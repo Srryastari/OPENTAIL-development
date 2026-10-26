@@ -1,0 +1,22 @@
+// QA regression: independent turns follow the LED data order; Hazard mirror is explicit.
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const html=fs.readFileSync('web-studio/opentail.htm','utf8');
+const start=html.indexOf('function otTurnModel('),end=html.indexOf('function otPaintTurnPreview()',start);
+assert(start>0&&end>start,'Turn model is missing');
+const turnModel=new Function(html.slice(start,end)+';return otTurnModel;')();
+const c={mode:'sync',pulseHighMs:350,pulseLowMs:350,sweepMs:280,hazard:'mirror'};
+assert.equal(turnModel(c,'left',140).direction,1);
+assert.equal(turnModel(c,'right',140).direction,1,'Standalone right turn must not use Hazard mirror');
+assert.equal(turnModel(c,'left',140,true).direction,1);
+assert.equal(turnModel(c,'right',140,true).direction,-1,'Explicit mirrored Hazard mode must still work');
+assert.equal(turnModel({...c,hazard:'same'},'right',140,true).direction,1);
+assert.equal(turnModel(c,'right',400).active,false,'Signal must switch off after pulse');
+assert(html.includes("otTurnModel(cfg,d.zoneSide,now,d.triggerName==='Hazards')"),'Renderer must only pass hazard mirror to hazards');
+assert(html.includes("hazard:'same',pulseHighMs:350"),'New projects must default to data index parity');
+assert(html.includes('id="ot-final-qa-01953"'),'Scoped mobile sizing CSS missing');
+assert(html.includes('ot-trigger-trailing')&&html.includes('ot-trigger-live-flag'),'Integrated trigger button labels missing');
+assert(html.includes('data-ot-sampled='),'Sampled strip display mode is not labeled');
+assert(html.includes('LIVE · SAMPLED VIEW'),'Live sampled strip must not claim all pixels shown');
+assert(html.includes('Indexes '),'Demo strips need visible index labels');
+console.log('Indexed turn direction, Hazard mirror and mobile QA contracts passed');
