@@ -2601,7 +2601,7 @@ function otPixelPreview(){
  const zones=otSimPreviewZones();
  const demo=otSim.active&&zones===OT_SIM_EXAMPLE_ZONES;
  const total=demo?OT_SIM_EXAMPLE_ZONES[OT_SIM_EXAMPLE_ZONES.length-1].start+OT_SIM_EXAMPLE_ZONES[OT_SIM_EXAMPLE_ZONES.length-1].length:
-   (otBleFxMode()||otControllerMode==='core')?otConfirmedCoreOutputs().reduce((sum,o)=>sum+Math.max(0,Number(o?.pixels)||0),0):
+   (otControllerMode==='core'||(typeof otBleFxMode==='function'&&otBleFxMode()))?(typeof otConfirmedCoreOutputs==='function'?otConfirmedCoreOutputs():(otOMData?.outputs||[])).reduce((sum,o)=>sum+Math.max(0,Number(o?.pixels)||0),0):
    !state.connected?Math.max(0,...state.layout.map(z=>Number(z.start)+Number(z.length))):configured;
  const activeZones=zones.filter(z=>z.start<total&&Number(z.length)>0);
  return `<section class="card ot-preview" data-ot-sampled="${activeZones.some(z=>Number(z.length)>28)}" aria-label="LED strip preview in ascending output data index order"><div class="line"><div><h2>Live Lighting Preview</h2><span id="ot-peek-status" class="small muted">${esc(otSimStatus()||otPeekStatusText())}</span></div><span id="ot-peek-badge" class="ot-mini">${otSim.active?'SIMULATED':'NO PIXEL DATA'}</span></div>${otPreviewTabs()}
