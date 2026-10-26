@@ -282,6 +282,26 @@ final class BleDiscovery {
         enqueueWrite(new byte[]{1,2,(byte)effect,(byte)chainMask,(byte)zoneMask,
             (byte)r,(byte)g,(byte)b,(byte)brightness,(byte)speed,(byte)ttl});
     }
+    /** One shared WLED-compatible ID, not an Android-only or particle-only effect menu.
+     * The CORE performs all frame generation; this sends a single 17-byte BLE control packet.
+     * Only capabilities exposed by firmware can be selected in the unified Studio editor.
+     */
+    void showFx(int effectId,int chainMask,int zoneMask,
+                int r,int g,int b,int bgR,int bgG,int bgB,
+                int brightness,int speed,int intensity,int paletteId,int ttl) {
+        if (!canControl()) {notifyStatus("BLE FX control not authorized");return;}
+        if (effectId<0||effectId>65535||chainMask<1||chainMask>3||
+            zoneMask<1||zoneMask>255||brightness<0||brightness>32||
+            speed<0||speed>255||intensity<0||intensity>255||paletteId!=0||
+            ttl<1||ttl>60||r<0||r>255||g<0||g>255||b<0||b>255||
+            bgR<0||bgR>255||bgG<0||bgG>255||bgB<0||bgB>255) {
+            notifyStatus("Unsupported or invalid BLE FX settings");return;
+        }
+        enqueueWrite(new byte[]{1,5,(byte)effectId,(byte)(effectId>>8),
+          (byte)chainMask,(byte)zoneMask,(byte)r,(byte)g,(byte)b,
+          (byte)bgR,(byte)bgG,(byte)bgB,(byte)brightness,(byte)speed,
+          (byte)intensity,(byte)paletteId,(byte)ttl});
+    }
     void stopShow() {
         if (!canControl()) {notifyStatus("BLE show control not authorized");return;}
         enqueueWrite(new byte[]{1,3});
