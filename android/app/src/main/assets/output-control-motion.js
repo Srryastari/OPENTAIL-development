@@ -12,6 +12,9 @@ input,textarea,[contenteditable="true"],[role="textbox"]{ -webkit-user-select:te
 .ot-bom-pill,.ot-bom-health strong,#ot-direct-state{transition:color var(--ot-motion-normal) ease,background-color var(--ot-motion-normal) ease,border-color var(--ot-motion-normal) ease}
 .ot-output-control{margin:12px 0;padding:14px;border:1px solid #3b3e40;border-radius:14px;background:#242627;color:#f5f5f5}
 .ot-output-control h3{margin:0 0 12px;font-size:15px}
+.ot-output-control button:focus-visible,.ot-output-target input:focus-visible{outline:2px solid #48d88d;outline-offset:2px}
+.ot-output-control button{cursor:pointer}
+.ot-output-control .ot-mode-note{line-height:1.5}
 .ot-mode-tabs{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:4px;background:#131515;border-radius:12px;isolation:isolate}
 .ot-mode-slider{position:absolute;z-index:0;pointer-events:none;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:9px;background:#3a3e3b;transform:translateX(200%);transition:transform var(--ot-motion-normal) var(--ot-motion-ease)}
 .ot-mode-tabs button{min-height:40px;padding:4px 3px;border:0;background:transparent;color:#bbb;font-size:11px;font-weight:650;border-radius:9px}
@@ -35,7 +38,7 @@ manager.before(card);if(mode==='independent')target=selectedFromManager();update
 card.addEventListener('click',e=>{const b=e.target.closest('[data-mode]');if(!b)return;mode=b.dataset.mode;if(mode!=='independent'){target='both';}else target=selectedFromManager();update(card);});
 card.addEventListener('change',e=>{if(e.target.name!=='ot-output-target')return;if(mode==='independent'&&e.target.value==='both'){update(card);return;}target=e.target.value;if(target!=='both'){if(mode==='independent'){const index=target==='two'?1:0;const button=document.querySelector('#ot-ble-output-card [data-ble-out="select"][data-index="'+index+'"]');if(button)button.click();}}update(card);});
 }
-function update(card){card.querySelector('.ot-mode-slider').style.transform='translateX('+(['independent','linked','sync'].indexOf(mode)*100)+'%)';card.querySelectorAll('input[name="ot-output-target"]').forEach(input=>{input.checked=input.value===target;});card.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));card.querySelector('.ot-mode-description').textContent=descriptions[mode];}
+function update(card){card.querySelector('.ot-mode-slider').style.transform='translateX('+(['independent','linked','sync'].indexOf(mode)*100)+'%)';card.querySelectorAll('input[name="ot-output-target"]').forEach(input=>{input.checked=input.value===target;});card.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));card.querySelector('.ot-mode-description').textContent=descriptions[mode];card.querySelectorAll('.ot-output-target input').forEach(input=>{input.disabled=mode!=='independent';});}
 document.addEventListener('opentail:ble-output-selected',e=>{const selectedTarget=e.detail.index===1?'two':'one';if(mode==='independent'){target=selectedTarget;const card=document.getElementById('ot-output-control');if(card)update(card);}});
 let queued=false;new MutationObserver(()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;mount();});}).observe(document.body,{childList:true,subtree:true});mount();
 })();
