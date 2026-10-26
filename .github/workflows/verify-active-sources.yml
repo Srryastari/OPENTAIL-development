@@ -1,7 +1,7 @@
 name: Verify OpenTail active sources
 on:
   push:
-    branches: [work/extract-active-sources]
+    branches: [main, work/extract-active-sources]
   pull_request:
     paths:
       - 'core-firmware/**'
