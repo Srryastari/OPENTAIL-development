@@ -34,38 +34,35 @@ jobs:
           PY
       - name: Check whitespace
         run: git diff --check HEAD^ HEAD || git diff --check
-  firmware-build:
+  firmware-host-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Firmware build readiness
+      - name: Run CORE native logic tests when source exists
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f core-firmware/platformio.ini ]; then
-            python3 -m pip install --user platformio
-            "$HOME/.local/bin/pio" run -d firmware
-          elif [ -f core-firmware/CMakeLists.txt ]; then
-            echo "ESP-IDF project detected; configure ESP-IDF toolchain before claiming a build."
-            exit 1
+          if [ -f core-firmware/tests/run-host-tests.sh ]; then
+            bash core-firmware/tests/run-host-tests.sh
           else
-            echo "::notice::Firmware source/build configuration not imported yet; build not executed."
+            echo "::notice::CORE active source not imported on this ref. Host logic tests not run."
           fi
-  android-build:
+      - name: Report firmware compile ownership
+        shell: bash
+        run: |
+          if [ -f core-firmware/CMakeLists.txt ]; then
+            echo "::notice::ESP-IDF target build is verified by verify-active-sources.yml core-espidf-build, not by this host-test job."
+          fi
+  android-source-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Android build readiness
+      - name: Check Android source import state
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f android/gradlew ]; then
-            chmod +x android/gradlew
-            (cd android && ./gradlew assembleDebug --no-daemon)
+          if [ -f android/app/build.gradle ]; then
+            echo "::notice::Android source detected; APK compile belongs to verify-active-sources.yml android-debug-apk."
           else
-            echo "::notice::Android source/build configuration not imported yet; APK build not executed."
+            echo "::notice::Android buildable source not present on this ref; APK not built."
           fi
