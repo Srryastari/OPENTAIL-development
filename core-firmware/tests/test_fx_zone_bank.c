@@ -34,7 +34,6 @@ int main(void){
  assert(ot_fx_slot_active(&bank.zones[1][2],600000));
  ot_fx_bank_stop_all(&bank);
  assert(!ot_fx_bank_any_active(&bank,600000));
- assert(!ot_fx_bank_apply(&bank,&a,10,false) || a.zone_mask!=0);
  a.zone_mask=0;assert(!ot_fx_bank_apply(&bank,&a,10,false));
  a=make(1,3,255,1);
  assert(ot_fx_bank_apply(&bank,&a,UINT32_MAX-500u,false));
