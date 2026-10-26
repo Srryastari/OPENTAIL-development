@@ -221,6 +221,7 @@ public final class MainActivity extends Activity {
                     injectInlineBleControls(view);
                     injectBleOutputControls(view);
                     injectUnifiedShell(view);
+                    injectDirectBleDashboard(view);
                 }
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request,
@@ -409,6 +410,19 @@ public final class MainActivity extends Activity {
             while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
             view.evaluateJavascript(out.toString("UTF-8"), null);
         } catch(Exception e){android.util.Log.e("OpenTail", "BLE Output Manager injection failed",e);}
+    }
+
+    /** Direct BLE dashboard actions; additive to existing BLE output and CORE editors. */
+    private void injectDirectBleDashboard(WebView view) {
+        try (InputStream in = getAssets().open("direct-ble-dashboard.js");
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            view.evaluateJavascript(out.toString("UTF-8"), null);
+        } catch (Exception ex) {
+            android.util.Log.e("OpenTail", "Direct BLE dashboard injection failed", ex);
+        }
     }
 
     private void injectUnifiedShell(WebView view) {
