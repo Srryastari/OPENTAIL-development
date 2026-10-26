@@ -20,6 +20,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/wled_fx_compat.c main/particle_system_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test && /tmp/ot-palettes-test
 
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
+
 python3 tests/test_wled_catalog.py
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
