@@ -13,4 +13,4 @@ Universal automotive addressable-lighting controller project using ESP32-S3 firm
 - [`archive/library-releases/`](archive/library-releases/) — immutable original historical releases and SHA-256 manifest
 - [`scripts/`](scripts/) — import tooling
 
-**Status:** historical files are imported; working source extraction and reproducible builds are still pending. See [`docs/BASELINE.md`](docs/BASELINE.md).
+**Status:** historical archives and the extracted v0.1.24 CORE / v0.1.15 Android / v0.19.50 Studio baseline are now on `main`. GitHub Actions compiled the ESP32-S3 firmware and Android APK and ran baseline source checks on PR #8. These are **not** physical controller, BLE phone, power, or automotive safety validations. See [`docs/BASELINE.md`](docs/BASELINE.md).
