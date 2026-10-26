@@ -19,7 +19,7 @@
     <p class="ot-direct-help">First-time enrollment: keep CORE running, hold BOOT, then tap Pair with BOOT. Release BOOT after authorization. Bench use only.</p>`;
   const css=document.createElement('style');
   css.textContent=`
-    #ot-direct-ble-dashboard{display:none;box-sizing:border-box;max-width:644px;margin:10px auto 5px;padding:15px 16px;border:1px solid #353535;border-radius:19px;background:#080808;color:#f6f6f6}
+    #ot-direct-ble-dashboard{display:none;box-sizing:border-box;width:calc(100% - 28px);max-width:692px;margin:10px auto 5px;padding:15px 16px;border:1px solid #353535;border-radius:19px;background:#080808;color:#f6f6f6}
     body.ot-home-active:not(.ot-settings-active) #ot-direct-ble-dashboard{display:block}
     .ot-direct-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
     .ot-direct-heading strong{font-size:16px}
@@ -33,7 +33,7 @@
     #ot-direct-ble-dashboard button:focus-visible{outline:2px solid #48d88d;outline-offset:2px}
     html[data-ot-theme=light] #ot-direct-ble-dashboard{background:#fff;color:#152018;border-color:#d4dfd6}
     html[data-ot-theme=light] .ot-direct-actions button{background:#f6faf7;color:#1c3224;border-color:#c8d7cc}
-    @media(max-width:370px){#ot-direct-ble-dashboard{margin:7px 12px;padding:12px}.ot-direct-actions{gap:6px}}
+    @media(max-width:370px){#ot-direct-ble-dashboard{margin:7px auto;padding:12px}.ot-direct-actions{gap:6px}}
   `;
   document.head.appendChild(css);
   const header=document.querySelector('.ot-mobile-header');
@@ -52,12 +52,14 @@
     status.textContent=authorized?'Connected · Authorized':connected?'Connected · Authorization needed':phase==='permission'?'Permission needed':s.bleRadioOn===false?'Bluetooth off':waiting?phase.charAt(0).toUpperCase()+phase.slice(1)+'…':'Disconnected';
     status.style.color=authorized?'#29da8b':connected||waiting?'#f6bd47':'#aaa';
     detail.textContent=authorized?'Ready to manage outputs and zones over BLE.':connected?'Authorize your controller to edit outputs.':phase==='permission'?'Grant nearby-device permission when prompted.':s.bleRadioOn===false?'Turn on Bluetooth to connect.':'Connect over Bluetooth without switching Wi-Fi.';
-    connect.textContent=authorized?'Reconnect / Scan':connected?'Authorize Controller':waiting?'Connecting…':'Connect to CORE';
+    connect.textContent=authorized?'Manage Outputs & Zones':connected?'Authorize Controller':waiting?'Connecting…':'Connect to CORE';
     connect.disabled=waiting;
     pair.hidden=authorized;
+
   }
   connect.addEventListener('click',()=>{
     const s=read();
+    if(s.ble&&s.bleAuthorized){outputs.click();return;}
     if(s.ble&&s.bleRadioOn!==false&&!s.bleAuthorized)window.OpenTailNativeApp.authorizeBle();
     else window.OpenTailNativeApp.scanBle();
     refresh();
