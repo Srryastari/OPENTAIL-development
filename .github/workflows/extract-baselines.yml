@@ -5,7 +5,7 @@ permissions:
   contents: write
 jobs:
   extract:
-    if: github.ref_name == 'setup/active-development-baseline'
+    if: github.ref_name == 'work/extract-active-sources'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,5 +18,5 @@ jobs:
           git add core-firmware web-studio android hardware
           if ! git diff --cached --quiet; then
             git commit -m "baseline: extract CORE Studio Android and hardware sources"
-            git push origin HEAD:setup/active-development-baseline
+            git push origin HEAD:work/extract-active-sources
           fi
