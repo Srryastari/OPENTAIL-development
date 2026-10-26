@@ -45,6 +45,8 @@ typedef struct {
 } ot_wled_fx_metadata_t;
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out);
+/* Enumerates exactly the locally implemented FX IDs for BLE capabilities. */
+size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids);
 void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
