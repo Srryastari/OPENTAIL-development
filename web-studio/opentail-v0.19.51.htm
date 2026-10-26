@@ -725,18 +725,20 @@ function otSetSectionLength(id,value){
   slideLength(id,n);commitLiveLayout();render();
 }
 let otLayoutSelected=null,otLayoutUndo=[],otLayoutRedo=[],otLayoutIdentifyMode='off',otLayoutSweepTimer=null,otLayoutSweepStep=0;
-function otLayoutSnapshot(){return JSON.stringify(state.layout)}
+function otLayoutSnapshot(){return JSON.stringify({layout:state.layout,removedSections:state.removedSections||[]})}
 function otLayoutCheckpoint(){otLayoutUndo.push(otLayoutSnapshot());if(otLayoutUndo.length>30)otLayoutUndo.shift();otLayoutRedo=[]}
-function otLayoutRestoreSnapshot(snapshot){try{const v=JSON.parse(snapshot);if(!Array.isArray(v))return;state.layout=v;state.segmentsSynced=false;persist();render()}catch(e){state.status='Unable to restore layout';render()}}
+function otLayoutRestoreSnapshot(snapshot){try{const v=JSON.parse(snapshot);if(!Array.isArray(v.layout)||!Array.isArray(v.removedSections))return;state.layout=v.layout;state.removedSections=v.removedSections;state.segmentsSynced=false;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;persist();render()}catch(e){state.status='Unable to restore layout';render()}}
 function otLayoutUndoChange(){if(!otLayoutUndo.length)return;otLayoutRedo.push(otLayoutSnapshot());otLayoutRestoreSnapshot(otLayoutUndo.pop())}
 function otLayoutRedoChange(){if(!otLayoutRedo.length)return;otLayoutUndo.push(otLayoutSnapshot());otLayoutRestoreSnapshot(otLayoutRedo.pop())}
-function otLayoutSelect(id){otLayoutSelected=otLayoutSelected===id?null:id;otLayoutIdentifyMode='off';render()}
-function otLayoutAdd(){otLayoutCheckpoint();addSection();otLayoutSelected=state.layout[state.layout.length-1]?.id||null}
-function otLayoutRemove(id){const z=state.layout.find(x=>x.id===id);if(!z||!confirm('Remove '+z.name+'?'))return;otLayoutCheckpoint();if(otLayoutSelected===id)otLayoutSelected=null;removeSection(id)}
+function otLayoutSelect(id){otLayoutSelected=otLayoutSelected===id?null:id;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;render()}
+function otLayoutAdd(){otLayoutCheckpoint();addSection();otLayoutSelected=state.layout[state.layout.length-1]?.id||null;render()}
+function otLayoutRemove(id){const z=state.layout.find(x=>x.id===id);if(!z||!confirm('Remove '+z.name+'?'))return;otLayoutCheckpoint();if(otLayoutSelected===id){otLayoutSelected=null;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;}removeSection(id)}
 function otLayoutMove(id,direction){const a=state.layout,i=a.findIndex(x=>x.id===id),j=i+direction;if(i<0||j<0||j>=a.length)return;otLayoutCheckpoint();[a[i],a[j]]=[a[j],a[i]];let start=Math.min(...a.map(x=>x.start));for(const z of a){z.start=start;start+=z.length}state.segmentsSynced=false;persist();render()}
 function otLayoutResize(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<1||n>10000||n===z.length)return;otLayoutCheckpoint();otSetSectionLength(id,n)}
+function otLayoutRename(id,name){const z=state.layout.find(x=>x.id===id);if(!z||!String(name||'').trim()||String(name).trim()===z.name)return;otLayoutCheckpoint();otRenameZone(id,name)}
+function otLayoutReverse(id,on){const z=state.layout.find(x=>x.id===id);if(!z||z.reverse===on)return;otLayoutCheckpoint();editLayout(id,'reverse',on)}
 function otLayoutIdentify(mode){otLayoutIdentifyMode=otLayoutIdentifyMode===mode?'off':mode;clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;otLayoutSweepStep=0;if(otLayoutIdentifyMode==='sweep')otLayoutSweepTimer=setInterval(()=>{otLayoutSweepStep++;otLayoutPaintIdentify()},140);otLayoutPaintIdentify()}
-function otLayoutPaintIdentify(){const p=document.querySelector('.ot-zone-preview');if(!p)return;const dots=[...p.children],last=dots.length-1;dots.forEach((d,i)=>d.classList.toggle('on',otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&i===0||otLayoutIdentifyMode==='last'&&i===last||otLayoutIdentifyMode==='sweep'&&i===otLayoutSweepStep%dots.length))}
+function otLayoutPaintIdentify(){const p=document.querySelector('.ot-zone-preview');if(!p){clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;otLayoutIdentifyMode='off';return;}const dots=[...p.children],last=dots.length-1;document.querySelectorAll('.ot-zone-identify [data-ot-identify]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.otIdentify===otLayoutIdentifyMode)));dots.forEach((d,i)=>d.classList.toggle('on',otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&i===0||otLayoutIdentifyMode==='last'&&i===last||otLayoutIdentifyMode==='sweep'&&i===otLayoutSweepStep%dots.length))}
 function otBaseArrangementLayout(){
  const archived=state.removedSections||[];
  const z=state.layout.find(x=>x.id===otLayoutSelected);
@@ -751,12 +753,12 @@ function otBaseArrangementLayout(){
  <div class="ot-zone-row"><button class="ot-zone-expand" aria-expanded="${item.id===otLayoutSelected}" onclick="otLayoutSelect('${item.id}')">${item.id===otLayoutSelected?'⌄':'›'} <strong>${esc(item.name)}</strong><br><span class="small muted">Pixels ${item.start}–${item.start+item.length-1} · ${item.length} LEDs</span></button>
  <div class="ot-zone-actions"><button aria-label="Move ${esc(item.name)} up" ${i===0?'disabled':''} onclick="otLayoutMove('${item.id}',-1)">↑</button><button aria-label="Move ${esc(item.name)} down" ${i===state.layout.length-1?'disabled':''} onclick="otLayoutMove('${item.id}',1)">↓</button><button aria-label="Remove ${esc(item.name)}" onclick="otLayoutRemove('${item.id}')">×</button></div></div>
  ${item.id===otLayoutSelected?`<div class="ot-zone-editor">
- <label class="field">Zone name<input maxlength="48" value="${esc(item.name)}" onchange="otRenameZone('${item.id}',this.value)"></label>
+ <label class="field">Zone name<input maxlength="48" value="${esc(item.name)}" onchange="otLayoutRename('${item.id}',this.value)"></label>
  <p class="small muted">Start ${item.start} · End ${item.start+item.length-1} · Following offsets adjust automatically</p>
  <label class="field">Zone length · ${item.length} LEDs</label>
  <div class="ot-zone-length"><button onclick="otLayoutResize('${item.id}',${item.length-1})">−1</button><input type="range" min="1" max="${Math.max(300,item.length)}" value="${item.length}" oninput="document.getElementById('ot-count-${item.id}').value=this.value" onchange="otLayoutResize('${item.id}',this.value)"><button onclick="otLayoutResize('${item.id}',${item.length+1})">+1</button><input id="ot-count-${item.id}" aria-label="Exact zone length" type="number" min="1" max="10000" value="${item.length}" onchange="otLayoutResize('${item.id}',this.value)"></div>
- <label class="ot-simple-reverse"><input type="checkbox" ${item.reverse?'checked':''} onchange="editLayout('${item.id}','reverse',this.checked)"> Reverse effect direction</label>
- <h3>Identify LEDs <span class="ot-mini">Simulation only</span></h3><div class="ot-zone-identify">${['off','all','first','last','sweep'].map(m=>`<button aria-pressed="${otLayoutIdentifyMode===m}" onclick="otLayoutIdentify('${m}')">${m==='all'?'Entire':m[0].toUpperCase()+m.slice(1)}</button>`).join('')}</div>
+ <label class="ot-simple-reverse"><input type="checkbox" ${item.reverse?'checked':''} onchange="otLayoutReverse('${item.id}',this.checked)"> Reverse effect direction</label>
+ <h3>Identify LEDs <span class="ot-mini">Simulation only</span></h3><div class="ot-zone-identify">${['off','all','first','last','sweep'].map(m=>`<button data-ot-identify="${m}" aria-pressed="${otLayoutIdentifyMode===m}" onclick="otLayoutIdentify('${m}')">${m==='all'?'Entire':m[0].toUpperCase()+m.slice(1)}</button>`).join('')}</div>
  <div class="ot-zone-preview" aria-label="Simulated pixel identification">${Array.from({length:Math.min(30,item.length)},(_,j)=>`<span class="${otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&j===0||otLayoutIdentifyMode==='last'&&j===Math.min(30,item.length)-1?'on':''}"></span>`).join('')}</div>
  </div>`:''}</div>`).join('')}
  ${!state.layout.length?button('Load sample project','otLoadExampleLayout()'):''}
