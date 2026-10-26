@@ -50,6 +50,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
+      - name: Validate Android WebView JavaScript syntax and output integration contract
+        run: |
+          node --check android/app/src/main/assets/ble-output-panel.js
+          node --check android/app/src/main/assets/output-control-motion.js
+          node --check android/app/src/main/assets/direct-ble-dashboard.js
+          node - <<'JS'
+          const fs=require('fs'),assert=require('assert');
+          const ble=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
+          const ui=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
+          assert(ble.includes("getSelectedIndex(){return selected;}"),'BLE selected index API missing');
+          assert(ble.includes("announceSelection();load(selected);"),'Selection event must precede reload');
+          assert(ui.includes("opentail:ble-output-selected"),'Output Control selection listener missing');
+          assert(ui.includes("selectedFromManager()"),'Independent mode must follow BLE manager');
+          assert(ui.includes("let mode='independent',target='one';"),'Independent mode must be the default');
+          assert(ui.includes("if(mode==='independent'&&e.target.value==='both')"),'Independent mode must reject both targets');
+          console.log('Android WebView integration contract checks passed (static checks only).');
+          JS
       - name: Compile debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
