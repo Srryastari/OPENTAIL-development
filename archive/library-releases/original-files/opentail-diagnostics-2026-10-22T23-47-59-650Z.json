@@ -1,0 +1,813 @@
+{
+  "schema": "opentail-diagnostics-v1",
+  "app": "OpenTail Studio 0.19.18",
+  "appVersion": "0.19.18",
+  "captured": "2026-10-22T23:47:59.650Z",
+  "sessionStarted": "2026-10-22T23:46:31.109Z",
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+  "snapshot": null,
+  "failoverDesign": {
+    "schema": "opentail-failover-profile-v1",
+    "architecture": "dual-esp32-s3",
+    "carLabel": "New installation",
+    "inputs": 8,
+    "ledType": "WS2815",
+    "colorOrder": "BRG",
+    "channels": [
+      {
+        "id": "left",
+        "pixels": 0,
+        "buffered": true
+      },
+      {
+        "id": "right",
+        "pixels": 0,
+        "buffered": true
+      }
+    ],
+    "heartbeatMs": 250,
+    "timeoutMs": 1500,
+    "recoveryHoldMs": 10000,
+    "goodHeartbeats": 20,
+    "faultMode": "oem-only",
+    "returnMode": "manual-confirmation",
+    "signalOwner": "hardware-exclusive",
+    "priority": [
+      "Brake",
+      "Left Turn",
+      "Right Turn",
+      "Hazards",
+      "Reverse",
+      "Park",
+      "Show"
+    ],
+    "preserveSafetyMode": true,
+    "confirmedHardware": false
+  },
+  "failoverTelemetry": null,
+  "events": [
+    {
+      "at": "2026-10-22T23:46:31.374Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json",
+        "status": 200,
+        "ok": true,
+        "ms": 263,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:31.528Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/fxdata",
+        "status": 200,
+        "ok": true,
+        "ms": 145,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:31.571Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 187,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:42.073Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 67,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:42.137Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "POST",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 63,
+        "payload": {
+          "on": true,
+          "bri": 48,
+          "tt": 0,
+          "seg": [
+            {
+              "id": 0,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  255,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 1,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  255,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 2,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  255,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 3,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  255,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            }
+          ],
+          "v": true
+        },
+        "reply": {
+          "on": true,
+          "brightness": 48,
+          "segments": [
+            {
+              "id": 0,
+              "start": 0,
+              "stop": 118,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 1,
+              "start": 118,
+              "stop": 227,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 2,
+              "start": 227,
+              "stop": 269,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 3,
+              "start": 269,
+              "stop": 522,
+              "on": true,
+              "fx": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:43.059Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 40,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:43.151Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "POST",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 89,
+        "payload": {
+          "on": true,
+          "bri": 48,
+          "tt": 0,
+          "seg": [
+            {
+              "id": 0,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  0,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 1,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  0,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 2,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  0,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 3,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  0,
+                  255
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            }
+          ],
+          "v": true
+        },
+        "reply": {
+          "on": true,
+          "brightness": 48,
+          "segments": [
+            {
+              "id": 0,
+              "start": 0,
+              "stop": 118,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 1,
+              "start": 118,
+              "stop": 227,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 2,
+              "start": 227,
+              "stop": 269,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 3,
+              "start": 269,
+              "stop": 522,
+              "on": true,
+              "fx": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:44.866Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 79,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:44.933Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "POST",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 63,
+        "payload": {
+          "on": true,
+          "bri": 48,
+          "tt": 0,
+          "seg": [
+            {
+              "id": 0,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  255,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 1,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  255,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 2,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  255,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 3,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  0,
+                  255,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            }
+          ],
+          "v": true
+        },
+        "reply": {
+          "on": true,
+          "brightness": 48,
+          "segments": [
+            {
+              "id": 0,
+              "start": 0,
+              "stop": 118,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 1,
+              "start": 118,
+              "stop": 227,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 2,
+              "start": 227,
+              "stop": 269,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 3,
+              "start": 269,
+              "stop": 522,
+              "on": true,
+              "fx": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:45.753Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 43,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:45.805Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "POST",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 49,
+        "payload": {
+          "on": true,
+          "bri": 48,
+          "tt": 0,
+          "seg": [
+            {
+              "id": 0,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 1,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 2,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            },
+            {
+              "id": 3,
+              "on": true,
+              "frz": false,
+              "fx": 0,
+              "pal": 0,
+              "col": [
+                [
+                  255,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  0
+                ]
+              ],
+              "bri": 255
+            }
+          ],
+          "v": true
+        },
+        "reply": {
+          "on": true,
+          "brightness": 48,
+          "segments": [
+            {
+              "id": 0,
+              "start": 0,
+              "stop": 118,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 1,
+              "start": 118,
+              "stop": 227,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 2,
+              "start": 227,
+              "stop": 269,
+              "on": true,
+              "fx": 0
+            },
+            {
+              "id": 3,
+              "start": 269,
+              "stop": 522,
+              "on": true,
+              "fx": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:54.504Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/eff",
+        "status": 200,
+        "ok": true,
+        "ms": 60,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:54.525Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/pal",
+        "status": 200,
+        "ok": true,
+        "ms": 80,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:46:54.692Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/fxdata",
+        "status": 200,
+        "ok": true,
+        "ms": 167,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:47:06.971Z",
+      "type": "wled-request",
+      "detail": {
+        "method": "GET",
+        "path": "/json/state",
+        "status": 200,
+        "ok": true,
+        "ms": 57,
+        "payload": null,
+        "reply": null
+      }
+    },
+    {
+      "at": "2026-10-22T23:47:52.517Z",
+      "type": "report-exported",
+      "detail": {
+        "events": 15
+      }
+    }
+  ],
+  "notice": "No passwords or network configuration are intentionally collected. Review before sharing."
+}

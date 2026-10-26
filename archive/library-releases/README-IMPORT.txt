@@ -1,0 +1,1 @@
+Preserved original Library files: 282. Each is stored unchanged under original-files/. SHA256-MANIFEST.csv verifies integrity. This is an archive of available named OpenTail-related Library files, not a claim that every historical conversation attachment exists. Do not overwrite active source with older versions.

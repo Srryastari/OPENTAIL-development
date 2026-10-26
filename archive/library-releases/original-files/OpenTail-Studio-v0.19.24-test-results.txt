@@ -1,0 +1,14 @@
+PASS initial render v0.19.24
+PASS tri-color metadata renders all three direct pickers
+PASS fast 3-color changes are coalesced, sent and confirmed on WLED mock
+PASS 2-color metadata hides unsupported accent
+PASS explicit no-color effect exposes no pickers
+PASS accent color wheel target switches correctly
+PASS edits preserve untouched color slots and clear edited RGBW white byte
+PASS Layout / Triggers / Diagnostics smoke renders
+PASS new WLED effect resets stale RGB slot colors and validates effect selection
+PASS preset capture and playback preserves all 3 slots
+PASS trigger assignment toggle is reversible
+PASS effect readback failure is reported
+PASS local autosave reload resets bench state and preserves project name
+PASS no uncaught browser exceptions
