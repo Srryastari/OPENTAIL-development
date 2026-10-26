@@ -82,8 +82,10 @@ const node=document.createElement('section');node.id='ot-ble-output-card';node.c
 const existing=main.querySelector('.ot-om-card');if(existing)existing.before(node);else main.prepend(node);
 paint();
 }
+function announceSelection(){document.dispatchEvent(new CustomEvent('opentail:ble-output-selected',{detail:{index:selected}}));}
 function load(index){if(busy)return;if(index!==0&&index!==1)return;pendingIndex=index;busy=true;message='Reading output '+(index+1)+' over BLE…';paint();window.OpenTailNativeBLE.readOutput(index);}
 window.OpenTailBLEOutputs={
+ getSelectedIndex(){return selected;},
  connectionChanged(status){
   const st=nativeState();
   message=st.radioOn===false?'Bluetooth switched off · disconnected':(status||st.message||'BLE status updated');
@@ -104,7 +106,7 @@ if(action==='scan')window.OpenTailNativeBLE.scan();
 else if(action==='authorize')window.OpenTailNativeBLE.authorize();
 else if(action==='pair')window.OpenTailNativeBLE.pairWithBoot();
 else if(action==='wifi')window.OpenTailNativeBLE.authorizeWifiLegacy();
-else if(action==='select'){if(busy){message='Wait for the current BLE operation before switching outputs';paint();return;}const next=Number(b.dataset.index);if(next!==0&&next!==1)return;selected=next;paint();load(selected);}
+else if(action==='select'){if(busy){message='Wait for the current BLE operation before switching outputs';paint();return;}const next=Number(b.dataset.index);if(next!==0&&next!==1)return;selected=next;paint();announceSelection();load(selected);}
 else if(action==='reload')load(selected);
 else if(action==='add'){if(!draft[selected]||draft[selected].zones.length>=8||busy)return;draft[selected].zones.push({name:'Zone '+(draft[selected].zones.length+1),pixels:0,role:'decorative'});message='Unsaved draft — adjust pixel totals before saving';paint();}
 else if(action==='remove'){if(!draft[selected]||draft[selected].zones.length<=1||busy)return;draft[selected].zones.splice(Number(b.dataset.index),1);message='Zone removed from unsaved draft';paint();}
