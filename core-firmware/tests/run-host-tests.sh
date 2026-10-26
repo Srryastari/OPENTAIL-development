@@ -16,7 +16,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/particle_system_1d.c tes
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c tests/test_effects_1d.c -o /tmp/ot-effects-unified-tests && /tmp/ot-effects-unified-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/effects_1d.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test && /tmp/ot-fx-presets-test
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/effects_1d.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test && /tmp/ot-fx-presets-test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/wled_fx_compat.c main/particle_system_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test && /tmp/ot-palettes-test
 
