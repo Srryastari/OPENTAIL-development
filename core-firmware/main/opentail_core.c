@@ -28,6 +28,7 @@
 #include "ble_command.h"
 #include "ble_fx_command.h"
 #include "effects_1d.h"
+#include "fx_preset_record.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
@@ -62,6 +63,7 @@ static bool native_outputs_ready=false;
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
+static bool ble_fx_standalone=false; /* Explicit loaded preset; persists through BLE disconnect, not boot */
 static ot_ble_fx_packet_t ble_fx_request={0};
 static uint32_t ble_fx_generation=0;
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
@@ -213,7 +215,7 @@ static uint8_t signal_mask_of(const char *name) {
     return 0;
 }
 static bool show_window(TickType_t now){
-    return native_show.mode!=OT_SHOW_OFF && before_deadline(now,native_show_deadline);
+    return native_show.mode!=OT_SHOW_OFF && ((ble_fx_enabled&&ble_fx_standalone)||before_deadline(now,native_show_deadline));
 }
 static bool om_number(const cJSON *obj,const char *key,unsigned *dest,unsigned low,unsigned high){
     const cJSON *v=cJSON_GetObjectItemCaseSensitive((cJSON *)obj,key);
@@ -539,7 +541,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
-    if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;ble_fx_standalone=false;native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)request->ttl_sec*1000u);}
     portEXIT_CRITICAL(&state_lock);
     return ready;
@@ -567,6 +569,7 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
         ble_fx_request=*req;
         ++ble_fx_generation;
         ble_fx_enabled=true;
+        ble_fx_standalone=false; /* ordinary live BLE effect expires/disconnects */
         ble_owns_show=true;
         native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
@@ -577,9 +580,66 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
 void ot_ble_stop_show(void){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
+    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;ble_fx_standalone=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
     portEXIT_CRITICAL(&state_lock);
     /* status is refreshed by render task; don't suppress a newer Wi-Fi show. */
+}
+/* Eight opt-in named-by-slot effect snapshots in controller NVS. Flash records are
+ * independently checksummed and versioned; they never alter road-lighting maps.
+ * Save/load/delete are invoked only through authenticated BLE GATT commands.
+ */
+static bool fx_slot_key(uint8_t slot,char key[8]){
+ if(slot>=OT_FX_PRESET_SLOTS)return false;
+ snprintf(key,8,"slot%u",(unsigned)slot);return true;
+}
+bool ot_ble_save_fx_preset(uint8_t slot){
+ char key[8];if(!fx_slot_key(slot,key))return false;
+ ot_ble_fx_packet_t fx={0};bool active;
+ TickType_t now=xTaskGetTickCount();
+ portENTER_CRITICAL(&state_lock);
+ active=native_outputs_ready&&ble_fx_enabled&&show_window(now);
+ if(active)fx=ble_fx_request;
+ portEXIT_CRITICAL(&state_lock);
+ ot_fx_preset_record_t record;
+ if(!active||!ot_fx_preset_pack(&record,&fx))return false;
+ nvs_handle_t h;
+ if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
+ esp_err_t e=nvs_set_blob(h,key,&record,sizeof(record));
+ if(e==ESP_OK)e=nvs_commit(h);
+ nvs_close(h);
+ return e==ESP_OK;
+}
+bool ot_ble_play_fx_preset(uint8_t slot){
+ char key[8];if(!fx_slot_key(slot,key))return false;
+ nvs_handle_t h;
+ if(nvs_open("ot_fx_presets",NVS_READONLY,&h)!=ESP_OK)return false;
+ ot_fx_preset_record_t record={0};size_t n=sizeof(record);
+ esp_err_t e=nvs_get_blob(h,key,&record,&n);
+ nvs_close(h);
+ if(e!=ESP_OK||n!=sizeof(record)||!ot_fx_preset_valid(&record))return false;
+ if(!ot_ble_apply_fx(&record.fx))return false;
+ portENTER_CRITICAL(&state_lock);
+ ble_fx_standalone=true; /* explicit user action; no silent boot autorun */
+ portEXIT_CRITICAL(&state_lock);
+ return true;
+}
+bool ot_ble_delete_fx_preset(uint8_t slot){
+ char key[8];if(!fx_slot_key(slot,key))return false;
+ nvs_handle_t h;
+ if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
+ esp_err_t e=nvs_erase_key(h,key);
+ if(e==ESP_OK)e=nvs_commit(h);
+ nvs_close(h);
+ return e==ESP_OK;
+}
+void ot_ble_disconnect_show(void){
+ /* Saved and explicitly started autonomous effects continue without the phone.
+  * Temporary live previews stop. Required road triggers always preempt both. */
+ bool keep=false;
+ portENTER_CRITICAL(&state_lock);
+ keep=ble_fx_enabled&&ble_fx_standalone;
+ portEXIT_CRITICAL(&state_lock);
+ if(!keep)ot_ble_stop_show();
 }
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
