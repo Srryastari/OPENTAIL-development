@@ -17,16 +17,16 @@
 
 ## What was added in this stage
 
-`main/wled_fx_compat.[ch]` implements a **pure C, allocation-free 1D adapter** with WLED IDs 0 Solid, 1 Blink and 23 Strobe. Blink/Strobe share WLED's cycle-time, on-time, and `SEGENV.step` frame-catch-up semantics; host tests cover boundaries, skipped frames, brightness and unsupported configs. Only `palette_id=0` direct colors work. WLED palette lookup, custom controls, per-zone runtime, gamma and full frame parity are pending.
+`main/wled_fx_compat.[ch]` implements a **pure C, allocation-free 1D adapter** with WLED IDs 0 Solid, 1 Blink, 3 Wipe, 6 Sweep, 12 Fade, and 23 Strobe. Wipe/Sweep/Fade use pinned WLED frame math (including width/intensity-dependent partial-pixel blending and triangle timing) with host regression fixtures. Blink/Strobe share WLED's cycle-time, on-time, and `SEGENV.step` frame-catch-up semantics; host tests cover boundaries, skipped frames, brightness and unsupported configs. Only `palette_id=0` direct colors work. WLED palette lookup, custom controls, per-zone runtime, gamma and full frame parity are pending.
 
-`effects-catalog.json` indexes the pinned upstream effect names and raw metadata for offline support discovery. It resolves **201 distinct mode IDs**, with **16 upstream metadata symbols requiring more mapping** (the source contains one duplicate registration). Only three IDs say `host-tested-compatibility-module-only`; all others are `not-ported`.
+`effects-catalog.json` indexes the pinned upstream effect names and raw metadata for offline support discovery. It resolves **201 distinct mode IDs**, with **16 upstream metadata symbols requiring more mapping** (the source contains one duplicate registration). Only six IDs say `host-tested-compatibility-module-only`; all others are `not-ported`. These six are **not yet available on physical LED outputs**.
 
 ## Phases to reach full 1D capability
 
 1. **Golden parity fixtures:** derive reference frame outputs from pinned WLED C++ for Solid/Blink/Strobe on small 1D strips. Compare all RGB samples at exact timestamps, speed/intensity extrema, one-frame skips and zero/one pixel boundaries. Distinguish WLED bus brightness from OpenTail brightness cap.
 2. **Bench-only CORE selection:** add effect dispatch through the existing temporary, bounded CORE show API, *without* changing trigger priority, NVS output layouts or persistent road-lighting. Map WLED `uint8_t` speed/intensity exactly; reject unavailable modes and unsupported palettes. Track each zone's independent `step` and reset when configuration changes.
 3. **Accurate preview:** expose/reuse the same source-proven pixel renderer in the app; render the full configured zone then sample <=30 uniform indicator positions. Show effect/sequence frame timing honestly, and no writes during preview.
-4. **More 1D algorithms:** port deterministically, beginning with Fade, Wipe, Sweep, Rainbow, Theater and Chase classes. Add color/palette blend primitives and explicit seeded random state, then per-zone effect memory as needed. Do not claim parity based only on WLED metadata.
+4. **More 1D algorithms:** port deterministically, continuing with Rainbow, Theater and Chase classes (Fade, Wipe, and Sweep compatibility adapters are now implemented). Add color/palette blend primitives and explicit seeded random state, then per-zone effect memory as needed. Do not claim parity based only on WLED metadata.
 5. **Feature-gated complexity:** audio-reactive requires an independent, actually measured audio pipeline; 2D/matrix/particle modes are disabled until their dimensional and memory requirements are met. WLED usermods are not automatically included.
 6. **Bench acceptance:** measured simultaneous Brake+Hazards preemption, deterministic restoration, offline disconnection, minimum/max zone lengths, output direction, memory/CPU/per-channel FPS with WS2815 full-count lighting. No automotive-safety certification is implied.
 
