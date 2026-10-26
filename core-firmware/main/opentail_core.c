@@ -29,6 +29,7 @@
 #include "ble_fx_command.h"
 #include "effects_1d.h"
 #include "fx_preset_record.h"
+#include "palette_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
@@ -551,7 +552,8 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  */
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     ot_wled_fx_metadata_t meta;
-    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||req->palette_id!=0||
+    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
+       !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask<1||req->chain_mask>3||req->zone_mask==0||
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
         return false;
