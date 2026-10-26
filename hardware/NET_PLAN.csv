@@ -1,0 +1,80 @@
+Net,From,To,Constraint_or_remark,Status
+VIN_12V_LOGIC_FUSED,External 12V source through rated fuse,AITRIP IN+,Source fuse/rating/protection required,PROPOSED
+LOGIC_GND,Power source return,AITRIP IN-; ESP32 GND; shifter GND; MCP GND,Star/reference grounding detail subject to layout,PROPOSED
+VREG_5V_UNVERIFIED,AITRIP OUT+,Normally-open JP5V pin1,Not safe for ESP32 until measured,PROPOSED
+LOGIC_5V_VALIDATED,Normally-open JP5V pin2,ESP32 confirmed 5V input; AHCT245 VCC,Verify USB backfeed/isolation before enabling,PROPOSED
+MCU_3V3,ESP32 validated 3V3 logic rail,MCP23017 VDD; I2C pulls,Do not source large loads from this rail,PROPOSED
+LED_12V_BUS_EXTERNAL,Fused 12V LED busbar in enclosure,LED harness +12V pins,NOT ON CARRIER PCB COPPER,PROPOSED
+LED_GND_BUS_EXTERNAL,Rated LED return bus in enclosure,LED harness ground pins,NOT ON CARRIER PCB COPPER,PROPOSED
+SWITCH_12V_PROTECTED,Fused 12V auxiliary supply,TPS4H160 VS inputs,Review thermal/current protection,PROPOSED
+TRIG_ISO_1,Optocoupler logic OUT1,ESP32 GPIO4,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_2,Optocoupler logic OUT2,ESP32 GPIO5,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_3,Optocoupler logic OUT3,ESP32 GPIO6,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_4,Optocoupler logic OUT4,ESP32 GPIO7,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_5,Optocoupler logic OUT5,ESP32 GPIO8,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_6,Optocoupler logic OUT6,ESP32 GPIO9,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_7,Optocoupler logic OUT7,ESP32 GPIO10,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+TRIG_ISO_8,Optocoupler logic OUT8,ESP32 GPIO11,3.3V-safe; active polarity TBD,EXISTING_FIRMWARE_MAP
+PIX_MCU_1,ESP32 GPIO16,U_BUF1 A1,"Native GPIO, driver firmware TBD",EXISTING_FIRMWARE_MAP
+PIX_BUF_1,U_BUF1 B1,Series resistor RPIX1 -> data signal header J_PIX1,"5V data, common reference ground",PROPOSED
+BI_RESERVED_1,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_2,ESP32 GPIO17,U_BUF1 A2,"Native GPIO, driver firmware TBD",EXISTING_FIRMWARE_MAP
+PIX_BUF_2,U_BUF1 B2,Series resistor RPIX2 -> data signal header J_PIX2,"5V data, common reference ground",PROPOSED
+BI_RESERVED_2,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_3,ESP32 GPIO12,U_BUF1 A3,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_3,U_BUF1 B3,Series resistor RPIX3 -> data signal header J_PIX3,"5V data, common reference ground",PROPOSED
+BI_RESERVED_3,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_4,ESP32 GPIO13,U_BUF1 A4,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_4,U_BUF1 B4,Series resistor RPIX4 -> data signal header J_PIX4,"5V data, common reference ground",PROPOSED
+BI_RESERVED_4,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_5,ESP32 GPIO14,U_BUF1 A5,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_5,U_BUF1 B5,Series resistor RPIX5 -> data signal header J_PIX5,"5V data, common reference ground",PROPOSED
+BI_RESERVED_5,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_6,ESP32 GPIO15,U_BUF1 A6,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_6,U_BUF1 B6,Series resistor RPIX6 -> data signal header J_PIX6,"5V data, common reference ground",PROPOSED
+BI_RESERVED_6,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_7,ESP32 GPIO18,U_BUF1 A7,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_7,U_BUF1 B7,Series resistor RPIX7 -> data signal header J_PIX7,"5V data, common reference ground",PROPOSED
+BI_RESERVED_7,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_8,ESP32 GPIO21,U_BUF1 A8,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_8,U_BUF1 B8,Series resistor RPIX8 -> data signal header J_PIX8,"5V data, common reference ground",PROPOSED
+BI_RESERVED_8,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_9,ESP32 GPIO38,U_BUF2 A1,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_9,U_BUF2 B1,Series resistor RPIX9 -> data signal header J_PIX9,"5V data, common reference ground",PROPOSED
+BI_RESERVED_9,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_10,ESP32 GPIO39,U_BUF2 A2,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_10,U_BUF2 B2,Series resistor RPIX10 -> data signal header J_PIX10,"5V data, common reference ground",PROPOSED
+BI_RESERVED_10,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_11,ESP32 GPIO40,U_BUF2 A3,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_11,U_BUF2 B3,Series resistor RPIX11 -> data signal header J_PIX11,"5V data, common reference ground",PROPOSED
+BI_RESERVED_11,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+PIX_MCU_12,ESP32 GPIO41,U_BUF2 A4,"Native GPIO, driver firmware TBD",PROPOSED
+PIX_BUF_12,U_BUF2 B4,Series resistor RPIX12 -> data signal header J_PIX12,"5V data, common reference ground",PROPOSED
+BI_RESERVED_12,Disconnected BI breakout,User optional backup data pad,DNP no wiring until WS2815 BI verified,UNVERIFIED
+BUFF_OE_N,"10k pullup from 5V, 2N7002 drain",U_BUF1 /OE and U_BUF2 /OE,"Disabled high on reset; gate source from ESP GPIO44, gate PD",PROPOSED
+BUFF_DIRECTION,LOGIC_5V_VALIDATED,U_BUF1 DIR; U_BUF2 DIR,Verify A-to-B direction,PROPOSED
+I2C_SDA,ESP32 GPIO1,MCP23017 SDA; 4.7k pullup 3V3,Add I2C bus test points,PROPOSED
+I2C_SCL,ESP32 GPIO2,MCP23017 SCL; 4.7k pullup 3V3,Add I2C bus test points,PROPOSED
+SW_CTRL_1,MCP23017 GPA0,U_HS1 IN1,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_1,U_HS1 OUT1,Auxiliary output harness channel 1,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_2,MCP23017 GPA1,U_HS1 IN2,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_2,U_HS1 OUT2,Auxiliary output harness channel 2,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_3,MCP23017 GPA2,U_HS1 IN3,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_3,U_HS1 OUT3,Auxiliary output harness channel 3,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_4,MCP23017 GPA3,U_HS1 IN4,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_4,U_HS1 OUT4,Auxiliary output harness channel 4,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_5,MCP23017 GPA4,U_HS2 IN1,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_5,U_HS2 OUT1,Auxiliary output harness channel 5,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_6,MCP23017 GPA5,U_HS2 IN2,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_6,U_HS2 OUT2,Auxiliary output harness channel 6,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_7,MCP23017 GPA6,U_HS2 IN3,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_7,U_HS2 OUT3,Auxiliary output harness channel 7,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_8,MCP23017 GPA7,U_HS2 IN4,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_8,U_HS2 OUT4,Auxiliary output harness channel 8,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_9,MCP23017 GPB0,U_HS3 IN1,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_9,U_HS3 OUT1,Auxiliary output harness channel 9,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+SW_CTRL_10,MCP23017 GPB1,U_HS3 IN2,High-side switch enable; default off / reset,PROPOSED
+SW_12V_OUT_10,U_HS3 OUT2,Auxiliary output harness channel 10,"HIGH-SIDE +12V; fuse, thermal, current limit review",PROPOSED
+MIC_BCLK,ESP32 GPIO42,Reserved I2S mic testpad MIC_BCLK,"Audio provision, no microphone hardware",RESERVED
+MIC_WS,ESP32 GPIO43,Reserved I2S mic testpad MIC_WS,"Audio provision, no microphone hardware",RESERVED
+MIC_DIN,ESP32 GPIO47,Reserved I2S mic testpad MIC_DIN,"Audio provision, no microphone hardware",RESERVED

@@ -1,0 +1,7 @@
+menu "OpenTail CORE Alpha"
+  config OPENTAIL_AP_PASSWORD
+    string "Bench-only Wi-Fi AP WPA2 password (8-63 characters)"
+    default "OpenTailLab-ChangeMe"
+    help
+      Change before bench testing. Do not connect this alpha unit to a vehicle.
+endmenu

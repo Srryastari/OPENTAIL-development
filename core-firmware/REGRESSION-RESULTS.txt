@@ -1,0 +1,41 @@
+HOST QA PASSED: 40 gates. ESP-IDF 5.5.5 cross-build and physical electrical/hardware tests NOT run in this environment.
+PASS: Stable and versioned Studio copies identical
+PASS: Embedded Studio matches standalone HTML byte-for-byte
+PASS: Studio version and title updated
+PASS: CORE firmware version bumped
+PASS: New Trigger Manager included in ESP-IDF build
+PASS: Previously verified GPIO16 and GPIO17 unchanged
+PASS: Physical input pin mapping unchanged
+PASS: Output Manager NVS v2 kept unchanged
+PASS: Output Manager persistence, migration and commit-before-mutate preserved
+PASS: Independent versioned trigger NVS profile
+PASS: Trigger changes applied only after successful commit
+PASS: Physical-to-function mapping used in render and output diagnostic path
+PASS: Function mask exposed in status/diagnostics
+PASS: Trigger GET/POST routes and capability advertised
+PASS: Existing Output Manager endpoints and capabilities retained
+PASS: Show status indicator and BLE status startup retained
+PASS: Trigger Studio rejects wrong revisions and unverified saves
+PASS: Previously verified dynamic-zone UI retained
+PASS: Unknown ESP-IDF 5.5.5 BLE config symbol removed
+PASS: No Wi-Fi secret included in distributable SDK defaults
+PASS: BLE protocol parser compiled by ESP-IDF
+PASS: Ephemeral authorization endpoint available only via CORE Wi-Fi HTTP server
+PASS: Wi-Fi show ownership preserved when BLE session ends
+PASS: BLE GATT supports authorized bench-only show commands
+PASS: Volatile session token and disconnect revocation
+PASS: Existing output and trigger NVS schemas retained
+PASS: Six C host test suites
+PASS: BLE parser/auth/range/disconnect host C tests
+PASS: BLE config binary codec 522-pixel/CRC validation
+PASS: BLE output save bridge and stale-revision prevention enabled
+PASS: BLE chunk receipt, checksum, and disconnect resets enabled
+PASS: Physical BOOT enrollment gate and separate persistent key namespace
+PASS: Owner challenge HMAC, one-time use and rate limit present
+PASS: BLE enrollment/challenge characteristics and crypto component compiled
+PASS: New HMAC authorization preserves legacy Wi-Fi-authenticated show protocol
+PASS: Full Studio JavaScript syntax
+PASS: studio-output-regression.mjs
+PASS: studio-trigger-regression.mjs
+PASS: studio-preview-trigger-regression.mjs
+PASS: Capabilities JSON valid and bench-only hardware limits correct

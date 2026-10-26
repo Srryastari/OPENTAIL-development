@@ -1,0 +1,1 @@
+OpenTail Android v0.1.15 connection-status integrity update. Android-only; works with your existing CORE v0.1.24. Extract all files and run BUILD-APK.bat on Windows. A new APK is compiled locally; it is not included. Bluetooth OFF must immediately clear BLE-connected status; ongoing Wi-Fi Studio access is labelled separately. See PHONE-TESTS.md. Bench only.

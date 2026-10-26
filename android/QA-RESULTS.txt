@@ -1,0 +1,77 @@
+PASS: Android XML parses correctly
+PASS: Studio v0.19.51 bundled, pinned checksum
+PASS: CORE endpoint fixed to known AP
+PASS: CORE protocol validated before opening web controls
+PASS: Untrusted URLs blocked
+PASS: Offline Studio asset loader, with safe file defaults
+PASS: Android JSON import/export uses system document pickers
+PASS: BLE service/characteristic UUIDs consistent with firmware
+PASS: Existing BLE discovery and info read retained
+PASS: BLE command protocol UUIDs match firmware
+PASS: BLE AUTH/SHOW/STOP command encoding
+PASS: BLE GATT operation serialized and acknowledged
+PASS: Legacy Wi-Fi token remains optional, not the sole authorization
+PASS: Physical trigger mappings remain not writable over BLE
+PASS: Android 12+ BLE permissions included
+PASS: Only CORE AP HTTP exception
+PASS: Release/build versions pinned
+PASS: Bundled Studio output & trigger editors retained
+PASS: BLE bench-only limitation explicitly documented
+PASS: Native haptics use user preferences and Android vibration API
+PASS: Haptic permission declared
+PASS: WebView tap bridge is restricted to allowlisted pages
+PASS: No haptic success before verified CORE save response
+PASS: Auto Wi-Fi reconnect requires verified CORE capabilities
+PASS: Preferred BLE address stored only after validating expected OpenTail service
+PASS: BLE reconnection bounded; control authorization cleared after BLE disconnect
+PASS: Embedded Bluetooth Show Modes script bundled
+PASS: One-screen connection transport selector
+PASS: BLE auth, effect start, and stop remain accessible
+PASS: BLE control UI persists across Studio render/navigation
+PASS: BLE controls shown on both CORE Wi-Fi and offline Studio
+PASS: Bridge disallows write commands on unrelated pages
+PASS: BLE-only BOOT enrollment and encrypted local key retention
+PASS: BLE HMAC authorization uses challenge and limits routine key exposure
+PASS: Legacy Wi-Fi authorization remains manually accessible
+PASS: Android BOOT pairing button visible
+PASS: Native BLE bridge has no physical trigger mapping writes
+PASS: BLE brightness maps to firmware cap 32
+PASS: Separate BLE Show Modes popup and top toolbar button removed
+PASS: Version bump for in-place Android update
+PASS: Unified OpenTail shell bundled and injected into CORE and offline Studio
+PASS: Old native duplicate header and connection-button rows removed
+PASS: Unified connection cards and compact Connected badge
+PASS: Unified bottom navigation has five required destinations
+PASS: Native Settings preserves Wi-Fi, BLE, haptics, appearance, diagnostics and offline access
+PASS: Show Modes retains Bluetooth effect selectors, native commands and Wi-Fi alternative
+PASS: BLE remains available after Wi-Fi loss with offline Studio fallback
+PASS: Only first-party bridge controls, no arbitrary WebView navigation
+PASS: Native system haptic and saved-setting functions still present
+PASS: Unified script JavaScript syntax
+PASS: Bluetooth OFF broadcast clears stale native status
+PASS: Native connection phase reflects scanning/pairing/transfer state
+PASS: Wi-Fi badge requires active Wi-Fi transport, not merely a cached CORE page
+PASS: BLE Output Manager presents inline status and refreshes on radio event
+PASS: Offline badge red, connecting amber, authorized green (late-theme overrides)
+PASS: Wi-Fi status refresh uses event callback rather than periodic polling
+PASS: Unified shell navigation smoke tests
+PASS: Home, Triggers, and Layout have compact native-first overview cards
+PASS: Full existing editors remain directly accessible
+PASS: Overview pages read device data but never write configuration
+PASS: BLE compact panel has progressive controls while keeping all parameters
+PASS: BLE show view hides the long legacy Studio panels
+PASS: Native bottom navigation stays above Android safe area
+PASS: A native standalone release does not modify bundled Studio
+PASS: Embedded Bluetooth Show Modes script syntax
+PASS: BLE show commands and Wi-Fi/BLE panel switching smoke test
+PASS: Native haptics injected JavaScript parses
+PASS: All bundled Studio inline JavaScript parses
+PASS: All Android Java sources parse (syntax only)
+PASS: Android BLE output characteristic UUIDs match CORE
+PASS: BLE read/save bounded by auth and post-commit readback
+PASS: Android output codec matches CORE 261-byte wire offsets and CRC
+PASS: Offline and online Layout BLE Output Manager injected
+PASS: BLE Output Manager contains zone role editing and never calls raw GATT from JavaScript
+PASS: BLE Output Manager JS syntax valid
+
+75/75 static checks passed. Android SDK compile/device/BLE tests NOT run.

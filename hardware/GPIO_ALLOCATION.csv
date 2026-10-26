@@ -1,0 +1,46 @@
+Function,ESP32_GPIO,Type,Evidence,Design_warning
+IN1,GPIO4,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN2,GPIO5,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN3,GPIO6,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN4,GPIO7,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN5,GPIO8,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN6,GPIO9,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN7,GPIO10,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+IN8,GPIO11,isolated trigger input,CORE v0.1.15 tested GPIO map,Keep 12V away from GPIO; verify exact opto module logic polarity
+PIX1,GPIO16,800kHz addressable LED data,Firmware-assigned,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX2,GPIO17,800kHz addressable LED data,Firmware-assigned,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX3,GPIO12,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX4,GPIO13,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX5,GPIO14,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX6,GPIO15,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX7,GPIO18,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX8,GPIO21,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX9,GPIO38,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability; GPIO38 might serve on-board RGB on certain board revs"
+PIX10,GPIO39,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX11,GPIO40,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+PIX12,GPIO41,800kHz addressable LED data,PROPOSED,"All require direct ESP GPIO, 5V buffer; physical header pin availability"
+SDA,GPIO1,I2C data to MCP23017,PROPOSED,Avoid boot and peripheral conflicts
+SCL,GPIO2,I2C clock to MCP23017,PROPOSED,Avoid boot and peripheral conflicts
+BUF_OE,GPIO44,Level shift output gating via transistor,PROPOSED,UART0 RX conflict
+MIC_BCLK,GPIO42,I2S microphone serial clock,RESERVED,Audio not implemented
+MIC_WS,GPIO43,I2S microphone word select,RESERVED,UART0 TX conflict
+MIC_DIN,GPIO47,I2S microphone serial data,RESERVED,Audio not implemented
+RGB_STATUS,GPIO48,Onboard RGB LED,PROVISIONAL,Verify actual board; GPIO38 possible on board variations
+DO_NOT_USE,GPIO0,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO3,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO45,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO46,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO19,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO20,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO26,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO27,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO28,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO29,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO30,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO31,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO32,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO33,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO34,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO35,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO36,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
+DO_NOT_USE,GPIO37,Reserved/strapping/USB/flash,RESERVED,Do not allocate to ordinary outputs
