@@ -1,61 +1,52 @@
 'use strict';
-const fs=require('fs');
-const vm=require('vm');
-const assert=require('node:assert/strict');
-const code=fs.readFileSync('android/app/src/main/assets/ble-show-panel.js','utf8');
-const sent=[];
-let connected=true, authorized=true,core=true;
-const doc={getElementById(){return null}};
-const native={
- getState(){return JSON.stringify({connected,authorized})},
- readEffectCapabilities(){sent.push(['caps'])},
- startEffectId(...args){sent.push(['fx',...args])},
- stop(){sent.push(['stop'])}
+/* Exercise the native BLE transport extracted from the actual Studio source.
+ * A separate Android script must not inject/override the effects editor. */
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync('web-studio/opentail.htm','utf8');
+const activity=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
+assert(!activity.includes('injectInlineBleControls('),'Obsolete standalone BLE FX panel is still injected');
+assert(!html.includes('window.__otUnifiedBleFxV1'),'Wrapper monkey patch must not ship inside Studio');
+const start=html.indexOf('const OT_CORE_FX_NAMES='),end=html.indexOf('function otCompatibleEffectChoices()',start);
+assert(start>0&&end>start,'Unified BLE source must live directly inside Studio');
+const fragment=html.slice(start,end);
+let connected=true,authorized=true;
+const calls=[],ble={
+ getState:()=>JSON.stringify({connected,authorized}),
+ readEffectCapabilities:()=>calls.push({cmd:'caps'}),
+ startEffectId:(...args)=>calls.push({cmd:'fx',args}),
+ stop:()=>calls.push({cmd:'stop'})
 };
-const s={connected:false,status:'',wledEffects:[],wledEdit:{fx:3,sx:80,ix:140,bri:160,color:'#ff0000',background:'#000000'}};
-const context={window:{OpenTailNativeBLE:native},document:doc,state:s,
-  setTimeout,clearTimeout,otControllerMode:'core',
-  otEffectSectionId:'__all__',otChosenEffectId:null,
-  otUE:null,render(){},statusLine(){},
-  scenes(){return '<div><h2>Effects</h2><select aria-label="Target for WLED effects"><option value="__all__">All</option></select><details class="card ot-core-advanced ot-core-native-show"><summary>duplicate</summary></details></div>'},
-  applyWledEffect(){throw Error('WLED Wi-Fi selected')},
-  otCompatibleEffectChoices(){throw Error('WLED catalog selected')},
-  otEffectCompatible(){return false},otEffectMeta(){return null},
-  otSelectEffectSection(){throw Error('Wi-Fi zone')},otReadEffectSection(){throw Error('Wi-Fi read')},
-  setWledEdit(){throw Error('Wi-Fi write')},otStopShow(){throw Error('Wi-Fi stop')},
-  async otUEApply(){throw Error('Wi-Fi FX editor')}
-};
-context.window.scenes=context.scenes;
-for(const name of ['applyWledEffect','otCompatibleEffectChoices','otEffectCompatible',
- 'otEffectMeta','otSelectEffectSection','otReadEffectSection','setWledEdit',
- 'otStopShow','otUEApply'])context.window[name]=context[name];
-vm.createContext(context);
-vm.runInContext(code,context,{filename:'ble-show-panel.js'});
-assert.equal(sent[0][0],'caps','BLE capabilities must be requested');
-const api=context.window.OpenTailBLEEffects;
-api.capabilities([0,1,3,6,12,23,32768,999,3]);
-assert.deepEqual(Array.from(api.choices(),x=>x.id),[0,1,3,6,12,23,32768]);
-assert.equal(api.select(999),false,'Unimplemented FX must be rejected');
-assert.equal(api.select(3),true,'Confirmed Wipe should send a BLE FX command');
-const fx=sent.at(-1);
-assert.deepEqual(Array.from(fx.slice(0,4)),['fx',3,3,255]);
-assert.equal(fx[4],255);assert.equal(fx[5],0);assert.equal(fx[6],0);
-assert.equal(fx[10],Math.round(160*32/255));
-assert.equal(fx[13],0,'Unsupported nondefault palettes must not be sent');
-assert.equal(fx[14],60,'Temporary bench playback TTL is 60s');
-assert.equal(context.window.otCompatibleEffectChoices().length,7);
-assert.equal(api.select(32768),true,'CORE particle-backed Embers is a normal effect ID');
-assert.equal(context.window.otEffectMeta(3).palette,false);
-const html=context.window.scenes();
-assert.match(html,/CORE effects run locally/);
-assert(!html.includes('duplicate'),'No duplicate CORE effects card allowed');
-assert(!html.includes('ot-ble-inline'),'No second BLE effects picker allowed');
-context.window.otSelectEffectSection('core-1-2');
-assert.equal(api.select(12),true);
-const zone=sent.at(-1);
-assert.equal(zone[2],2,'CORE output 2 only');assert.equal(zone[3],4,'CORE zone 3 only');
-context.window.otStopShow();
-assert.equal(sent.at(-1)[0],'stop');
+const state={status:'',wledEffects:[],wledEdit:{fx:3,color:'#ff0000',background:'#000000',bri:160,sx:80,ix:140}};
+const c={window:{OpenTailNativeBLE:ble},state,otControllerMode:'core',
+ otChosenEffectId:null,otEffectSectionId:'__all__',otEffectIsAll(){return c.otEffectSectionId==='__all__'},
+ otPreviewConfiguredZones(){return [{id:'core-1-2',name:'Zone 3',otCoreOutput:1,otCoreZone:2}]},
+ render(){},statusLine(){},setTimeout(){return 1},clearTimeout(){},console};
+vm.createContext(c);vm.runInContext(fragment,c,{filename:'Studio native BLE effects'});
+assert.equal(c.otBleFxMode(),true);
+c.otBleRequestCapabilities();
+assert.equal(calls.at(-1).cmd,'caps');
+c.window.OpenTailBLEEffects.capabilities([0,1,3,6,12,23,32768,65535,3]);
+assert.equal(c.otBleFxIds.length,7,'Unimplemented modes must not be listed');
+assert.equal(c.otBleEffectMeta(32768).palette,false,'Palette capability must reflect firmware');
+assert.equal(c.otBleApplyEffect(65535),false,'Unimplemented mode must be rejected');
+assert.equal(c.otBleApplyEffect(3),true);
+const play=calls.at(-1);
+assert.equal(play.cmd,'fx');
+assert.deepEqual(play.args.slice(0,3),[3,3,255]);
+assert.deepEqual(play.args.slice(3,6),[255,0,0]);
+assert.equal(play.args[9],Math.round(160*32/255),'CORE brightness limited to bench cap');
+assert.equal(play.args[12],0,'Only implemented palettes are enabled');
+assert.equal(play.args[13],60,'Temporary playback TTL must not run forever');
+c.otEffectSectionId='core-1-2';
+assert.equal(c.otBleApplyEffect(32768),true,'Original particle effect uses same FX registry');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[32768,2,4]);
+assert.equal(c.otBleStopEffect(),true);
+assert.equal(calls.at(-1).cmd,'stop');
 authorized=false;
-assert.equal(api.select(3),false,'Unauthorized BLE must not execute');
-console.log('Unified BLE effects editor: single library, capability gating, output zone, auth and stop PASS');
+assert.equal(c.otBleApplyEffect(3),false,'No unauthorized command dispatch');
+connected=false;
+c.otBleResult('BLE disconnected');
+assert.equal(c.otBleFxIds.length,0,'Cached capabilities must clear after disconnect');
+assert(!html.slice(html.indexOf('function scenes(){'),html.indexOf('let otPresetEditorId=null;')).includes('otNativeShowPanel()'),
+  'No duplicate CORE Effects picker belongs in Show Modes');
+console.log('Native Studio BLE transport + single Effects UI + capability/mask/auth checks passed');
