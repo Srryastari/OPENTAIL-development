@@ -11,7 +11,7 @@ Source: `wled00/FXparticleSystem.h`, `wled00/FXparticleSystem.cpp`.
 
 - WLED 1D effects include sparks, rain, fire and bouncing balls. Positions, velocities, lifetimes, size, collisions, accelerations, age/fade and additive rendering determine the frames.
 - Current OpenTail private `particle_system_1d.[ch]` implements a bounded 64-slot pool, age/lifetime, q8 motion, optional acceleration, edge kill/wrap/bounce, additive rendering and optional two-pixel fractional-position rendering. **It is original simplified code, not a verbatim WLED port or verified WLED-equivalent physics.**
-- Missing: per-emitter parameters, drag/wind, configurable size profiles, multiple-particle collision and mass rules, WLED PS effect registry/recipes, palette-based particle colors, runtime integration with actual particle FX.
+- The original **Embers** effect (OpenTail ID 0x8000) now exercises this private particle backend through `effects_1d.[ch]` and the same BLE effect registry as WLED-based modes. It is not an adaptation or duplicate of any WLED PS recipe. Missing: WLED emitter semantics, drag/wind, size profiles, collisions/mass, official WLED PS recipes, palette-driven particle colors, and host/golden WLED physics parity.
 - Particle physics belongs INSIDE named effect implementations. Do **not** expose a menu item called `Particle Engine`, a duplicate `Sparks` variant, an extra BLE opcode or a separate PS toggle. The single registry advertises an effect only when its recipe and all required internals are ported and tested.
 - Collision checks grow with particle count squared. Bound the work per frame, lower particle count under resource pressure and never trade away physical lighting response. A PSRAM-equipped ESP32-S3 does not eliminate frame-time limits.
 - No default 2D map: GS400 strips use independent 1D zones. 2D/matrix-only WLED effects are not advertised.
@@ -53,8 +53,8 @@ Source: `wled00/led.cpp` and target bus drivers.
 | Stage | Deliverable | Evidence required |
 |---|---|---|
 | A (current) | 1D host-tested WLED FX IDs, internal bounded particle utilities, BLE FX commands | Host CI, ESP-IDF build, Android compile, Studio checks; physical frame parity still unknown |
-| B | One Studio Show Modes catalog driven by BLE CORE capability readback; remove duplicate BLE FX picker | Android phone BLE/GATT readback; effect ID and zone routing tests |
-| C | Port native WLED palettes and a real particle-powered named effect using the private particle engine | Golden frame checks, CPU/heap benchmarks, physical WS2815 output test |
+| B (software integrated) | Existing Android Studio Show Modes catalog driven by CORE Bluetooth capability readback; legacy BLE FX picker removed from injected Android UI | Mocked JavaScript integration checks and APK compile; physical Android BLE/GATT and on-screen review still pending |
+| C (partial) | Original Embers uses private CORE particle physics; upstream WLED palettes/PS effect algorithms remain unported | Host simulation tests; hardware WS2815 playback and official WLED golden parity still pending |
 | D | CCT/RGBW eligible-bus support, auto-white safety and calibration | Independent RGBW / tunable-white hardware validation |
 | E | Expand beyond 2 outputs toward 12 and measure 6k-pixel throughput | GPIO/driver resource allocation, scope timing, full electrical test |
 | F | On-CORE nonvolatile presets, optional startup/shutdown transitions, hardware road-light fallback | Persistence, independent watchdog, trigger preemption, safe state and fault injection |
