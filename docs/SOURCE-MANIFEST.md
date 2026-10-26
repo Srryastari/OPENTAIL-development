@@ -1,6 +1,6 @@
-# Verified pre-GitHub source artifacts — initial batch
+# Pre-GitHub source artifacts — initial batch (now archived)
 
-The following original files were retrieved byte-for-byte from ChatGPT Library and SHA-256 hashed. **They are not yet uploaded to GitHub**. Hashes are for later verification against the committed archive.
+The following original files were retrieved byte-for-byte from ChatGPT Library and SHA-256 hashed. **The original artifacts are now stored in the GitHub historical archive.** The hashes below are the original pre-import SHA-256 measurements; cross-check `archive/library-releases/SHA256-MANIFEST.csv` for committed archive records.
 
 | Original filename | Size (bytes) | SHA-256 | Archive entries |
 |---|---:|---|---:|
