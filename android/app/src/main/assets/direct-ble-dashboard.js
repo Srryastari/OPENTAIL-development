@@ -29,6 +29,7 @@
     #ot-direct-connect{width:100%;border:1px solid #eee;background:#f4f4f4;color:#111}
     .ot-direct-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:9px}
     .ot-direct-actions button{border:1px solid #404040;background:#101010;color:#e7e7e7}
+    #ot-direct-ble-dashboard [hidden]{display:none!important}
     #ot-direct-ble-dashboard .ot-direct-help{font-size:10px;color:#888;margin:10px 0 0}
     #ot-direct-ble-dashboard button:focus-visible{outline:2px solid #48d88d;outline-offset:2px}
     html[data-ot-theme=light] #ot-direct-ble-dashboard{background:#fff;color:#152018;border-color:#d4dfd6}
@@ -55,6 +56,7 @@
     connect.textContent=authorized?'Manage Outputs & Zones':connected?'Authorize Controller':waiting?'Connecting…':'Connect to CORE';
     connect.disabled=waiting;
     pair.hidden=authorized;
+    outputs.hidden=true; // Primary action handles navigation; avoid duplicate Home buttons.
 
   }
   function actionFeedback(message){card.querySelector('#ot-direct-detail').textContent=message;card.querySelector('#ot-direct-state').textContent='Action requested';}
