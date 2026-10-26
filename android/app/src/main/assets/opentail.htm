@@ -1793,7 +1793,7 @@ function otBuildTriggerPlan(active,profiles,layout,physical,effects,opts={}){
    if(fx>=0&&!otEffectCompatible(fx)){errors.push(name+' / '+zone.name+': '+String(a.pattern)+' requires a matrix or has unverified 1D compatibility');continue;}
    if(fx<0){errors.push(name+' / '+zone.name+': '+(String(a.pattern).toLowerCase()==='pixel-custom'?'pixel-custom requires a custom frame player; no pixel frames are defined for WLED playback. Use Convert to Solid for a static test, or keep the original for future animation support.':a.pattern+' is not a WLED effect'));continue;}
    const val=(v,d)=>Math.round(Math.max(0,Math.min(100,Number.isFinite(Number(v))?Number(v):d))*2.55);
-   const spec={id:seg.id,on:true,fx,fxdef:false,sx:otNativeByte(a.speedRaw,val(a.speed,60)),ix:otNativeByte(a.intensityRaw,val(a.intensity,60)),bri:val(a.brightness,85),pal:otNativeByte(a.pal,0),c1:otNativeByte(a.c1,128),c2:otNativeByte(a.c2,128),c3:otNativeByte(a.c3,16,31),o1:!!a.o1,o2:!!a.o2,o3:!!a.o3,col:[hexRgb(a.color||'#ff0000'),hexRgb(a.secondary||'#000000'),hexRgb(a.tertiary||'#000000')],rev:a.reverseEffect===true,frz:false};
+   const spec={id:seg.id,on:true,fx,fxdef:false,sx:otNativeByte(a.speedRaw,val(a.speed,60)),ix:otNativeByte(a.intensityRaw,val(a.intensity,60)),bri:val(a.brightness,85),pal:otNativeByte(a.pal,0),c1:otNativeByte(a.c1,128),c2:otNativeByte(a.c2,128),c3:otNativeByte(a.c3,16,31),o1:!!a.o1,o2:!!a.o2,o3:!!a.o3,col:[hexRgb(a.color||'#ff0000'),hexRgb(a.secondary||'#000000'),hexRgb(a.tertiary||'#000000')],rev:!!zone.reverse,frz:false};
    if(plan.has(seg.id))conflicts.push({section:zone.name,previous:plan.get(seg.id).trigger,winner:name});
    plan.set(seg.id,{trigger:name,zone:zone.name,zoneId:zone.id,segmentId:seg.id,spec});
   }
@@ -2857,10 +2857,10 @@ function otResetSectionAnimation(){
 }
 // Copy/Paste replaces the old silent "copy to all assigned sections" shortcut.
 // The transient clipboard, draft and undo snapshots are deliberately NOT persisted.
-const OT_ANIM_KEYS=['pattern','color','secondary','tertiary','brightness','speed','intensity','speedRaw','intensityRaw','c1','c2','c3','o1','o2','o3','pal','reverseEffect','direction','stepMs','loops','holdMs'];
+const OT_ANIM_KEYS=['pattern','color','secondary','tertiary','brightness','speed','intensity','speedRaw','intensityRaw','c1','c2','c3','o1','o2','o3','pal','stepMs','loops','holdMs'];
 const OT_ANIM_COLORS=['color','secondary','tertiary'];
-const OT_ANIM_MOTION=['pattern','speed','intensity','speedRaw','intensityRaw','c1','c2','c3','o1','o2','o3','pal','reverseEffect','direction','stepMs','loops','holdMs'];
-const OT_ANIM_LABELS={pattern:'WLED effect',color:'Foreground',secondary:'Background',tertiary:'Accent',brightness:'Brightness',speed:'Speed (%)',intensity:'Intensity (%)',speedRaw:'Native speed',intensityRaw:'Native intensity',c1:'Custom slider 1',c2:'Custom slider 2',c3:'Custom slider 3',o1:'Custom option 1',o2:'Custom option 2',o3:'Custom option 3',pal:'Palette',reverseEffect:'Reverse effect',direction:'Direction',stepMs:'Step duration',loops:'Loops',holdMs:'Hold duration'};
+const OT_ANIM_MOTION=['pattern','speed','intensity','speedRaw','intensityRaw','c1','c2','c3','o1','o2','o3','pal','stepMs','loops','holdMs'];
+const OT_ANIM_LABELS={pattern:'WLED effect',color:'Foreground',secondary:'Background',tertiary:'Accent',brightness:'Brightness',speed:'Speed (%)',intensity:'Intensity (%)',speedRaw:'Native speed',intensityRaw:'Native intensity',c1:'Custom slider 1',c2:'Custom slider 2',c3:'Custom slider 3',o1:'Custom option 1',o2:'Custom option 2',o3:'Custom option 3',pal:'Palette',stepMs:'Step duration',loops:'Loops',holdMs:'Hold duration'};
 let otAnimClipboard=null,otPastePanelOpen=false,otPasteMode='all',otPasteCustom=new Set(OT_ANIM_KEYS),otPasteUndo=null;
 function otCopyAnimation(){
  const selected=otSelection(),n=state.triggerEditing,p=state.profiles?.[n];
