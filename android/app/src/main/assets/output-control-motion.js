@@ -13,7 +13,7 @@ input,textarea,[contenteditable="true"],[role="textbox"]{ -webkit-user-select:te
 .ot-output-control{margin:12px 0;padding:14px;border:1px solid #3b3e40;border-radius:14px;background:#242627;color:#f5f5f5}
 .ot-output-control h3{margin:0 0 12px;font-size:15px}
 .ot-mode-tabs{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:4px;background:#131515;border-radius:12px;isolation:isolate}
-.ot-mode-slider{position:absolute;z-index:0;pointer-events:none;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:9px;background:#3a3e3b;transform:translateX(calc(var(--ot-mode-index,0)*100%));transition:transform var(--ot-motion-normal) var(--ot-motion-ease)}
+.ot-mode-slider{position:absolute;z-index:0;pointer-events:none;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:9px;background:#3a3e3b;transform:translateX(200%);transition:transform var(--ot-motion-normal) var(--ot-motion-ease)}
 .ot-mode-tabs button{min-height:40px;padding:4px 3px;border:0;background:transparent;color:#bbb;font-size:11px;font-weight:650;border-radius:9px}
 .ot-mode-tabs button[aria-pressed=true]{color:#fff}
 .ot-mode-description{min-height:34px;margin:10px 0;color:#aeb6b0;font-size:12px;transition:opacity var(--ot-motion-fast) ease}
@@ -31,9 +31,9 @@ function mount(){const manager=document.getElementById('ot-ble-output-card');if(
 const card=document.createElement('section');card.id='ot-output-control';card.className='ot-output-control';
 card.innerHTML='<h3>Output Control</h3><div class="ot-mode-tabs" role="group" aria-label="Output control mode"><span class="ot-mode-slider"></span>'+[['independent','Independent'],['linked','Linked'],['sync','Sync + Override']].map(([v,t])=>'<button type="button" data-mode="'+v+'" aria-pressed="'+(v===mode)+'">'+t+'</button>').join('')+'</div><p class="ot-mode-description"></p><hr><strong>Edit target</strong><div class="ot-output-target">'+[['both','Both outputs'],['one','Output 1 · GPIO16'],['two','Output 2 · GPIO17']].map(([v,t])=>'<label><input type="radio" name="ot-output-target" value="'+v+'" '+(v===target?'checked':'')+'>'+t+'</label>').join('')+'</div><div class="ot-output-status"><div><span>Output 1 · GPIO16</span><strong>✓</strong></div><div><span>Output 2 · GPIO17</span><strong>✓</strong></div></div><p class="ot-mode-note">UI preview only — synchronization is not yet active on CORE.</p>';
 manager.before(card);update(card);
-card.addEventListener('click',e=>{const b=e.target.closest('[data-mode]');if(!b)return;mode=b.dataset.mode;update(card);});
+card.addEventListener('click',e=>{const b=e.target.closest('[data-mode]');if(!b)return;mode=b.dataset.mode;target=mode==='independent'?'one':'both';update(card);});
 card.addEventListener('change',e=>{if(e.target.name==='ot-output-target')target=e.target.value;});
 }
-function update(card){card.querySelector('.ot-mode-tabs').style.setProperty('--ot-mode-index',String(['independent','linked','sync'].indexOf(mode)));card.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));card.querySelector('.ot-mode-description').textContent=descriptions[mode];}
+function update(card){card.querySelector('.ot-mode-slider').style.transform='translateX('+(['independent','linked','sync'].indexOf(mode)*100)+'%)';card.querySelectorAll('input[name="ot-output-target"]').forEach(input=>{input.checked=input.value===target;});card.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));card.querySelector('.ot-mode-description').textContent=descriptions[mode];}
 let queued=false;new MutationObserver(()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;mount();});}).observe(document.body,{childList:true,subtree:true});mount();
 })();
