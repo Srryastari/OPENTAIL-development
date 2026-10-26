@@ -21,7 +21,9 @@ assert(html.includes("hazard:'sweep',pulseHighMs:350"), 'No global hazard mirror
 assert(html.includes('id="ot-trigger-zone-qa-01955"'), 'Trigger menu visual fix must be bundled');
 assert(html.includes('ot-trigger-card-test')&&html.includes('ot-trigger-card-edit'), 'Direct Test and Edit actions required');
 const builder=html.slice(html.indexOf('function builder(){'),html.indexOf('function otTriggerColor(',html.indexOf('function builder(){')));
-assert(builder.indexOf('ot-assignments-card')<builder.indexOf('ot-automatic-card'), 'Selected trigger editor must be above Automatic Events');
+assert(builder.includes('ot-assignments-card'), 'Existing per-Trigger zone editor must be retained');
+assert(!builder.includes('ot-automatic-card'), 'Auto Events must no longer be buried under Triggers');
+assert(html.includes('function otChatAutomaticEvents()')&&html.includes("otConceptActive==='events'"), 'Automatic Events must have its own top concept surface');
 assert(!builder.includes("otBatchEdit('reverseEffect'"), 'Batch UI must not override zone-level mirror');
 assert(!builder.includes("otEditSectionAnimation('reverseEffect'"), 'Trigger UI must not override zone-level mirror');
 assert(html.includes('data-ot-sampled=')&&html.includes('LIVE · EXACT INDEXES')&&html.includes('ot-live-canvas-scroll'), 'Live pixel output remains exact by data index');
