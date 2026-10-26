@@ -29,5 +29,25 @@ int main(void){
         assert(ot_particles_1d_emit(&ps,(int32_t)(i*256),0,1000,(ot_wled_rgb_t){1,2,3}));
     assert(!ot_particles_1d_emit(&ps,0,0,1000,(ot_wled_rgb_t){1,2,3}));
     assert(ot_particles_1d_count(&ps)==OT_PARTICLES_1D_MAX);
+    /* Subpixel blending: midpoint straddles two LEDs, direction mirrors,
+     * and edges clip safely without leaking to the opposite end. */
+    ot_particles_1d_reset(&ps,7);
+    assert(ot_particles_1d_emit(&ps,256+128,0,1000,
+           (ot_wled_rgb_t){255,100,0}));
+    memset(pix,0,sizeof(pix));
+    ot_particles_1d_render_smooth(&ps,pix,4,255,false);
+    assert(pix[1].r>=120&&pix[1].r<=129);
+    assert(pix[2].r>=120&&pix[2].r<=129);
+    assert(pix[0].r==0&&pix[3].r==0);
+    memset(pix,0,sizeof(pix));
+    ot_particles_1d_render_smooth(&ps,pix,4,255,true);
+    assert(pix[2].r>=120&&pix[1].r>=120);
+    assert(pix[0].r==0&&pix[3].r==0);
+    ot_particles_1d_reset(&ps,8);
+    assert(ot_particles_1d_emit(&ps,3*256+255,0,1000,
+           (ot_wled_rgb_t){255,0,0}));
+    memset(pix,0,sizeof(pix));
+    ot_particles_1d_render_smooth(&ps,pix,4,255,false);
+    assert(pix[0].r==0&&pix[3].r<=1);
     return 0;
 }
