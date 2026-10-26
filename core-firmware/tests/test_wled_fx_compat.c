@@ -11,6 +11,10 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
+    uint16_t ids[10]={0};
+    assert(ot_wled_fx_supported_ids(ids,10)==6);
+    assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
+           ids[4]==12 && ids[5]==23);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
