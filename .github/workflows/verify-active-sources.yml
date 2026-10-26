@@ -130,7 +130,7 @@ jobs:
             const zone={id:'zoneA',name:'Custom 1'};
             const resolved=new Function('otSim','state','otPreviewConfiguredZones','otUE','otSimDraft','DEFAULT_PROFILE',js+';return {example:otSimTriggerExampleMode,effect:otSimEffectForZone};');
             const fx=resolved(otSim,state,()=>[zone],null,x=>({fx:x.pattern||'solid',fg:x.color||'#ff0000',brightness:x.brightness/100,speed:.5,intensity:.5}),()=>({zones:[],brightness:85,color:'#ff0000',pattern:'solid'}));
-            return {example:fx.example(),effect:fx.effect(zone)};
+            return {example:fx.example(),effect:selected.length?fx.effect(zone):null};
           }
           const blank=build({Brake:{zones:[],brightness:85,color:'#ff0000',pattern:'solid'}});
           assert.equal(blank.example,true,'Unassigned preview must use example mode');
