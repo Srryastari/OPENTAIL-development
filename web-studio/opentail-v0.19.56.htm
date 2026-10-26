@@ -1592,6 +1592,7 @@ window.OpenTailBLEEffects={
    // Unknown IDs remain hidden until Studio has validated their parameter metadata.
    otBleFxIds=[...new Set((Array.isArray(ids)?ids:[]).filter(id=>Number.isInteger(id)&&OT_CORE_FX_NAMES[id]))];
    state.wledEffects=[];
+   state.wledPalettes=['Default',undefined,'Color 1','Colors 1&2','Color Gradient'];
    for(const id of otBleFxIds)state.wledEffects[id]=OT_CORE_FX_NAMES[id];
    if(otBleFxIds.length&&!otBleFxIds.includes(otChosenEffectId)){
      otChosenEffectId=otBleFxIds[0];
@@ -1610,7 +1611,8 @@ function otBleEffectMeta(id){
  const colors=id===0||id===32768?[{i:0,label:'Fx'}]:[{i:0,label:'Fx'},{i:1,label:'Bg'}];
  const controls=id===0?[]:[{key:'sx',label:'Speed',max:255}];
  if([1,3,6,32768].includes(id))controls.push({key:'ix',label:id===32768?'Density':id===1?'Duty cycle':'Edge softness',max:255});
- return {colors,controls,palette:false,flags:'1',defaults:{sx:128,ix:128,pal:0}};
+ return {colors:id===32768?[{i:0,label:'Fx'},{i:1,label:'Bg'}]:colors,
+   controls,palette:id===32768,flags:'1',defaults:{sx:128,ix:128,pal:0}};
 }
 function otBleTargetMasks(){
  if(otEffectIsAll())return [3,255];
@@ -1637,7 +1639,8 @@ function otBleApplyEffect(id,edit=state.wledEdit){
  const fx=otBleChannel(edit?.color,'#ffffff'),bg=otBleChannel(edit?.background,'#000000');
  const bri=otBleClamped(otBleClamped(edit?.bri,255,160)*32/255,32,20);
  window.OpenTailNativeBLE.startEffectId(Number(id),mask[0],mask[1],
-   ...fx,...bg,bri,otBleClamped(edit?.sx,255,128),otBleClamped(edit?.ix,255,128),0,60);
+   ...fx,...bg,bri,otBleClamped(edit?.sx,255,128),otBleClamped(edit?.ix,255,128),
+   Number(id)===32768&&[0,2,3,4].includes(Number(edit?.pal))?Number(edit.pal):0,60);
  otChosenEffectId=Number(id);state.wledEdit={...(edit||{}),fx:Number(id)};
  otBleSelectedPending=Number(id);
  state.status='Sent '+OT_CORE_FX_NAMES[id]+' over Bluetooth; awaiting CORE acknowledgement.';
@@ -1785,7 +1788,7 @@ function otResetPendingEffects(){clearTimeout(effectTimer);otPendingEditKeys.cle
 function setWledEdit(k,v){
  if(otBleFxMode()){
    const meta=otBleEffectMeta(state.wledEdit?.fx);
-   const allowed=new Set(['bri',...(meta?.controls||[]).map(x=>x.key),...(meta?.colors||[]).map(x=>['color','background','tertiary'][x.i])]);
+   const allowed=new Set(['bri',...(meta?.palette?['pal']:[]),...(meta?.controls||[]).map(x=>x.key),...(meta?.colors||[]).map(x=>['color','background','tertiary'][x.i])]);
    if(!allowed.has(k))return;
    state.wledEdit??={};state.wledEdit[k]=v;
    clearTimeout(otBleFxTimer);
@@ -2885,7 +2888,7 @@ async function otUEApply(keepOpen=false){
    otShowToast('Animation saved · assignments preserved');return true;
   }
   if(context==='effects'&&otBleFxMode()){
-   const data={fx:id,sx:d.sx,ix:d.ix,bri:d.bri,color:d.col?.[0],background:d.col?.[1],pal:0};
+   const data={fx:id,sx:d.sx,ix:d.ix,bri:d.bri,color:d.col?.[0],background:d.col?.[1],pal:d.pal};
    if(!otBleApplyEffect(id,data))return false;
    if(!keepOpen)otUE=null;render();return true;
   }
