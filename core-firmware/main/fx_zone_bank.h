@@ -24,6 +24,11 @@ typedef struct {
 void ot_fx_bank_reset(ot_fx_zone_bank_t *bank);
 bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
                       uint32_t now_ms,bool standalone);
+/* Apply across configured Output Manager zones only; rejects a request whose
+ * selected mask resolves to no usable LEDs. Retains all untouched zone states. */
+bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ uint32_t now_ms,bool standalone);
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms);
 void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank);
