@@ -1,0 +1,35 @@
+# OpenTail Studio v0.19.29 / CORE v0.1.1 Verification
+
+**Source test date:** 2026-10-23
+
+PASS — Node.js VM syntax parse of Studio JavaScript.
+PASS — Isolated Chromium rendering (real Studio HTML in set_content, fake CORE/WLED HTTP responses):
+  1. CORE auto-connect to capabilities and status on embedded /studio context
+  2. CORE telemetry readout
+  3. WLED controls hidden while CORE mode selected
+  4. Brake test uses POST /api/v1/simulate with 2-second TTL
+  5. Simulated mask visible in UI
+  6. Red demo uses POST /api/v1/demo with brightness 20 and 3-second TTL
+  7. Stop uses POST /api/v1/stop and clears mock state
+  8. Stop readback reflected in UI
+  9. CORE Triggers page only exposes simulated inputs
+ 10. CORE Show Modes explains unsupported effect engine
+ 11. CORE Layout explains lack of firmware layout sync
+ 12. Switching to WLED mode is functional
+ 13. WLED connection UI remains available
+ 14. Legacy WLED /json connection still works with simulated data
+ 15. Switching from WLED to CORE clears active WLED connection
+ 16. Non-CORE Studio path defaults to WLED
+ 17. WLED project export button remains present
+PASS — No pageerror in the simulated browser checks.
+PASS — 25 pure-C host assertions from existing CORE source tests.
+PASS — Gzip asset decompresses byte-for-byte to v0.19.29 Studio release HTML.
+PASS — Firmware source archive includes no private sdkconfig/AP password.
+PASS — ESP-IDF documented EMBED_FILES symbol naming matches generated `assets/studio.htm.gz` path; HTTP handler uses httpd_resp_send() with Content-Encoding: gzip.
+
+NOT TESTED — ESP-IDF compiler/linker build of the new v0.1.1 firmware (no ESP-IDF toolchain in this container).
+NOT TESTED — Flashing v0.1.1 onto the user's board, or first live GET /studio from iPhone.
+NOT TESTED — Live physical LEDs, triggers, input isolation or full WLED network connectivity.
+NOT SUPPORTED — Road use, independent fallback or redundant failover.
+
+Original CORE 0.1.0 was compiled and booted by the user on real ESP32-S3; that does not validate v0.1.1.

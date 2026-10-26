@@ -1,0 +1,18 @@
+OpenTail CORE Alpha v0.1.0 host verification — 2026-10-23
+
+PASS: GCC C11 -Wall -Wextra -Werror -pedantic build of pure logic module and tests.
+PASS: 25 host assertions (layout, section order, park/brake/turn/reverse priority, independent chains, bounded demo, input debounce).
+PASS: Clang C11 -Wall -Wextra -Werror -pedantic build, same 25 assertions.
+PASS: static pin map and reserved area sanity checks.
+PASS: RGB wire order positions correspond to B-R-G.
+PASS: two RMT channels configured with DMA enabled.
+PASS: bench profile defaults to 30 pixels per output.
+PASS: REST route declarations present.
+PASS: ZIP integrity check.
+
+NOT TESTED: Full ESP-IDF build (toolchain/idf.py unavailable in this environment).
+NOT TESTED: Device flash/boot, Wi-Fi hardware, WS2815 timing, Adafruit shifter or optocoupler electrical behavior.
+NOT TESTED: Full GS400 1246-pixel load, power draw and thermal safety.
+NOT IMPLEMENTED: Direct OpenTail Studio-WLED API integration, BLE, failsafe/failover, startup/shutdown/sequence execution.
+
+Result: bench firmware SOURCE prototype prepared. No firmware .bin delivered or claimed. Never use on road.
