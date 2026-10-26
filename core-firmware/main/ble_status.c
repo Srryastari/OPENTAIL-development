@@ -14,6 +14,7 @@
 #include "status_led.h"
 #include "ble_command.h"
 #include "ble_fx_command.h"
+#include "effects_1d.h"
 #include "ble_config.h"
 #include <stdio.h>
 #include <string.h>
@@ -128,7 +129,7 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
     uint16_t ids[9]={0};
-    size_t total=ot_wled_fx_supported_ids(ids,9u);
+    size_t total=ot_effects_1d_supported_ids(ids,9u);
     if(total>9u)total=9u; /* Do not advertise truncated modes as fully discoverable. */
     uint8_t payload[20]={1,(uint8_t)total};
     for(size_t i=0;i<total;i++){
