@@ -77,6 +77,16 @@ html[data-ot-theme="light"] .ot-arb-line b[data-active="on"]{color:#12734e}
 .ot-core-advanced>summary{cursor:pointer;color:#eee;min-height:34px;padding:5px 3px;font-size:14px;font-weight:650}
 .ot-core-advanced[open]>summary{border-bottom:1px solid #333;margin-bottom:10px}
 .ot-core-advanced .card{background:#000!important;border-color:#343434!important}
+
+/* Compact offline LED example lives only inside the expandable Trigger testing panel. */
+.ot-approved-triggers .ot-trigger-demo-preview{background:#000!important;border:1px solid #303030;border-radius:15px;margin-top:13px;padding:11px;display:grid;gap:7px}
+.ot-approved-triggers .ot-trigger-demo-preview>.line{margin-bottom:2px;gap:8px;flex-wrap:wrap}
+.ot-approved-triggers .ot-trigger-demo-preview strong{font-size:12px}
+.ot-approved-triggers .ot-trigger-demo-row{display:flex;align-items:center;gap:8px;min-height:24px;justify-content:space-between}
+.ot-approved-triggers .ot-trigger-demo-name{font-size:11px;color:#bbb;max-width:35%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ot-approved-triggers .ot-trigger-demo-pixels{display:flex;gap:3px;flex:1;max-width:64%;justify-content:flex-end}
+.ot-approved-triggers .ot-trigger-demo-pixel{background:#080808;border:1px solid #161616;border-radius:3px;flex:1;min-width:1px;height:12px;display:block}
+.ot-approved-triggers .ot-trigger-demo-preview p{margin:5px 0 0}
 </style><style>
 .fxbg-tabs{display:flex;gap:7px;align-items:center}.fxbg-tabs button{border:2px solid transparent;border-radius:50%;width:48px;height:48px;font-weight:800;color:white}.fxbg-tabs button.active{border-color:#fff;box-shadow:0 0 0 3px #7665e9}.color-wheel{width:min(72vw,280px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at center,#fff 0%,transparent 72%),conic-gradient(red,#ff0,lime,cyan,blue,magenta,red);position:relative;touch-action:none;cursor:crosshair;border:2px solid #5b6480}.wheel-pointer{position:absolute;width:19px;height:19px;border:2px solid white;border-radius:50%;box-shadow:0 1px 5px #000;pointer-events:none;transform:translate(-50%,-50%)}.color-workspace{display:flex;gap:15px;flex-wrap:wrap;align-items:center;justify-content:center;padding:14px;background:#171d2b;border-radius:14px}.color-swatches{display:grid;grid-template-columns:repeat(4,36px);gap:9px}.color-swatches button{width:36px;height:36px;border-radius:50%;border:2px solid #5d6780}.color-swatches button.active{border:3px solid white}.color-preview{height:40px;border-radius:10px;border:1px solid #58627a}.color-channel-panel{padding:12px;border:1px solid #384461;border-radius:14px;margin-top:12px}.color-channel-panel .field{margin:10px 0}.fxbg-note{font-size:11px;color:#aab8ce;line-height:1.4}
 </style><style>
@@ -2892,11 +2902,39 @@ function otEventSettings(n){const p=state.profiles[n],isOpen=otAutomaticEditing=
  return `<div class="ot-automatic-row"><span><strong>${n}</strong><small> · ${esc(p.eventFx||p.pattern||'Solid')} · ${Number(p.eventDuration||2).toFixed(1)}s</small></span><button class="btn" onclick="otAutomaticEditing=otAutomaticEditing==='${n}'?null:'${n}';render()">${isOpen?'Close':'✎ Edit'}</button><button class="btn" onclick="otStartAutomaticPreview('${n}')" title="Manual WLED bench preview only; this does not test ignition detection">▶ Preview</button></div>${isOpen?`<div class="ot-inline-edit"><label class="field">Animation<select onchange="otSetAutomatic('${n}','eventFx',this.value)">${otTriggerEffectChoices(p.eventFx||p.pattern).map(([v,l])=>`<option value="${esc(v)}" ${String(v).toLowerCase()===String(p.eventFx||p.pattern).toLowerCase()?'selected':''}>${esc(l)}</option>`).join('')}</select></label><label class="field">Primary color<input type="color" value="${esc(p.eventColor||p.color||'#ffffff')}" oninput="otSetAutomatic('${n}','eventColor',this.value)"></label><label class="field">Duration (seconds)<input type="number" min="0.2" max="30" step="0.1" value="${p.eventDuration||2}" onchange="otSetAutomatic('${n}','eventDuration',this.value)"></label></div>`:''}`;}
 function otSetAutomatic(n,k,v){const p=state.profiles[n];if(!p)return;if(k==='eventFx'){const fx=otCanonicalEffect(v);if(!fx)return;p.eventFx=fx}else if(k==='eventColor'){if(!/^#[0-9a-f]{6}$/i.test(v))return;p.eventColor=v;persist();return}else if(k==='eventDuration'){p.eventDuration=Math.min(30,Math.max(.2,Number(v)||2));}persist();render();}
 
-let otTriggerPending=null;
+let otTriggerPending=null,otTriggerTestOpen=false;
 async function otToggleTriggerFromCard(n){
  if(otTriggerPending||otBenchUncertain)return false;
  otTriggerPending=n;render();
  try{return await toggleTrigger(n);}finally{otTriggerPending=null;render();}
+}
+// The Trigger editor has two distinctly labeled testing paths:
+// offline preview uses the existing software pixel animation and never calls a vehicle API;
+// connected WLED uses the existing real bench snapshot/priority/restore workflow.
+function otTriggerTestOffline(){return otControllerMode==='core'||!state.connected}
+function otTriggerTestActive(n){return otTriggerTestOffline()?otSim.active&&otSim.triggers.includes(n):!!state.benchSignals[n]}
+function otTriggerTestToggle(n){
+ otTriggerTestOpen=true;
+ if(otTriggerTestOffline()){
+  if(!OT_SIM_TRIGGERS.includes(n)){state.triggerStatus='Offline examples are available for standard lighting functions. Custom trigger bench tests need a supported controller.';render();return false;}
+  if(otSim.source!=='trigger'&&otSim.active)otSimStop();
+  state.triggerStatus='Local preview only · No controller signal sent. Use the testing strip below to verify animation.';
+  otSimTrigger(n);return true;
+ }
+ return otToggleTriggerFromCard(n);
+}
+function otTriggerTestPreview(){
+ if(!otTriggerTestOffline()||!otSim.active||!otSim.triggers.length)return '';
+ const zones=otSimPreviewZones().filter(z=>Number(z.length)>0);
+ return `<div class="ot-trigger-demo-preview" aria-label="Offline simulated trigger LED strips">
+ <div class="line"><strong>Offline LED example</strong><span class="ot-mini">SIMULATED · no vehicle commands</span></div>
+ ${zones.map(z=>{const n=Math.min(16,Number(z.length));
+ return `<div class="ot-trigger-demo-row"><span class="ot-trigger-demo-name">${esc(z.name)}</span>
+ <span class="ot-trigger-demo-pixels">${Array.from({length:n},(_,i)=>{
+ const idx=z.start+Math.floor(i*z.length/n);
+ return `<i class="ot-trigger-demo-pixel" data-ot-led-index="${idx}" data-ot-preview-zone="${esc(z.id)}" data-ot-preview-sample="${i}" data-ot-preview-count="${n}"></i>`;
+ }).join('')}</span></div>`}).join('')}
+ <p class="small muted">Visual example only. Saved section assignments and live road lighting are not affected.</p></div>`;
 }
 function builder(){
  otRepairTriggerAssignments();
@@ -2904,13 +2942,13 @@ function builder(){
  const p=state.profiles[n];
  const assigned=Array.isArray(p.zones)?p.zones:[];
  const z=otZone(),a=otSectionAnimation();
- const active=Object.entries(state.benchSignals||{}).filter(([k,v])=>v).map(([k])=>k);
+ const active=otTriggerTestOffline()?otSim.active?[...otSim.triggers]:[]:Object.entries(state.benchSignals||{}).filter(([k,v])=>v).map(([k])=>k);
  const triggers=[...OT_MAIN_TRIGGERS,...otCustomTriggerNames()];
  return `<div class="ot-approved-triggers">${otRecoveryBanner()}${otArchivedWarning()}
  <div class="card ot-triggers-overview"><div class="line"><div><span class="ot-eyebrow">Vehicle lighting</span><h2>Triggers</h2></div><div class="ot-title-actions"><span class="ot-mini">${active.length} ON</span><button type="button" class="btn primary" onclick="otAddTriggerOpen()">+ Add</button></div></div>
  ${otAddingTrigger?`<div class="ot-inline-edit"><label class="field">New software trigger name<input id="ot-trigger-new-name" maxlength="32" placeholder="e.g. Welcome Lights"></label><div class="btnrow"><button class="btn primary" onclick="otCreateSoftwareTrigger()">Create trigger</button><button class="btn" onclick="otAddTriggerOpen()">Cancel</button></div><p class="small muted">Software/bench trigger only. Physical inputs require CORE hardware mapping.</p></div>`:''}
  <div class="ot-trigger-list ot-trigger-actions">
- ${triggers.map(t=>`<div class="ot-trigger-action ${state.benchSignals[t]?'is-on':''}"><button type="button" class="ot-trigger-edit ${otTriggerEditorOpen&&n===t?'is-editing':''}" aria-pressed="${otTriggerEditorOpen&&n===t}" onclick="otEditTrigger('${t}')"><strong>${esc(t)}</strong><span>${otTriggerEditorOpen&&n===t?'⌄ Selected':'›'}</span></button><span class="ot-mini">${state.benchSignals[t]?'● Test active':''}</span></div>`).join('')}
+ ${triggers.map(t=>`<div class="ot-trigger-action ${state.benchSignals[t]?'is-on':''}"><button type="button" class="ot-trigger-edit ${otTriggerEditorOpen&&n===t?'is-editing':''}" aria-pressed="${otTriggerEditorOpen&&n===t}" onclick="otEditTrigger('${t}')"><strong>${esc(t)}</strong><span>${otTriggerEditorOpen&&n===t?'⌄ Selected':'›'}</span></button><span class="ot-mini">${otTriggerTestActive(t)?'● Test active':''}</span></div>`).join('')}
  </div><div class="notice" role="status" aria-live="polite">${esc(state.triggerStatus||'Select a trigger to edit. Testing is below.')}</div>
  ${benchBefore?`<div class="btnrow">${button('Restore previous WLED lighting','otRestorePreviousLighting()')}</div>`:''}</div>
  <div class="card ot-automatic-card"><div class="ot-card-kicker">CORE configuration</div><h2>Automatic Events</h2><p class="small muted">Startup and shutdown settings are saved for firmware integration. ACC detection is not active in this browser app.</p>${otEventSettings('Startup')}${otEventSettings('Shutdown')}</div>
@@ -2920,7 +2958,7 @@ function builder(){
  <div class="ot-assignment-bottom"><span class="ot-eyebrow">${otSelection().length} selected for editing</span><div class="ot-section-shortcuts">${assigned.length>1?`<button class="ot-link-action" onclick="otEditAllAssigned()">Edit all assigned</button>`:''}${state.layout.length>1?`<button class="ot-link-action" onclick="otSelectAllZones()">Select all</button>`:''}${otSelection().length?`<button class="ot-link-action" onclick="otClearMultiZones()">Clear</button>`:''}</div></div>
  </div>
  ${otSelection().length?`<div class="card ot-editor-card"><div class="ot-editor-heading"><div><span class="ot-eyebrow">Animation editor</span><h2>${otSelection().length===1?esc(z?.name||'Section'):otSelection().length+' selected sections'}</h2><span class="ot-editor-caption">${esc(n)} · settings saved locally</span></div>${otSelection().length===1?`<div class="ot-animation-preview"><span class="ot-eyebrow">Current effect</span><strong>${esc(otCleanEffectName(a.pattern)||'Solid')}</strong>${otAnimSwatches(a)}</div>`:`<span class="ot-edit-count">Batch edit</span>`}</div>${otSelection().length===1?`<div class="ot-edit-fields"><button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Open Effect Editor</button><details class="ot-legacy-controls"><summary>Classic inline controls</summary>${dropdown('WLED Effect',otCanonicalEffect(a.pattern)||otCleanEffectName(a.pattern),otTriggerEffectChoices(a.pattern),"otEditSectionAnimation('pattern',this.value);render()")}${field('Foreground color',a.color,'color','',`oninput="otEditSectionAnimation(&#39;color&#39;,this.value)"`)}${otTriggerControlHtml(false,a)}${field('Brightness %',a.brightness,'range','min="1" max="100"',`oninput="otEditSectionAnimation(&#39;brightness&#39;,+this.value)"`)}<label class="field">Direction<select onchange="otEditSectionAnimation('reverseEffect',this.value==='reverse');render()"><option value="forward" ${a.reverseEffect?'':'selected'}>Forward</option><option value="reverse" ${a.reverseEffect?'selected':''}>Reverse</option></select></label></details></div>`:`<button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Edit selected animations</button>${otMultiEditor()}`}${otCopyPastePanel()}</div>`:''}
- </div>`:''}<details class="card ot-trigger-bench-tests"><summary>Trigger testing · ${active.length} active</summary><p class="small muted">Bench controls; simultaneous triggers use existing priority arbitration. These are not live vehicle signals.</p><div class="ot-trigger-test-grid">${triggers.map(t=>`<button type="button" class="ot-trigger-toggle ${state.benchSignals[t]?'is-on':''}" aria-pressed="${Boolean(state.benchSignals[t])}" ${otTriggerPending?'disabled':''} onclick="otToggleTriggerFromCard('${t}')">${esc(t)} · ${state.benchSignals[t]?'ON':'OFF'}</button>`).join('')}</div></details></div>`;
+ </div>`:''}<details class="card ot-trigger-bench-tests" ${otTriggerTestOpen?'open':''}><summary onclick="otTriggerTestOpen=!otTriggerTestOpen">Trigger testing · ${active.length} active</summary><p class="small muted">${otTriggerTestOffline()?'Offline simulation · No CORE or WLED connection required. These examples do not transmit vehicle signals.':'Connected WLED bench test · Uses existing lighting snapshot and priority arbitration.'}</p><div class="ot-trigger-test-grid">${triggers.map(t=>`<button type="button" class="ot-trigger-toggle ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${esc(t)} · ${otTriggerTestActive(t)?'ON':'OFF'}</button>`).join('')}</div>${otTriggerTestPreview()}</details></div>`;
 }
 function otTriggerColor(k,v){let n=state.triggerEditing&&state.profiles[state.triggerEditing]?state.triggerEditing:'Brake';state.profiles[n][k]=v;persist();if(state.connected&&state.benchSignals[n])applyBenchTriggers()}
 function otSelectAll(){otMulti=new Set(state.layout.map(z=>z.id));render()}
