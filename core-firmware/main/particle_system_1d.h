@@ -30,3 +30,12 @@ void ot_particles_1d_step(ot_particles_1d_t *system,uint16_t dt_ms,
 void ot_particles_1d_render(const ot_particles_1d_t *system,
                             ot_wled_rgb_t *pixels,size_t led_count,
                             uint8_t brightness,bool reverse);
+
+/* Optional subpixel anti-aliasing for the same internal particle backend.
+ * One fixed-point particle distributes brightness between adjacent pixels.
+ * No new public effect ID, menu entry, BLE opcode or extra allocation.
+ * This is OpenTail interpolation inspired by WLED 1D Particle System docs,
+ * not a claim of bit-identical WLED particle rendering.
+ */
+void ot_particles_1d_render_smooth(const ot_particles_1d_t *system,
+    ot_wled_rgb_t *pixels,size_t led_count,uint8_t brightness,bool reverse);
