@@ -80,6 +80,43 @@
   @media(max-width:350px){.ot-connected-badge{padding:7px}.ot-connection-card{padding:10px 7px;gap:5px}.ot-mobile-heading h1{font-size:22px}}
   `;
   style.textContent += "\n  .ot-settings-page .ot-settings-group>summary{\n    display:flex;align-items:center;justify-content:space-between;\n    padding:15px 16px;min-height:48px;color:#ececec;font:600 14px/1.2 inherit;\n    cursor:pointer;list-style:none;\n  }\n  .ot-settings-page .ot-settings-group>summary::-webkit-details-marker{display:none}\n  .ot-settings-page .ot-settings-group>summary svg{width:15px;height:15px;color:#999;transform:rotate(90deg)}\n  .ot-settings-page .ot-settings-group[open]>summary svg{transform:rotate(-90deg)}\n  .ot-settings-page .ot-settings-copy{font-size:12px;line-height:1.5;padding:0 16px 12px;margin:0;color:#aaa}\n  .ot-settings-page .ot-quick-action{min-height:48px;padding:13px 16px;font-size:13px;background:#111}\n  .ot-settings-page input[type=file]{max-width:150px;font-size:11px;color:#aaa}\n";
+  // LOCKED OCT-26: one TOP segmented navigation; OLED-black surfaces, no fixed bottom bar.
+  // The existing native BLE bridge and controls remain untouched.
+  style.textContent += `
+    html:not([data-ot-theme="light"]),html:not([data-ot-theme="light"]) body{background:#000!important;color:#f4f4f4!important}
+    html:not([data-ot-theme="light"]) .ot-mobile-header{background:#000!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card,
+    html:not([data-ot-theme="light"]) .ot-settings-group,
+    html:not([data-ot-theme="light"]) #ot-ble-inline,
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-card{background:#080808!important;border-color:#252525!important;color:#f3f3f3!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card strong,
+    html:not([data-ot-theme="light"]) .ot-mobile-heading h1{color:#f7f7f7!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card small{color:#aaa!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card svg{color:#999!important}
+    html:not([data-ot-theme="light"]) #ot-ble-inline .ot-ble-fields select,
+    html:not([data-ot-theme="light"]) #ot-ble-inline .ot-ble-fields input[type=color]{background:#050505!important;border-color:#333!important}
+    html:not([data-ot-theme="light"]) #app .card{background:#080808!important;border-color:#252525!important}
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-output,
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-stat{background:#050505!important;border-color:#303030!important}
+    .ot-mobile-header{padding-bottom:3px!important}
+    .ot-native-nav{position:static!important;inset:auto!important;max-width:none!important;width:100%!important;
+      display:flex!important;overflow-x:auto!important;overscroll-behavior-x:contain!important;scrollbar-width:none!important;
+      gap:3px!important;margin:10px 0 4px!important;padding:4px!important;border:1px solid #252525!important;
+      border-radius:15px!important;background:#080808!important;box-shadow:none!important;box-sizing:border-box!important}
+    .ot-native-nav::-webkit-scrollbar{display:none!important}
+    .ot-native-nav button{flex:1 0 auto!important;min-width:66px!important;min-height:40px!important;
+      padding:8px 9px!important;border-radius:11px!important;color:#b0b0b0!important;font:600 11px/1.2 Inter,Roboto,sans-serif!important}
+    .ot-native-nav button svg{display:none!important}
+    .ot-native-nav button[aria-current=page]{background:#222!important;color:#fff!important}
+    #app>.shell{padding-bottom:20px!important}
+    #ot-compact-pages{padding-bottom:22px!important}
+    body.ot-settings-active .ot-settings-page{padding-bottom:20px!important}
+    html[data-ot-theme="light"] .ot-native-nav{background:#f4f4f4!important;border-color:#dedede!important}
+    html[data-ot-theme="light"] .ot-native-nav button{color:#555!important}
+    html[data-ot-theme="light"] .ot-native-nav button[aria-current=page]{background:#fff!important;color:#111!important}
+    .ot-theme-settings{font-size:13px!important}
+    @media (max-width:430px){.ot-native-nav{justify-content:flex-start!important}.ot-native-nav button{flex:0 0 auto!important}}
+  `;
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
@@ -93,6 +130,7 @@
     <details class="ot-settings-group" open>
       <summary>App Preferences ${icon('arrow')}</summary>
       <button type="button" class="ot-quick-action" data-ot-native="prefs">Haptics and reconnection ${icon('arrow')}</button>
+      <button type="button" class="ot-quick-action ot-theme-settings" data-ot-native="appearance">I Hate Dark Mode / Back to Dark Mode ${icon('arrow')}</button>
       <button type="button" class="ot-quick-action" data-ot-native="offline">Work offline ${icon('arrow')}</button>
     </details>
     <details class="ot-settings-group">
@@ -110,7 +148,7 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.23 · Studio v0.19.56</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.24 · Studio v0.19.56</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
@@ -129,7 +167,7 @@
   nav.innerHTML = destinations.map(([id,label,ic]) => `<button type="button" data-ot-destination="${id}" aria-current="false">${icon(ic)}<span>${label}</span></button>`).join('');
   document.body.prepend(header);
   document.body.appendChild(settings);
-  document.body.insertBefore(nav, header.nextSibling);
+  header.appendChild(nav); // one segmented navigator at top, never a bottom tab bar
   let settingsOpen = false;
   let autoEventsOpen = false;
   const state = () => {
@@ -237,6 +275,12 @@
     }
     const action = event.target.closest('[data-ot-native]');
     if (!action) return;
+    if (action.dataset.otNative === 'appearance') {
+      if (typeof window.otSetTheme === 'function') {
+        window.otSetTheme(document.documentElement.dataset.otTheme === 'light' ? 'dark' : 'light');
+      }
+      return;
+    }
     const commands={
       connect:'connectWifi',wifi:'wifiSettings',scan:'scanBle',authorize:'authorizeBle',
       prefs:'appSettings',offline:'offlineStudio'
