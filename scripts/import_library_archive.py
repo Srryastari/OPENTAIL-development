@@ -3,12 +3,12 @@
 import csv, hashlib, io, pathlib, re, sys, zipfile
 root=pathlib.Path(__file__).resolve().parents[1]
 inbox=root/"import-inbox"
-parts=sorted(inbox.glob("opentail-github-import-*-of-*.zip"))
+parts=sorted(inbox.glob("opentail-github-small-*-of-*.zip"))
 if not parts:
     sys.exit("No opentail-github-import ZIP parts in import-inbox/")
-m=re.fullmatch(r"opentail-github-import-(\d+)-of-(\d+)\.zip",parts[0].name)
+m=re.fullmatch(r"opentail-github-small-(\d+)-of-(\d+)\.zip",parts[0].name)
 expected=int(m.group(2))
-if len(parts)!=expected or [int(re.fullmatch(r"opentail-github-import-(\d+)-of-(\d+)\.zip",p.name).group(1)) for p in parts]!=list(range(1,expected+1)):
+if len(parts)!=expected or [int(re.fullmatch(r"opentail-github-small-(\d+)-of-(\d+)\.zip",p.name).group(1)) for p in parts]!=list(range(1,expected+1)):
     sys.exit(f"Expected all {expected} ZIP parts in numeric order")
 files={}
 for part in parts:
