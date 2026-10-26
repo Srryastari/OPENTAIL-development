@@ -676,7 +676,7 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-red{
           <div class="ot-simple-stat"><strong>${outputs?outputs.length:'—'}</strong><small>Physical pixel outputs</small></div>
           <div class="ot-simple-stat"><strong>${total===null?'—':total.toLocaleString()}</strong><small>Configured pixels</small></div>
         </div><p class="ot-simple-readonly">${esc(outputs?'Read from CORE output configuration.':'Connect to CORE Wi-Fi to load live configuration.')}</p>
-        <div class="ot-simple-actions"><button class="ot-simple-button" data-ot-open="shows">Open Show Modes</button><button class="ot-simple-button secondary" data-ot-open="edit">Live Lighting Preview</button></div></div>
+        <div class="ot-simple-actions"><button class="ot-simple-button" data-ot-open="shows">Open Show Modes</button><button class="ot-simple-button secondary" data-ot-open="preview">Live Lighting Preview</button></div></div>
         <div class="ot-simple-card"><h3>Lighting setup</h3>${outputCards()}</div>`;
     }
     if (route==='triggers') {
@@ -737,6 +737,7 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-red{
     const b=e.target.closest('#ot-compact-pages [data-ot-open]');
     if(b){
       const action=b.dataset.otOpen;
+      if(action==='preview'){advanced=true;refreshVisual(true);requestAnimationFrame(()=>{const preview=document.querySelector('#app .card.ot-preview');if(preview)preview.scrollIntoView({block:'start',behavior:'smooth'});});return;}
       if(action==='edit'){advanced=true;refreshVisual(true);return;}
       if(action==='back'){advanced=false;readConfig(route);refreshVisual(true);return;}
       const destination={shows:'scenes',layout:'layout',diagnostics:'diagnostics'}[action];
