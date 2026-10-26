@@ -1,0 +1,75 @@
+name: Verify OpenTail active sources
+on:
+  push:
+    branches: [work/extract-active-sources]
+  pull_request:
+    paths:
+      - 'core-firmware/**'
+      - 'android/**'
+      - 'web-studio/**'
+      - '.github/workflows/verify-active-sources.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-host-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run native firmware logic tests
+        run: bash tests/run-host-tests.sh
+
+  core-espidf-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile ESP32-S3 firmware with ESP-IDF 5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+
+  android-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 35 SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Compile debug APK
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-android-v0.1.15-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  web-studio-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deployment and versioned Studio copies
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('web-studio/opentail.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.50.htm').read_bytes()
+          assert a == b, 'Stable and versioned Studio copies differ'
+          assert b'OpenTail Studio v0.19.50' in a, 'Unexpected Studio version'
+          print('Studio baseline file checks passed (not browser/hardware tests).')
+          PY
