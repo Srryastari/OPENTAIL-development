@@ -28,6 +28,12 @@ bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
     return false;
 }
 
+size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
+    const size_t count=sizeof(supported)/sizeof(supported[0]);
+    if(dest)for(size_t i=0;i<count&&i<max_ids;i++)dest[i]=supported[i].id;
+    return count;
+}
+
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
     if (state) state->step=0;
 }
