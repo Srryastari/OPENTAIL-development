@@ -1,20 +1,41 @@
-# OpenTail locked per-zone lighting arbitration — 2026-10-26
+# OpenTail zone-local arbitration — CORE Alpha implementation, October 26 2026
 
-**Status:** approved requirement, NOT implemented or hardware validated by this UI-only commit. No firmware/flash changes. Do not rely on alpha as sole vehicle lighting.
+**Source changed in PR #12; automated CI and physical acceptance are separate.**
+The firmware still has only two physical RMT outputs and no independent watchdog/failover.
 
-## Locked behavior
+## Locked owner-approved policy
 
-- Holding parking (IN1) is normal while driving. It must not globally block a user-selected Show Mode or full-section custom effect. It supplies idle/parking lighting only when no higher applicable layer is selected for that zone.
-- Brake (IN2), Left Turn (IN3), Right Turn (IN4), Hazards (IN3+IN4), and Reverse (IN5) override **only the zones assigned to them**. Zones not assigned to an active trigger continue their independent effect without a restart or pause.
-- When a trigger releases, its zone reveals the previously running effect or applicable parking appearance; an unrelated output/zone never resets. Saved autonomous scenes continue over BLE disconnect; temporary effects still expire on their own TTL/disconnect.
-- For simultaneous inputs, compose zone overlays independently. Overlap on one zone must have deterministic, documented priority and physical test evidence. Do not change all outputs globally because of one input.
+1. Parking is the idle layer, not a blanket override. With IN1 active, a selected
+   CORE effect continues on its chosen output/zone; zones configured as parking
+   without a Show Mode continue displaying their parking appearance.
+2. Brake, left/right turn, hazards, reverse and AUX override **only the Output
+   Manager zones assigned to their logical roles**. Other zones continue their
+   effects and keep independent phase/origin even while an overlay is visible.
+3. Releasing an input reveals the underlying effect at its current position
+   without restarting the FX; the FX bank is never cleared for a trigger.
+4. The `park_brake` role keeps deterministic Brake > Parking precedence.
+   Hazards mean left and right turn inputs simultaneously, each restricted to
+   its own assigned zones. Reverse affects only reverse-assigned zones.
+5. Manually stopping Show Modes clears temporary or flash-loaded scene playback
+   but **does not** disable physical vehicle triggers. Saved scenes persist in
+   NVS without auto-start at power-up; standalone scenes continue through BLE
+   disconnect, temporary tests still expire/stop.
+6. CORE role assignment is currently single-role per zone except park_brake.
+   Editable arbitrary overlapping trigger masks and per-zone conflict priorities
+   remain a separate feature, not a completed claim.
 
-## Firmware acceptance checks (still pending)
+## Automated checks / hardware gates
 
-1. Start Wipe with Parking continuously asserted: Wipe keeps playing on its selected zones.
-2. Apply Brake while Wipe and another independent output effect are running: only Brake's assigned zones change; release restores underlying phase.
-3. Repeat IN3, IN4, IN3+IN4, IN5 and IN2+IN3+IN4; verify zone-local preemption and restoration.
-4. Verify same on real WS2815 strips at the physical outputs, including BRG and level-shifted data, not just onboard RGB status LED.
-5. Verify saved-scene NVS, BLE disconnect, controller reconnect, and no cross-zone resets.
+Host tests cover Parking + Wipe coexistence, Brake > Park, left+right/hazards,
+Reverse, AUX, disabled/decorative zones, and no global show suppression.
+CORE render loop uses configured role ownership per pixel. Readback of
+`trigger_active` and `effect_selected` now reflects the selected zone.
 
-This supersedes older **global** parking/show arbitration as a requirement, but not as a claim that firmware has been updated or proven safe.
+Remaining hardware acceptance: hold IN1 and start Wipe, assert/release IN2,
+IN3, IN4, IN3+IN4, IN5 and IN2+IN3+IN4, ensure Wipe's original phase resumes
+while other zones never pause; verify this on actual level-shifted WS2815 BRG
+pixel chains, not just the onboard RGB status LED. Verify independent saved
+scenes / BLE reconnect / Manual Stop / NVS persistence and watchdog fallback
+separately before any vehicle deployment.
+
+**No device flashing or physical road-safety/failover test is claimed.**

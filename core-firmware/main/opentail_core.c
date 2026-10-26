@@ -233,7 +233,7 @@ static bool om_string(const cJSON *obj,const char *key,char dst[OT_OM_NAME_LEN])
     memcpy(dst,v->valuestring,n+1);
     return true;
 }
-static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask){
+static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask,uint8_t show_zones){
     cJSON *item=cJSON_CreateObject();if(!item)return NULL;
     cJSON_AddNumberToObject(item,"index",id);
     cJSON_AddNumberToObject(item,"pin",(int)out_pin[id]);
@@ -253,17 +253,35 @@ static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask){
         cJSON_AddStringToObject(entry,"name",z->name);
         cJSON_AddNumberToObject(entry,"pixels",z->pixels);
         cJSON_AddStringToObject(entry,"role",ot_om_role_name(z->role));
-        ot_rgb_t color=ot_om_trigger_color(z->role,mask,OT_MAX_BRIGHTNESS);
-        cJSON_AddBoolToObject(entry,"trigger_active",(color.r|color.g|color.b)!=0);
+        const bool show_here=(show_zones&(1u<<i))!=0;
+        ot_rgb_t overlay={0,0,0};
+        bool trigger_here=ot_om_trigger_overlay(z->role,mask,show_here,
+                                                 OT_MAX_BRIGHTNESS,&overlay);
+        cJSON_AddBoolToObject(entry,"trigger_active",trigger_here);
+        cJSON_AddBoolToObject(entry,"effect_selected",show_here);
         cJSON_AddItemToArray(zones,entry);
     }
     return item;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;TickType_t now=xTaskGetTickCount();
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
+    uint8_t show_zones[OT_OM_OUTPUTS]={0};
+    TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
+    if(show_window(now)){
+        if(ble_fx_enabled){
+            uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<copy[o].zone_count;z++)
+                if(ot_fx_slot_active(&fx_bank.zones[o][z],ms))
+                    show_zones[o]=(uint8_t)(show_zones[o]|(1u<<z));
+        }else{
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+                if(native_show.chain_mask&(1u<<o))
+                    show_zones[o]=(uint8_t)native_show.section_mask;
+        }
+    }
     portEXIT_CRITICAL(&state_lock);
     cJSON *obj=cJSON_CreateObject();
     if(!obj)return respond_err(r,500,"out of memory");
@@ -277,7 +295,7 @@ static esp_err_t om_get(httpd_req_t *r){
     cJSON_AddBoolToObject(obj,"dynamic_zones",true);
     cJSON_AddNumberToObject(obj,"effective_mask",mask);
     cJSON *outputs=cJSON_AddArrayToObject(obj,"outputs");
-    for(int i=0;i<OT_OM_OUTPUTS;i++)cJSON_AddItemToArray(outputs,om_json_output(&copy[i],i,mask));
+    for(int i=0;i<OT_OM_OUTPUTS;i++)cJSON_AddItemToArray(outputs,om_json_output(&copy[i],i,mask,show_zones[i]));
     char *payload=cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
     if(!payload)return respond_err(r,500,"out of memory");
@@ -550,7 +568,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     return ready;
 }
 /* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
- * Temporary bench effects expire in 60 seconds, existing triggers take precedence.
+ * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone){
     ot_wled_fx_metadata_t meta;
@@ -688,7 +706,7 @@ bool ot_ble_delete_fx_preset(uint8_t slot){
 }
 void ot_ble_disconnect_show(void){
  /* Disconnect expires only temporary zones; explicitly loaded NVS effects
-  * remain local on CORE. Physical road-lighting triggers still override all.
+  * remain local on CORE. Vehicle inputs override only their assigned zones.
   * A legacy HTTP show is not owned by the BLE session. */
  portENTER_CRITICAL(&state_lock);
  if(ble_owns_show){
@@ -719,11 +737,11 @@ static esp_err_t status_get(httpd_req_t *r) {
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
     char arb_json[600];
     snprintf(arb_json,sizeof(arb_json),
-      "{\"mode\":\"%s\",\"mapping\":\"legacy_example\",\"hazards\":%s,\"brake_over_parking\":%s,\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,\"demo_requested\":%s,\"demo_suppressed\":%s,"
+      "{\"mode\":\"%s\",\"mapping\":\"legacy_example_zone_local\",\"hazards\":%s,\"brake_over_parking\":%s,\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,\"demo_requested\":%s,\"demo_suppressed\":%s,"
       "\"left\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"},"
       "\"right\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"}}",
       ot_arb_mode_name(arb.mode),arb.hazards?"true":"false",arb.brake_over_parking?"true":"false",
-      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",arb.mode==OT_ARB_SHOW?"true":"false",
+      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",arb.show_requested?"true":"false",
       arb.demo_requested?"true":"false",arb.demo_suppressed?"true":"false",
       ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TOP,show_cfg.chain_mask,show_cfg.section_mask)),
       ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TURN,show_cfg.chain_mask,show_cfg.section_mask)),
@@ -982,10 +1000,13 @@ static void led_task(void *p) {
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
-       bool native_rendering=decision.mode==OT_ARB_SHOW;
+       /* Vehicle inputs no longer pause the show engine. Effects render behind
+        * per-zone trigger overlays and resume at their current phase. */
+       bool native_rendering=decision.show_requested;
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
-           uint32_t elapsed=(uint32_t)((uint32_t)(esp_timer_get_time()/1000LL)-show_started);
+           const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+           uint32_t elapsed=(uint32_t)(frame_ms-show_started);
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                const ot_om_output_t *output=&local_outputs[ch];
                ot_layout_t zone_layout;
@@ -1000,7 +1021,6 @@ static void led_task(void *p) {
                    for(int z=0;z<output->zone_count;z++){
                        unsigned len=output->zones[z].pixels;
                        const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
-                       const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
                        if(len && ot_fx_slot_active(slot,frame_ms) &&
                           output->zones[z].role!=OT_OM_OFF &&
                           offset+len<=OT_CHAIN_PIXELS){
@@ -1032,19 +1052,31 @@ static void led_task(void *p) {
                    ot_rgb_t c={0,0,0};
                    int zone=ot_om_section(output,px);
                    if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
-                       if(combined){
-                           c=ot_om_trigger_color(output->zones[zone].role,combined,OT_MAX_BRIGHTNESS);
-                       }else if(native_rendering){
-                           if(local_fx_enabled){
+                       const uint8_t role=output->zones[zone].role;
+                       const bool fx_here=native_rendering&&local_fx_enabled&&
+                           ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms);
+                       const bool legacy_here=native_rendering&&!local_fx_enabled&&
+                           (local_show.chain_mask&(1u<<ch))&&
+                           (local_show.section_mask&(1u<<zone));
+                       const bool demo_here=!fx_here&&!legacy_here&&
+                           local_demo.mode!=OT_DEMO_OFF;
+                       const bool decorated=fx_here||legacy_here||demo_here;
+                       /* Parking remains a baseline underneath show playback.
+                        * Brake/turn/hazard/reverse/AUX win only in their role-owned zones. */
+                       bool trigger_here=ot_om_trigger_overlay(role,combined,
+                                                 decorated,OT_MAX_BRIGHTNESS,&c);
+                       if(!trigger_here){
+                           if(fx_here){
                                ot_wled_rgb_t fx=fx_frame[ch][px];
                                c=(ot_rgb_t){fx.r,fx.g,fx.b};
-                           }else c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
-                       }else if(local_demo.mode!=OT_DEMO_OFF){
-                           c=ot_pixel_color(&zone_layout,ch,px,0,&local_demo,frame_index);
+                           }else if(legacy_here){
+                               c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
+                           }else if(demo_here){
+                               c=ot_pixel_color(&zone_layout,ch,px,0,&local_demo,frame_index);
+                           }
+                           if(decorated)c=ot_om_calibrate(c,output);
                        }
                    }
-                   if(!combined && (native_rendering || local_demo.mode!=OT_DEMO_OFF))
-                       c=ot_om_calibrate(c,output);
                    c=ot_om_swizzle(c,output->color_order);
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }

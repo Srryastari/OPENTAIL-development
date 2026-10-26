@@ -12,7 +12,7 @@ This supersedes any proposal to run WLED over Wi-Fi, require a WLED controller/f
 - Local presets and permitted autonomous trigger/auto-event playback continue when Bluetooth disconnects. A deliberate temporary/live BLE test may stop at its timeout or disconnect. Disconnection must never disable physical road-lighting inputs.
 - Wi-Fi may remain optional for setup/development/legacy migration, but is **not required for ongoing effects**. Existing alpha Wi-Fi authorization and app transport switches are legacy; secure BLE onboarding is a separate production prerequisite.
 - Only supported firmware modes are selectable. The upstream effects catalog is discovery metadata, **not** proof that 201 modes are implemented. WLED's 2D-only effects require separate dimensional support and should be hidden or marked unavailable for 1D strips.
-- Priority: **hardware fallback and physical road-lighting triggers > startup/shutdown animations > decorative effects**. Rendering and BLE must never block input acquisition or override a required brake/turn/reverse response.
+- Priority is **zone-local**: Brake, turn/hazards, reverse and AUX overlay only their assigned Output Manager zones; Show Modes replace Parking baseline only on zones they occupy. FX timelines continue underneath overlays and resume on release. Future hardware failover must have highest priority; it is not implemented in this alpha.
 
 ## One registry and one control path
 
@@ -41,7 +41,7 @@ The renderer's algorithm class (basic/particle/audio-reactive) is **internal** a
 1. BLE selects a supported ID, speed, intensity, zone, colors; **no Wi-Fi connected**; CORE renders actual LEDs.
 2. The same effect ID is visible once in Studio; particle-based modes have no separate category or engine switch.
 3. Disconnect BLE during a saved preset: CORE keeps rendering. Temporary live test can expire, but road-trigger response remains immediate.
-4. Priority checks Brake + Hazards, Reverse, Parking and independent left/right; rendering never suppresses them.
+4. Zone-local checks: Brake + Hazards, Reverse, Parking and independent left/right; Show continues with parking asserted, and assigned inputs mask only their own zones while effects resume on release.
 5. Verify 12 V WS2815 BRG output on the user-configured zones; measure both buses' FPS and memory rather than assuming 60–120.
 6. Ported WLED license EUPL-1.2-or-later attribution and source obligations reviewed before distribution.
 

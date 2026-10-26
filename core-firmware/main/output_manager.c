@@ -76,6 +76,27 @@ ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness){
     }
     return (ot_rgb_t){0,0,0};
 }
+/* Zone-owned overlays. BRAKE outranks PARK in the combined park_brake role.
+ * Nonmatching inputs must not blank or interrupt the independent FX bank. */
+bool ot_om_trigger_overlay(uint8_t role,uint8_t mask,bool show_here,
+                           uint8_t brightness,ot_rgb_t *color){
+    uint8_t active=show_here?(uint8_t)(mask&~OT_SIG_PARK):mask;
+    bool hit=false;
+    switch(role){
+        case OT_OM_PARK_BRAKE:hit=(active&(OT_SIG_PARK|OT_SIG_BRAKE))!=0;break;
+        case OT_OM_PARK:hit=(active&OT_SIG_PARK)!=0;break;
+        case OT_OM_BRAKE:hit=(active&OT_SIG_BRAKE)!=0;break;
+        case OT_OM_LEFT:hit=(active&OT_SIG_LEFT)!=0;break;
+        case OT_OM_RIGHT:hit=(active&OT_SIG_RIGHT)!=0;break;
+        case OT_OM_REVERSE:hit=(active&OT_SIG_REVERSE)!=0;break;
+        case OT_OM_AUX1:hit=(active&(1u<<5))!=0;break;
+        case OT_OM_AUX2:hit=(active&(1u<<6))!=0;break;
+        case OT_OM_AUX3:hit=(active&(1u<<7))!=0;break;
+        default:break;
+    }
+    if(hit&&color)*color=ot_om_trigger_color(role,active,brightness);
+    return hit;
+}
 /* led_strip driver configured for physical BRG data ordering.
  * Permute logical RGB arguments to produce the requested wire byte sequence.
  * e.g. requesting GRB -> send (r,g,b) as (r,b,g) to a BRG driver.

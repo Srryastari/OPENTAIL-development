@@ -40,5 +40,9 @@ bool ot_om_valid(const ot_om_output_t *o);
 int ot_om_section(const ot_om_output_t *o,unsigned pixel);
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout);
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness);
+/* Inputs overlay only assigned zone roles. Parking is the baseline and yields
+ * when a user-selected effect (or demo) occupies this zone. */
+bool ot_om_trigger_overlay(uint8_t role,uint8_t mask,bool show_here,
+                           uint8_t brightness,ot_rgb_t *color);
 ot_rgb_t ot_om_swizzle(ot_rgb_t rgb,uint8_t requested_order);
 ot_rgb_t ot_om_calibrate(ot_rgb_t rgb,const ot_om_output_t *cfg);

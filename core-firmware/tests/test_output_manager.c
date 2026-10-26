@@ -23,6 +23,24 @@ int main(void){
  color(ot_om_trigger_color(OT_OM_PARK_BRAKE,OT_SIG_PARK|OT_SIG_BRAKE,32),32,0,0);
  color(ot_om_trigger_color(OT_OM_REVERSE,OT_SIG_REVERSE,32),32,32,32);
  color(ot_om_trigger_color(OT_OM_AUX1,1u<<5,32),16,0,32);
+ /* Locked Park baseline / selective Brake, Turn, Hazards, Reverse overlays. */
+ ot_rgb_t over={0,0,0};
+ assert(!ot_om_trigger_overlay(OT_OM_PARK_BRAKE,OT_SIG_PARK,true,32,&over));
+ assert(ot_om_trigger_overlay(OT_OM_PARK_BRAKE,OT_SIG_PARK,false,32,&over));
+ color(over,7,0,0);
+ assert(ot_om_trigger_overlay(OT_OM_PARK_BRAKE,OT_SIG_PARK|OT_SIG_BRAKE,true,32,&over));
+ color(over,32,0,0);
+ assert(!ot_om_trigger_overlay(OT_OM_LEFT,OT_SIG_BRAKE,true,32,&over));
+ assert(ot_om_trigger_overlay(OT_OM_LEFT,OT_SIG_LEFT|OT_SIG_RIGHT|OT_SIG_BRAKE,true,32,&over));
+ color(over,32,19,0);
+ assert(ot_om_trigger_overlay(OT_OM_RIGHT,OT_SIG_LEFT|OT_SIG_RIGHT,true,32,&over));
+ assert(!ot_om_trigger_overlay(OT_OM_REVERSE,OT_SIG_PARK|OT_SIG_BRAKE,true,32,&over));
+ assert(ot_om_trigger_overlay(OT_OM_REVERSE,OT_SIG_REVERSE|OT_SIG_PARK,true,32,&over));
+ color(over,32,32,32);
+ assert(!ot_om_trigger_overlay(OT_OM_DECORATIVE,0xff,true,32,&over));
+ assert(!ot_om_trigger_overlay(OT_OM_OFF,0xff,false,32,&over));
+ assert(ot_om_trigger_overlay(OT_OM_AUX1,(1u<<5)|OT_SIG_PARK,true,32,&over));
+ color(over,16,0,32);
  ot_rgb_t v={11,22,33};
  const uint8_t seq[6][3]={{11,22,33},{11,33,22},{22,11,33},{22,33,11},{33,11,22},{33,22,11}};
  for(int i=0;i<6;i++){ot_rgb_t s=ot_om_swizzle(v,i);uint8_t actual[3]={s.b,s.r,s.g};assert(!memcmp(actual,seq[i],3));}
