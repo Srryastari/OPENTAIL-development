@@ -146,11 +146,9 @@ try {
     [IO.File]::WriteAllLines((Join-Path $stage "BUILD-INFO.txt"), [string[]]$report)
 
     $zip = Join-Path $dist ("opentail-core-esp32s3-pr12-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".zip")
-    Compress-Archive -LiteralPath (Join-Path $stage "*") -DestinationPath $zip -Force
-    # Compress-Archive -LiteralPath does not expand wildcard on all PS versions.
-    if (-not (Test-Path -LiteralPath $zip)) {
-        Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -Force
-    }
+    # -Path wildcard includes contents while preserving bootloader/ and
+    # partition_table/ folders; -LiteralPath must NOT be used with '*'.
+    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -Force
     if ((Get-Item -LiteralPath $zip).Length -le 0) { throw "Firmware ZIP was empty." }
     Write-Host ""
     Write-Host "SUCCESS - Firmware built and packaged:" -ForegroundColor Green
