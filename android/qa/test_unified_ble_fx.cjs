@@ -26,7 +26,7 @@ assert.equal(c.otBleFxMode(),true);
 c.otBleRequestCapabilities();
 assert.equal(calls.at(-1).cmd,'caps');
 c.window.OpenTailBLEEffects.capabilities([0,1,3,6,12,23,32768,65535,3]);
-assert.equal(c.otBleFxIds.length,7,'Unimplemented modes must not be listed');
+assert.equal(vm.runInContext('otBleFxIds.length',c),7,'Unimplemented modes must not be listed');
 assert.equal(c.otBleEffectMeta(32768).palette,false,'Palette capability must reflect firmware');
 assert.equal(c.otBleApplyEffect(65535),false,'Unimplemented mode must be rejected');
 assert.equal(c.otBleApplyEffect(3),true);
@@ -46,7 +46,7 @@ authorized=false;
 assert.equal(c.otBleApplyEffect(3),false,'No unauthorized command dispatch');
 connected=false;
 c.otBleResult('BLE disconnected');
-assert.equal(c.otBleFxIds.length,0,'Cached capabilities must clear after disconnect');
+assert.equal(vm.runInContext('otBleFxIds.length',c),0,'Cached capabilities must clear after disconnect');
 assert(!html.slice(html.indexOf('function scenes(){'),html.indexOf('let otPresetEditorId=null;')).includes('otNativeShowPanel()'),
   'No duplicate CORE Effects picker belongs in Show Modes');
 console.log('Native Studio BLE transport + single Effects UI + capability/mask/auth checks passed');
