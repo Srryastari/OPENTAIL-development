@@ -222,6 +222,7 @@ public final class MainActivity extends Activity {
                     injectBleOutputControls(view);
                     injectUnifiedShell(view);
                     injectDirectBleDashboard(view);
+                    injectOutputControlMotion(view);
                 }
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request,
@@ -422,6 +423,19 @@ public final class MainActivity extends Activity {
             view.evaluateJavascript(out.toString("UTF-8"), null);
         } catch (Exception ex) {
             android.util.Log.e("OpenTail", "Direct BLE dashboard injection failed", ex);
+        }
+    }
+
+    /** Shared motion and approved Output Control preview; no CORE configuration writes. */
+    private void injectOutputControlMotion(WebView view) {
+        try (InputStream in = getAssets().open("output-control-motion.js");
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            view.evaluateJavascript(out.toString("UTF-8"), null);
+        } catch (Exception ex) {
+            android.util.Log.e("OpenTail", "Output Control motion injection failed", ex);
         }
     }
 
