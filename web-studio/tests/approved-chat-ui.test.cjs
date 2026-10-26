@@ -62,3 +62,21 @@ assert(html.includes('id="ot-approved-chat-01956"'),'Layout style tokens are pin
 assert(html.includes('id="ot-approved-chat-trigger-01956"'),'Trigger style tokens are pinned');
 assert(shell.includes('UI baseline v1: lock Android wrapper to neutral OLED'),'Android cannot inject an alternate green theme');
 console.log('Protected in-chat OLED UI geometry, multi-trigger editing, local event animation and controller isolation contracts passed');
+
+
+
+// Approved Android six-tab nav: the native wrapper owns exactly one global nav.
+const navStart=shell.indexOf('const destinations = [');
+const navEnd=shell.indexOf('];',navStart);
+assert(navStart>0&&navEnd>navStart,'Android canonical navigation list missing');
+const androidNav=shell.slice(navStart,navEnd);
+const navLabels=[...androidNav.matchAll(/\['(?:home|scenes|layout|builder|events|settings)','([^']+)'/g)].map(m=>m[1]);
+assert.deepEqual(navLabels,['Home','Show Modes','Layout','Triggers','Auto Events','Settings'],'Approved Android six-tab order must be exact');
+assert(shell.includes('document.body.insertBefore(nav, header.nextSibling)'),'Canonical navigation belongs below header, not at page bottom');
+assert(shell.includes('position:sticky!important;top:0!important'),'Native pill navigation must be at the top');
+assert(shell.includes('#app .ot-chat-nav{display:none!important}'),'Hide duplicate Studio concept tabs inside Android');
+assert(shell.includes('autoEventsOpen=target===\'events\''),'Auto Events must have its own top-level nav identity');
+assert(shell.includes("window.otConceptNavigate(target)"),'Route Auto Events through existing offline-safe concept handler');
+assert(shell.includes('body:not(.ot-home-active) .ot-connection-grid{display:none!important}'),'Connection actions belong on Home');
+assert(!androidNav.includes("'Shows'"),'Use approved full Show Modes label');
+console.log('Approved Android six-tab nav placement/order and duplicate-tab suppression checks passed');
