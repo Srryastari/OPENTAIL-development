@@ -83,11 +83,12 @@ function updateCatalog(){
  }catch(_){}
 }
 function meta(id){
- if(!supported.includes(Number(id)))return null;
- const solid=id===0,blink=id===1,strobe=id===23,fade=id===12;
+ id=Number(id);
+ if(!supported.includes(id))return null;
+ const solid=id===0,blink=id===1;
  return {controls:solid?[]:[
    {key:'sx',label:'Speed',max:255},
-   ...blink||id===3||id===6?[{key:'ix',label:blink?'Duty cycle':'Edge softness',max:255}]:[]
+   ...(blink||id===3||id===6?[{key:'ix',label:blink?'Duty cycle':'Edge softness',max:255}]:[])
  ],colors:solid?[{i:0,label:'Fx'}]:[{i:0,label:'Fx'},{i:1,label:'Bg'}],
  palette:false,flags:'1',defaults:{sx:128,ix:128,pal:0}};
 }
@@ -112,7 +113,7 @@ function statusChanged(message){
  if(wasReady!==lastReady&&typeof render==='function')render();
 }
 window.OpenTailBLEEffects={
- isActive:active,ready,refresh,statusChanged,
+ isActive:active,ready,refresh:()=>{readAttempted=false;refresh()},statusChanged,
  capabilities(ids){
   if(!Array.isArray(ids))return;
   const list=[...new Set(ids.filter(x=>Number.isInteger(x)&&names[x]!==undefined))];
