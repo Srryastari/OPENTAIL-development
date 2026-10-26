@@ -45,7 +45,7 @@ void ot_particles_1d_step(ot_particles_1d_t *sys,uint16_t dt_ms,
             else{
                 const int64_t period=max*2;
                 int64_t folded=((x%period)+period)%period;
-                if(folded>max){folded=period-folded;p->v_q8=-p->v_q8;}
+                if(folded>max){folded=period-folded;p->v_q8=saturate_i32(-(int64_t)p->v_q8);}
                 x=folded;
             }
         }else if(x<0 || x>=limit){
