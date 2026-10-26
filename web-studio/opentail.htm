@@ -725,6 +725,34 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
 .ot-chat-hint{color:#999;font-size:11px;line-height:1.4;margin:7px 0}
 .ot-chat-archived{padding:9px 12px;border:1px solid #303030;border-radius:16px}
 @media(max-width:390px){#app .ot-chat-layout{padding:12px!important}.ot-chat-heading{gap:7px}#app .ot-chat-pill{font-size:11px!important;padding:9px 11px}}
+</style><style id="ot-approved-chat-trigger-01956">
+/* Chat concept: selectable Trigger cards and editable neutral pill states. */
+#app .ot-chat-triggers .ot-trigger-list{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:9px!important}
+#app .ot-chat-trigger-action{display:flex!important;flex-direction:column!important;gap:12px!important;padding:12px!important;min-width:0!important;min-height:131px!important;background:#101010!important;border:1px solid #303030!important;border-radius:19px!important;box-shadow:none!important;outline:0!important}
+#app .ot-chat-trigger-action.is-editing{background:#1c1c1c!important;border-color:#777!important}
+#app .ot-chat-trigger-select{display:flex!important;flex-direction:column!important;gap:8px!important;align-items:flex-start!important;position:relative;flex:1;width:100%!important;min-height:55px!important;margin:0!important;padding:0!important;border:0!important;outline:0!important;border-radius:0!important;background:transparent!important;color:#eee!important;box-shadow:none!important;text-align:left!important}
+#app .ot-chat-trigger-select strong{font-size:14px!important;font-weight:650!important;letter-spacing:0!important;line-height:1.25!important;color:#eee!important}
+#app .ot-chat-check{font-size:20px;color:#adadad;line-height:1}
+#app .ot-chat-trigger-action.is-editing .ot-chat-check{color:#f0f0f0}
+#app .ot-chat-sim-flag{position:absolute;right:1px;top:1px;font-size:10px;color:#aaa}
+#app .ot-chat-trigger-action>.ot-trigger-card-test{width:100%!important;min-height:39px!important;padding:9px!important}
+#app .ot-chat-trigger-action>.ot-trigger-card-test.is-on{background:#383838!important;border-color:#777!important;color:#fff!important}
+#app .ot-chat-selection{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;color:#aaa;margin:13px 0 9px}
+#app .ot-chat-selection>div{display:flex;gap:7px}
+#app .ot-chat-textbutton{font-size:12px!important;color:#ccc!important;background:none!important;border:0!important;border-radius:8px!important;padding:4px!important;box-shadow:none!important}
+#app .ot-chat-edit-selected{width:100%;min-height:43px!important}
+#app .ot-chat-inline-editor{background:#000!important;border:0!important;border-top:1px solid #303030!important;border-radius:0!important;box-shadow:none!important;padding:14px 0 2px!important;margin:14px 0 0!important}
+#app .ot-chat-inline-editor .card{background:transparent!important;box-shadow:none!important;border:0!important}
+#app .ot-chat-batch .ot-chat-field{margin-top:13px}
+#app .ot-chat-batch .ot-chat-field input[type=range]{accent-color:#bdbdbd!important}
+#app .ot-chat-batch-zone{min-height:45px;margin:5px 0;gap:7px}
+#app .ot-chat-batch-zone>span:last-child{display:flex;gap:5px}
+#app .ot-chat-batch-zone .ot-chat-pill{font-size:11px!important;padding:7px!important}
+#app .ot-assignments-card .ot-assignment-card{border:0!important;border-bottom:1px solid #303030!important;border-radius:0!important;background:#000!important;box-shadow:none!important}
+#app .ot-assignments-card .ot-assignment-actions button{border-radius:999px!important}
+#app .ot-editor-card{background:transparent!important}
+#app .ot-triggers-overview .ot-chat-heading{margin-bottom:12px}
+@media(max-width:365px){#app .ot-chat-trigger-action{padding:10px!important}#app .ot-chat-trigger-select strong{font-size:12px!important}}
 </style></head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
@@ -2844,6 +2872,79 @@ async function otApplySavedPreset(id){
 function otDeleteSavedPreset(id){const p=(state.savedPresets||[]).find(x=>x.id===id);if(!p||!confirm('Delete saved preset "'+p.name+'"?'))return;state.savedPresets=state.savedPresets.filter(x=>x.id!==id);otPresetEditorId=null;persist();render()}
 function otPresetsPanel(){const ps=state.savedPresets||[];const legacy=Object.values(state.profiles||{}).filter(p=>p?.kind==='custom');return `<div class="card"><div class="line"><h2>Saved Presets</h2><button class="btn primary" onclick="otAddSavedPreset()">+ Add Preset</button></div>${ps.length||legacy.length?'':`<p class="small muted">No saved presets yet. Tap + to capture the current WLED lighting.</p>`}${ps.map(p=>`<div class="ot-preset-item"><button class="btn" onclick="otApplySavedPreset('${p.id}')">▶ ${esc(p.name)}</button><button class="btn" aria-label="Edit ${esc(p.name)}" onclick="otPresetEdit('${p.id}')">✎ Edit</button></div>${otPresetEditorId===p.id?`<div class="ot-inline-edit"><label class="field">Preset name<input value="${esc(p.name)}" maxlength="48" onchange="otRenameSavedPreset('${p.id}',this.value)"></label><div class="btnrow"><button class="btn" onclick="otOverwriteSavedPreset('${p.id}')">Update from current lights</button><button class="btn danger" onclick="otDeleteSavedPreset('${p.id}')">Delete</button></div></div>`:''}`).join('')}</div>`}
 
+
+let otSelectedTriggerNames=[],otTriggerBatchOpen=false;
+function otSelectedTriggers(){return otSelectedTriggerNames.filter(n=>Boolean(state.profiles?.[n]))}
+function otToggleTriggerSelection(name){
+ if(!state.profiles?.[name])return;
+ const list=otSelectedTriggers();
+ otSelectedTriggerNames=list.includes(name)?list.filter(n=>n!==name):[...list,name];
+ otTriggerEditorOpen=false;otTriggerBatchOpen=false;otMultiSelected=[];otEditZone=null;
+ if(otSelectedTriggerNames.length===1)state.triggerEditing=otSelectedTriggerNames[0];
+ render();
+}
+function otSelectAllTriggers(){otSelectedTriggerNames=[...OT_MAIN_TRIGGERS,...otCustomTriggerNames()];otTriggerEditorOpen=false;otTriggerBatchOpen=false;render()}
+function otClearTriggerSelections(){otSelectedTriggerNames=[];otTriggerEditorOpen=false;otTriggerBatchOpen=false;render()}
+function otEditSelectedTriggers(){
+ const names=otSelectedTriggers();if(!names.length)return;
+ if(names.length===1){otTriggerBatchOpen=false;otEditTrigger(names[0]);return}
+ otTriggerEditorOpen=false;otTriggerBatchOpen=!otTriggerBatchOpen;render();
+}
+function otTriggerBatchApply(k,v){
+ const names=otSelectedTriggers();if(names.length<2)return false;
+ if(k==='pattern'){v=otCanonicalEffect(v);if(!v){otShowToast('Choose a supported 1D effect',true);return false}}
+ if(k==='color'&&!/^#[0-9a-f]{6}$/i.test(v))return false;
+ if(k==='brightness'||k==='speed'||k==='intensity'){v=Number(v);if(!Number.isFinite(v))return false;v=Math.round(Math.max(k==='brightness'?1:0,Math.min(100,v)))}
+ const affected=[];
+ for(const n of names){
+  const p=state.profiles[n];if(!p)continue;
+  p[k]=v;
+  if(k==='pattern')p.pattern=v;
+  p.sectionAnimations||={};
+  for(const id of p.zones||[]){
+   const a=p.sectionAnimations[id]||{};
+   a[k]=v;
+   if(k==='speed')a.speedRaw=Math.round(v*2.55);
+   if(k==='intensity')a.intensityRaw=Math.round(v*2.55);
+   p.sectionAnimations[id]=a;
+  }
+  affected.push(n);
+ }
+ if(!persist()){otShowToast('Could not save multi-trigger changes',true);return false}
+ state.triggerStatus='Updated '+k+' in '+affected.join(', ')+' · other settings preserved';
+ render();if(state.connected&&affected.some(n=>state.benchSignals[n]))applyBenchTriggers();
+ return true;
+}
+function otTriggerBatchAssign(zoneId,on){
+ if(!state.layout.some(z=>z.id===zoneId))return;
+ const previous=otSelectedTriggers().map(n=>[n,[...(state.profiles[n].zones||[])]]);
+ for(const [n] of previous){
+  const p=state.profiles[n],ids=new Set(p.zones||[]);
+  if(on)ids.add(zoneId);else ids.delete(zoneId);
+  p.zones=[...ids];
+ }
+ if(!persist()){for(const [n,ids] of previous)state.profiles[n].zones=ids;render();return}
+ state.triggerStatus=(on?'Assigned':'Unassigned')+' zone on '+previous.length+' selected triggers';
+ render();if(state.connected&&previous.some(([n])=>state.benchSignals[n]))applyBenchTriggers();
+}
+function otTriggerBatchMarkup(){
+ const names=otSelectedTriggers(),models=names.map(n=>state.profiles[n]);
+ const uniform=k=>models.every(p=>String(p[k])===String(models[0][k]))?models[0][k]:null;
+ const chosenFx=uniform('pattern'),chosenBri=uniform('brightness'),chosenSpeed=uniform('speed'),chosenInt=uniform('intensity'),chosenColor=uniform('color');
+ const fxList=otTriggerEffectChoices(chosenFx);
+ return `<div class="ot-chat-inline-editor ot-chat-batch" aria-label="Multi-trigger animation editor">
+ <div class="ot-chat-between"><strong>Shared animation editor</strong><span class="ot-mini">${names.length} triggers</span></div>
+ <p class="ot-chat-hint">${names.map(esc).join(' + ')} · Each change updates only the chosen field on assigned zones.</p>
+ <label class="ot-chat-field">WLED effect<select class="ot-chat-input" onchange="otTriggerBatchApply('pattern',this.value)">
+ ${chosenFx===null?'<option selected disabled>Mixed · choose an effect</option>':''}
+ ${fxList.map(([v,label])=>`<option value="${esc(v)}" ${String(chosenFx).toLowerCase()===String(v).toLowerCase()?'selected':''}>${esc(label)}</option>`).join('')}</select></label>
+ <label class="ot-chat-field">Primary color ${chosenColor===null?'· Mixed':''}<input type="color" value="${chosenColor||'#ffffff'}" onchange="otTriggerBatchApply('color',this.value)"></label>
+ ${[['brightness','Brightness',chosenBri],['speed','Speed',chosenSpeed],['intensity','Intensity',chosenInt]].map(([k,label,value])=>`<label class="ot-chat-field"><span class="ot-chat-between"><strong>${label}</strong><small>${value===null?'Mixed':value+'%'}</small></span><input type="range" min="${k==='brightness'?1:0}" max="100" value="${value===null?50:value}" onchange="otTriggerBatchApply('${k}',this.value)"></label>`).join('')}
+ <div class="ot-chat-between"><strong>Assigned zones</strong><small>Apply selection to each Trigger</small></div>
+ ${state.layout.map(z=>`<div class="ot-chat-between ot-chat-batch-zone"><span>${esc(z.name)}</span><span><button class="ot-chat-pill" onclick="otTriggerBatchAssign('${z.id}',true)">Assign all</button><button class="ot-chat-pill" onclick="otTriggerBatchAssign('${z.id}',false)">Remove all</button></span></div>`).join('')}
+ <p class="ot-chat-hint">Unchanged fields and per-zone Reverse direction are preserved. Physical output testing still requires WLED/CORE connection.</p>
+ </div>`;
+}
 let otTriggerEditorOpen=false;
 function otEditTrigger(n){
  if(!state.profiles?.[n])return;
@@ -3147,18 +3248,26 @@ function builder(){
  const active=otTriggerTestOffline()?otSim.active?[...otSim.triggers]:[]:Object.entries(state.benchSignals||{}).filter(([k,v])=>v).map(([k])=>k);
  const triggers=[...OT_MAIN_TRIGGERS,...otCustomTriggerNames()];
  return `<div class="ot-approved-triggers">${otRecoveryBanner()}${otArchivedWarning()}
- <div class="card ot-triggers-overview"><div class="line"><div><span class="ot-eyebrow">Vehicle lighting</span><h2>Triggers</h2></div><div class="ot-title-actions"><span class="ot-mini">${active.length} ON</span><button type="button" class="btn primary" onclick="otAddTriggerOpen()">+ Add</button></div></div>
+ <div class="card ot-triggers-overview ot-chat-triggers"><div class="ot-chat-heading"><div><h2>Triggers</h2><p>Tap cards to select one or more for editing</p></div><button type="button" class="ot-chat-pill ot-chat-primary" onclick="otAddTriggerOpen()">＋ Add</button></div>
  ${otAddingTrigger?`<div class="ot-inline-edit"><label class="field">New software trigger name<input id="ot-trigger-new-name" maxlength="32" placeholder="e.g. Welcome Lights"></label><div class="btnrow"><button class="btn primary" onclick="otCreateSoftwareTrigger()">Create trigger</button><button class="btn" onclick="otAddTriggerOpen()">Cancel</button></div><p class="small muted">Software/bench trigger only. Physical inputs require CORE hardware mapping.</p></div>`:''}
  <div class="ot-trigger-list ot-trigger-actions">
- ${triggers.map(t=>`<div class="ot-trigger-action ${otTriggerTestActive(t)?'is-on':''} ${otTriggerEditorOpen&&n===t?'is-editing':''}"><div class="ot-trigger-card-heading"><strong>${esc(t)}</strong><span>${otTriggerTestActive(t)?(otTriggerTestOffline()?'● SIM':'● TEST'):'○ IDLE'}</span></div><div class="ot-trigger-card-actions"><button type="button" class="ot-trigger-card-test ${otTriggerTestActive(t)?'is-on':''}" aria-label="${otTriggerTestActive(t)?'Stop':'Test'} ${esc(t)}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${otTriggerTestActive(t)?'■ Stop':'▶ Test'}</button><button type="button" class="ot-trigger-card-edit ${otTriggerEditorOpen&&n===t?'is-editing':''}" aria-label="${otTriggerEditorOpen&&n===t?'Close':'Edit'} ${esc(t)} settings" aria-expanded="${otTriggerEditorOpen&&n===t}" onclick="otEditTrigger('${t}')">${otTriggerEditorOpen&&n===t?'Close':'✎ Edit'}</button></div></div>`).join('')}
- </div><div class="notice" role="status" aria-live="polite">${esc(state.triggerStatus||'Select a trigger to edit. Testing is below.')}</div>
+ ${triggers.map(t=>`<div class="ot-trigger-action ot-chat-trigger-action ${otSelectedTriggers().includes(t)?'is-editing':''} ${otTriggerTestActive(t)?'is-on':''}">
+ <button type="button" class="ot-trigger-card-edit ot-chat-trigger-select" aria-pressed="${otSelectedTriggers().includes(t)}" onclick="otToggleTriggerSelection('${t}')">
+  <span aria-hidden="true" class="ot-chat-check">${otSelectedTriggers().includes(t)?'✓':'○'}</span>
+  ${otTriggerTestActive(t)?'<span class="ot-chat-sim-flag">SIM</span>':''}
+  <strong>${esc(t)}</strong>
+ </button>
+ <button type="button" class="ot-trigger-card-test ot-chat-pill ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${otTriggerTestActive(t)?'■ Stop test':'▷ Test'}</button>
+ </div>``).join('')}
+ </div><div class="ot-chat-selection"><span>${otSelectedTriggers().length} selected for editing</span><div><button class="ot-chat-textbutton" onclick="otSelectAllTriggers()">All</button><button class="ot-chat-textbutton" onclick="otClearTriggerSelections()">Clear</button></div></div><button type="button" class="ot-chat-pill ot-chat-primary ot-chat-edit-selected" ${otSelectedTriggers().length?'':'disabled'} onclick="otEditSelectedTriggers()">Edit ${otSelectedTriggers().length} selected ${otSelectedTriggers().length===1?'Trigger':'Triggers'}</button>${state.triggerStatus?`<p class="ot-chat-hint" role="status">${esc(state.triggerStatus)}</p>`:''}
  ${benchBefore?`<div class="btnrow">${button('Restore previous WLED lighting','otRestorePreviousLighting()')}</div>`:''}</div>
- ${otTriggerEditorOpen?`<div class="card ot-assignments-card"><div class="line"><div><span class="ot-eyebrow">Trigger configuration</span><h2>${esc(n)} · Edit</h2></div>${p.kind==='trigger-custom'?`<button class="btn danger" onclick="otDeleteSoftwareTrigger('${n}')">Delete trigger</button>`:'<span class="ot-mini">Auto-saved</span>'}</div>
+ ${otTriggerBatchOpen&&otSelectedTriggers().length>1?otTriggerBatchMarkup():''}
+ ${otTriggerEditorOpen?`<div class="ot-assignments-card ot-chat-inline-editor"><div class="line"><div><span class="ot-eyebrow">Trigger configuration</span><h2>${esc(n)} · Edit</h2></div>${p.kind==='trigger-custom'?`<button class="btn danger" onclick="otDeleteSoftwareTrigger('${n}')">Delete trigger</button>`:'<span class="ot-mini">Auto-saved</span>'}</div>
  <div class="ot-assignment-header"><div><strong>LED sections</strong><p class="ot-help">Assign for playback; use Edit or select multiple to change animations.</p></div><span class="ot-edit-count">${assigned.length} / ${state.layout.length} assigned</span></div>
  <div class="ot-section-grid ot-assign-tiles">${state.layout.map(s=>`<div class="ot-assign ot-assignment-card ${assigned.includes(s.id)?'on':''} ${otSelection().includes(s.id)?'is-selected':''}"><div class="ot-assignment-title"><strong>${esc(s.name)}</strong><small>${s.length} pixels</small></div><div class="ot-assignment-actions"><button type="button" class="ot-assignment-toggle" aria-pressed="${assigned.includes(s.id)}" onclick="otTriggerAssignmentsToggle('${n}','${s.id}')">${assigned.includes(s.id)?'✓ Assigned':'+ Assign'}</button><button type="button" class="ot-assignment-edit" aria-label="Edit animation for ${esc(s.name)}" aria-pressed="${otSelection().includes(s.id)}" onclick="otTriggerEditAssigned('${s.id}')">✎ Edit</button><button type="button" class="ot-assignment-multi ${otSelection().includes(s.id)?'is-picked':''}" aria-label="${otSelection().includes(s.id)?'Deselect':'Select'} ${esc(s.name)} for batch animation editing" aria-pressed="${otSelection().includes(s.id)}" onclick="otToggleMultiZone('${s.id}')">${otSelection().includes(s.id)?'☑':'☐'}</button></div></div>`).join('')||'<p class="small muted">Add LED sections in Layout to assign triggers.</p>'}</div>
  <div class="ot-assignment-bottom"><span class="ot-eyebrow">${otSelection().length} selected for editing</span><div class="ot-section-shortcuts">${assigned.length>1?`<button class="ot-link-action" onclick="otEditAllAssigned()">Edit all assigned</button>`:''}${state.layout.length>1?`<button class="ot-link-action" onclick="otSelectAllZones()">Select all</button>`:''}${otSelection().length?`<button class="ot-link-action" onclick="otClearMultiZones()">Clear</button>`:''}</div></div>
  </div>
- ${otSelection().length?`<div class="card ot-editor-card"><div class="ot-editor-heading"><div><span class="ot-eyebrow">Animation editor</span><h2>${otSelection().length===1?esc(z?.name||'Section'):otSelection().length+' selected sections'}</h2><span class="ot-editor-caption">${esc(n)} · settings saved locally</span></div>${otSelection().length===1?`<div class="ot-animation-preview"><span class="ot-eyebrow">Current effect</span><strong>${esc(otCleanEffectName(a.pattern)||'Solid')}</strong>${otAnimSwatches(a)}</div>`:`<span class="ot-edit-count">Batch edit</span>`}</div>${otSelection().length===1?`<div class="ot-edit-fields"><button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Open Effect Editor</button><details class="ot-legacy-controls"><summary>Classic inline controls</summary>${dropdown('WLED Effect',otCanonicalEffect(a.pattern)||otCleanEffectName(a.pattern),otTriggerEffectChoices(a.pattern),"otEditSectionAnimation('pattern',this.value);render()")}${field('Foreground color',a.color,'color','',`oninput="otEditSectionAnimation(&#39;color&#39;,this.value)"`)}${otTriggerControlHtml(false,a)}${field('Brightness %',a.brightness,'range','min="1" max="100"',`oninput="otEditSectionAnimation(&#39;brightness&#39;,+this.value)"`)}<p class="small muted">Animation direction and mirroring follow this zone’s Reverse setting in Layout. Trigger profiles do not override it.</p></details></div>`:`<button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Edit selected animations</button>${otMultiEditor()}`}${otCopyPastePanel()}</div>`:''}
+ ${otSelection().length?`<div class="ot-editor-card ot-chat-inline-editor"><div class="ot-editor-heading"><div><span class="ot-eyebrow">Animation editor</span><h2>${otSelection().length===1?esc(z?.name||'Section'):otSelection().length+' selected sections'}</h2><span class="ot-editor-caption">${esc(n)} · settings saved locally</span></div>${otSelection().length===1?`<div class="ot-animation-preview"><span class="ot-eyebrow">Current effect</span><strong>${esc(otCleanEffectName(a.pattern)||'Solid')}</strong>${otAnimSwatches(a)}</div>`:`<span class="ot-edit-count">Batch edit</span>`}</div>${otSelection().length===1?`<div class="ot-edit-fields"><button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Open Effect Editor</button><details class="ot-legacy-controls"><summary>Classic inline controls</summary>${dropdown('WLED Effect',otCanonicalEffect(a.pattern)||otCleanEffectName(a.pattern),otTriggerEffectChoices(a.pattern),"otEditSectionAnimation('pattern',this.value);render()")}${field('Foreground color',a.color,'color','',`oninput="otEditSectionAnimation(&#39;color&#39;,this.value)"`)}${otTriggerControlHtml(false,a)}${field('Brightness %',a.brightness,'range','min="1" max="100"',`oninput="otEditSectionAnimation(&#39;brightness&#39;,+this.value)"`)}<p class="small muted">Animation direction and mirroring follow this zone’s Reverse setting in Layout. Trigger profiles do not override it.</p></details></div>`:`<button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Edit selected animations</button>${otMultiEditor()}`}${otCopyPastePanel()}</div>`:''}
  </div>`:''} <div class="card ot-automatic-card"><div class="ot-card-kicker">CORE configuration</div><h2>Automatic Events</h2><p class="small muted">Startup and shutdown settings are saved for firmware integration. ACC detection is not active in this browser app.</p>${otEventSettings('Startup')}${otEventSettings('Shutdown')}</div>
 <details class="card ot-trigger-bench-tests" ${otTriggerTestOpen?'open':''}><summary onclick="otTriggerTestOpen=!otTriggerTestOpen">Trigger testing · ${active.length} active</summary><p class="small muted">${otTriggerTestOffline()?'Offline simulation · No CORE or WLED connection required. These examples do not transmit vehicle signals.':'Connected WLED bench test · Uses existing lighting snapshot and priority arbitration.'}</p><div class="ot-trigger-test-grid">${triggers.map(t=>`<button type="button" class="ot-trigger-toggle ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${esc(t)} · ${otTriggerTestActive(t)?'ON':'OFF'}</button>`).join('')}</div>${otTriggerTestPreview()}</details></div>`;
 }
