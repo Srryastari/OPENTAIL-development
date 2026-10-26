@@ -57,16 +57,18 @@
     pair.hidden=authorized;
 
   }
+  function actionFeedback(message){card.querySelector('#ot-direct-detail').textContent=message;card.querySelector('#ot-direct-state').textContent='Action requested';}
   connect.addEventListener('click',()=>{
     const s=read();
     if(s.ble&&s.bleAuthorized){outputs.click();return;}
-    if(s.ble&&s.bleRadioOn!==false&&!s.bleAuthorized)window.OpenTailNativeApp.authorizeBle();
-    else window.OpenTailNativeApp.scanBle();
-    refresh();
+    if(s.ble&&s.bleRadioOn!==false&&!s.bleAuthorized){actionFeedback('Requesting controller authorization…');window.OpenTailNativeApp.authorizeBle();}
+    else {actionFeedback('Requesting Bluetooth permission or opening CORE scanner…');window.OpenTailNativeApp.scanBle();}
   });
   pair.addEventListener('click',()=>{
     // Enrollment is explicitly user initiated; never silently expose the owner key.
+    actionFeedback('Requesting BOOT enrollment. Hold BOOT on the powered CORE.');
     if(window.OpenTailNativeBLE?.pairWithBoot)window.OpenTailNativeBLE.pairWithBoot();
+    else actionFeedback('Native BLE bridge unavailable. Reopen the Android app.');
   });
   outputs.addEventListener('click',()=>{
     // Reuse existing output editor; no duplicate or unverified configuration path.
