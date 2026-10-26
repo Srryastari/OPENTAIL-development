@@ -50,7 +50,7 @@ class Particle1D {
         x=((x%period)+period)%period;
         if(x>max){x=period-x;p.velocity256=-p.velocity256;}
       } else if(x<0 || x>=length){p.active=false;continue;}
-      p.x256=static_cast<int32_t>(std::clamp(x,static_cast<int64_t>(INT32_MIN),static_cast<int64_t>(INT32_MAX)));
+      p.x256=static_cast<int32_t>(std::clamp(x,static_cast<int64_t>(0),static_cast<int64_t>(INT32_MAX)));
     }
   }
   // Additively paint particles onto caller-owned RGB buffer (no memory allocation).
