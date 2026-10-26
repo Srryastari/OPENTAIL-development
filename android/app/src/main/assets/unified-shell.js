@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.17: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.18: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -81,13 +81,13 @@
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
-  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Android v0.1.17</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
+  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Android v0.1.18</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
     <div id="ot-save-banner" class="ot-save-warning" hidden role="alert">Save failed · Review Studio changes</div><div class="ot-connection-grid"><button type="button" class="ot-connection-card" id="ot-wifi-card" data-active="false" aria-label="Wi-Fi connection settings">${icon('wifi')}<span><strong>Wi-Fi</strong><small id="ot-wifi-text">Not connected</small></span></button>
     <button type="button" class="ot-connection-card" id="ot-ble-card" data-active="false" aria-label="Bluetooth connection settings">${icon('bluetooth')}<span><strong>Bluetooth</strong><small id="ot-ble-text">Not connected</small></span></button></div>`;
   const settings = document.createElement('section');
   settings.className = 'ot-settings-page';
   settings.id = 'ot-unified-settings';
-  settings.innerHTML = `<h2>Settings</h2><p>Android v0.1.17 · Connections, preferences and controller tools.</p><div class="ot-settings-group">
+  settings.innerHTML = `<h2>Settings</h2><p>Android v0.1.18 · Connections, preferences and controller tools.</p><div class="ot-settings-group">
     <button class="ot-quick-action" data-ot-native="connect">Connect to CORE over Wi-Fi ${icon('arrow')}</button>
     <button class="ot-quick-action" data-ot-native="wifi">Android Wi-Fi settings ${icon('arrow')}</button>
     <button class="ot-quick-action" data-ot-native="scan">Find Bluetooth controller ${icon('arrow')}</button>
@@ -232,7 +232,7 @@
   setInterval(refresh,2000);
 })();
 
-/* OpenTail Android v0.1.17 — compact native-first surfaces.
+/* OpenTail Android v0.1.18 — compact native-first surfaces.
    Preserve all existing Studio editors and their proven save/readback functions.
    These read-only overview cards never overwrite output or trigger configuration. */
 (function () {
@@ -652,6 +652,30 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-amber{
 html[data-ot-theme="light"] .ot-connected-badge.ot-status-red{
   background:#200c11!important;border-color:#63303a!important;color:#ff5265!important;
 }
+/* Approved layouts are native Studio editing surfaces, never hidden behind overview pages.
+   Pure OLED black for the three reviewed tabs; keep status badges meaningful. */
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-approved-show,
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-approved-triggers,
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-layout-approved,
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-approved-show .card,
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-approved-triggers .card,
+html:not([data-ot-theme="light"]) body:not(.ot-settings-active) #app .ot-layout-approved .card {
+  background:#000!important;color:#f4f4f4!important;
+}
+html:not([data-ot-theme="light"]) #app .ot-approved-show .card,
+html:not([data-ot-theme="light"]) #app .ot-approved-triggers .card,
+html:not([data-ot-theme="light"]) #app .ot-layout-approved .card {
+  border-color:#303030!important;border-radius:20px!important;
+}
+html:not([data-ot-theme="light"]) #app .ot-core-advanced {
+  background:#000!important;border:1px solid #303030!important;
+  border-radius:20px!important;padding:14px!important;margin-top:14px!important;
+}
+#app .ot-core-advanced>summary {
+  cursor:pointer;list-style:revert;font-size:14px;font-weight:650;
+  color:#eee;padding:5px 3px;min-height:36px;
+}
+html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-bottom:1px solid #303030;margin-bottom:10px}
 /* Keep 5-tab nav, Wi-Fi/BLE cards, OLED palette and Live Preview untouched. */
 @media(max-width:350px){.ot-connected-badge{font-size:10px!important;padding:4px 6px!important}}
 `;
@@ -711,7 +735,9 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-red{
   function refreshVisual(force=false){
     const next=routeNow();
     if (next!==route){advanced=false;route=next;force=true; if(['home','layout','triggers'].includes(route)) readConfig(route);}
-    const showing=['home','layout','triggers'].includes(route);
+    // Approved Layout and Triggers are full Studio editors by default, even offline.
+    // Keep the legacy read-only compact overview for Home only.
+    const showing=route==='home';
     document.body.classList.toggle('ot-compact-view',showing&&!advanced);
     document.body.classList.toggle('ot-editor-active',showing&&advanced);
     document.body.classList.toggle('ot-compact-shows',route==='shows');
