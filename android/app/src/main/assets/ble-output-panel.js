@@ -87,6 +87,8 @@ function announceSelection(){document.dispatchEvent(new CustomEvent('opentail:bl
 function load(index){if(busy)return;if(index!==0&&index!==1)return;pendingIndex=index;busy=true;message='Reading output '+(index+1)+' over BLE…';paint();window.OpenTailNativeBLE.readOutput(index);}
 window.OpenTailBLEOutputs={
  getSelectedIndex(){return selected;},
+ // Only controller readback/verified saves are shared across the app.
+ getConfirmedOutputs(){return saved.map(o=>o?JSON.parse(JSON.stringify(o)):null);},
  connectionChanged(status){
   const st=nativeState();
   message=st.radioOn===false?'Bluetooth switched off · disconnected':(status||st.message||'BLE status updated');
@@ -98,7 +100,12 @@ window.OpenTailBLEOutputs={
   if(pendingIndex===null)return;
   if(r.index!==pendingIndex){message='BLE response index mismatch; no configuration applied. Reload the selected output.';busy=false;pendingIndex=null;paint();return;}
   busy=false;pendingIndex=null;message=r.message||'BLE operation complete';
-  if(r.ok&&r.output&&(r.index===0||r.index===1)){lastReadAt=new Date().toLocaleTimeString();saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
+  if(r.ok&&r.output&&(r.index===0||r.index===1)){
+   lastReadAt=new Date().toLocaleTimeString();
+   saved[r.index]=JSON.parse(JSON.stringify(r.output));
+   draft[r.index]=JSON.parse(JSON.stringify(r.output));
+   document.dispatchEvent(new CustomEvent('opentail:ble-outputs-updated',{detail:{index:r.index}}));
+  }
   paint();
  },refresh(){mount();paint();}
 };
