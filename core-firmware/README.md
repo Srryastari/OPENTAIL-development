@@ -1,5 +1,7 @@
 # OpenTail CORE v0.1.24-alpha — physical BOOT BLE bench enrollment
 
+> **Current PR #12:** For a free Windows ESP32-S3 build, follow [BUILD-PR12-WINDOWS.md](BUILD-PR12-WINDOWS.md) and run [BUILD-CORE-WINDOWS.ps1](BUILD-CORE-WINDOWS.ps1). This packages the flashable images but never flashes hardware. The older PREPARE-AND-BUILD instructions below describe the historical v0.1.24 enrollment bench release.
+
 This is a test build based on working v0.1.23: same HTTP Studio, output/trigger NVS profiles, BLE shows, BLE Output Manager read/write and Wi-Fi fallback.
 
 ## BLE onboarding
