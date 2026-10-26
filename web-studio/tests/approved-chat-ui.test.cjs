@@ -116,3 +116,13 @@ assert(builder.includes('otPendingTriggerDelete===t'),'Custom deletion must conf
 assert(!builder.includes('Delete trigger</button>'),'Do not duplicate Remove in the separate Trigger Settings editor');
 assert(html.includes('function otCancelTriggerDelete()'),'Inline Cancel action must exist');
 console.log('Custom-row-only remove icon and inline confirmation protected');
+
+// Regression: preserve precisely one visible global nav in browser and Android.
+const standaloneNav=html.slice(html.indexOf('function otConceptNav(){'),html.indexOf('function otChatAutoSet('));
+const labels=[...standaloneNav.matchAll(/\\['(?:home|scenes|layout|builder|events|device)','([^']+)'/g)].map(x=>x[1]);
+assert.deepEqual(labels,['Home','Show Modes','Layout','Triggers','Auto Events','Settings'],'Standalone tabs must follow approved six-item order');
+assert(!html.includes('<nav class="bottomnav">'),'Legacy bottom nav must not render');
+assert(html.includes('#app nav.tabs,#app nav.bottomnav{display:none!important}'),'Hidden legacy route mirror must stay hidden');
+assert(html.includes('scroll-snap-type:x proximity'),'Small screens use the same scrollable top segmented nav');
+assert(shell.includes('#app .ot-chat-nav{display:none!important}'),'Android native navigation must suppress bundled duplicate');
+console.log('OpenTail single-navigation regression checks passed');
