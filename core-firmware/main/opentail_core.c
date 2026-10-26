@@ -604,14 +604,15 @@ static bool fx_slot_key(uint8_t slot,char key[8]){
 }
 bool ot_ble_save_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
- ot_ble_fx_packet_t fx={0};bool active;
+ ot_fx_zone_bank_t snapshot={0};bool active;
+ const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
  TickType_t now=xTaskGetTickCount();
  portENTER_CRITICAL(&state_lock);
  active=native_outputs_ready&&ble_fx_enabled&&show_window(now);
- if(active)fx=ble_fx_request;
+ if(active)memcpy(&snapshot,&fx_bank,sizeof(snapshot));
  portEXIT_CRITICAL(&state_lock);
- ot_fx_preset_record_t record;
- if(!active||!ot_fx_preset_pack(&record,&fx))return false;
+ ot_fx_scene_record_t record;
+ if(!active||!ot_fx_scene_pack(&record,&snapshot,now_ms))return false;
  nvs_handle_t h;
  if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
  esp_err_t e=nvs_set_blob(h,key,&record,sizeof(record));
@@ -623,13 +624,48 @@ bool ot_ble_play_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
  nvs_handle_t h;
  if(nvs_open("ot_fx_presets",NVS_READONLY,&h)!=ESP_OK)return false;
- ot_fx_preset_record_t record={0};size_t n=sizeof(record);
- esp_err_t e=nvs_get_blob(h,key,&record,&n);
+ size_t n=0;esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+ if(e!=ESP_OK){nvs_close(h);return false;}
+ if(n==sizeof(ot_fx_preset_record_t)){
+     /* Migration: earlier eight slots store only one single-effect snapshot.
+      * Do not overwrite on load. Re-saving updates to v2 multi-zone format. */
+     ot_fx_preset_record_t legacy={0};
+     e=nvs_get_blob(h,key,&legacy,&n);
+     nvs_close(h);
+     return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
+         ot_ble_apply_fx_internal(&legacy.fx,true);
+ }
+ if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
+ ot_fx_scene_record_t record={0};
+ e=nvs_get_blob(h,key,&record,&n);
  nvs_close(h);
- if(e!=ESP_OK||n!=sizeof(record)||!ot_fx_preset_valid(&record))return false;
- /* Explicit user playback, never automatic on boot. It replaces only
-  * zones selected by this saved effect and survives phone disconnection. */
- return ot_ble_apply_fx_internal(&record.fx,true);
+ if(e!=ESP_OK||n!=sizeof(record)||!ot_fx_scene_valid(&record))return false;
+ const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+ TickType_t now=xTaskGetTickCount();
+ bool ready;
+ portENTER_CRITICAL(&state_lock);
+ ready=native_outputs_ready;
+ if(ready){
+     /* Atomic scene replacement. No old-zone effects survive a scene load. */
+     ot_fx_bank_stop_all(&fx_bank);
+     uint8_t out_mask=0,zone_mask=0;
+     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+         if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
+         const ot_ble_fx_packet_t *p=&record.effect[o][z];
+         ot_fx_bank_apply(&fx_bank,p,now_ms,true);
+         ble_fx_request=*p;
+         out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
+         zone_mask=(uint8_t)(zone_mask|(uint8_t)(1u<<z));
+     }
+     native_show=(ot_show_t){.mode=OT_SHOW_SOLID,
+        .color={0,0,0},.brightness=OT_MAX_BRIGHTNESS,.speed=0,
+        .chain_mask=out_mask,.section_mask=zone_mask};
+     ble_fx_enabled=true;ble_owns_show=true;
+     native_show_started_ms=now_ms;
+     native_show_deadline=now+pdMS_TO_TICKS(60000u);
+ }
+ portEXIT_CRITICAL(&state_lock);
+ return ready;
 }
 bool ot_ble_delete_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
