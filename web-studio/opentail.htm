@@ -2006,7 +2006,19 @@ function otSimPreviewZones(){
  return otSim.active&&!configured.length?OT_SIM_EXAMPLE_ZONES:configured;
 }
 function otSimExampleApplies(name,z){
- if(!z.otDemoRole)return true;
+ // When CORE outputs are available, respect their saved role labels in a visual-only simulation.
+ // These are not Studio trigger assignments and must never write controller configuration.
+ const role=String(z.otCoreRole||'').toLowerCase();
+ if(role){
+  if(name==='Brake')return role==='brake'||role==='park_brake';
+  if(name==='Park')return role==='parking'||role==='park_brake';
+  if(name==='Left Turn')return role==='left_turn';
+  if(name==='Right Turn')return role==='right_turn';
+  if(name==='Hazards')return role==='left_turn'||role==='right_turn';
+  if(name==='Reverse')return role==='reverse';
+  return false;
+ }
+ if(!z.otDemoRole)return true; // Legacy WLED projects retain existing example behavior.
  if(name==='Brake'||name==='Park')return z.otDemoRole==='tail';
  if(name==='Left Turn')return z.otDemoRole==='turn'&&z.vehicleSide==='left';
  if(name==='Right Turn')return z.otDemoRole==='turn'&&z.vehicleSide==='right';
@@ -3360,9 +3372,9 @@ function otStudioRoute(tab){
  if(otControllerMode==='core')return ({
   home:otCoreHome,
   device:()=>otCoreDevice()+otAppearanceCard(),
-  scenes:()=>otCoreWorkspaceBanner('Show Modes')+scenes(),
-  builder:()=>otTriggerManagerCard()+otCoreWorkspaceBanner('Triggers')+builder(),
-  layout:()=>otOutputManagerCard()+otCoreWorkspaceBanner('Layout')+layout(),
+  scenes:()=>scenes()+`<details class="card ot-core-advanced"><summary>CORE connection and capability notes</summary>${otCoreWorkspaceBanner('Show Modes')}</details>`,
+  builder:()=>builder()+`<details class="card ot-core-advanced"><summary>CORE physical trigger input mapping · Advanced</summary>${otTriggerManagerCard()}${otCoreWorkspaceBanner('Triggers')}</details>`,
+  layout:()=>layout()+`<details class="card ot-core-advanced"><summary>CORE hardware output mapping · Advanced</summary>${otOutputManagerCard()}${otCoreWorkspaceBanner('Layout')}</details>`,
   diagnostics:otCoreDiagnostics
  })[tab]();
  return ({home,scenes,builder,layout,device:()=>device()+otAppearanceCard(),diagnostics})[tab]();
