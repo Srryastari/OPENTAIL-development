@@ -29,6 +29,7 @@
 #include "ble_fx_command.h"
 #include "effects_1d.h"
 #include "fx_preset_record.h"
+#include "fx_zone_bank.h"
 #include "palette_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
@@ -64,9 +65,9 @@ static bool native_outputs_ready=false;
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
-static bool ble_fx_standalone=false; /* Explicit loaded preset; persists through BLE disconnect, not boot */
+static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect assignments */
 static ot_ble_fx_packet_t ble_fx_request={0};
-static uint32_t ble_fx_generation=0;
+
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
@@ -216,7 +217,8 @@ static uint8_t signal_mask_of(const char *name) {
     return 0;
 }
 static bool show_window(TickType_t now){
-    return native_show.mode!=OT_SHOW_OFF && ((ble_fx_enabled&&ble_fx_standalone)||before_deadline(now,native_show_deadline));
+    if(ble_fx_enabled)return ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
+    return native_show.mode!=OT_SHOW_OFF && before_deadline(now,native_show_deadline);
 }
 static bool om_number(const cJSON *obj,const char *key,unsigned *dest,unsigned low,unsigned high){
     const cJSON *v=cJSON_GetObjectItemCaseSensitive((cJSON *)obj,key);
@@ -501,7 +503,7 @@ static esp_err_t show_start(httpd_req_t *r){
     uint32_t start_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     portENTER_CRITICAL(&state_lock);
     bool ready=native_outputs_ready;
-    if(ready){ble_owns_show=false;ble_fx_enabled=false;native_show=cfg;native_show_deadline=now+pdMS_TO_TICKS(ttl);
+    if(ready){ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show=cfg;native_show_deadline=now+pdMS_TO_TICKS(ttl);
       native_show_started_ms=start_ms;}
     portEXIT_CRITICAL(&state_lock);
     if(!ready)return respond_err(r,409,"pixel outputs not initialized");
@@ -510,7 +512,7 @@ static esp_err_t show_start(httpd_req_t *r){
 static esp_err_t show_stop(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     portEXIT_CRITICAL(&state_lock);
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"active\":false}");
@@ -542,7 +544,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
-    if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;ble_fx_standalone=false;native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)request->ttl_sec*1000u);}
     portEXIT_CRITICAL(&state_lock);
     return ready;
@@ -550,7 +552,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
 /* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
  * Temporary bench effects expire in 60 seconds, existing triggers take precedence.
  */
-bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
+static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone){
     ot_wled_fx_metadata_t meta;
     if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
@@ -558,9 +560,14 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
         return false;
     const TickType_t now=xTaskGetTickCount();
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool ready;
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
+    if(ready){
+        /* Apply only the requested output/zone slots. Other zones retain FX phase. */
+        ready=ot_fx_bank_apply(&fx_bank,req,now_ms,standalone);
+    }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
         native_show=(ot_show_t){
@@ -569,9 +576,7 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
             .chain_mask=req->chain_mask,.section_mask=req->zone_mask
         };
         ble_fx_request=*req;
-        ++ble_fx_generation;
         ble_fx_enabled=true;
-        ble_fx_standalone=false; /* ordinary live BLE effect expires/disconnects */
         ble_owns_show=true;
         native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
@@ -579,10 +584,13 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     portEXIT_CRITICAL(&state_lock);
     return ready;
 }
+bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
+    return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
+}
 void ot_ble_stop_show(void){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;ble_fx_standalone=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
+    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
     portEXIT_CRITICAL(&state_lock);
     /* status is refreshed by render task; don't suppress a newer Wi-Fi show. */
 }
@@ -619,11 +627,9 @@ bool ot_ble_play_fx_preset(uint8_t slot){
  esp_err_t e=nvs_get_blob(h,key,&record,&n);
  nvs_close(h);
  if(e!=ESP_OK||n!=sizeof(record)||!ot_fx_preset_valid(&record))return false;
- if(!ot_ble_apply_fx(&record.fx))return false;
- portENTER_CRITICAL(&state_lock);
- ble_fx_standalone=true; /* explicit user action; no silent boot autorun */
- portEXIT_CRITICAL(&state_lock);
- return true;
+ /* Explicit user playback, never automatic on boot. It replaces only
+  * zones selected by this saved effect and survives phone disconnection. */
+ return ot_ble_apply_fx_internal(&record.fx,true);
 }
 bool ot_ble_delete_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
@@ -635,13 +641,19 @@ bool ot_ble_delete_fx_preset(uint8_t slot){
  return e==ESP_OK;
 }
 void ot_ble_disconnect_show(void){
- /* Saved and explicitly started autonomous effects continue without the phone.
-  * Temporary live previews stop. Required road triggers always preempt both. */
- bool keep=false;
+ /* Disconnect expires only temporary zones; explicitly loaded NVS effects
+  * remain local on CORE. Physical road-lighting triggers still override all.
+  * A legacy HTTP show is not owned by the BLE session. */
  portENTER_CRITICAL(&state_lock);
- keep=ble_fx_enabled&&ble_fx_standalone;
+ if(ble_owns_show){
+     ot_fx_bank_stop_temporary(&fx_bank);
+     bool active=ble_fx_enabled&&
+         ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
+     if(!active){
+         ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;
+     }
+ }
  portEXIT_CRITICAL(&state_lock);
- if(!keep)ot_ble_stop_show();
 }
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
