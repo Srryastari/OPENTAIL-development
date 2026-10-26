@@ -9,7 +9,7 @@ window.__otBleOutputsInstalled=true;
 const roles=[['off','Disabled'],['park_brake','Parking + Brake'],['parking','Parking'],['brake','Brake'],['left_turn','Left Turn'],['right_turn','Right Turn'],['reverse','Reverse'],['aux1','Aux 1'],['aux2','Aux 2'],['aux3','Aux 3'],['decorative','Show only']];
 const orders=['RGB','RBG','GRB','GBR','BRG','BGR'];
 const saved=[null,null],draft=[null,null];
-let selected=0,busy=false,pendingIndex=null,message='Connect BLE, pair once using BOOT, then load device outputs.',shown=false;
+let selected=0,busy=false,pendingIndex=null,lastReadAt='Not yet',message='Connect BLE, pair once using BOOT, then load device outputs.',shown=false;
 const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function nativeState(){try{return JSON.parse(window.OpenTailNativeBLE.getState()||'{}');}catch{return {};}}
 function isLayout(){try{return typeof state!=='undefined'&&state.tab==='layout';}catch{return false;}}
@@ -48,7 +48,7 @@ return `<div class="ot-bom-head"><div><h2>Bluetooth Output Manager</h2><small>2 
  <div class="ot-bom-row">${button('Add zone','add')}${button('Save to CORE over BLE','save')}</div>
  <p class="ot-bom-total ${sum===Number(output.pixels)?'':'bad'}">${sum} assigned / ${output.pixels} active pixels${sum===Number(output.pixels)?'':' — must match'}</p>`:
  '<p class="ot-bom-note">Load an output to view its saved zones and trigger roles.</p>'}
- <p class="ot-bom-status" role="status" aria-live="polite">${escape(message)}</p>
+ <p class="ot-bom-note" aria-label="BLE readback diagnostics">Selected GPIO${selected?17:16} · ${busy?'Operation in progress':'Idle'} · Last verified output read: ${escape(lastReadAt)}</p><p class="ot-bom-status" role="status" aria-live="polite">${escape(message)}</p>
  <p class="ot-bom-note">No physical safety or failover features are implemented. Stop shows and release all 12V triggers before saving. Reload after a save error; the draft is retained.</p>`;
 }
 const css=document.createElement('style');css.textContent=`
@@ -96,7 +96,7 @@ window.OpenTailBLEOutputs={
   let r;try{r=JSON.parse(raw);}catch{return;}
   if(pendingIndex!==null&&r.index!==pendingIndex){message='BLE response index mismatch; no configuration applied. Reload the selected output.';busy=false;pendingIndex=null;paint();return;}
   busy=false;pendingIndex=null;message=r.message||'BLE operation complete';
-  if(r.ok&&r.output&&(r.index===0||r.index===1)){saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
+  if(r.ok&&r.output&&(r.index===0||r.index===1)){lastReadAt=new Date().toLocaleTimeString();saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
   paint();
  },refresh(){mount();paint();}
 };
