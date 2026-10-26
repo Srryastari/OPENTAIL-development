@@ -104,6 +104,7 @@ static const ble_uuid128_t ot_cfg_cmd_uuid=BLE_UUID128_INIT(0x25,0xaf,0x2e,0x10,
 static const ble_uuid128_t ot_cfg_rsp_uuid=BLE_UUID128_INIT(0x26,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_enroll_uuid=BLE_UUID128_INIT(0x27,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_challenge_uuid=BLE_UUID128_INIT(0x28,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -116,6 +117,25 @@ static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
     const char *result=conn==active_conn?ot_ble_result_string(last_result):"ERR AUTH";
     return os_mbuf_append(ctx->om,result,strlen(result))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+/* Read-only BLE FX capability descriptor. No Wi-Fi, WLED runtime or authentication
+ * is required to discover what this firmware actually implements. Version 1:
+ * [version,count, little-endian effect IDs...] for current six-mode prototype.
+ * A future >9-mode library needs a paginated characteristic or long-read protocol.
+ */
+static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    uint16_t ids[9]={0};
+    size_t total=ot_wled_fx_supported_ids(ids,9u);
+    if(total>9u)total=9u; /* Do not advertise truncated modes as fully discoverable. */
+    uint8_t payload[20]={1,(uint8_t)total};
+    for(size_t i=0;i<total;i++){
+        payload[2+i*2]=(uint8_t)ids[i];
+        payload[3+i*2]=(uint8_t)(ids[i]>>8);
+    }
+    return os_mbuf_append(ctx->om,payload,2u+total*2u)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
@@ -244,6 +264,7 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_info_uuid.u,.access_cb=info_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_reply_uuid.u,.access_cb=reply_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_fx_caps_uuid.u,.access_cb=fx_capabilities_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
