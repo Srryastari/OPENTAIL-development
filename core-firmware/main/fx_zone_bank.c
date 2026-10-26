@@ -35,7 +35,7 @@ bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
  uint32_t now_ms,bool standalone){
  if(!bank||!request||!outputs||request->chain_mask==0||
     (request->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||
-    request->zone_mask==0)return false;
+    request->zone_mask==0||request->ttl_sec<1||request->ttl_sec>60)return false;
  uint8_t masks[OT_OM_OUTPUTS]={0};
  bool selected=false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
