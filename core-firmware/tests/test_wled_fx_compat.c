@@ -47,6 +47,41 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,1200,p,31));
     assert(eq(p[0],(ot_wled_rgb_t){100,10,2}));
 
+    /* Pinned upstream WLED FX.cpp deterministic 1D golden math:
+     * FADE triangular wave period, Wipe/Sweep in/out positions, and
+     * single-pixel upstream fallback to Solid (no palette enabled). */
+    c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    c.brightness=255;c.speed=0;c.intensity=0;
+    c.effect_id=OT_WLED_FADE;
+    assert(ot_wled_fx_metadata(OT_WLED_FADE,&meta) && !meta.supports_intensity);
+    assert(ot_wled_fx_render(&c,&s,0,p,4) && eq(p[0],c.background));
+    assert(ot_wled_fx_render(&c,&s,3277,p,4) && eq(p[0],c.foreground));
+    assert(eq(p[0],p[3]));
+    assert(ot_wled_fx_render(&c,&s,6554,p,4) && p[0].r<2 && p[0].b>253);
+    /* Wipe has a full cycle of 750 ms at speed=255. */
+    c.effect_id=OT_WLED_WIPE;c.speed=255;
+    assert(ot_wled_fx_metadata(OT_WLED_WIPE,&meta) && meta.supports_intensity);
+    assert(ot_wled_fx_render(&c,&s,0,p,4));
+    for(int k=0;k<4;k++)assert(eq(p[k],c.background));
+    assert(ot_wled_fx_render(&c,&s,375,p,4));
+    for(int k=0;k<4;k++)assert(eq(p[k],c.foreground));
+    assert(ot_wled_fx_render(&c,&s,562,p,4));
+    assert(eq(p[0],c.background) && eq(p[3],c.foreground));
+    c.effect_id=OT_WLED_SWEEP;
+    assert(ot_wled_fx_metadata(OT_WLED_SWEEP,&meta));
+    assert(ot_wled_fx_render(&c,&s,562,p,4));
+    assert(eq(p[0],c.foreground) && eq(p[3],c.background));
+    assert(ot_wled_fx_render(&c,&s,562,p,1) && eq(p[0],c.foreground));
+    /* Nontrivial fade at the partially covered wipe pixel. */
+    c.effect_id=OT_WLED_WIPE;c.intensity=255;
+    assert(ot_wled_fx_render(&c,&s,188,p,4));
+    assert(eq(p[0],c.foreground) && p[2].r>0 && p[2].r<255);
+    /* Pure metadata/renderer feature gating: unsupported palette fails. */
+    c.palette_id=3;assert(!ot_wled_fx_render(&c,&s,188,p,4));
+    c.palette_id=0;
+    assert(!ot_wled_fx_render(&c,&s,188,p,65536u));
+
     c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
     assert(!ot_wled_fx_render(&c,&s,0,p,31));
