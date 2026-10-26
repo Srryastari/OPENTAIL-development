@@ -15,12 +15,17 @@
 #include "ble_command.h"
 #include "ble_fx_command.h"
 #include "effects_1d.h"
+#include "fx_preset_record.h"
 #include "ble_config.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
 extern bool ot_ble_apply_fx(const ot_ble_fx_packet_t *request);
 extern void ot_ble_stop_show(void);
+extern void ot_ble_disconnect_show(void);
+extern bool ot_ble_save_fx_preset(uint8_t slot);
+extern bool ot_ble_play_fx_preset(uint8_t slot);
+extern bool ot_ble_delete_fx_preset(uint8_t slot);
 extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision);
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
 static uint8_t token[OT_BLE_TOKEN_BYTES];
@@ -147,6 +152,18 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
     if(n==18 && buf[0]==1 && buf[1]==4){
         authorized=owner_verify(buf+2);
         last_result=authorized?OT_BLE_OK_AUTH:OT_BLE_ERR_AUTH;
+    } else if(n==3 && buf[0]==OT_BLE_WIRE_V1 &&
+             buf[1]>=OT_BLE_FX_SAVE_PRESET && buf[1]<=OT_BLE_FX_DELETE_PRESET){
+        if(!authorized)last_result=OT_BLE_ERR_AUTH;
+        else if(buf[2]>=OT_FX_PRESET_SLOTS)last_result=OT_BLE_ERR_RANGE;
+        else {
+            bool ok=buf[1]==OT_BLE_FX_SAVE_PRESET?ot_ble_save_fx_preset(buf[2]):
+                buf[1]==OT_BLE_FX_PLAY_PRESET?ot_ble_play_fx_preset(buf[2]):
+                                                ot_ble_delete_fx_preset(buf[2]);
+            last_result=ok?(buf[1]==OT_BLE_FX_SAVE_PRESET?OT_BLE_OK_SAVED:
+                 buf[1]==OT_BLE_FX_PLAY_PRESET?OT_BLE_OK_LOADED:OT_BLE_OK_DELETED):
+                OT_BLE_ERR_BUSY;
+        }
     } else if(n>=2 && buf[0]==1 && buf[1]==OT_BLE_FX_OPCODE) {
         ot_ble_fx_packet_t fx={0};
         ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
@@ -294,7 +311,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
-        ot_st_ble_connected(false);ot_ble_stop_show();cfg_reset();advertise();
+        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }
