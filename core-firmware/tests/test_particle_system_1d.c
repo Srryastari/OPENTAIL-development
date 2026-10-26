@@ -25,8 +25,8 @@ int main(void){
     assert(pix[2].r>0);
     ot_particles_1d_step(&ps,0,0,0,OT_PARTICLE_KILL);
     assert(ot_particles_1d_count(&ps)==0);
-    for(int i=0;i<OT_PARTICLES_1D_MAX;i++)
-        assert(ot_particles_1d_emit(&ps,i*256,0,1000,(ot_wled_rgb_t){1,2,3}));
+    for(size_t i=0;i<OT_PARTICLES_1D_MAX;i++)
+        assert(ot_particles_1d_emit(&ps,(int32_t)(i*256),0,1000,(ot_wled_rgb_t){1,2,3}));
     assert(!ot_particles_1d_emit(&ps,0,0,1000,(ot_wled_rgb_t){1,2,3}));
     assert(ot_particles_1d_count(&ps)==OT_PARTICLES_1D_MAX);
     return 0;
