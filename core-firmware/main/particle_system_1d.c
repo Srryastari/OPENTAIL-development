@@ -74,3 +74,30 @@ void ot_particles_1d_render(const ot_particles_1d_t *sys,
         pixels[index].b=add_scaled(pixels[index].b,p->color.b,scale);
     }
 }
+
+void ot_particles_1d_render_smooth(const ot_particles_1d_t *sys,
+    ot_wled_rgb_t *pixels,size_t count,uint8_t brightness,bool reverse){
+    if(!sys||!pixels||!count)return;
+    for(size_t i=0;i<OT_PARTICLES_1D_MAX;i++){
+        const ot_particle_1d_t *p=&sys->particles[i];
+        if(!p->alive||p->x_q8<0||!p->life_ms)continue;
+        const size_t left=(size_t)p->x_q8/256u;
+        if(left>=count)continue;
+        const uint32_t fraction=(uint32_t)p->x_q8&255u;
+        const uint32_t life=(uint32_t)((uint64_t)brightness*
+            (p->life_ms-p->age_ms)/p->life_ms);
+        const uint32_t left_scale=(life*(256u-fraction))/256u;
+        const uint32_t right_scale=(life*fraction)/256u;
+        const size_t first=reverse?count-1u-left:left;
+        pixels[first].r=add_scaled(pixels[first].r,p->color.r,left_scale);
+        pixels[first].g=add_scaled(pixels[first].g,p->color.g,left_scale);
+        pixels[first].b=add_scaled(pixels[first].b,p->color.b,left_scale);
+        /* At the strip edge the second pixel is clipped, never wrapped.
+         * Edges belong to the separate particle motion policy. */
+        if(left+1u>=count)continue;
+        const size_t second=reverse?count-2u-left:left+1u;
+        pixels[second].r=add_scaled(pixels[second].r,p->color.r,right_scale);
+        pixels[second].g=add_scaled(pixels[second].g,p->color.g,right_scale);
+        pixels[second].b=add_scaled(pixels[second].b,p->color.b,right_scale);
+    }
+}
