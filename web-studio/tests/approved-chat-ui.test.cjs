@@ -105,3 +105,14 @@ assert(!settingsSource.includes('data-ot-native="scan"')&&!settingsSource.includ
 assert(shell.includes("window.confirm('Import this project?"),
   'Import must confirm before replacing the local working project');
 console.log('Show Modes ordering, Settings groups, and project import confirmation protected');
+
+
+
+// Custom triggers alone get a row-level trash icon with inline confirmation.
+const builderCode=html.slice(html.indexOf('function builder(){'),html.indexOf('let otPresetEditorId=',html.indexOf('function builder(){'))>0?html.indexOf('function otTurnModel(',html.indexOf('function builder(){')):html.indexOf('function otTriggerColor(',html.indexOf('function builder(){')));
+assert(builder.includes('ot-chat-trigger-delete'),'Each custom trigger must expose a row-level remove icon');
+assert(builder.includes("kind==='trigger-custom'"),'Built-in road-lighting rows must not be removable');
+assert(builder.includes('otPendingTriggerDelete===t'),'Custom deletion must confirm inline');
+assert(!builder.includes('Delete trigger</button>'),'Do not duplicate Remove in the separate Trigger Settings editor');
+assert(html.includes('function otCancelTriggerDelete()'),'Inline Cancel action must exist');
+console.log('Custom-row-only remove icon and inline confirmation protected');
