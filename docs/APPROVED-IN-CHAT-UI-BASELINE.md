@@ -1,6 +1,6 @@
 # OpenTail UI master approval baseline — 26 October 2026
 
-**Approval scope:** User-approved visual design system and final visual concepts for all six tabs, with their specified interaction patterns. This is a specification, **not** certification that current Android/Studio code matches it. Latest audited candidate: Studio v0.19.56 / Android v0.1.23, draft PR #6. The current application still has duplicate navigation, competing Show Modes editors and approximate simulation. No phone screenshot, BLE, LED, firmware or vehicle-safety validation has been established by this approval.
+**Approval scope:** User-approved visual design system and final visual concepts for all six tabs, with their specified interaction patterns. This is a specification, **not** certification that current Android/Studio code matches it. Latest audited candidate: Studio v0.19.56 / Android v0.1.23, draft PR #6. **Implementation is now underway on the draft branch:** one Android six-tab navigation, suppression of its duplicate four-tab concept bar, the Show Modes tabs-before-preview source ordering, and grouped Settings have been committed. Competing Show Modes effect editors and approximate LED simulation **remain unresolved**. No approved phone screenshot, BLE/LED hardware check, firmware effect-parity test or vehicle-safety validation has been established by this approval.
 
 ## Source of truth
 
@@ -88,6 +88,16 @@ Settings is the single location for app preferences, diagnostics, project backup
 - **Settings:** locked final visual concept; multi-controller grouping deferred.
 
 **No more proactive visual redesigns.** These approved concepts are a preserved implementation contract. Any proposed changes should be intentional and obtain fresh approval; still distinguish concept approval from APK, firmware, BLE, LED and road-safety validation.
+
+## Draft implementation history (not a released APK)
+
+- `4e7e153` — Android canonical six-tab top navigation with Auto Events route; hide duplicate in-app concept bar; simplify Home shortcut area.
+- `782fe1a` — baseline regression assertions for the six-tab order; CI reported success for that earlier commit.
+- `09432f8` — organize Settings into expandable App Preferences, Diagnostics, Project Backup, About sections and add import replacement confirmation.
+- `1673780`, `e75f99d`, `cbdc1e1` — synchronize web Studio, versioned release copy and Android bundled Studio source with Show Modes submode controls before the Live Lighting Preview.
+- `764371a` — add regression assertions for Show Modes order and Settings.
+
+**Current limitations:** not yet rebuilt/released to user as an APK, never reviewed side-by-side on Android; effects editor is still duplicated, full metadata and exact effect renderer/CORE parity are not implemented, and Settings preferences such as preview-quality mode still need a real settings/storage implementation rather than inert controls. Existing Android version names remain unchanged until release validation. Do not claim the final visual design has been implemented fully.
 
 ## Implementation and verification — NOT YET APPROVED AS COMPLETE
 
