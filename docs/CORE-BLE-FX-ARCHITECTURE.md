@@ -30,10 +30,10 @@ The renderer's algorithm class (basic/particle/audio-reactive) is **internal** a
 
 ## Current code state and migration
 
-- CORE's original five volatile native demo modes use a legacy BLE SHOW v1 command. Android currently injects a second independent five-mode BLE panel. **This is transitional, NOT the approved final interface.**
-- WLED compatibility adapters currently cover a limited number of algorithms and were not connected to the physical LED rendering at initial import. The standalone host particle adapter in `main/core-firmware/effects/` is not yet an integrated native particle backend.
-- Keep backward compatibility until one editor can send BLE native FX IDs. **Do not add these new FX IDs to another UI menu or duplicate effects in the app.**
-- Implement BLE FX capability negotiation/versioning. Reject an unsupported ID/parameter rather than silently rendering a different effect.
+- CORE's original five volatile native demo modes remain for legacy compatibility. In the Android app, the injected standalone five-mode BLE selector has been replaced with an adapter to Studio's **existing** Effects editor. CORE supports BLE effect IDs, per-zone source buffers, acknowledgements and read-only BLE capability enumeration. Browser-only Studio without a native BLE bridge still cannot connect to Bluetooth.
+- Six WLED source-derived 1D effects are now connected to the CORE-local render task for experimental BLE playback. The private bounded particle engine is exercised by the **original OpenTail effect Embers (ID 0x8000)** using the same registry; it is *not* a separately exposed engine or a claimed WLED Fireworks/Particle System parity port.
+- The Android one-editor bridge now sends native FX IDs over BLE and hides the redundant CORE native picker in the approved Show Modes view. It displays only capabilities actually returned by the device. No separate particles tab, second FX dropdown or duplicated effect ID is added; WLED Wi-Fi rendering remains available only for the legacy WLED controller mode.
+- BLE FX capability negotiation uses a read-only protocol-v1 GATT characteristic advertising the implemented IDs; unsupported modes and palettes are rejected. The current seven-mode list fits the minimum ATT-MTU payload; expand/fragment this protocol before adding more than nine modes.
 - Verify OTA/boot/disconnect, nonvolatile presets, simultaneous zones, output NVS persistence, measured frame timing and independent fallback before production claims.
 
 ## Acceptance checks (bench, not road-certified)
@@ -45,4 +45,4 @@ The renderer's algorithm class (basic/particle/audio-reactive) is **internal** a
 5. Verify 12 V WS2815 BRG output on the user-configured zones; measure both buses' FPS and memory rather than assuming 60–120.
 6. Ported WLED license EUPL-1.2-or-later attribution and source obligations reviewed before distribution.
 
-Not yet validated by writing this architecture document.
+**Not yet validated physically:** No phone-to-CORE BLE handshake, real LED output, FPS, road-lighting safety, or independent failover test has been completed from this branch. Temporary BLE shows stop on disconnect or expire within 60 seconds; persisted offline autonomous presets and their behavior across disconnect/power cycles are still future work.
