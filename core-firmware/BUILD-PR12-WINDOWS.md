@@ -22,7 +22,7 @@ The build script:
 - Verifies idf.py is active and warns if it is not v5.5.5.
 - Reuses an existing custom CORE Wi-Fi password from the local ignored sdkconfig or a recognized adjacent previous CORE firmware folder.
 - If none exists, generates a random bench Wi-Fi password, prints it once for you to save, and stores it only in the gitignored local sdkconfig (NOT the output ZIP).
-- Runs ESP-IDF compilation with at most two workers.
+- Runs ESP-IDF's reconfigure step and then `ninja -C build -j 2`, matching the **working Windows fix**. Avoid `idf.py -j 2 build`: the user's ESP-IDF 5.5.5 `idf.py` does not accept that flag.
 - Verifies every binary and offset specified in the generated flasher_args.json.
 - Creates a ZIP with the bootloader, partition table, firmware app, flasher metadata and SHA256 hashes. It does not flash or erase your board.
 
@@ -46,3 +46,15 @@ After the script prints **SUCCESS**, the firmware ZIP exists on your Windows PC.
 - Existing PREPARE-AND-BUILD.ps1 and INSTALL-WINDOWS.md describe older v0.1.24 enrollment-only releases; use this guide for the current PR.
 
 Official references: https://dl.espressif.com/dl/esp-idf/ and https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-guides/build-system.html
+
+
+## Existing pre-GitHub installation: proven steps and fixes
+
+- Your established local workspace is under `C:\Users\astari\Desktop\OpenTail`; the ESP32-S3 was previously on **COM9**, which must still be confirmed when you actually flash later.
+- Keep all earlier CORE version folders intact. Download this PR #12 source as a **new, separate folder**, never overwrite the last working release.
+- ESP-IDF **v5.5.5-dirty** was already installed and working. Use its ESP-IDF PowerShell shortcut.
+- Before building, run `dir CMakeLists.txt, main, sdkconfig.defaults` inside **core-firmware**. A missing `CMakeLists.txt` means you entered the wrong extracted level. Do not run the project build inside `C:\Espressif\frameworks\esp-idf-v5.5.5`.
+- If the old custom AP password is not detected, you can explicitly reference the previous release's **local** configuration file without copying the entire old SDK configuration: `.\BUILD-CORE-WINDOWS.ps1 -PreviousSdkconfig "C:\Path\To\Your\Previous\sdkconfig"`. The script reads it locally and does not print the password.
+- The previous embedded Studio linker-symbol mismatch is already corrected in PR #12 source (`_binary_studio_htm_gz_start` / `_end`).
+- If Windows Ninja gets stuck reconfiguring its manifest, verify that it isn't a source-code compile error; then use the earlier timestamp-normalization recovery selectively rather than erasing the SDK or wiping NVS.
+- **Only after a successful build**: independently confirm the board is still on COM9 using `[System.IO.Ports.SerialPort]::GetPortNames()`. Flash later from the project folder using `idf.py -p COM9 -b 460800 flash`, and read logs with `idf.py -p COM9 -b 115200 monitor`. The download/build instructions intentionally stop before this.
