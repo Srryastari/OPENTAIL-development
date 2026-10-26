@@ -14,6 +14,9 @@
 enum {
     OT_WLED_SOLID = 0,      /* WLED FX_MODE_STATIC */
     OT_WLED_BLINK = 1,      /* WLED FX_MODE_BLINK */
+    OT_WLED_WIPE = 3,       /* WLED FX_MODE_COLOR_WIPE */
+    OT_WLED_SWEEP = 6,      /* WLED FX_MODE_COLOR_SWEEP */
+    OT_WLED_FADE = 12,      /* WLED FX_MODE_FADE */
     OT_WLED_STROBE = 23     /* WLED FX_MODE_STROBE */
 };
 
@@ -29,7 +32,7 @@ typedef struct {
     ot_wled_rgb_t background;
 } ot_wled_fx_config_t;
 typedef struct {
-    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe */
+    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe; other modes are time-derived */
 } ot_wled_fx_state_t;
 
 typedef struct {
@@ -45,6 +48,7 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
+ * Supports exact 1D timing/position math for Solid, Blink, Wipe, Sweep, Fade, Strobe.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
