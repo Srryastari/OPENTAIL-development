@@ -43,6 +43,7 @@ final class BleDiscovery {
     private static final UUID ENROLL_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf27");
     private static final UUID CHALLENGE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf28");
     private static final UUID REPLY_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf24");
+    private static final UUID FX_CAPS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf29");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
 
@@ -61,6 +62,35 @@ final class BleDiscovery {
     private volatile boolean connecting = false;
     private volatile BluetoothGattCharacteristic command;
     private BluetoothGattCharacteristic reply;
+    private volatile BluetoothGattCharacteristic fxCaps;
+    private volatile boolean fxCapsBusy=false;
+    private Consumer<String> fxCapabilitiesListener;
+    void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
+    @SuppressWarnings("MissingPermission")
+    void readFxCapabilities(){
+        if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry supported effects");return;
+        }
+        fxCapsBusy=true;
+        try {if(!gatt.readCharacteristic(fxCaps)){fxCapsBusy=false;fxNotify("[]");}}
+        catch(SecurityException ex){fxCapsBusy=false;fxNotify("[]");}
+    }
+    private void fxNotify(String json){
+        if(fxCapabilitiesListener!=null)ui.post(()->fxCapabilitiesListener.accept(json));
+    }
+    private void fxRead(byte[] raw,int status){
+        fxCapsBusy=false;
+        if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
+        int n=raw[1]&255;
+        if(n>9||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
+        StringBuilder ids=new StringBuilder("[");
+        for(int i=0;i<n;i++){
+            if(i>0)ids.append(',');
+            ids.append((raw[2+i*2]&255)|((raw[3+i*2]&255)<<8));
+        }
+        fxNotify(ids.append(']').toString());pumpQueue();
+    }
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
     private String activeAddress="";
@@ -309,7 +339,7 @@ final class BleDiscovery {
 
     /** Serialize Android GATT operations; BLE GATT only allows one pending request. */
     private void enqueueWrite(byte[] data) {
-        if (writePending || readReplyPending || cfgBusy) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy) {
             // One pending latest action; explicit STOP replaces queued starts.
             nextPacket=Arrays.copyOf(data,data.length);return;
         }
@@ -334,7 +364,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){writePending=false;authPending=false;notifyStatus("BLE permission missing");}
     }
     private void pumpQueue(){
-        if (!writePending&&!readReplyPending&&!cfgBusy&&nextPacket!=null){
+        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&nextPacket!=null){
             pendingPacket=nextPacket;nextPacket=null;writeNow();
         }
     }
@@ -516,6 +546,7 @@ final class BleDiscovery {
             // Existing read-only connection remains compatible with older CORE firmware.
             command = service.getCharacteristic(COMMAND_UUID);
             reply = service.getCharacteristic(REPLY_UUID);
+            fxCaps = service.getCharacteristic(FX_CAPS_UUID);
             enroll = service.getCharacteristic(ENROLL_UUID);
             challenge = service.getCharacteristic(CHALLENGE_UUID);
             activeAddress=connection.getDevice().getAddress();
@@ -532,6 +563,7 @@ final class BleDiscovery {
             if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(value,status);return;}
             if (CFG_RSP_UUID.equals(characteristic.getUuid())) { cfgResponse(value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
+            if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE connected · " + new String(value, StandardCharsets.UTF_8));
                 if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
@@ -550,6 +582,7 @@ final class BleDiscovery {
                 if (REPLY_UUID.equals(characteristic.getUuid())) {
                     acceptReply(characteristic.getValue(),status);return;
                 }
+                if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                     byte[] value = characteristic.getValue();
                     notifyStatus("BLE connected · " + new String(value == null ? new byte[0] : value, StandardCharsets.UTF_8));
