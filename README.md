@@ -4,7 +4,7 @@ Universal automotive addressable-lighting controller project using ESP32-S3 firm
 
 ## Repository layout
 
-- [`core/`](core/) — active ESP32-S3 firmware workspace
+- [`firmware/`](firmware/) — active ESP32-S3 firmware workspace
 - [`studio/`](studio/) — active browser/WLED Studio workspace
 - [`android/`](android/) — active Android app workspace
 - [`hardware/`](hardware/) — controller electronics and PCB workspace
