@@ -5,7 +5,8 @@
  * copyright (c) 2016 Harm Aldick and WLED contributors, EUPL-1.2-or-later.
  * Source pin: wled/WLED commit 20e7a717664295eefc6ad77972cee1888d2da072.
  *
- * BENCH ONLY: No controller, GPIO, trigger or LED-bus integration here.
+ * BENCH ONLY: CORE can now dispatch supported IDs over BLE to the local LED
+ * render task. The pure C module itself remains independent of GPIO/network.
  */
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,7 +49,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
- * Supports exact 1D timing/position math for Solid, Blink, Wipe, Sweep, Fade, Strobe.
+ * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
+ * Sweep, Fade and Strobe. Full upstream parity remains unverified.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
