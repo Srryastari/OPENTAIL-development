@@ -6,6 +6,12 @@ style.textContent=`
 /* Disable WebView's blue touch flash and accidental selection on controls, not editable fields. */
 button,[role="button"],[role="tab"],[role="radio"],.ot-mode-tabs,.ot-output-target label,.ot-connection-card,.ot-quick-action{ -webkit-tap-highlight-color:transparent; -webkit-user-select:none;user-select:none;touch-action:manipulation; }
 input,textarea,[contenteditable="true"],[role="textbox"]{ -webkit-user-select:text;user-select:text; }
+/* Android WebView sliders: remove native blue touch/selection overlay without blocking drag gestures. */
+input[type="range"],input[type="range"]::-webkit-slider-thumb,input[type="range"]::-webkit-slider-runnable-track{ -webkit-tap-highlight-color:transparent!important; -webkit-touch-callout:none; -webkit-user-select:none;user-select:none; }
+input[type="range"]{touch-action:pan-y;}
+input[type="range"]:focus:not(:focus-visible){outline:none;}
+input[type="range"]:focus-visible{outline:2px solid #48d88d;outline-offset:3px;}
+
 .ot-mode-tabs button{position:relative;z-index:1;}
 .ot-native-nav button,.ot-bom button,.ot-simple-button,.ot-quick-action,.ot-connection-card,#ot-direct-ble-dashboard button{transition:background-color var(--ot-motion-normal) var(--ot-motion-ease),border-color var(--ot-motion-normal) var(--ot-motion-ease),color var(--ot-motion-normal) var(--ot-motion-ease),box-shadow var(--ot-motion-normal) var(--ot-motion-ease),transform var(--ot-motion-fast) var(--ot-motion-ease)}
 .ot-native-nav button:active,.ot-bom button:active,#ot-direct-ble-dashboard button:active{transform:scale(.975)}
