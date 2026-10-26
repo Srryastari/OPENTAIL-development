@@ -12,6 +12,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/t
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/wled_fx_compat.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests && /tmp/ot-ble-fx-tests
 
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/particle_system_1d.c tests/test_particle_system_1d.c -o /tmp/ot-particle-1d-tests && /tmp/ot-particle-1d-tests
+
 python3 tests/test_wled_catalog.py
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
