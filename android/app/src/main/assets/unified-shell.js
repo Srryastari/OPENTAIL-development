@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.23: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.24: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -894,4 +894,31 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   refreshVisual(true);
   setInterval(()=>refreshVisual(),2500);
   window.OpenTailCompactUI={refresh:refreshVisual,readConfig};
+  // Final cascade after Android's legacy presentation layers.
+  const approvedFinalStyle=document.createElement('style');
+  approvedFinalStyle.id='ot-approved-oled-final';
+  approvedFinalStyle.textContent=`
+    html:not([data-ot-theme=light]),html:not([data-ot-theme=light]) body{background:#000!important;color:#f7f7f7!important}
+    html:not([data-ot-theme=light]) .ot-mobile-header{background:#000!important}
+    html:not([data-ot-theme=light]) .ot-connection-card,
+    html:not([data-ot-theme=light]) #ot-ble-inline,
+    html:not([data-ot-theme=light]) .ot-settings-group,
+    html:not([data-ot-theme=light]) #ot-compact-pages .ot-simple-card{background:#080808!important;border-color:#292929!important;color:#f7f7f7!important}
+    html:not([data-ot-theme=light]) #app .card{background:#080808!important;border-color:#292929!important}
+    html:not([data-ot-theme=light]) .ot-mobile-heading h1{color:#fff!important}
+    .ot-native-nav{position:static!important;bottom:auto!important;top:auto!important;left:auto!important;right:auto!important;
+       width:100%!important;display:flex!important;overflow-x:auto!important;justify-content:flex-start!important;
+       border:1px solid #292929!important;background:#080808!important;border-radius:14px!important;
+       margin:10px 0 4px!important;padding:4px!important;box-shadow:none!important;gap:3px!important;box-sizing:border-box!important}
+    .ot-native-nav button{flex:1 0 auto!important;min-width:66px!important;min-height:38px!important;padding:8px!important;
+      color:#aaa!important;background:transparent!important;border-radius:10px!important;font-size:11px!important}
+    .ot-native-nav button svg{display:none!important}
+    .ot-native-nav button[aria-current=page]{background:#252525!important;color:#fff!important}
+    #app>.shell{padding-bottom:24px!important}
+    #ot-compact-pages,body.ot-settings-active .ot-settings-page{padding-bottom:25px!important}
+    html[data-ot-theme=light] .ot-native-nav{background:#f7f7f7!important;border-color:#ddd!important}
+    html[data-ot-theme=light] .ot-native-nav button{color:#444!important}
+    html[data-ot-theme=light] .ot-native-nav button[aria-current=page]{background:#fff!important;color:#111!important}
+  `;
+  document.head.appendChild(approvedFinalStyle);
 })();
