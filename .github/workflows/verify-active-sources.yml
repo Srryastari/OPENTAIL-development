@@ -140,8 +140,9 @@ jobs:
           assert(studio.includes('CORE physical trigger input mapping · Advanced'));
           assert(studio.includes('CORE hardware output mapping · Advanced'));
           const scene=studio.slice(studio.indexOf('function scenes(){'),studio.indexOf('let otPresetEditorId=null;'));
-          assert(scene.indexOf('otPixelPreview()')>=0 && scene.indexOf('otPixelPreview()')<scene.indexOf('ot-subnav'),
-            'Show preview should precede Effects/Sequences navigation');
+          assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
+            scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
+            'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
           assert(scene.indexOf('otNativeShowPanel()')>scene.indexOf('ot-subnav'),
             'CORE native lighting controls must not hide Show tabs');
           assert(shell.includes('Android v0.1.23')&&gradle.includes("versionName '0.1.23'"),
