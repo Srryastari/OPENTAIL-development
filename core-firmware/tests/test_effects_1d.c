@@ -21,6 +21,7 @@ int main(void){
   }
   assert(lit);
   assert(ot_particles_1d_count(&s.particles)<=OT_PARTICLES_1D_MAX);
+  cfg.palette_id=4;assert(ot_effects_1d_render(&cfg,&s,500,pix,31));
   cfg.palette_id=1;assert(!ot_effects_1d_render(&cfg,&s,500,pix,31));
   cfg.palette_id=0;cfg.effect_id=OT_WLED_SOLID;
   assert(ot_effects_1d_render(&cfg,&s,0,pix,31));
