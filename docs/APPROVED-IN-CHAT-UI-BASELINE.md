@@ -57,9 +57,16 @@ One Layout card, Add Zone in its header, editable pill project name, expandable 
 
 A trigger card selects/deselects independently of its test action. Preserve simultaneous offline tests and multi-profile batch selection/editing, Park+Brake and Left+Right turn, trigger priorities, arbitration/stop/restore, and untouched fields. Custom triggers have a **visible contextual red trash/remove icon directly in their own row beside Test**, opening an **inline confirmation**. **Built-in Parking, Brake, Left Turn, Right Turn, and Reverse rows do not have a delete icon**; all remain selectable, editable and independently testable. Do not duplicate deletion in settings. Trigger previews/tests are not Show Modes decorative previews.
 
-### Auto Events — interaction accepted, final visual polish pending
+### Auto Events — final visual and functional concept approved (26 October 2026)
 
-Keep Startup/Shutdown offline previews and parameters in this single dedicated tab. They must not require CORE/WLED/BLE connectivity or transmit any commands. Neutral range sliders, no unintended green theming or redundant 'ACC off' preview.
+Two contextual modes, **Startup** and **Shutdown**, in the single Auto Events tab. Each has its **own Enabled switch (off by default)**, animation effect, duration and effect-specific transition controls (direction where relevant, smooth/instant handoff). The controls appear inline with no duplicate configuration or separate ACC-off preview. The preview is a one-shot local animation that remains available while the event is disabled; preview must require no CORE/WLED/BLE connection and make **zero device or trigger writes**.
+
+- **ACC On, Startup enabled:** play the chosen startup animation **once** then hand off to the controller's current **actual active road-lighting state**, e.g. parking lights if that signal is active; do not force Parking on merely because ACC became active.
+- **ACC Off, Shutdown enabled:** play the chosen shutdown animation **once**, then turn off decorative lighting. Physical controller power-down is **separate hardware/power management**, not something demonstrated by the concept. A shutdown animation requires validated supply hold-up after ACC falls.
+- **Either event disabled:** skip its animation entirely and apply normal signal/fallback logic; manual simulation remains accessible for design.
+- **Safety:** Park/Brake/Turn/Reverse priority and hardware fallback override decorative animations; no transition may delay required road-light response. No road-lighting or automotive safety behavior has been validated by the in-chat demonstration.
+
+Maintain the approved OLED grayscale card design, neutral sliders, compact gray sampled preview and separate Startup/Shutdown configuration. **This approval is of the concept, not implementation in CORE firmware.**
 
 ### Settings — final organization pending
 
