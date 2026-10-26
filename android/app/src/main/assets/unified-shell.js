@@ -99,7 +99,7 @@
     html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-output,
     html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-stat{background:#050505!important;border-color:#303030!important}
     .ot-mobile-header{padding-bottom:3px!important}
-    .ot-native-nav{position:static!important;inset:auto!important;max-width:none!important;width:100%!important;
+    .ot-native-nav{position:sticky!important;top:0!important;inset:auto!important;max-width:none!important;width:100%!important;
       display:flex!important;overflow-x:auto!important;overscroll-behavior-x:contain!important;scrollbar-width:none!important;
       gap:3px!important;margin:10px 0 4px!important;padding:4px!important;border:1px solid #252525!important;
       border-radius:15px!important;background:#080808!important;box-shadow:none!important;box-sizing:border-box!important}
@@ -167,7 +167,7 @@
   nav.innerHTML = destinations.map(([id,label,ic]) => `<button type="button" data-ot-destination="${id}" aria-current="false">${icon(ic)}<span>${label}</span></button>`).join('');
   document.body.prepend(header);
   document.body.appendChild(settings);
-  header.appendChild(nav); // one segmented navigator at top, never a bottom tab bar
+  document.body.insertBefore(nav, header.nextSibling); // one segmented navigator below header
   let settingsOpen = false;
   let autoEventsOpen = false;
   const state = () => {
@@ -906,7 +906,7 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
     html:not([data-ot-theme=light]) #ot-compact-pages .ot-simple-card{background:#080808!important;border-color:#292929!important;color:#f7f7f7!important}
     html:not([data-ot-theme=light]) #app .card{background:#080808!important;border-color:#292929!important}
     html:not([data-ot-theme=light]) .ot-mobile-heading h1{color:#fff!important}
-    .ot-native-nav{position:static!important;bottom:auto!important;top:auto!important;left:auto!important;right:auto!important;
+    .ot-native-nav{position:sticky!important;top:0!important;bottom:auto!important;left:auto!important;right:auto!important;
        width:100%!important;display:flex!important;overflow-x:auto!important;justify-content:flex-start!important;
        border:1px solid #292929!important;background:#080808!important;border-radius:14px!important;
        margin:10px 0 4px!important;padding:4px!important;box-shadow:none!important;gap:3px!important;box-sizing:border-box!important}
