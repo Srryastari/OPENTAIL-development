@@ -1,0 +1,24 @@
+// Verify exact WLED live RGB trace renders unmirrored, contiguous indexed pixels, never invented telemetry.
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),html=fs.readFileSync('web-studio/opentail.htm','utf8');
+const a=html.indexOf('function otLiveInspectPixel('),b=html.indexOf('function otPeekPaint()',a);
+assert(a>0&&b>a);
+const rectangles=[],flags=[];
+const pixels=['#ff0000','#ff0000','#00ff00','#0000ff'];
+const context={fillStyle:'',fillRect(x,y,w,h){rectangles.push({color:this.fillStyle,x,y,w,h})}};
+const label={textContent:''};
+const canvas={dataset:{otLiveStart:'0',otLiveCount:'4'},width:20,getBoundingClientRect(){return {left:0,width:20}},getContext(){return context},closest(){return {querySelector(){return label}}}};
+const region={hidden:true,querySelectorAll(){return [canvas]}};
+const root={classList:{toggle(name,on){flags.push({name,on})}}};
+const document={querySelector(){return root},querySelectorAll(){return [region]}};
+const {paint,inspect}=new Function('document','otPeekExact','otPeekPixels',html.slice(a,b)+';return {paint:otPeekLiveCanvases,inspect:otLiveInspectPixel};')(document,true,pixels);
+paint(true,false);
+assert.equal(region.hidden,false);
+assert.deepEqual(rectangles,[{color:'#ff0000',x:0,y:0,w:10,h:20},{color:'#00ff00',x:10,y:0,w:5,h:20},{color:'#0000ff',x:15,y:0,w:5,h:20}]);
+inspect({clientX:13},canvas);
+assert.equal(label.textContent,'Data index 2 · reported RGB #00ff00');
+paint(false,false);assert.equal(region.hidden,true);
+paint(true,true);assert.equal(region.hidden,true,'Local simulation must never be labeled exact physical output');
+assert(html.includes('ot-live-canvas-scroll')&&html.includes('data-ot-live-start='),'Full indexed canvas view must exist');
+assert(html.includes('const first=z.start+chunk*2048'),'Every zone must use exact data index offsets');
+console.log('Exact indexed live RGB trace, readout, and simulation separation passed');
