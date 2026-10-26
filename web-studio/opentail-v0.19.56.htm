@@ -3620,6 +3620,11 @@ function otCoreSelectMode(next){
     otCoreConnected=false;otCoreStatus=null;otCoreCaps=null;otCoreMonitorSampleAt=0;
   }
   otControllerMode=next;
+  // Never leak the CORE's 7 firmware-implemented IDs into a WLED Wi-Fi library
+  // or reuse a stale WLED catalog while selecting native Bluetooth effects.
+  state.wledEffects=[];state.wledPalettes=[];otChosenEffectId=null;
+  if(next==='core')otBleRequestCapabilities(true);
+  else{otBleFxIds=[];otBleCapsPending=false;}
   otCoreStoreValue('ot-controller-mode-v1',next);
   otCoreMessage=next==='core'?'Ready to connect to OpenTail CORE.':'WLED mode selected.';
   render();
