@@ -257,6 +257,7 @@ public final class MainActivity extends Activity {
             bleLabel.setText("BLE · " + message);
             if (web != null && bridgePageAllowed()) {
                 web.evaluateJavascript("window.OpenTailBLEPanel&&window.OpenTailBLEPanel.statusChanged(" + JSONObject.quote(message) + ");", null);
+                web.evaluateJavascript("window.OpenTailBLEEffects&&window.OpenTailBLEEffects.statusChanged(" + JSONObject.quote(message) + ");",null);
                 updateConnectionSurfaces();
                 web.evaluateJavascript("window.OpenTailBLEOutputs&&window.OpenTailBLEOutputs.connectionChanged(" + JSONObject.quote(message) + ");",null);
             }
