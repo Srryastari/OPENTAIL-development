@@ -5,6 +5,7 @@
 | CORE | `opentail-core-v0.1.24-ble-boot-enrollment.zip` | Archived; extraction/build pending |
 | Studio | `opentail-v0.19.50.htm` | Archived; deployment/functional checks pending |
 | Android | `opentail-android-v0.1.15-approved-compact-status-easy-build.zip` | Archived; extraction/build pending |
+| iOS | None — planned | Not developed; no build available |
 | Hardware | `OpenTail-CORE-Flux-RevA-Design-Package.zip` | Archived; design review pending |
 
 All original files live under `archive/library-releases/original-files/` and are inventoried in `archive/library-releases/SHA256-MANIFEST.csv`.
