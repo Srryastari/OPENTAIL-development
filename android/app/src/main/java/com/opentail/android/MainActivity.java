@@ -262,6 +262,10 @@ public final class MainActivity extends Activity {
             }
         });
         ble.setPreferredListener(address -> preferences.edit().putString("preferred_ble_address", address).apply());
+        ble.setFxCapabilitiesListener(ids -> {
+            if(web!=null&&bridgePageAllowed())web.evaluateJavascript(
+                "window.OpenTailBLEEffects&&window.OpenTailBLEEffects.capabilities(" + ids + ");",null);
+        });
         ble.setConfigListener(result -> {
             if(web!=null&&bridgePageAllowed())web.evaluateJavascript(
                 "window.OpenTailBLEOutputs&&window.OpenTailBLEOutputs.onResult(" + JSONObject.quote(result) + ");",null);
@@ -505,6 +509,9 @@ public final class MainActivity extends Activity {
                 j.put("message", lastBleMessage);
                 return j.toString();
             } catch (Exception ignored) { return "{}"; }
+        }
+        @JavascriptInterface public void readEffectCapabilities() {
+            runOnUiThread(() -> {if(bridgePageAllowed()&&ble!=null)ble.readFxCapabilities();});
         }
         @JavascriptInterface public void readOutput(int index) {
             runOnUiThread(() -> { if(bridgePageAllowed()&&ble!=null)ble.readOutput(index); });
