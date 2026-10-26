@@ -332,6 +332,14 @@ final class BleDiscovery {
           (byte)bgR,(byte)bgG,(byte)bgB,(byte)brightness,(byte)speed,
           (byte)intensity,(byte)paletteId,(byte)ttl});
     }
+    /** Explicit NVS preset actions: 8 slots, owner authorized; no auto-start on boot. */
+    void fxPreset(int action,int slot) {
+        if (!canControl()) {notifyStatus("Authorize BLE before preset changes");return;}
+        if (action<6||action>8||slot<0||slot>=8){
+            notifyStatus("Invalid CORE preset action or slot");return;
+        }
+        enqueueWrite(new byte[]{1,(byte)action,(byte)slot});
+    }
     void stopShow() {
         if (!canControl()) {notifyStatus("BLE show control not authorized");return;}
         enqueueWrite(new byte[]{1,3});
