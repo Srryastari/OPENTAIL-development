@@ -79,6 +79,7 @@
     @media(min-width:700px){.ot-mobile-header,.ot-settings-page{padding-left:30px;padding-right:30px}#app>.shell{padding-left:30px!important;padding-right:30px!important}.ot-native-nav{max-width:960px;margin:auto;left:0;right:0;border-left:1px solid #293a30;border-right:1px solid #293a30}}
   @media(max-width:350px){.ot-connected-badge{padding:7px}.ot-connection-card{padding:10px 7px;gap:5px}.ot-mobile-heading h1{font-size:22px}}
   `;
+  style.textContent += "\n  .ot-settings-page .ot-settings-group>summary{\n    display:flex;align-items:center;justify-content:space-between;\n    padding:15px 16px;min-height:48px;color:#ececec;font:600 14px/1.2 inherit;\n    cursor:pointer;list-style:none;\n  }\n  .ot-settings-page .ot-settings-group>summary::-webkit-details-marker{display:none}\n  .ot-settings-page .ot-settings-group>summary svg{width:15px;height:15px;color:#999;transform:rotate(90deg)}\n  .ot-settings-page .ot-settings-group[open]>summary svg{transform:rotate(-90deg)}\n  .ot-settings-page .ot-settings-copy{font-size:12px;line-height:1.5;padding:0 16px 12px;margin:0;color:#aaa}\n  .ot-settings-page .ot-quick-action{min-height:48px;padding:13px 16px;font-size:13px;background:#111}\n  .ot-settings-page input[type=file]{max-width:150px;font-size:11px;color:#aaa}\n";
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
@@ -88,20 +89,31 @@
   const settings = document.createElement('section');
   settings.className = 'ot-settings-page';
   settings.id = 'ot-unified-settings';
-  settings.innerHTML = `<h2>Settings</h2><p>Android v0.1.23 · Connections, preferences and controller tools.</p><div class="ot-settings-group">
-    <button class="ot-quick-action" data-ot-native="connect">Connect to CORE over Wi-Fi ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="wifi">Android Wi-Fi settings ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="scan">Find Bluetooth controller ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="authorize">Authorize BLE lighting ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="blemode">Shows connection mode: Bluetooth ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="wifimode">Shows connection mode: Wi-Fi ${icon('arrow')}</button>
-  </div><div class="ot-settings-group">
-    <button class="ot-quick-action" data-ot-native="prefs">Haptics and reconnection ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="appearance">Studio appearance ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="diagnostics">Diagnostics ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="advanced">Advanced Studio connection tools ${icon('arrow')}</button>
-    <button class="ot-quick-action" data-ot-native="offline">Offline Studio ${icon('arrow')}</button>
-  </div><p class="ot-settings-help">Bluetooth lighting is currently BENCH ONLY. Physical lighting triggers override shows. The brightness control is not a current limiter. Keep vehicle road lighting independent of this prototype.</p>`;
+  settings.innerHTML = `<h2>Settings</h2>
+    <details class="ot-settings-group" open>
+      <summary>App Preferences ${icon('arrow')}</summary>
+      <button type="button" class="ot-quick-action" data-ot-native="prefs">Haptics and reconnection ${icon('arrow')}</button>
+      <button type="button" class="ot-quick-action" data-ot-native="offline">Work offline ${icon('arrow')}</button>
+    </details>
+    <details class="ot-settings-group">
+      <summary>Diagnostics ${icon('arrow')}</summary>
+      <p class="ot-settings-copy">Hardware status is displayed only when confirmed by the controller. Offline readings are unavailable.</p>
+      <button type="button" class="ot-quick-action" data-ot-native="diagnostics">View controller diagnostics ${icon('arrow')}</button>
+    </details>
+    <details class="ot-settings-group">
+      <summary>Project Backup ${icon('arrow')}</summary>
+      <p class="ot-settings-copy">Export a backup before importing. Import replaces the local working project.</p>
+      <button type="button" class="ot-quick-action" data-ot-native="backup-export">Export project ${icon('arrow')}</button>
+      <label class="ot-quick-action">Import project
+        <input type="file" id="ot-settings-import" accept=".json,application/json" aria-label="Import OpenTail project JSON">
+      </label>
+    </details>
+    <details class="ot-settings-group">
+      <summary>About ${icon('arrow')}</summary>
+      <p class="ot-settings-copy">OpenTail Android v0.1.23 · Studio v0.19.56</p>
+      <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
+    </details>
+    <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
   const nav = document.createElement('nav');
   nav.className = 'ot-native-nav';
   nav.setAttribute('aria-label', 'OpenTail main navigation');
@@ -236,8 +248,25 @@
     }
     if (action.dataset.otNative==='blemode'||action.dataset.otNative==='wifimode'){window.OpenTailBLEPanel?.setTransport(action.dataset.otNative==='blemode'?'ble':'wifi');navigate('scenes');return;}
     if (action.dataset.otNative==='appearance' && typeof window.otSetTheme === 'function') window.otSetTheme(document.documentElement.dataset.otTheme==='light'?'dark':'light');
+    if (action.dataset.otNative==='backup-export') {
+      if (typeof window.exportProject === 'function') window.exportProject();
+      return;
+    }
+    if (action.dataset.otNative==='about') {
+      if (typeof window.otAbout === 'function') window.otAbout();
+      return;
+    }
     if (action.dataset.otNative==='diagnostics') navigate('diagnostics');
     if (action.dataset.otNative==='advanced') navigate('device');
+  });
+  document.addEventListener('change', event => {
+    const fileInput=event.target;
+    if (fileInput?.id!=='ot-settings-import' || !fileInput.files?.length) return;
+    const file=fileInput.files[0];
+    if (window.confirm('Import this project? Current local lighting layout, presets and effects will be replaced. Export a backup first.')) {
+      if (typeof window.importProject === 'function') void window.importProject(file);
+    }
+    fileInput.value='';
   });
   const app = document.getElementById('app');
   if (app) {
