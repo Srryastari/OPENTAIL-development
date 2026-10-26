@@ -1,0 +1,19 @@
+Ref,Part,Qty_per_unit,Acquisition,Design_note
+U_MCU,hiBCTR ESP32-S3 N16R8 dev board,1,Owned / reported,Exact footprint & pinout unknown; keep removable
+J_MCUA/B,2.54mm female header strips,2,To source,"Exact spacing, pin count, body height TBD"
+U_BUCK,AITRIP 5V mini regulator module,1,Owned / photo confirmed variant,Nominal 5V; board-specific voltage and load test missing
+J_BUCK,4-position module wiring/retaining connector,1,To source,"Regulator pads are electrical, not mounting holes"
+U_TRIG,Existing 8-channel optocoupler module,1,Owned / reported,Input and output pinout must be confirmed
+U_BUF1/U_BUF2,SN74AHCT245 8-bit 3-state transceiver,2,Candidate to source,"5V, TTL input; 8+4 channels; direction & OE controlled"
+RPIX1-12,Series signal damping resistors,12,Choose at schematic review,"Provisional small value, cable validation required"
+Q_OE,2N7002 NMOS transistor + gate network,1,Candidate to source,Default data buffers disabled on reset
+U_IO,MCP23017 16-bit I2C GPIO expander,1,Candidate to source,Ten switch control outputs; 3V3 logic
+U_HS1/U_HS2/U_HS3,TPS4H160-Q1 quad smart high-side switches,3,Candidate / DNP for minimal carrier,Ten used channels; output current/thermal design pending
+F_LOGIC,Rated fuse for low-current logic branch,1,Fuseholders owned / reported,Current selection not validated
+BUS_LED,Enclosure rated fused 12V/ground distribution,1,Mechanical/power design required,Not PCB copper; no 80A trace claim
+J_OUT,Rated LED output cable connectors,12,Candidate / choose after load calculation,"12V, return, DATA from shifter; optional BI reserved"
+J_AUX,Rated positive-switched 12V connectors,10,Candidate / choose after load calculation,"Protected high-side, per-channel load limit TBD"
+J_INPUT,Vehicle trigger harness connector,1,On hand 12-pin trigger connector reported,Fit and mating orientation check
+JP_LOGIC_5V_VERIFY,Normally-open jumper,1,To source,Do not close before independent voltage/power path verification
+C_DECOUPLE,Local ceramic bypass capacitors for added ICs,As per vendor datasheets,To source,"At least 0.1 uF near supply, verify all bypass values"
+MOUNT,"Nylon standoffs, PCB mounting posts",4+,To source,Exact mechanical fit to plastic enclosure TBD

@@ -1,0 +1,9 @@
+OpenTail Android v0.1.15
+75/75 static checks passed.
+test_unified_shell.js: PASS — PASS: Unified header, transport cards, Shows default, Settings, BLE scan and Triggers route.
+test_ble_inline.js: PASS — PASS: Inline BLE controls mount, map commands, stop, authorize, switch Wi-Fi/BLE without modal.
+test_ble_connection_status.js: PASS — PASS: BLE Output Manager radio off, scanning, pairing, authorized, and disconnect status
+test_approved_status_pill.js: PASS — PASS: approved compact pill matches shell + BLE Output Manager, colors, icon sizing and live-state priority
+test_dynamic_core_preview.cjs: PASS — PASS: dynamic CORE preview mirrors saved zones across outputs, renames/add/delete/zero, WLED unchanged.
+
+No APK compiled here; hardware/phone live behavior not verified.

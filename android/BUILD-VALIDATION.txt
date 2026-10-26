@@ -1,0 +1,1 @@
+OpenTail Android v0.1.15: 75/75 static checks and five JavaScript DOM/source regression suites passed. Android Java syntax parses. Existing native BLE, Wi-Fi, Studio, and CORE protocol files remain unchanged from v0.1.14. No APK compiled and no physical phone tests performed in this environment; build using BUILD-APK.bat on Windows with Android SDK and JDK 17/21.
