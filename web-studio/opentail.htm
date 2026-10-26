@@ -753,6 +753,21 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
 #app .ot-editor-card{background:transparent!important}
 #app .ot-triggers-overview .ot-chat-heading{margin-bottom:12px}
 @media(max-width:365px){#app .ot-chat-trigger-action{padding:10px!important}#app .ot-chat-trigger-select strong{font-size:12px!important}}
+</style><style id="ot-concept-navigation-01956">
+/* Native in-chat four-pill navigation. No supplemental decorative headings. */
+#app .ot-chat-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:0 0 13px;width:100%;background:#000}
+#app .ot-chat-nav-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 5px;min-height:42px;min-width:0;border:1px solid #353535;border-radius:999px;background:#101010;color:#bababa;font:600 11px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;box-shadow:none}
+#app .ot-chat-nav-pill svg{height:15px;width:15px;flex:0 0 15px}
+#app .ot-chat-nav-pill.is-active{color:#f4f4f4;border-color:#888;background:#242424}
+#app .ot-chat-nav-pill:focus-visible{outline:2px solid #d4d4d4;outline-offset:2px}
+#app main:has(>.ot-chat-nav)>.ot-page-intro{display:none!important}
+#app .ot-chat-events .ot-chat-event-tabs{display:flex;gap:8px;margin:0 0 15px}
+#app .ot-chat-events .ot-chat-event-tabs button{flex:1}
+#app .ot-chat-events .ot-chat-event-fields{display:flex;flex-direction:column;gap:8px}
+#app .ot-chat-events .ot-chat-event-fields>input[type=range]{accent-color:#bdbdbd;height:31px}
+#app .ot-chat-full{width:100%}
+#app .ot-chat-event-strip span{min-width:0!important}
+@media(max-width:370px){#app .ot-chat-nav-pill{font-size:10px;padding:8px 3px;gap:3px}#app .ot-chat-nav-pill svg{width:13px;height:13px;flex-basis:13px}}
 </style></head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
@@ -3268,8 +3283,7 @@ function builder(){
  <div class="ot-assignment-bottom"><span class="ot-eyebrow">${otSelection().length} selected for editing</span><div class="ot-section-shortcuts">${assigned.length>1?`<button class="ot-link-action" onclick="otEditAllAssigned()">Edit all assigned</button>`:''}${state.layout.length>1?`<button class="ot-link-action" onclick="otSelectAllZones()">Select all</button>`:''}${otSelection().length?`<button class="ot-link-action" onclick="otClearMultiZones()">Clear</button>`:''}</div></div>
  </div>
  ${otSelection().length?`<div class="ot-editor-card ot-chat-inline-editor"><div class="ot-editor-heading"><div><span class="ot-eyebrow">Animation editor</span><h2>${otSelection().length===1?esc(z?.name||'Section'):otSelection().length+' selected sections'}</h2><span class="ot-editor-caption">${esc(n)} · settings saved locally</span></div>${otSelection().length===1?`<div class="ot-animation-preview"><span class="ot-eyebrow">Current effect</span><strong>${esc(otCleanEffectName(a.pattern)||'Solid')}</strong>${otAnimSwatches(a)}</div>`:`<span class="ot-edit-count">Batch edit</span>`}</div>${otSelection().length===1?`<div class="ot-edit-fields"><button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Open Effect Editor</button><details class="ot-legacy-controls"><summary>Classic inline controls</summary>${dropdown('WLED Effect',otCanonicalEffect(a.pattern)||otCleanEffectName(a.pattern),otTriggerEffectChoices(a.pattern),"otEditSectionAnimation('pattern',this.value);render()")}${field('Foreground color',a.color,'color','',`oninput="otEditSectionAnimation(&#39;color&#39;,this.value)"`)}${otTriggerControlHtml(false,a)}${field('Brightness %',a.brightness,'range','min="1" max="100"',`oninput="otEditSectionAnimation(&#39;brightness&#39;,+this.value)"`)}<p class="small muted">Animation direction and mirroring follow this zone’s Reverse setting in Layout. Trigger profiles do not override it.</p></details></div>`:`<button class="btn primary ot-ue-launch" onclick="otUEOpen('trigger')">⚙ Edit selected animations</button>${otMultiEditor()}`}${otCopyPastePanel()}</div>`:''}
- </div>`:''} <div class="card ot-automatic-card"><div class="ot-card-kicker">CORE configuration</div><h2>Automatic Events</h2><p class="small muted">Startup and shutdown settings are saved for firmware integration. ACC detection is not active in this browser app.</p>${otEventSettings('Startup')}${otEventSettings('Shutdown')}</div>
-<details class="card ot-trigger-bench-tests" ${otTriggerTestOpen?'open':''}><summary onclick="otTriggerTestOpen=!otTriggerTestOpen">Trigger testing · ${active.length} active</summary><p class="small muted">${otTriggerTestOffline()?'Offline simulation · No CORE or WLED connection required. These examples do not transmit vehicle signals.':'Connected WLED bench test · Uses existing lighting snapshot and priority arbitration.'}</p><div class="ot-trigger-test-grid">${triggers.map(t=>`<button type="button" class="ot-trigger-toggle ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${esc(t)} · ${otTriggerTestActive(t)?'ON':'OFF'}</button>`).join('')}</div>${otTriggerTestPreview()}</details></div>`;
+ </div>`:''}<details class="card ot-trigger-bench-tests" ${otTriggerTestOpen?'open':''}><summary onclick="otTriggerTestOpen=!otTriggerTestOpen">Trigger testing · ${active.length} active</summary><p class="small muted">${otTriggerTestOffline()?'Offline simulation · No CORE or WLED connection required. These examples do not transmit vehicle signals.':'Connected WLED bench test · Uses existing lighting snapshot and priority arbitration.'}</p><div class="ot-trigger-test-grid">${triggers.map(t=>`<button type="button" class="ot-trigger-toggle ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${esc(t)} · ${otTriggerTestActive(t)?'ON':'OFF'}</button>`).join('')}</div>${otTriggerTestPreview()}</details></div>`;
 }
 function otTriggerColor(k,v){let n=state.triggerEditing&&state.profiles[state.triggerEditing]?state.triggerEditing:'Brake';state.profiles[n][k]=v;persist();if(state.connected&&state.benchSignals[n])applyBenchTriggers()}
 function otSelectAll(){otMulti=new Set(state.layout.map(z=>z.id));render()}
@@ -3725,7 +3739,77 @@ function otSetTheme(next){
 }
 function otAppearanceCard(){return `<section class="card ot-appearance-card" aria-label="Appearance settings"><div class="line"><h2>Appearance</h2><span class="ot-mini">Your device</span></div><div class="ot-appearance-options" role="group" aria-label="Studio color theme"><button type="button" aria-pressed="${otTheme==='dark'}" onclick="otSetTheme('dark')">☾ OLED Black</button><button type="button" aria-pressed="${otTheme==='light'}" onclick="otSetTheme('light')">☀ I Hate Dark Mode</button></div><p class="small muted">Switch between the approved black design and white mode. Saves in this browser only; LED brightness, colors and controller commands stay unchanged.</p></section>`;}
 function otThemeShortcut(){return `<button type="button" class="ot-theme-quick" onclick="otSetTheme('${otTheme==='dark'?'light':'dark'}')" aria-label="${otTheme==='dark'?'I Hate Dark Mode — switch to white mode':'Back to Dark Mode — switch to OLED black'}" title="${otTheme==='dark'?'I Hate Dark Mode':'Back to Dark Mode'}"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${otTheme==='dark'?'<circle cx="12" cy="12" r="4" stroke="currentColor"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5" stroke="currentColor"/>':'<path d="M20.3 15.4A8.6 8.6 0 0 1 8.6 3.7a8.7 8.7 0 1 0 11.7 11.7Z" stroke="currentColor"/>'}</svg><span class="ot-theme-text">${otTheme==='dark'?'I Hate Dark Mode':'Back to Dark Mode'}</span></button>`;}
+
+let otConceptActive='normal',otChatEventName='Startup',otChatEventPlay=null,otChatEventRaf=0;
+function otConceptNavigate(target){
+ if(target==='events'){
+  if(state.tab!=='builder')go('builder');
+  otConceptActive='events';render();return;
+ }
+ otConceptActive='normal';go(target);render();
+}
+function otConceptNav(){
+ if(!['builder','layout','scenes'].includes(state.tab))return '';
+ const items=[['builder','Triggers','<path d="m13 2-8 11h7l-1 9 8-12h-7z"/>'],['layout','Layout','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],['events','Auto Events','<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5"/>'],['scenes','Show Modes','<path d="m12 2 2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/>']];
+ const active=otConceptActive==='events'?'events':state.tab;
+ return `<nav class="ot-chat-nav" aria-label="OpenTail concept tabs">${items.map(([id,name,icon])=>`<button type="button" class="ot-chat-nav-pill ${active===id?'is-active':''}" aria-current="${active===id?'page':'false'}" onclick="otConceptNavigate('${id}')"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">${icon}</svg><span>${name}</span></button>`).join('')}</nav>`;
+}
+function otChatAutoSet(n,k,v){
+ if(!['Startup','Shutdown'].includes(n))return false;
+ const p=state.profiles[n];if(!p)return false;
+ if(k==='eventDuration'){v=Number(v);if(!Number.isFinite(v))return false;v=Math.max(.2,Math.min(30,v))}
+ else if(k==='eventFx'&&!['Solid','Sweep','Fade','Breathe'].includes(v))return false;
+ p[k]=v;
+ if(!persist()){otShowToast('Could not save event configuration',true);return false}
+ otChatEventStop(false);render();return true;
+}
+function otChatEventStop(update=true){
+ cancelAnimationFrame(otChatEventRaf);otChatEventRaf=0;otChatEventPlay=null;
+ if(update)render();
+}
+function otChatEventStart(){
+ if(otChatEventPlay){otChatEventStop();return}
+ const n=otChatEventName,p=state.profiles[n];if(!p)return;
+ otChatEventPlay={name:n,start:performance.now(),duration:Math.max(200,Math.min(30000,(Number(p.eventDuration)||2)*1000)),effect:p.eventFx||'Solid'};
+ render();
+ const play=otChatEventPlay;
+ const tick=(now)=>{
+  if(otChatEventPlay!==play)return;
+  const x=Math.min(1,Math.max(0,(now-play.start)/play.duration));
+  const dots=[...document.querySelectorAll('.ot-chat-event-pixel')];
+  for(let i=0;i<dots.length;i++){
+   const pos=(i+.5)/Math.max(1,dots.length),lit=play.effect==='Sweep'?pos<=x:
+     play.effect==='Fade'?true:play.effect==='Breathe'?true:true;
+   dots[i].style.background=lit?'#d7d7d7':'#424242';
+   dots[i].style.opacity=play.effect==='Fade'?String(.25+.75*x):
+     play.effect==='Breathe'?String(.35+.65*Math.sin(x*Math.PI)): '1';
+  }
+  const v=document.getElementById('ot-chat-event-progress');if(v)v.textContent=Math.round(x*100)+'%';
+  if(x<1)otChatEventRaf=requestAnimationFrame(tick);
+  else{otChatEventRaf=0;otChatEventPlay=null;const button=document.getElementById('ot-chat-event-play');if(button)button.textContent='▷ Preview offline';}
+ };
+ otChatEventRaf=requestAnimationFrame(tick);
+}
+function otChatAutomaticEvents(){
+ const n=otChatEventName,p=state.profiles[n]||{},fx=p.eventFx||'Solid',duration=Number(p.eventDuration)||2;
+ return `<section class="ot-chat-events card">
+  <div class="ot-chat-heading"><div><h2>Automatic Events</h2><p>Design and preview locally · no connection required</p></div></div>
+  <div class="ot-chat-event-tabs">${['Startup','Shutdown'].map(name=>`<button type="button" class="ot-chat-pill ${name===n?'ot-chat-primary':''}" aria-pressed="${name===n}" onclick="otChatEventStop(false);otChatEventName='${name}';render()">${name}</button>`).join('')}</div>
+  <div class="ot-chat-event-fields">
+   <div class="ot-chat-between"><strong>${esc(n)} animation</strong><small>OFFLINE PREVIEW</small></div>
+   <label class="ot-chat-field">Animation<select class="ot-chat-input" onchange="otChatAutoSet('${n}','eventFx',this.value)">${['Solid','Sweep','Fade','Breathe'].map(a=>`<option value="${a}" ${String(fx).toLowerCase()===a.toLowerCase()?'selected':''}>${a}</option>`).join('')}</select></label>
+   <div class="ot-chat-between"><strong>Duration</strong><span class="ot-chat-count">${duration.toFixed(1)} sec</span></div>
+   <input type="range" min=".2" max="5" step=".1" value="${Math.min(5,duration)}" onchange="otChatAutoSet('${n}','eventDuration',this.value)" aria-label="Automatic event duration">
+   <button type="button" id="ot-chat-event-play" class="ot-chat-pill ot-chat-primary ot-chat-full" onclick="otChatEventStart()">${otChatEventPlay?'■ Stop preview':'▷ Preview offline'}</button>
+   <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-chat-event-progress">0%</small></div>
+   <div class="ot-chat-led-strip ot-chat-event-strip" aria-label="Offline automatic-event animation preview">${Array.from({length:16},()=>'<span class="ot-chat-event-pixel"></span>').join('')}</div>
+   <p class="ot-chat-hint">SIM only. The visual preview uses no WLED, CORE, Bluetooth, or vehicle input and sends no commands. Device testing is a separate bench action.</p>
+  </div>
+ </section>`;
+}
+
 function otStudioRoute(tab){
+ if(tab==='builder'&&otConceptActive==='events')return otChatAutomaticEvents();
  if(otControllerMode==='core')return ({
   home:otCoreHome,
   device:()=>otCoreDevice()+otAppearanceCard(),
@@ -3750,7 +3834,7 @@ const OT_NAV_ICONS={
 function otNavIcon(id){return '<svg class="ot-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(OT_NAV_ICONS[id]||OT_NAV_ICONS.home)+'</svg>'}
 const OT_PAGE_SUBS={home:'Your vehicle lighting, at a glance.',device:'Controllers, connections and safe bench testing.',scenes:'Create lighting effects, sequences and presets.',builder:'Configure lighting behaviors and vehicle events.',layout:'Organize sections and pixel output mapping.',diagnostics:'Health, logs and controller capabilities.'};
 function otPageIntro(){const tab=TABS.find(item=>item[0]===state.tab)||TABS[0];return `<section class="ot-page-intro"><div><div class="ot-eyebrow">${otControllerMode==='core'?'CORE WORKSPACE':'WLED WORKSPACE'} <span aria-hidden="true">/</span> ${esc(state.projectName||'Untitled project')}</div><h1>${esc(tab[2])}</h1><p>${OT_PAGE_SUBS[tab[0]]||''}</p></div><div class="ot-mode-tag">${otControllerMode==='core'?'CORE Alpha':'WLED'}</div></section>`;}
-function render(){document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div><nav class="bottomnav">${TABS.map(([id,ic,t])=>`<button class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
+function render(){document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div><nav class="bottomnav">${TABS.map(([id,ic,t])=>`<button class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
 
 otMigrateLegacyDefaultTriggers();
 // Existing F1 Brake saved projects retain their settings in a legacy backup; Brake absorbs their section assignments.
