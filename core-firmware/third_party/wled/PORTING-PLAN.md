@@ -1,6 +1,6 @@
 # WLED → OpenTail CORE effect-port plan
 
-**Status:** initial compatibility scaffold (host tested in CI; no pixel-output integration yet).  
+**Status:** six WLED-compatible effect IDs now have an experimental BLE->CORE render path; no physical LED or automotive validation yet. The private CORE particle 1D foundation is compiled but not yet linked to a particle-based effect.  
 **Source:** https://github.com/wled/WLED at commit `20e7a717664295eefc6ad77972cee1888d2da072` (2026-10-25).  
 **WLED core source:** `wled00/FX.cpp`, `wled00/FX.h`, `wled00/FX_fcn.cpp`, palette/math dependencies as required.  
 **License:** EUPL-1.2-or-later; see `LICENSE` and `README.md` here. Follow obligations and review compatibility before distributing combined binaries.
@@ -32,4 +32,4 @@
 
 ## Deliberately not changed
 
-No CORE trigger precedence, BLE authorization, output mapping, live pixel rendering, firmware API version, user projects/presets, or approved UI layout was modified by this stage. The compatibility engine is compiled but not yet used for physical LED output. PR #6 stays in draft pending validation and owner approval.
+CORE BLE command dispatch and render-task integration were added in the continuation branch without changing road-trigger precedence, output layouts, authentication, NVS saved projects, or the approved Studio screens. The legacy five-mode BLE selector remains transitional and must be consolidated into the one Studio effects editor before release. No hardware output has been tested. The particle subsystem is an internal library, NOT another effect menu entry. PR #6 stays draft until validation. See docs/CORE-BLE-FX-ARCHITECTURE.md.
