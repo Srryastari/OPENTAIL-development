@@ -34,7 +34,7 @@ Source: `wled00/colors.cpp`, `wled00/FX_fcn.cpp`, `wled00/FX.cpp` and palette re
 
 - Palette IDs are **not effect IDs**. WLED palette 0 is `Default` (effect-dependent); WLED also defines 2 = `Color 1`, 3 = `Colors 1&2`, 4 = `Color Gradient`, and many more. Do not confuse the documented count of WLED palettes with an implemented CORE palette count.
 - Preserve canonical upstream IDs and palette stops/interpolation semantics. Custom palettes should use a versioned, bounded NVS record with CRC and explicit save/transfer acknowledgements. Avoid overwriting existing Output Manager or Trigger Manager NVS schemas.
-- Current pure C WLED-compatible renderer and BLE opcode 5 accept `palette_id=0` **only**. The other IDs are future work; CORE must reject them until an actual lookup/math implementation and golden tests exist.
+- CORE now implements a constrained color source for the original **Embers** effect: WLED palette IDs **0 Default, 2 Color 1, 3 Colors 1&2, and 4 two-color Gradient**, with pure C lookups/host checks. Other WLED-compatible effects still accept only `palette_id=0`, and **no claim of full WLED palette interpolation parity** is made. BLE and flash presets reject unsupported IDs. WLED IDs 1 (Random Cycle), 5 (Colors Only), curated palettes and custom palette upload remain future work.
 - Effect/palette capability metadata drives the ONE Show Modes editor; adding palettes does not create a second effects list. A particle effect resolves colors from exactly the same palette pipeline as any other compatible effect.
 
 ## 4. Multi-strip — independent outputs, not Wi-Fi streaming
@@ -56,7 +56,7 @@ Source: `wled00/led.cpp` and target bus drivers.
 | B (software integrated) | Existing Android Studio Show Modes catalog driven by CORE Bluetooth capability readback; legacy BLE FX picker removed from injected Android UI | Mocked JavaScript integration checks and APK compile; physical Android BLE/GATT and on-screen review still pending |
 | C (partial) | Original Embers uses private CORE particle physics; upstream WLED palettes/PS effect algorithms remain unported | Host simulation tests; hardware WS2815 playback and official WLED golden parity still pending |
 | D | CCT/RGBW eligible-bus support, auto-white safety and calibration | Independent RGBW / tunable-white hardware validation |
-| E | Expand beyond 2 outputs toward 12 and measure 6k-pixel throughput | GPIO/driver resource allocation, scope timing, full electrical test |
-| F | On-CORE nonvolatile presets, optional startup/shutdown transitions, hardware road-light fallback | Persistence, independent watchdog, trigger preemption, safe state and fault injection |
+| E (hardware blocked) | Expand beyond 2 RMT outputs toward 12 and roughly 6k pixels | Requires actual ESP32-S3 parallel I2S driver allocation, reserved pinout, scope timing, electrical protection and hardware qualification; 2 outputs currently compiled |
+| F (partial) | Eight CRC/format-checked NVS FX slots and explicit BLE Save/Play/Delete; no reboot autorun | CI tests; real flash/reboot/disconnect not yet tested. Startup/shutdown sequences and independent road-light hardware fallback not implemented |
 
 All source-ported effects and library components remain **BENCH ONLY** until the stated evidence exists. License review remains a release gate.
