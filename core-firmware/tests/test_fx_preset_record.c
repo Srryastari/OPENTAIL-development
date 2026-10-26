@@ -10,6 +10,8 @@ int main(void){
  assert(ot_fx_preset_pack(&record,&input));
  assert(ot_fx_preset_valid(&record));
  assert(record.fx.effect_id==32768);
+ input.palette_id=4;assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
  record.fx.intensity^=1;
  assert(!ot_fx_preset_valid(&record));
  record.fx.intensity^=1;
