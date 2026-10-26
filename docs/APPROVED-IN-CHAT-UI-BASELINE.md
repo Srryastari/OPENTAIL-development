@@ -47,9 +47,11 @@ Hierarchy: **Show Modes heading → Effects / Sequences / Presets controls → c
 - Retain restoration and exact indexed live WLED diagnostic inspection, but do not let diagnostic controls become a competing Show Modes editor.
 - CORE's current independent five effects are not a complete port of WLED's effect algorithms. Source-provenance/licensing review, renderer parity and controller performance validation are separate engineering work.
 
-### Layout — approved card geometry / interactions to preserve
+### Layout — final visual concept approved (26 October 2026)
 
 One Layout card, Add Zone in its header, editable pill project name, expandable zone rows with chevrons, editable names and counts, neutral sliders, zone-only Reverse, uniform 16-dot strip preview (not live telemetry), muted red Remove Zone directly under its preview. Preserve reorder, Undo/Redo, offsets, assignment semantics, and distinction between Studio draft and confirmed CORE output configuration.
+
+- The approved Layout interaction includes an exact numeric LED-count input alongside the neutral LED slider, local immediate zone count feedback, and an inline two-step confirmation when removing a zone. Remove Zone remains beneath the sixteen-sample strip preview. This is visual approval, not evidence of on-device implementation.
 
 ### Triggers — selection/testing behavior approved
 
