@@ -96,11 +96,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.50.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.51.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.50' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.51' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
@@ -118,3 +118,18 @@ jobs:
           for file in /tmp/opentail-script-*.js; do node --check "$file"; done
           node --check web-studio/tests/offline-trigger-preview.test.cjs
           node web-studio/tests/offline-trigger-preview.test.cjs
+          node --check android/app/src/main/assets/unified-shell.js
+          node - <<'JS'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
+          const studio=fs.readFileSync('web-studio/opentail.htm','utf8');
+          const gradle=fs.readFileSync('android/app/build.gradle','utf8');
+          assert(shell.includes("const showing=route==='home';"),'Android shell still hides approved Layout or Triggers behind a summary');
+          assert(studio.includes('builder:()=>builder()+')&&studio.includes('layout:()=>layout()+'),
+            'CORE full editors must appear before advanced hardware panels');
+          assert(studio.includes('CORE physical trigger input mapping · Advanced'));
+          assert(studio.includes('CORE hardware output mapping · Advanced'));
+          assert(shell.includes('Android v0.1.18')&&gradle.includes("versionName '0.1.18'"),
+            'Android app and shell version must match');
+          console.log('Android editor routing and version assertions passed (static).');
+          JS
