@@ -1,0 +1,25 @@
+OpenTail Studio v0.19.26 - Source and simulated-browser validation
+Date: October 23, 2026
+PASS: ECMAScript parser (node --check)
+PASS: browser render using Chromium with isolated localStorage
+PASS: three-step sequence starter is shown for new projects
+PASS: three-color effect metadata exposes Foreground, Background, Accent
+PASS: two-color metadata hides unsupported Accent
+PASS: no-color metadata hides all manual color slots
+PASS: sequence step saves duration, speed, intensity, custom slider, palette, and RGB colors
+PASS: Shuffle Now retains number of steps and supports compatible-effect selection
+PASS: trigger editor opens for assigned zone and saves WLED-native speed and color
+PASS: trigger editor preserves section-to-trigger assignments
+PASS: universal editor opens in Shows/Effects, Sequences, and Triggers
+PASS: native effect output applied to simulated WLED segments
+PASS: existing WLED master brightness remains unchanged in simulation
+PASS: sequence playback respects simulated segment brightness cap
+PASS: sequence stop restores prior segment effects/colors/power/brightness in simulation
+PASS: standalone effects apply and read back simulated changed effect/colors
+PASS: offline trigger multi-section save works
+PASS: cancel discards uncommitted sequence edits
+PASS: project export includes sequence and shuffle options using prior schema v4
+PASS: color wheel panel renders and clicking a preset swatch changes correct slot
+PASS: no uncaught JavaScript errors in the executed browser checks
+
+LIMITS: WLED API and LED behaviors used mock state/readback. Tests did not contact the physical WLED unit at 10.0.0.13. Full regressions of every OpenTail screen and native mobile apps were not performed. WLED+-inspired interaction is an independent implementation, not a port of proprietary WLED+ code.
