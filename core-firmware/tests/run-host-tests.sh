@@ -10,6 +10,8 @@ cc -std=c11 -Wall -Wextra -Werror -Imain main/core_logic.c main/arbitration_logi
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/test_wled_fx_compat.c -o /tmp/ot-wled-fx-tests && /tmp/ot-wled-fx-tests
 
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/wled_fx_compat.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests && /tmp/ot-ble-fx-tests
+
 python3 tests/test_wled_catalog.py
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
