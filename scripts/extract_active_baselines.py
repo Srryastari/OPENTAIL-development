@@ -10,7 +10,7 @@ archive=root/"import-inbox/opentail-complete-library-releases-archive.zip"
 if not archive.exists():
     raise SystemExit(f"Missing {archive}")
 packages={
-    "core": "opentail-core-v0.1.24-ble-boot-enrollment.zip",
+    "firmware": "opentail-core-v0.1.24-ble-boot-enrollment.zip",
     "android": "opentail-android-v0.1.15-approved-compact-status-easy-build.zip",
     "hardware": "OpenTail-CORE-Flux-RevA-Design-Package.zip",
 }
