@@ -566,7 +566,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ready=native_outputs_ready;
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=ot_fx_bank_apply(&fx_bank,req,now_ms,standalone);
+        ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
@@ -646,23 +646,33 @@ bool ot_ble_play_fx_preset(uint8_t slot){
  portENTER_CRITICAL(&state_lock);
  ready=native_outputs_ready;
  if(ready){
-     /* Atomic scene replacement. No old-zone effects survive a scene load. */
-     ot_fx_bank_stop_all(&fx_bank);
+     ot_fx_zone_bank_t replacement={0};
      uint8_t out_mask=0,zone_mask=0;
-     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+     for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
-         ot_fx_bank_apply(&fx_bank,p,now_ms,true);
-         ble_fx_request=*p;
+         if(!ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
+             ready=false;break; /* layout changed: preserve original live scene */
+         }
          out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
          zone_mask=(uint8_t)(zone_mask|(uint8_t)(1u<<z));
      }
-     native_show=(ot_show_t){.mode=OT_SHOW_SOLID,
-        .color={0,0,0},.brightness=OT_MAX_BRIGHTNESS,.speed=0,
-        .chain_mask=out_mask,.section_mask=zone_mask};
-     ble_fx_enabled=true;ble_owns_show=true;
-     native_show_started_ms=now_ms;
-     native_show_deadline=now+pdMS_TO_TICKS(60000u);
+     if(ready){
+         /* Transaction: no old-zone FX survive scene load. */
+         fx_bank=replacement;
+         /* Diagnostic legacy show fields describe union of targeted zones. */
+         native_show=(ot_show_t){.mode=OT_SHOW_SOLID,
+            .color={0,0,0},.brightness=OT_MAX_BRIGHTNESS,.speed=0,
+            .chain_mask=out_mask,.section_mask=zone_mask};
+         /* Only use last stored entry for legacy "current effect" reporting. */
+         for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+             if(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z)))
+                 ble_fx_request=record.effect[o][z];
+         }
+         ble_fx_enabled=true;ble_owns_show=true;
+         native_show_started_ms=now_ms;
+         native_show_deadline=now+pdMS_TO_TICKS(60000u);
+     }
  }
  portEXIT_CRITICAL(&state_lock);
  return ready;
