@@ -55,6 +55,7 @@ jobs:
           node --check android/app/src/main/assets/ble-output-panel.js
           node --check android/app/src/main/assets/output-control-motion.js
           node --check android/app/src/main/assets/direct-ble-dashboard.js
+          node android/qa/test_ble_output_pending.cjs
           node - <<'JS'
           const fs=require('fs'),assert=require('assert');
           const ble=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
