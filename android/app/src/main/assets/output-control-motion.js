@@ -26,7 +26,7 @@ input,textarea,[contenteditable="true"],[role="textbox"]{ -webkit-user-select:te
 @media(prefers-reduced-motion:reduce){:root{--ot-motion-fast:0ms;--ot-motion-normal:0ms}.ot-native-nav button,.ot-bom button,.ot-simple-button,.ot-quick-action,.ot-connection-card,#ot-direct-ble-dashboard button,.ot-mode-slider{transition:none!important}}
 `;document.head.appendChild(style);
 const descriptions={independent:'Outputs operate separately.',linked:'Both outputs selected in preview. Multi-output writes are not implemented yet.',sync:'Synchronization and trigger overrides are planned; not active in CORE yet.'};
-let mode='sync',target='both';
+let mode='independent',target='one';
 function selectedFromManager(){const index=window.OpenTailBLEOutputs?.getSelectedIndex?.();return index===1?'two':'one';}
 function mount(){const manager=document.getElementById('ot-ble-output-card');if(!manager||document.getElementById('ot-output-control'))return;
 const card=document.createElement('section');card.id='ot-output-control';card.className='ot-output-control';
