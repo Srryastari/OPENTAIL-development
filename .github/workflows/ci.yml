@@ -42,10 +42,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f firmware/platformio.ini ]; then
+          if [ -f core-firmware/platformio.ini ]; then
             python3 -m pip install --user platformio
             "$HOME/.local/bin/pio" run -d firmware
-          elif [ -f firmware/CMakeLists.txt ]; then
+          elif [ -f core-firmware/CMakeLists.txt ]; then
             echo "ESP-IDF project detected; configure ESP-IDF toolchain before claiming a build."
             exit 1
           else
