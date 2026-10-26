@@ -80,3 +80,28 @@ assert(shell.includes("window.otConceptNavigate(target)"),'Route Auto Events thr
 assert(shell.includes('body:not(.ot-home-active) .ot-connection-grid{display:none!important}'),'Connection actions belong on Home');
 assert(!androidNav.includes("'Shows'"),'Use approved full Show Modes label');
 console.log('Approved Android six-tab nav placement/order and duplicate-tab suppression checks passed');
+
+
+// Approved Show Modes hierarchy: tabs, then bounded preview, then one editing workspace.
+const scenesStart=html.indexOf('function scenes(){');
+const scenesEnd=html.indexOf('let otPresetEditorId=',scenesStart);
+const sceneSource=html.slice(scenesStart,scenesEnd);
+assert(scenesStart>0&&scenesEnd>scenesStart,'Show Modes source not found');
+const tabsAt=sceneSource.indexOf('class="ot-subnav"');
+const previewAt=sceneSource.indexOf('otPixelPreview()');
+const editorAt=sceneSource.indexOf("otSub==='Effects'");
+assert(tabsAt>=0&&previewAt>tabsAt&&editorAt>previewAt,
+  'Show Modes hierarchy must be tabs → Live Lighting Preview → editor');
+// Settings is one expandable workspace, with no duplicated primary connection actions.
+const settingsStart=shell.indexOf('settings.innerHTML =');
+const settingsEnd=shell.indexOf("const nav = document.createElement('nav')",settingsStart);
+const settingsSource=shell.slice(settingsStart,settingsEnd);
+for(const label of ['App Preferences','Diagnostics','Project Backup','About'])
+  assert(settingsSource.includes(label),'Settings section missing: '+label);
+assert.equal((settingsSource.match(/class="ot-settings-group"/g)||[]).length,4,
+  'Settings sections belong to one expandable workspace');
+assert(!settingsSource.includes('data-ot-native="scan"')&&!settingsSource.includes('data-ot-native="connect"'),
+  'Home owns primary connection actions');
+assert(shell.includes("window.confirm('Import this project?"),
+  'Import must confirm before replacing the local working project');
+console.log('Show Modes ordering, Settings groups, and project import confirmation protected');
