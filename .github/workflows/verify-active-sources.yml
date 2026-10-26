@@ -98,6 +98,49 @@ jobs:
           a=Path('web-studio/opentail.htm').read_bytes()
           b=Path('web-studio/opentail-v0.19.50.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
+          bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
+          assert a == bundled, 'Android APK bundles a stale Studio file'
           assert b'OpenTail Studio v0.19.50' in a, 'Unexpected Studio version'
-          print('Studio baseline file checks passed (not browser/hardware tests).')
+          print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
+      - name: Parse Studio JavaScript and verify trigger example mapping
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          html=Path('web-studio/opentail.htm').read_text()
+          scripts=re.findall(r'<script(?:\\s[^>]*)?>([\\s\\S]*?)</script>',html)
+          assert len(scripts)>=1, 'No Studio scripts found'
+          for i,src in enumerate(scripts):
+              Path(f'/tmp/opentail-script-{i}.js').write_text(src)
+          print('Extracted',len(scripts),'Studio scripts')
+          PY
+          for file in /tmp/opentail-script-*.js; do node --check "$file"; done
+          node - <<'JS'
+          const fs=require('fs'),assert=require('assert');
+          const html=fs.readFileSync('web-studio/opentail.htm','utf8');
+          const a=html.indexOf('function otSimTriggerExampleMode()');
+          const b=html.indexOf('function otSimEffectForZone(z)',a);
+          const c=html.indexOf('function otSimElapsed()',b);
+          assert(a>0&&b>a&&c>b,'Preview helper/resolver missing');
+          const js=html.slice(a,c);
+          function build(profiles,selected=['Brake']){
+            const otSim={triggers:selected,source:'trigger'};
+            const state={profiles,wledEdit:{}};
+            const zone={id:'zoneA',name:'Custom 1'};
+            const resolved=new Function('otSim','state','otPreviewConfiguredZones','otUE','otSimDraft','DEFAULT_PROFILE',js+';return {example:otSimTriggerExampleMode,effect:otSimEffectForZone};');
+            const fx=resolved(otSim,state,()=>[zone],null,x=>({fx:x.pattern||'solid',fg:x.color||'#ff0000',brightness:x.brightness/100,speed:.5,intensity:.5}),()=>({zones:[],brightness:85,color:'#ff0000',pattern:'solid'}));
+            return {example:fx.example(),effect:fx.effect(zone)};
+          }
+          const blank=build({Brake:{zones:[],brightness:85,color:'#ff0000',pattern:'solid'}});
+          assert.equal(blank.example,true,'Unassigned preview must use example mode');
+          assert.equal(blank.effect.fg,'#ff0000');
+          assert(blank.effect.brightness>0,'Trigger example must illuminate pixels');
+          assert.equal(blank.effect.triggerName,'Brake');
+          const mapped=build({Brake:{zones:['zoneA'],brightness:85,color:'#ff0000',pattern:'solid'}});
+          assert.equal(mapped.example,false,'Assigned preview must use actual assignments');
+          assert(mapped.effect.brightness>0);
+          const empty=build({Brake:{zones:[],brightness:85,color:'#ff0000'}},[]);
+          assert.equal(empty.example,false,'No pressed triggers is not an example');
+          console.log('Offline trigger preview tests passed.');
+          JS
