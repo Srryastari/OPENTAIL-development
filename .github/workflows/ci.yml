@@ -1,0 +1,71 @@
+name: OpenTail CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  repository-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate tracked sources and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f AGENTS.md
+          test -f docs/HISTORY-POLICY.md
+          test -f docs/LIBRARY-INVENTORY.md
+          test -f studio/opentail-v0.19.50.htm
+          python3 - <<'PY'
+          from pathlib import Path
+          import html.parser
+          class Parser(html.parser.HTMLParser): pass
+          p=Path("studio/opentail-v0.19.50.htm")
+          parser=Parser()
+          parser.feed(p.read_text(encoding="utf-8"))
+          print("Studio HTML parse: PASS (syntax-level only)")
+          PY
+      - name: Check whitespace
+        run: git diff --check HEAD^ HEAD || git diff --check
+  firmware-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Firmware build readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f core-firmware/platformio.ini ]; then
+            python3 -m pip install --user platformio
+            "$HOME/.local/bin/pio" run -d firmware
+          elif [ -f core-firmware/CMakeLists.txt ]; then
+            echo "ESP-IDF project detected; configure ESP-IDF toolchain before claiming a build."
+            exit 1
+          else
+            echo "::notice::Firmware source/build configuration not imported yet; build not executed."
+          fi
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android build readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f android/gradlew ]; then
+            chmod +x android/gradlew
+            (cd android && ./gradlew assembleDebug --no-daemon)
+          else
+            echo "::notice::Android source/build configuration not imported yet; APK build not executed."
+          fi
