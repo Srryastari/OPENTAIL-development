@@ -3258,7 +3258,7 @@ function builder(){
   <strong>${esc(t)}</strong>
  </button>
  <button type="button" class="ot-trigger-card-test ot-chat-pill ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${otTriggerTestActive(t)?'■ Stop test':'▷ Test'}</button>
- </div>``).join('')}
+ </div>`).join('')}
  </div><div class="ot-chat-selection"><span>${otSelectedTriggers().length} selected for editing</span><div><button class="ot-chat-textbutton" onclick="otSelectAllTriggers()">All</button><button class="ot-chat-textbutton" onclick="otClearTriggerSelections()">Clear</button></div></div><button type="button" class="ot-chat-pill ot-chat-primary ot-chat-edit-selected" ${otSelectedTriggers().length?'':'disabled'} onclick="otEditSelectedTriggers()">Edit ${otSelectedTriggers().length} selected ${otSelectedTriggers().length===1?'Trigger':'Triggers'}</button>${state.triggerStatus?`<p class="ot-chat-hint" role="status">${esc(state.triggerStatus)}</p>`:''}
  ${benchBefore?`<div class="btnrow">${button('Restore previous WLED lighting','otRestorePreviousLighting()')}</div>`:''}</div>
  ${otTriggerBatchOpen&&otSelectedTriggers().length>1?otTriggerBatchMarkup():''}
