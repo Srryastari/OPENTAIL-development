@@ -8,7 +8,7 @@
 if(window.__otUnifiedBleFxV1||!window.OpenTailNativeBLE)return;
 window.__otUnifiedBleFxV1=true;
 const ble=window.OpenTailNativeBLE;
-const names={0:'Solid',1:'Blink',3:'Wipe',6:'Sweep',12:'Fade',23:'Strobe'};
+const names={0:'Solid',1:'Blink',3:'Wipe',6:'Sweep',12:'Fade',23:'Strobe',32768:'Embers'};
 let supported=[],readAttempted=false,lastConnected=false,lastReady=false;
 let lastSentId=null,liveTimer=null,sendPending=false;
 const native={};
@@ -72,7 +72,7 @@ function refresh(){
 function updateCatalog(){
  if(!active())return;
  try{
-  // Only these six pinned CORE FX names have implemented frame renderers.
+  // Six pinned WLED frame adapters plus one original OpenTail particle effect.
   state.wledEffects=[];
   for(const id of supported)if(names[id])state.wledEffects[id]=names[id];
   if(supported.length && (!state.wledEdit||!supported.includes(Number(state.wledEdit.fx)))){
@@ -85,11 +85,11 @@ function updateCatalog(){
 function meta(id){
  id=Number(id);
  if(!supported.includes(id))return null;
- const solid=id===0,blink=id===1;
+ const solid=id===0,blink=id===1,embers=id===32768;
  return {controls:solid?[]:[
    {key:'sx',label:'Speed',max:255},
-   ...(blink||id===3||id===6?[{key:'ix',label:blink?'Duty cycle':'Edge softness',max:255}]:[])
- ],colors:solid?[{i:0,label:'Fx'}]:[{i:0,label:'Fx'},{i:1,label:'Bg'}],
+   ...(blink||id===3||id===6||embers?[{key:'ix',label:blink?'Duty cycle':embers?'Density':'Edge softness',max:255}]:[])
+ ],colors:solid||embers?[{i:0,label:'Fx'}]:[{i:0,label:'Fx'},{i:1,label:'Bg'}],
  palette:false,flags:'1',defaults:{sx:128,ix:128,pal:0}};
 }
 function statusChanged(message){
