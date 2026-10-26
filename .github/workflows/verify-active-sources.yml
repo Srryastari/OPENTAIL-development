@@ -118,6 +118,8 @@ jobs:
           for file in /tmp/opentail-script-*.js; do node --check "$file"; done
           node --check web-studio/tests/offline-trigger-preview.test.cjs
           node web-studio/tests/offline-trigger-preview.test.cjs
+          node --check web-studio/tests/layout-history.test.cjs
+          node web-studio/tests/layout-history.test.cjs
           node --check android/app/src/main/assets/unified-shell.js
           node - <<'JS'
           const fs=require('node:fs'),assert=require('node:assert/strict');
