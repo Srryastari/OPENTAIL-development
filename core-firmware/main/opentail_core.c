@@ -27,6 +27,7 @@
 #include "show_logic.h"
 #include "ble_command.h"
 #include "ble_fx_command.h"
+#include "effects_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
@@ -454,7 +455,7 @@ static esp_err_t show_get(httpd_req_t *r){
     ready=native_outputs_ready;
     portEXIT_CRITICAL(&state_lock);
     ot_wled_fx_metadata_t meta;
-    const char *active_name=fx_active&&ot_wled_fx_metadata(fx_effect_id,&meta)?
+    const char *active_name=fx_active&&ot_effects_1d_metadata(fx_effect_id,&meta)?
       meta.name:ot_show_name(cfg.mode);
     char buf[390];
     snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
@@ -548,7 +549,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  */
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     ot_wled_fx_metadata_t meta;
-    if(!req||!ot_wled_fx_metadata(req->effect_id,&meta)||req->palette_id!=0||
+    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||req->palette_id!=0||
        req->chain_mask<1||req->chain_mask>3||req->zone_mask==0||
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
         return false;
@@ -833,7 +834,7 @@ static bool strip_init(void) {
 static void led_task(void *p) {
     (void)p;
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
-    static ot_wled_fx_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     uint32_t prior_fx_generation=0;
     while(1){
@@ -863,7 +864,10 @@ static void led_task(void *p) {
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
        bool native_rendering=decision.mode==OT_ARB_SHOW;
        if(local_fx_enabled && local_fx_generation!=prior_fx_generation){
-           memset(fx_state,0,sizeof(fx_state));
+           for(unsigned output=0;output<OT_CHAIN_COUNT;output++)
+               for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
+                   ot_effects_1d_reset(&fx_state[output][zone],
+                       0x1234u+output*97u+zone*19u+local_fx_generation);
            prior_fx_generation=local_fx_generation;
        }
        ot_st_show_active(native_rendering);
@@ -894,7 +898,7 @@ static void led_task(void *p) {
                                .foreground={local_fx.r,local_fx.g,local_fx.b},
                                .background={local_fx.bg_r,local_fx.bg_g,local_fx.bg_b}
                            };
-                           if(!ot_wled_fx_render(&cfg,&fx_state[ch][z],elapsed,
+                           if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],elapsed,
                                                 &fx_frame[ch][offset],len))
                                ot_st_set_fault("invalid BLE effect frame");
                        }
