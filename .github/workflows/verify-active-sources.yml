@@ -96,11 +96,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.54.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.55.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.54' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.55' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
@@ -142,7 +142,7 @@ jobs:
             'Show preview should precede Effects/Sequences navigation');
           assert(scene.indexOf('otNativeShowPanel()')>scene.indexOf('ot-subnav'),
             'CORE native lighting controls must not hide Show tabs');
-          assert(shell.includes('Android v0.1.21')&&gradle.includes("versionName '0.1.21'"),
+          assert(shell.includes('Android v0.1.22')&&gradle.includes("versionName '0.1.22'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS
