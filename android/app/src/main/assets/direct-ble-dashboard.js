@@ -51,7 +51,7 @@
     const waiting=['scanning','connecting','pairing','authorizing'].includes(phase);
     status.textContent=authorized?'Connected · Authorized':connected?'Connected · Authorization needed':phase==='permission'?'Permission needed':s.bleRadioOn===false?'Bluetooth off':waiting?phase.charAt(0).toUpperCase()+phase.slice(1)+'…':'Disconnected';
     status.style.color=authorized?'#29da8b':connected||waiting?'#f6bd47':'#aaa';
-    detail.textContent=authorized?'Ready to manage outputs and zones over BLE.':connected?'Authorize your controller to edit outputs.':phase==='permission'?'Grant nearby-device permission when prompted.':s.bleRadioOn===false?'Turn on Bluetooth to connect.':'Connect over Bluetooth without switching Wi-Fi.';
+    detail.textContent=authorized?'Ready to manage outputs and zones over BLE.':(s.bleMessage&&s.bleMessage!=='BLE not connected')?s.bleMessage:connected?'Authorization required. If this app was reinstalled, hold BOOT and tap Pair with BOOT to enroll again.':phase==='permission'?'Grant nearby-device permission when prompted.':s.bleRadioOn===false?'Turn on Bluetooth to connect.':'Connect over Bluetooth without switching Wi-Fi.';
     connect.textContent=authorized?'Manage Outputs & Zones':connected?'Authorize Controller':waiting?'Connecting…':'Connect to CORE';
     connect.disabled=waiting;
     pair.hidden=authorized;
