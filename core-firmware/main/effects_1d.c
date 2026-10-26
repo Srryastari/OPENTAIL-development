@@ -1,4 +1,5 @@
 #include "effects_1d.h"
+#include "palette_1d.h"
 #include <string.h>
 /* Shared list: source-derived WLED implementations first, private original
  * Ember recipe last. No "Particle Engine" category or duplicate effect. */
@@ -30,7 +31,7 @@ static uint32_t rng(ot_particles_1d_t *s){
 bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     ot_effects_1d_state_t *s,uint32_t ms,ot_wled_rgb_t *frame,size_t count){
     if(!cfg||!s||!frame||count==0||count>65535u||cfg->frame_time_ms==0||
-        cfg->palette_id!=0)return false;
+        !ot_palette_1d_supported(cfg->effect_id,cfg->palette_id))return false;
     if(cfg->effect_id!=OT_FX_EMBERS)
         return ot_wled_fx_render(cfg,&s->wled,ms,frame,count);
     if(!s->particles.seed)ot_particles_1d_reset(&s->particles,1u);
@@ -52,7 +53,8 @@ bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
             if(random&0x10000u)velocity=-velocity;
             uint16_t lifetime=(uint16_t)(350u+((random>>12)%1150u));
             ot_particles_1d_emit(&s->particles,(int32_t)(index*256u),velocity,
-                lifetime,cfg->foreground);
+                lifetime,ot_palette_1d_sample(cfg->palette_id,
+                    cfg->foreground,cfg->background,(uint8_t)(random>>8)));
             s->emit_accumulator-=1000u;
             emitted++;
         }
