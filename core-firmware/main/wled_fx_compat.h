@@ -1,0 +1,52 @@
+#pragma once
+/*
+ * OpenTail's isolated WLED 1D compatibility layer.
+ * The implementation of Blink / Strobe timing is adapted from WLED FX.cpp,
+ * copyright (c) 2016 Harm Aldick and WLED contributors, EUPL-1.2-or-later.
+ * Source pin: wled/WLED commit 20e7a717664295eefc6ad77972cee1888d2da072.
+ *
+ * BENCH ONLY: No controller, GPIO, trigger or LED-bus integration here.
+ */
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+enum {
+    OT_WLED_SOLID = 0,      /* WLED FX_MODE_STATIC */
+    OT_WLED_BLINK = 1,      /* WLED FX_MODE_BLINK */
+    OT_WLED_STROBE = 23     /* WLED FX_MODE_STROBE */
+};
+
+typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
+typedef struct {
+    uint16_t effect_id;     /* Preserve WLED's numeric effect ID */
+    uint8_t speed;          /* WLED 0..255 */
+    uint8_t intensity;      /* WLED 0..255 (Blink duty-cycle) */
+    uint8_t brightness;     /* 0..255 post-effect linear cap; WLED bus brightness is separate */
+    uint8_t palette_id;     /* Only 0 (direct solid colors) is implemented */
+    uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
+    ot_wled_rgb_t foreground;
+    ot_wled_rgb_t background;
+} ot_wled_fx_config_t;
+typedef struct {
+    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe */
+} ot_wled_fx_state_t;
+
+typedef struct {
+    uint16_t id;
+    const char *name;
+    const char *wled_metadata; /* Upstream effect metadata; not a promise of palette support */
+    bool supports_foreground, supports_background, supports_speed, supports_intensity;
+    bool supports_palette;    /* false until palette behavior is ported and tested */
+} ot_wled_fx_metadata_t;
+
+bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out);
+void ot_wled_fx_reset(ot_wled_fx_state_t *state);
+
+/* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
+ * never once per pixel, so that SEGENV.step advances at the right cadence.
+ * WLED palette modes, gamma and global brightness handling are NOT ported.
+ * Returns false for unknown effects, invalid config or zero-sized zones.
+ */
+bool ot_wled_fx_render(const ot_wled_fx_config_t *config, ot_wled_fx_state_t *state,
+                       uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count);
