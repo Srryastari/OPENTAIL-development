@@ -94,6 +94,9 @@ function meta(id){
 }
 function statusChanged(message){
  const s=stateOf();
+ // Initial GATT service/info reads may be busy; retry capability discovery
+ // when owner authorization completes, instead of caching an empty list.
+ if(s.connected&&s.authorized&&!lastReady)readAttempted=false;
  if(!s.connected){
    supported=[];readAttempted=false;lastConnected=false;lastSentId=null;sendPending=false;
  } else refresh();
