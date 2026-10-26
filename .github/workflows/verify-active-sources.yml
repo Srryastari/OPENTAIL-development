@@ -131,6 +131,11 @@ jobs:
             'CORE full editors must appear before advanced hardware panels');
           assert(studio.includes('CORE physical trigger input mapping · Advanced'));
           assert(studio.includes('CORE hardware output mapping · Advanced'));
+          const scene=studio.slice(studio.indexOf('function scenes(){'),studio.indexOf('let otPresetEditorId=null;'));
+          assert(scene.indexOf('otPixelPreview()')>=0 && scene.indexOf('otPixelPreview()')<scene.indexOf('ot-subnav'),
+            'Show preview should precede Effects/Sequences navigation');
+          assert(scene.indexOf('otNativeShowPanel()')>scene.indexOf('ot-subnav'),
+            'CORE native lighting controls must not hide Show tabs');
           assert(shell.includes('Android v0.1.18')&&gradle.includes("versionName '0.1.18'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
