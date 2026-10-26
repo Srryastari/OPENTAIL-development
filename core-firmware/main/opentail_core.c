@@ -910,7 +910,7 @@ static void led_task(void *p) {
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
-    uint32_t prior_fx_generation=0;
+    static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     while(1){
        bool levels[OT_IN_COUNT];
        for(int i=0;i<OT_IN_COUNT;++i) {
@@ -920,7 +920,7 @@ static void led_task(void *p) {
        uint8_t physical=ot_debounce(&inputs,levels,OT_DEBOUNCE_TICKS);
        TickType_t now=xTaskGetTickCount();
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
-       bool local_fx_enabled=false;ot_ble_fx_packet_t local_fx={0};uint32_t local_fx_generation=0;
+       bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
        live_input_mask=physical;
@@ -932,18 +932,11 @@ static void led_task(void *p) {
        if(show_window(now)){
            local_show=native_show;show_started=native_show_started_ms;
            local_fx_enabled=ble_fx_enabled;
-           if(local_fx_enabled){local_fx=ble_fx_request;local_fx_generation=ble_fx_generation;}
+           if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
        bool native_rendering=decision.mode==OT_ARB_SHOW;
-       if(local_fx_enabled && local_fx_generation!=prior_fx_generation){
-           for(unsigned output=0;output<OT_CHAIN_COUNT;output++)
-               for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
-                   ot_effects_1d_reset(&fx_state[output][zone],
-                       0x1234u+output*97u+zone*19u+local_fx_generation);
-           prior_fx_generation=local_fx_generation;
-       }
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
            uint32_t elapsed=(uint32_t)((uint32_t)(esp_timer_get_time()/1000LL)-show_started);
@@ -960,19 +953,29 @@ static void led_task(void *p) {
                    unsigned offset=0;
                    for(int z=0;z<output->zone_count;z++){
                        unsigned len=output->zones[z].pixels;
-                       if(len && (local_fx.chain_mask&(1u<<ch)) &&
-                          (local_fx.zone_mask&(1u<<z)) &&
+                       const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
+                       const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+                       if(len && ot_fx_slot_active(slot,frame_ms) &&
                           output->zones[z].role!=OT_OM_OFF &&
                           offset+len<=OT_CHAIN_PIXELS){
+                           /* Reset ONLY this zone on replacement. Unrelated zone
+                            * particle motion and effect phase are preserved. */
+                           if(prior_fx_generation[ch][z]!=slot->generation){
+                               ot_effects_1d_reset(&fx_state[ch][z],
+                                   0x1234u+ch*97u+(unsigned)z*19u+slot->generation);
+                               prior_fx_generation[ch][z]=slot->generation;
+                           }
+                           const ot_ble_fx_packet_t *fx=&slot->request;
                            ot_wled_fx_config_t cfg={
-                               .effect_id=local_fx.effect_id,
-                               .speed=local_fx.speed,.intensity=local_fx.intensity,
-                               .brightness=local_fx.brightness,
-                               .palette_id=local_fx.palette_id,.frame_time_ms=23,
-                               .foreground={local_fx.r,local_fx.g,local_fx.b},
-                               .background={local_fx.bg_r,local_fx.bg_g,local_fx.bg_b}
+                               .effect_id=fx->effect_id,
+                               .speed=fx->speed,.intensity=fx->intensity,
+                               .brightness=fx->brightness,
+                               .palette_id=fx->palette_id,.frame_time_ms=23,
+                               .foreground={fx->r,fx->g,fx->b},
+                               .background={fx->bg_r,fx->bg_g,fx->bg_b}
                            };
-                           if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],elapsed,
+                           uint32_t zone_elapsed=frame_ms-slot->started_ms;
+                           if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
                                                 &fx_frame[ch][offset],len))
                                ot_st_set_fault("invalid BLE effect frame");
                        }
