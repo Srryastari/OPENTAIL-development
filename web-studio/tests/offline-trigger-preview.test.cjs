@@ -68,6 +68,20 @@ assert.equal(assigned.zones(),real,'Configured zones must not be replaced by dem
 assert.equal(assigned.example(),false,'Existing assignments must be honored');
 assert(!assigned.html().includes('DEMO OUTPUTS'));
 assert.equal(assigned.effect(real[0]).brightness,.85);
+// CORE role routing remains independent from the temporary six-zone demo geometry.
+const coreRoles=[
+ {id:'core-0-0',name:'Tail',start:0,length:20,otCoreRole:'park_brake',otCoreOutput:0},
+ {id:'core-0-1',name:'Left',start:20,length:20,otCoreRole:'left_turn',otCoreOutput:0},
+ {id:'core-1-0',name:'Right',start:40,length:20,otCoreRole:'right_turn',otCoreOutput:1},
+ {id:'core-1-1',name:'Reverse',start:60,length:20,otCoreRole:'reverse',otCoreOutput:1}
+];
+const coreBrake=prepare(['Brake'],coreRoles);
+assert.equal(coreBrake.zones(),coreRoles,'Connected CORE zone metadata should be retained');
+assert.deepEqual(coreRoles.map(z=>lit(coreBrake,z)),[true,false,false,false]);
+const coreHazards=prepare(['Hazards'],coreRoles);
+assert.deepEqual(coreRoles.map(z=>lit(coreHazards,z)),[false,true,true,false]);
+const coreCombined=prepare(['Brake','Hazards'],coreRoles);
+assert.deepEqual(coreRoles.map(z=>coreCombined.effect(z).fg),['#ff0000','#ffbf00','#ffbf00','#000000']);
 const stopped=prepare([]);
 assert.equal(stopped.zones().length,0,'Never display fake zones outside simulation');
 assert.equal(stopped.example(),false);
