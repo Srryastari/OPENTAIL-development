@@ -283,8 +283,8 @@
     .ot-simple-readonly{font-size:11px;color:#a8b8ac;margin:8px 0 0;line-height:1.4}
     body.ot-compact-shows #app .ot-page-intro{display:none!important}
     body.ot-compact-shows #app>.shell{padding-top:4px!important}
-    body.ot-compact-shows.ot-ble-mode #app main > :not(#ot-ble-inline){display:none!important}
-    body.ot-compact-shows #app main:has(#ot-ble-inline [data-ot-ble="ble"][aria-pressed="true"]) > :not(#ot-ble-inline){display:none!important}
+    /* Show tab keeps Studio preview visible alongside BLE controls. */
+    /* BLE transport selection must not hide Live Lighting Preview. */
     body.ot-compact-shows #app .footer{display:none!important}
     body.ot-compact-shows.ot-ble-mode #ot-ble-inline{margin-top:0!important}
     body.ot-compact-shows .ot-ble-fields{row-gap:9px!important}
@@ -297,6 +297,20 @@
     body.ot-compact-shows .ot-ble-inline .ot-ble-fields label{font-size:11px!important}
     body.ot-compact-shows .ot-ble-inline .ot-ble-head p{font-size:11px!important}
     body.ot-compact-shows .ot-ble-inline .ot-ble-head h2{margin-bottom:3px!important}
+
+/* Approved compact Show layout: original ot-preview renderer and its controls remain intact. */
+body.ot-compact-shows #app .card.ot-preview{display:block!important;order:-1;margin:6px 0 10px!important;padding:12px!important;background:#000!important;border:1px solid #303030!important;border-radius:17px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-preview-modes{margin:8px 0 10px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-preview-modes button{min-height:35px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-preview-row{margin:5px 0!important;padding:7px 8px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-sim-actions{gap:6px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-sim-actions button{min-height:36px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-sim-triggers{gap:5px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-sim-triggers button{min-height:32px!important}
+body.ot-compact-shows #app .card.ot-preview .ot-ledstrip{min-width:0!important}
+body.ot-compact-shows #app main{display:flex;flex-direction:column;gap:9px}
+body.ot-compact-shows #app main > *{min-width:0}
+
     body.ot-editor-active #app .ot-page-intro{display:none!important}
     body.ot-editor-active #app .ot-om-card>p.small.muted,body.ot-editor-active #app .ot-tm-card>p.small.muted{display:none!important}
     body.ot-editor-active #app .ot-om-card,body.ot-editor-active #app .ot-tm-card{padding:12px!important}
