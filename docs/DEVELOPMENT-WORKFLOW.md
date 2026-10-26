@@ -19,6 +19,6 @@ OpenTail is an **internal development codename**, not a final product name.
 - This document does not itself create Codex scheduled tasks or enable GitHub branch protection.
 
 ## Current blockers
-- Historical binary archives and earliest releases are not fully imported.
+- Historical releases are archived; active source extraction and version-specific build verification remain pending.
 - Android and CORE buildable source trees are not yet confirmed in this repository.
 - CI is preliminary; no claim of full firmware/Android test coverage.
