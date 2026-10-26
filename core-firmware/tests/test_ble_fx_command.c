@@ -18,5 +18,7 @@ int main(void){
   cmd[16]=15;cmd[2]=23;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   cmd[2]=0;cmd[3]=128;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   assert(v.effect_id==32768u);
+  cmd[15]=4;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=3;cmd[3]=0;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   return 0;
 }
