@@ -606,11 +606,24 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
 }
 void ot_ble_stop_show(void){
-    TickType_t now=xTaskGetTickCount();
+    const TickType_t now=xTaskGetTickCount();
+    bool stopped=false;
     portENTER_CRITICAL(&state_lock);
-    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
+    /* STOP cancels all active BLE-owned zones, including a scene whose
+     * ownership bit was cleared during a pending disconnect. A genuine
+     * unrelated HTTP show remains untouched. */
+    if(ble_owns_show || ble_fx_enabled){
+        ble_owns_show=false;
+        ble_fx_enabled=false;
+        ot_fx_bank_stop_all(&fx_bank);
+        native_show.mode=OT_SHOW_OFF;
+        native_show_deadline=now;
+        stopped=true;
+    }
     portEXIT_CRITICAL(&state_lock);
-    /* status is refreshed by render task; don't suppress a newer Wi-Fi show. */
+    /* Restore the previous status indication immediately, rather than
+     * leaving a stale rainbow until the next BLE preview TTL expires. */
+    if(stopped)ot_st_show_active(false);
 }
 /* Eight opt-in named-by-slot effect snapshots in controller NVS. Flash records are
  * independently checksummed and versioned; they never alter road-lighting maps.
