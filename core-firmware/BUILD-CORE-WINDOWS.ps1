@@ -2,7 +2,8 @@
 # Run from the ESP-IDF v5.5.5 PowerShell shortcut. Never flashes/erases a device.
 param(
     [string]$ProjectDir = "",
-    [ValidateRange(1, 16)][int]$Jobs = 2
+    [ValidateRange(1, 16)][int]$Jobs = 2,
+    [string]$PreviousSdkconfig = ""
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -17,8 +18,9 @@ if (-not (Test-Path -LiteralPath $cmake) -or
     -not (Test-Path -LiteralPath (Join-Path $ProjectDir "main\idf_component.yml"))) {
     throw "Not the OpenTail CORE source folder. Extract PR #12 source, then run this script from core-firmware."
 }
-if (-not $env:IDF_PATH -or -not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
-    throw "ESP-IDF environment is missing. Install ESP-IDF v5.5.5 and launch the 'ESP-IDF 5.5 PowerShell' shortcut, not ordinary PowerShell."
+if (-not $env:IDF_PATH -or -not (Get-Command idf.py -ErrorAction SilentlyContinue) -or
+    -not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+    throw "ESP-IDF environment is missing. Launch the existing 'ESP-IDF 5.5 PowerShell' shortcut, which provides both idf.py and Ninja."
 }
 $version = (& idf.py --version | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw "Cannot execute the ESP-IDF toolchain." }
@@ -46,6 +48,13 @@ if (Test-Path -LiteralPath $config) {
     }
 }
 $apLine = Get-CustomApLine $config
+if (-not $apLine -and $PreviousSdkconfig) {
+    if (-not (Test-Path -LiteralPath $PreviousSdkconfig)) {
+        throw "PreviousSdkconfig does not exist: $PreviousSdkconfig"
+    }
+    $apLine = Get-CustomApLine $PreviousSdkconfig
+    if (-not $apLine) { throw "PreviousSdkconfig did not contain a custom AP password." }
+}
 if (-not $apLine) {
     $parent = Split-Path $ProjectDir -Parent
     $old = @(
@@ -55,10 +64,19 @@ if (-not $apLine) {
         "OpenTail-CORE-Alpha-v0.1.20-BLE-Control",
         "OpenTail-CORE-Alpha-v0.1.18-Universal-Triggers"
     )
-    foreach ($name in $old) {
-        $candidate = Join-Path $parent (Join-Path $name "sdkconfig")
-        $apLine = Get-CustomApLine $candidate
+    # Our original pre-GitHub firmware folders live on Desktop\OpenTail.
+    # A newly downloaded GitHub ZIP nests core-firmware under a new repo folder,
+    # so looking only next to core-firmware silently missed the old password.
+    $roots = @($parent, (Join-Path $env:USERPROFILE "Desktop\OpenTail"))
+    foreach ($root in $roots) {
         if ($apLine) { break }
+        foreach ($name in $old) {
+            $folder = Join-Path $root $name
+            $apLine = Get-CustomApLine (Join-Path $folder "sdkconfig")
+            if ($apLine) { break }
+            $apLine = Get-CustomApLine (Join-Path (Join-Path $folder $name) "sdkconfig")
+            if ($apLine) { break }
+        }
     }
 }
 if (-not $apLine) {
@@ -87,8 +105,12 @@ $oldLocation = Get-Location
 try {
     Set-Location $ProjectDir
     Write-Host "Building OpenTail CORE for ESP32-S3 with $Jobs compilation jobs. No flash will be attempted."
-    & idf.py -j $Jobs build
-    if ($LASTEXITCODE -ne 0) { throw "ESP-IDF build FAILED. No firmware ZIP was created." }
+    # Windows ESP-IDF 5.5.5 idf.py does NOT accept '-j'. The proven
+    # workaround is to configure once, then limit Ninja directly to 2 jobs.
+    & idf.py reconfigure
+    if ($LASTEXITCODE -ne 0) { throw "ESP-IDF reconfigure FAILED. No firmware ZIP was created." }
+    & ninja -C build -j $Jobs
+    if ($LASTEXITCODE -ne 0) { throw "Ninja firmware build FAILED. No firmware ZIP was created." }
 
     $build = Join-Path $ProjectDir "build"
     $flashJson = Join-Path $build "flasher_args.json"
