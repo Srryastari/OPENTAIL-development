@@ -498,6 +498,9 @@ public final class MainActivity extends Activity {
                 return j.toString();
             } catch (Exception ignored) { return "{}"; }
         }
+        @JavascriptInterface public void effectPreset(int action,int slot) {
+            runOnUiThread(() -> {if(bridgePageAllowed()&&ble!=null)ble.fxPreset(action,slot);});
+        }
         @JavascriptInterface public void readEffectCapabilities() {
             runOnUiThread(() -> {if(bridgePageAllowed()&&ble!=null)ble.readFxCapabilities();});
         }
