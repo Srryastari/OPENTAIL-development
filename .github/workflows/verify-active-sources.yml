@@ -52,6 +52,9 @@ jobs:
           gradle-version: '8.11.1'
       - name: Validate Android WebView JavaScript syntax and output integration contract
         run: |
+          node --check android/app/src/main/assets/ble-show-panel.js
+          node --check android/qa/test_unified_ble_fx.cjs
+          node android/qa/test_unified_ble_fx.cjs
           node --check android/app/src/main/assets/ble-output-panel.js
           node --check android/app/src/main/assets/output-control-motion.js
           node --check android/app/src/main/assets/direct-ble-dashboard.js
