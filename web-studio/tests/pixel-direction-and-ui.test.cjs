@@ -17,6 +17,6 @@ assert(html.includes("hazard:'same',pulseHighMs:350"),'New projects must default
 assert(html.includes('id="ot-final-qa-01953"'),'Scoped mobile sizing CSS missing');
 assert(html.includes('ot-trigger-trailing')&&html.includes('ot-trigger-live-flag'),'Integrated trigger button labels missing');
 assert(html.includes('data-ot-sampled='),'Sampled strip display mode is not labeled');
-assert(html.includes('LIVE · SAMPLED VIEW'),'Live sampled strip must not claim all pixels shown');
+assert(html.includes('LIVE · EXACT INDEXES')&&html.includes('ot-live-canvas-scroll'),'Full WLED frames must show exact RGB values by data index');
 assert(html.includes('Indexes '),'Demo strips need visible index labels');
 console.log('Indexed turn direction, Hazard mirror and mobile QA contracts passed');
