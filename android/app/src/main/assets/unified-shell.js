@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.18: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.19: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -81,13 +81,13 @@
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
-  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Android v0.1.18</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
+  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Android v0.1.19</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
     <div id="ot-save-banner" class="ot-save-warning" hidden role="alert">Save failed · Review Studio changes</div><div class="ot-connection-grid"><button type="button" class="ot-connection-card" id="ot-wifi-card" data-active="false" aria-label="Wi-Fi connection settings">${icon('wifi')}<span><strong>Wi-Fi</strong><small id="ot-wifi-text">Not connected</small></span></button>
     <button type="button" class="ot-connection-card" id="ot-ble-card" data-active="false" aria-label="Bluetooth connection settings">${icon('bluetooth')}<span><strong>Bluetooth</strong><small id="ot-ble-text">Not connected</small></span></button></div>`;
   const settings = document.createElement('section');
   settings.className = 'ot-settings-page';
   settings.id = 'ot-unified-settings';
-  settings.innerHTML = `<h2>Settings</h2><p>Android v0.1.18 · Connections, preferences and controller tools.</p><div class="ot-settings-group">
+  settings.innerHTML = `<h2>Settings</h2><p>Android v0.1.19 · Connections, preferences and controller tools.</p><div class="ot-settings-group">
     <button class="ot-quick-action" data-ot-native="connect">Connect to CORE over Wi-Fi ${icon('arrow')}</button>
     <button class="ot-quick-action" data-ot-native="wifi">Android Wi-Fi settings ${icon('arrow')}</button>
     <button class="ot-quick-action" data-ot-native="scan">Find Bluetooth controller ${icon('arrow')}</button>
@@ -232,7 +232,7 @@
   setInterval(refresh,2000);
 })();
 
-/* OpenTail Android v0.1.18 — compact native-first surfaces.
+/* OpenTail Android v0.1.19 — compact native-first surfaces.
    Preserve all existing Studio editors and their proven save/readback functions.
    These read-only overview cards never overwrite output or trigger configuration. */
 (function () {
@@ -619,7 +619,7 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-green{color:#29da8b!im
 .ot-connection-card[data-active="true"] small{color:#29da8b!important}
 `;
   css.textContent += `
-/* v0.1.18: approved 100x22 reference status chip. ONLY the badges change. */
+/* v0.1.19: approved 100x22 reference status chip. ONLY the badges change. */
 .ot-connected-badge,
 html[data-ot-theme="light"] .ot-connected-badge {
   box-sizing:border-box!important;
