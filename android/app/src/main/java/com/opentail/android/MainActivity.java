@@ -218,7 +218,6 @@ public final class MainActivity extends Activity {
                     // Intercept Studio's project export to use Android's user-chosen document picker.
                     view.evaluateJavascript("window.download=function(name,text){window.OpenTailApp.exportJson(String(name),String(text));};", null);
                     view.evaluateJavascript(STUDIO_HAPTIC_JS, null);
-                    injectInlineBleControls(view);
                     injectBleOutputControls(view);
                     injectUnifiedShell(view);
                     injectDirectBleDashboard(view);
@@ -397,18 +396,6 @@ public final class MainActivity extends Activity {
     /** Install the same Show Modes BLE controls into both offline and CORE-hosted Studio.
      *  Repeating Studio rendering does not destroy them: the script mounts on each tab render.
      */
-    private void injectInlineBleControls(WebView view) {
-        try (InputStream in = getAssets().open("ble-show-panel.js");
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
-            view.evaluateJavascript(out.toString("UTF-8"), null);
-        } catch (Exception ex) {
-            android.util.Log.e("OpenTail", "Failed to inject native BLE Show Modes", ex);
-        }
-    }
-
     private void injectBleOutputControls(WebView view) {
         try (InputStream in = getAssets().open("ble-output-panel.js");
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
