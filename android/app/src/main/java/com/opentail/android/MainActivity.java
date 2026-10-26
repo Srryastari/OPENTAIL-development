@@ -524,6 +524,18 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void authorizeWifiLegacy(){
             runOnUiThread(() -> { if(bridgePageAllowed()) enableBleWifiFallback(); });
         }
+        /** Used by the *one* Show Modes effect editor once supported FX IDs are discovered.
+         * Kept independent of legacy five-effect BLE panel during migration.
+         */
+        @JavascriptInterface public void startEffectId(int effectId,int output,int zone,
+                int r,int g,int b,int bgR,int bgG,int bgB,
+                int brightness,int speed,int intensity,int paletteId,int ttl) {
+            runOnUiThread(() -> {
+                if (!bridgePageAllowed() || ble == null) return;
+                ble.showFx(effectId,output,zone,r,g,b,bgR,bgG,bgB,
+                           brightness,speed,intensity,paletteId,ttl);
+            });
+        }
         @JavascriptInterface public void stop() {
             runOnUiThread(() -> { if (bridgePageAllowed() && ble != null) ble.stopShow(); });
         }
