@@ -1595,9 +1595,12 @@ window.OpenTailBLEEffects={
    state.wledPalettes=['Default',undefined,'Color 1','Colors 1&2','Color Gradient'];
    for(const id of otBleFxIds)state.wledEffects[id]=OT_CORE_FX_NAMES[id];
    if(otBleFxIds.length&&!otBleFxIds.includes(otChosenEffectId)){
-     otChosenEffectId=otBleFxIds[0];
-     state.wledEdit={...(state.wledEdit||{}),fx:otChosenEffectId,color:'#ffffff',
-       background:'#000000',tertiary:'#ffffff',sx:128,ix:128,bri:160,pal:0};
+     const requested=Number(state.wledEdit?.fx);
+     otChosenEffectId=otBleFxIds.includes(requested)?requested:otBleFxIds[0];
+     // Preserve the existing session's colors/sliders when learning capabilities.
+     // Only reset invalid/missing fields, never silently whiten the selection.
+     state.wledEdit={color:'#ffffff',background:'#000000',tertiary:'#ffffff',
+       sx:128,ix:128,bri:160,pal:0,...(state.wledEdit||{}),fx:otChosenEffectId};
    }
    state.status=otBleFxIds.length?'CORE Bluetooth confirms '+otBleFxIds.length+' effect modes':'No supported FX capability reply from CORE';
    render();
