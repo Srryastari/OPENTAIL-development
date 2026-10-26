@@ -26,6 +26,7 @@
 #include "status_led.h"
 #include "show_logic.h"
 #include "ble_command.h"
+#include "ble_fx_command.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
@@ -58,6 +59,10 @@ static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
 static bool ble_owns_show=false;
+/* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
+static bool ble_fx_enabled=false;
+static ot_ble_fx_packet_t ble_fx_request={0};
+static uint32_t ble_fx_generation=0;
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
@@ -487,7 +492,7 @@ static esp_err_t show_start(httpd_req_t *r){
     uint32_t start_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     portENTER_CRITICAL(&state_lock);
     bool ready=native_outputs_ready;
-    if(ready){ble_owns_show=false;native_show=cfg;native_show_deadline=now+pdMS_TO_TICKS(ttl);
+    if(ready){ble_owns_show=false;ble_fx_enabled=false;native_show=cfg;native_show_deadline=now+pdMS_TO_TICKS(ttl);
       native_show_started_ms=start_ms;}
     portEXIT_CRITICAL(&state_lock);
     if(!ready)return respond_err(r,409,"pixel outputs not initialized");
@@ -496,7 +501,7 @@ static esp_err_t show_start(httpd_req_t *r){
 static esp_err_t show_stop(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    ble_owns_show=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     portEXIT_CRITICAL(&state_lock);
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"active\":false}");
@@ -528,15 +533,45 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
-    if(ready){native_show=show;ble_owns_show=true;native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)request->ttl_sec*1000u);}
+    portEXIT_CRITICAL(&state_lock);
+    return ready;
+}
+/* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
+ * Temporary bench effects expire in 60 seconds, existing triggers take precedence.
+ */
+bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
+    ot_wled_fx_metadata_t meta;
+    if(!req||!ot_wled_fx_metadata(req->effect_id,&meta)||req->palette_id!=0||
+       req->chain_mask<1||req->chain_mask>3||req->zone_mask==0||
+       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
+        return false;
+    const TickType_t now=xTaskGetTickCount();
+    bool ready;
+    portENTER_CRITICAL(&state_lock);
+    ready=native_outputs_ready;
+    if(ready){
+        /* Existing show state gates arbitration, deadlines and trigger-independent status. */
+        native_show=(ot_show_t){
+            .mode=OT_SHOW_SOLID,.color={req->r,req->g,req->b},
+            .brightness=req->brightness,.speed=0,
+            .chain_mask=req->chain_mask,.section_mask=req->zone_mask
+        };
+        ble_fx_request=*req;
+        ++ble_fx_generation;
+        ble_fx_enabled=true;
+        ble_owns_show=true;
+        native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
+    }
     portEXIT_CRITICAL(&state_lock);
     return ready;
 }
 void ot_ble_stop_show(void){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    if(ble_owns_show){ble_owns_show=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
+    if(ble_owns_show){ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;}
     portEXIT_CRITICAL(&state_lock);
     /* status is refreshed by render task; don't suppress a newer Wi-Fi show. */
 }
@@ -792,6 +827,10 @@ static bool strip_init(void) {
 }
 static void led_task(void *p) {
     (void)p;
+    /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
+    static ot_wled_fx_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
+    uint32_t prior_fx_generation=0;
     while(1){
        bool levels[OT_IN_COUNT];
        for(int i=0;i<OT_IN_COUNT;++i) {
@@ -801,6 +840,7 @@ static void led_task(void *p) {
        uint8_t physical=ot_debounce(&inputs,levels,OT_DEBOUNCE_TICKS);
        TickType_t now=xTaskGetTickCount();
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
+       bool local_fx_enabled=false;ot_ble_fx_packet_t local_fx={0};uint32_t local_fx_generation=0;
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
        live_input_mask=physical;
@@ -809,11 +849,18 @@ static void led_task(void *p) {
        combined=ot_tm_resolve(&local_tm,physical);
        if(before_deadline(now,sim_deadline)) combined|=sim_mask;
        if(before_deadline(now,demo_deadline)) local_demo=demo;
-       if(show_window(now)){local_show=native_show;show_started=native_show_started_ms;}
-       else native_show.mode=OT_SHOW_OFF;
+       if(show_window(now)){
+           local_show=native_show;show_started=native_show_started_ms;
+           local_fx_enabled=ble_fx_enabled;
+           if(local_fx_enabled){local_fx=ble_fx_request;local_fx_generation=ble_fx_generation;}
+       } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
        bool native_rendering=decision.mode==OT_ARB_SHOW;
+       if(local_fx_enabled && local_fx_generation!=prior_fx_generation){
+           memset(fx_state,0,sizeof(fx_state));
+           prior_fx_generation=local_fx_generation;
+       }
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
            uint32_t elapsed=(uint32_t)((uint32_t)(esp_timer_get_time()/1000LL)-show_started);
@@ -823,6 +870,32 @@ static void led_task(void *p) {
                if(!ot_om_layout(output,&zone_layout)){
                    ot_st_set_fault("invalid output mapping");break;
                }
+               /* Render each selected zone once, even if the native frame is indexed by
+                * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
+               if(native_rendering && local_fx_enabled){
+                   memset(fx_frame[ch],0,sizeof(fx_frame[ch]));
+                   unsigned offset=0;
+                   for(int z=0;z<output->zone_count;z++){
+                       unsigned len=output->zones[z].pixels;
+                       if(len && (local_fx.chain_mask&(1u<<ch)) &&
+                          (local_fx.zone_mask&(1u<<z)) &&
+                          output->zones[z].role!=OT_OM_OFF &&
+                          offset+len<=OT_CHAIN_PIXELS){
+                           ot_wled_fx_config_t cfg={
+                               .effect_id=local_fx.effect_id,
+                               .speed=local_fx.speed,.intensity=local_fx.intensity,
+                               .brightness=local_fx.brightness,
+                               .palette_id=local_fx.palette_id,.frame_time_ms=23,
+                               .foreground={local_fx.r,local_fx.g,local_fx.b},
+                               .background={local_fx.bg_r,local_fx.bg_g,local_fx.bg_b}
+                           };
+                           if(!ot_wled_fx_render(&cfg,&fx_state[ch][z],elapsed,
+                                                &fx_frame[ch][offset],len))
+                               ot_st_set_fault("invalid BLE effect frame");
+                       }
+                       offset+=len;
+                   }
+               }
                for(unsigned px=0;px<layout.chain_pixels;++px){
                    ot_rgb_t c={0,0,0};
                    int zone=ot_om_section(output,px);
@@ -830,7 +903,10 @@ static void led_task(void *p) {
                        if(combined){
                            c=ot_om_trigger_color(output->zones[zone].role,combined,OT_MAX_BRIGHTNESS);
                        }else if(native_rendering){
-                           c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
+                           if(local_fx_enabled){
+                               ot_wled_rgb_t fx=fx_frame[ch][px];
+                               c=(ot_rgb_t){fx.r,fx.g,fx.b};
+                           }else c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
                        }else if(local_demo.mode!=OT_DEMO_OFF){
                            c=ot_pixel_color(&zone_layout,ch,px,0,&local_demo,frame_index);
                        }
