@@ -94,7 +94,9 @@ window.OpenTailBLEOutputs={
   mount();paint();
  },onResult(raw){
   let r;try{r=JSON.parse(raw);}catch{return;}
-  if(pendingIndex!==null&&r.index!==pendingIndex){message='BLE response index mismatch; no configuration applied. Reload the selected output.';busy=false;pendingIndex=null;paint();return;}
+  // Ignore late callbacks after disconnect or completion; only a pending request owns a result.
+  if(pendingIndex===null)return;
+  if(r.index!==pendingIndex){message='BLE response index mismatch; no configuration applied. Reload the selected output.';busy=false;pendingIndex=null;paint();return;}
   busy=false;pendingIndex=null;message=r.message||'BLE operation complete';
   if(r.ok&&r.output&&(r.index===0||r.index===1)){lastReadAt=new Date().toLocaleTimeString();saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
   paint();
