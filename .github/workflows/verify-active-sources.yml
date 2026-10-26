@@ -33,6 +33,40 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
+      - name: Verify ESP32-S3 flash images and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=core-firmware/build
+          test -s "$build/opentail_core_alpha.bin"
+          test -s "$build/bootloader/bootloader.bin"
+          test -s "$build/partition_table/partition-table.bin"
+          test -s "$build/flasher_args.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          build=Path('core-firmware/build')
+          meta=json.loads((build/'flasher_args.json').read_text())
+          files=meta.get('flash_files',{})
+          assert isinstance(files,dict) and len(files)>=3, 'Flasher manifest needs bootloader, partitions and app'
+          for name in files.values():
+              p=build/name
+              assert p.is_file() and p.stat().st_size>0, f'Missing referenced flash image: {p}'
+          print('Validated flash images and flasher offsets:',list(files))
+          PY
+      - name: Upload flashable CORE bench firmware package
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-esp32s3-bench-firmware
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+            core-firmware/build/flash_args
+            core-firmware/build/project_description.json
+          if-no-files-found: error
+          retention-days: 14
 
   android-debug-apk:
     runs-on: ubuntu-latest
