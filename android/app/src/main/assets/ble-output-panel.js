@@ -9,7 +9,7 @@ window.__otBleOutputsInstalled=true;
 const roles=[['off','Disabled'],['park_brake','Parking + Brake'],['parking','Parking'],['brake','Brake'],['left_turn','Left Turn'],['right_turn','Right Turn'],['reverse','Reverse'],['aux1','Aux 1'],['aux2','Aux 2'],['aux3','Aux 3'],['decorative','Show only']];
 const orders=['RGB','RBG','GRB','GBR','BRG','BGR'];
 const saved=[null,null],draft=[null,null];
-let selected=0,busy=false,message='Connect BLE, pair once using BOOT, then load device outputs.',shown=false;
+let selected=0,busy=false,pendingIndex=null,message='Connect BLE, pair once using BOOT, then load device outputs.',shown=false;
 const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function nativeState(){try{return JSON.parse(window.OpenTailNativeBLE.getState()||'{}');}catch{return {};}}
 function isLayout(){try{return typeof state!=='undefined'&&state.tab==='layout';}catch{return false;}}
@@ -82,17 +82,18 @@ const node=document.createElement('section');node.id='ot-ble-output-card';node.c
 const existing=main.querySelector('.ot-om-card');if(existing)existing.before(node);else main.prepend(node);
 paint();
 }
-function load(index){if(busy)return;busy=true;message='Reading output '+(index+1)+' over BLE…';paint();window.OpenTailNativeBLE.readOutput(index);}
+function load(index){if(busy)return;if(index!==0&&index!==1)return;pendingIndex=index;busy=true;message='Reading output '+(index+1)+' over BLE…';paint();window.OpenTailNativeBLE.readOutput(index);}
 window.OpenTailBLEOutputs={
  connectionChanged(status){
   const st=nativeState();
   message=st.radioOn===false?'Bluetooth switched off · disconnected':(status||st.message||'BLE status updated');
-  if (st.radioOn===false || !st.connected) busy=false;
+  if (st.radioOn===false || !st.connected){busy=false;pendingIndex=null;}
   mount();paint();
  },onResult(raw){
   let r;try{r=JSON.parse(raw);}catch{return;}
-  busy=false;message=r.message||'BLE operation complete';
-  if(r.ok&&r.output){saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
+  if(pendingIndex!==null&&r.index!==pendingIndex){message='BLE response index mismatch; no configuration applied. Reload the selected output.';busy=false;pendingIndex=null;paint();return;}
+  busy=false;pendingIndex=null;message=r.message||'BLE operation complete';
+  if(r.ok&&r.output&&(r.index===0||r.index===1)){saved[r.index]=r.output;draft[r.index]=JSON.parse(JSON.stringify(r.output));}
   paint();
  },refresh(){mount();paint();}
 };
@@ -103,7 +104,7 @@ if(action==='scan')window.OpenTailNativeBLE.scan();
 else if(action==='authorize')window.OpenTailNativeBLE.authorize();
 else if(action==='pair')window.OpenTailNativeBLE.pairWithBoot();
 else if(action==='wifi')window.OpenTailNativeBLE.authorizeWifiLegacy();
-else if(action==='select'){selected=Number(b.dataset.index);paint();if(!draft[selected])load(selected);}
+else if(action==='select'){if(busy){message='Wait for the current BLE operation before switching outputs';paint();return;}const next=Number(b.dataset.index);if(next!==0&&next!==1)return;selected=next;paint();load(selected);}
 else if(action==='reload')load(selected);
 else if(action==='add'){if(!draft[selected]||draft[selected].zones.length>=8||busy)return;draft[selected].zones.push({name:'Zone '+(draft[selected].zones.length+1),pixels:0,role:'decorative'});message='Unsaved draft — adjust pixel totals before saving';paint();}
 else if(action==='remove'){if(!draft[selected]||draft[selected].zones.length<=1||busy)return;draft[selected].zones.splice(Number(b.dataset.index),1);message='Zone removed from unsaved draft';paint();}
@@ -111,7 +112,7 @@ else if(action==='save'){
  if(busy||!draft[selected])return;
  const o=draft[selected],sum=o.zones.reduce((n,z)=>n+Number(z.pixels||0),0);
  if(sum!==Number(o.pixels)||o.pixels<1||o.pixels>522){message='Zone pixel totals must equal active output count (1–522)';paint();return;}
- busy=true;message='Writing, committing, and verifying saved output over BLE…';paint();
+ busy=true;pendingIndex=selected;message='Writing, committing, and verifying saved output over BLE…';paint();
  window.OpenTailNativeBLE.saveOutput(selected,JSON.stringify(o));
 }
 });
