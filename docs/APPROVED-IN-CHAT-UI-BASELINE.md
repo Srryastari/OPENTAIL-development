@@ -1,6 +1,6 @@
 # OpenTail UI master approval baseline — 26 October 2026
 
-**Approval scope:** User-approved visual design system and selected interaction patterns. This is a specification, **not** certification that current Android/Studio code matches it. Latest audited candidate: Studio v0.19.56 / Android v0.1.23, draft PR #6. The current application still has duplicate navigation, competing Show Modes editors and approximate simulation. No phone screenshot, BLE, LED, firmware or vehicle-safety validation has been established by this approval.
+**Approval scope:** User-approved visual design system and final visual concepts for all six tabs, with their specified interaction patterns. This is a specification, **not** certification that current Android/Studio code matches it. Latest audited candidate: Studio v0.19.56 / Android v0.1.23, draft PR #6. The current application still has duplicate navigation, competing Show Modes editors and approximate simulation. No phone screenshot, BLE, LED, firmware or vehicle-safety validation has been established by this approval.
 
 ## Source of truth
 
@@ -68,9 +68,26 @@ Two contextual modes, **Startup** and **Shutdown**, in the single Auto Events ta
 
 Maintain the approved OLED grayscale card design, neutral sliders, compact gray sampled preview and separate Startup/Shutdown configuration. **This approval is of the concept, not implementation in CORE firmware.**
 
-### Settings — final organization pending
+### Settings — final visual concept approved (26 October 2026)
 
-Keep each controller configuration, diagnostics entry point and preference **in one authoritative location**. Do not duplicate editable settings in Home or other workspaces; preserve functionality while consolidating navigation.
+Settings is the single location for app preferences, diagnostics, project backup/import/export and About/version/changelog/licenses. It uses the approved grayscale styling, native-looking row affordances and inline expandable sections, **not** secondary navigation or duplicate settings across Home/Layout/Triggers. Preserve the existing implementation of project backup, diagnostics and authorization rather than inventing a second pathway.
+
+- **App Preferences:** remember last selected controller, optional auto-connect on app launch (must never automatically start lighting effects), and adaptive/balanced/smooth **preview rendering quality** distinctly separate from physical LED output. These controls were visually approved as a concept; real option availability and storage must be confirmed during implementation.
+- **Diagnostics:** expanded inline, status values from confirmed controller data rather than fabricated results; offline values shown as unavailable. Preserve current detailed debugging and safety-relevant telemetry in one location.
+- **Project Backup:** one canonical import/export workflow, with confirmation before replacing a project.
+- **About:** exact Studio/Android/CORE versions, release history, third-party attribution and licenses.
+- **Future, not current scope:** provide an option to **add multiple OpenTail controllers together** into a grouped/multi-controller experience. Later engineering must establish secure pairing/authorization for each controller, group membership, compatible output/zone assignment, synchronization, disconnect behavior, and safe independent road-lighting overrides. **Do not introduce multi-controller UI or claim it works in the current release.** Home remains the single connection/status entry point until this feature is designed.
+
+### Final visual approval tracker — all six tabs
+
+- **Home:** locked visual concept and connection/status dashboard.
+- **Show Modes:** locked hierarchy, per-zone animated sampled preview, one inline effect editor and compact metadata-driven effect/color browser direction. Full renderer fidelity and metadata coverage still require implementation/verification.
+- **Layout:** locked final zone editor concept.
+- **Triggers:** locked final visual concept including inline custom trigger delete and protected built-ins.
+- **Auto Events:** locked final optional one-shot ACC lifecycle concept and local preview.
+- **Settings:** locked final visual concept; multi-controller grouping deferred.
+
+**No more proactive visual redesigns.** These approved concepts are a preserved implementation contract. Any proposed changes should be intentional and obtain fresh approval; still distinguish concept approval from APK, firmware, BLE, LED and road-safety validation.
 
 ## Implementation and verification — NOT YET APPROVED AS COMPLETE
 
