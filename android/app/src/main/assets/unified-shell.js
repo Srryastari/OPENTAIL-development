@@ -619,7 +619,7 @@ html[data-ot-theme="light"] .ot-connected-badge.ot-status-green{color:#29da8b!im
 .ot-connection-card[data-active="true"] small{color:#29da8b!important}
 `;
   css.textContent += `
-/* v0.1.17: approved 100x22 reference status chip. ONLY the badges change. */
+/* v0.1.18: approved 100x22 reference status chip. ONLY the badges change. */
 .ot-connected-badge,
 html[data-ot-theme="light"] .ot-connected-badge {
   box-sizing:border-box!important;
