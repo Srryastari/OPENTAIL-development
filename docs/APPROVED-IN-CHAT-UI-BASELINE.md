@@ -53,9 +53,9 @@ One Layout card, Add Zone in its header, editable pill project name, expandable 
 
 - The approved Layout interaction includes an exact numeric LED-count input alongside the neutral LED slider, local immediate zone count feedback, and an inline two-step confirmation when removing a zone. Remove Zone remains beneath the sixteen-sample strip preview. This is visual approval, not evidence of on-device implementation.
 
-### Triggers — selection/testing behavior approved
+### Triggers — final visual concept approved (26 October 2026)
 
-A trigger card selects/deselects independently of its test action. Preserve simultaneous offline tests and multi-profile batch selection/editing, Park+Brake and Left+Right turn, trigger priorities, arbitration/stop/restore, and untouched fields. Custom triggers may receive contextual Delete with confirmation; never offer it for built-in road-lighting triggers. Trigger previews/tests are not Show Modes decorative previews.
+A trigger card selects/deselects independently of its test action. Preserve simultaneous offline tests and multi-profile batch selection/editing, Park+Brake and Left+Right turn, trigger priorities, arbitration/stop/restore, and untouched fields. Custom triggers have a **visible contextual red trash/remove icon directly in their own row beside Test**, opening an **inline confirmation**. **Built-in Parking, Brake, Left Turn, Right Turn, and Reverse rows do not have a delete icon**; all remain selectable, editable and independently testable. Do not duplicate deletion in settings. Trigger previews/tests are not Show Modes decorative previews.
 
 ### Auto Events — interaction accepted, final visual polish pending
 
