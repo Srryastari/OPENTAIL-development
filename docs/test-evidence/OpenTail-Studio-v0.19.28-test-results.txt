@@ -1,0 +1,30 @@
+OpenTail Studio v0.19.28 · TEST RESULTS (2026-10-23)
+======================================================
+SOURCE: /mnt/data/opentail-v0.19.28.htm
+Checks performed in isolated JavaScript simulations with a mocked WLED /json/state API.
+
+Syntax: PASS (node --check, extracted inline JS)
+Focused checks: 17 PASS / 0 FAIL
+Regression checks carried from v0.19.27: 19 PASS / 0 FAIL
+End-to-end bench simulation: 7 PASS / 0 FAIL
+Total: 43 PASS / 0 FAIL
+
+Key tested paths:
+- Stop Show with a saved, inactive in-session bench snapshot -> WLED OFF, snapshot retained
+- Stop Show after reload with a prior-session recovery record -> WLED OFF, recovery retained
+- Stop Show while Brake bench trigger active -> no WLED OFF command; accurate warning
+- Stop Show without any bench snapshot -> WLED OFF
+- Stop Show during an in-flight WLED command -> OFF command lands last
+- Start Brake trigger -> Stop Trigger -> Stop Show -> Restore Previous Lighting -> original scene verified
+- Effect settings position above effect library; no duplicate settings node
+- Fx/Bg/Cs inline controls, full editor control and stop button preserved
+- Sequence shuffle titles, shared palette, Stop/Restore across tab navigation, automatic event previews
+
+NOT VERIFIED:
+- Live controller at 10.0.0.13, real WS2815 strips, or hardware 12V triggers
+- Mobile / desktop visual rendering in a browser. Local Chromium rendering attempt timed out.
+- Road-legal or hardware fail-safe behavior (outside scope of this browser app).
+
+CAUTION: A retained recovery snapshot is expected after Stop Trigger (OFF).
+Stop Show turns output OFF but intentionally does not discard the saved snapshot.
+Restore lighting explicitly or discard only after inspecting the actual LEDs.
