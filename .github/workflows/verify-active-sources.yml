@@ -109,7 +109,7 @@ jobs:
           import re
           from pathlib import Path
           html=Path('web-studio/opentail.htm').read_text()
-          scripts=re.findall(r'<script(?:\\s[^>]*)?>([\\s\\S]*?)</script>',html)
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',html,flags=re.S)
           assert len(scripts)>=1, 'No Studio scripts found'
           for i,src in enumerate(scripts):
               Path(f'/tmp/opentail-script-{i}.js').write_text(src)
