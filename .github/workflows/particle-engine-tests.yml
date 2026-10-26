@@ -1,0 +1,26 @@
+name: Particle engine host tests
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/effects/**'
+      - '.github/workflows/particle-engine-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'core-firmware/effects/**'
+      - '.github/workflows/particle-engine-tests.yml'
+permissions:
+  contents: read
+jobs:
+  host-cxx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run isolated effect tests
+        run: |
+          set -eux
+          for source in core-firmware/effects/tests/*_smoke.cpp; do
+            exe="/tmp/$(basename "$source" .cpp)"
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer "$source" -o "$exe"
+            "$exe"
+          done
