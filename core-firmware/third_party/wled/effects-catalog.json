@@ -1,0 +1,1527 @@
+{
+  "note": "Reference catalog only; not a list of fully ported CORE effects. WLED-derived metadata, EUPL-1.2-or-later.",
+  "source": {
+    "repository": "https://github.com/wled/WLED",
+    "commit": "20e7a717664295eefc6ad77972cee1888d2da072",
+    "files": [
+      "wled00/FX.h",
+      "wled00/FX.cpp"
+    ],
+    "license": "EUPL-1.2-or-later"
+  },
+  "upstreamMetadataOccurrences": 218,
+  "distinctResolvedIds": 201,
+  "unmappedMetadataSymbols": 16,
+  "coreCompatibilityModuleIds": [
+    0,
+    1,
+    23
+  ],
+  "effects": [
+    {
+      "id": 186,
+      "name": "Akemi",
+      "wledMacro": "FX_MODE_2DAKEMI",
+      "wledMetadata": "Akemi@Color speed,Dance;Head palette,Arms & Legs,Eyes & Mouth;Face palette;2f;si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 220,
+      "name": "Analog Clock 2D",
+      "wledMacro": "FX_MODE_2DANALOGCLOCK",
+      "wledMetadata": "Analog Clock 2D@,,,,,Seconds,Soft;Hour,Minute,Second;;2;o1=1,o2=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 27,
+      "name": "Android",
+      "wledMacro": "FX_MODE_ANDROID",
+      "wledMetadata": "Android@!,Width;!,!;!;;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 38,
+      "name": "Aurora",
+      "wledMacro": "FX_MODE_AURORA",
+      "wledMetadata": "Aurora@!,!;1,2,3;!;;sx=24,pal=50",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 183,
+      "name": "Black Hole",
+      "wledMacro": "FX_MODE_2DBLACKHOLE",
+      "wledMetadata": "Black Hole@Fade rate,Outer Y freq.,Outer X freq.,Inner X freq.,Inner Y freq.,Solid,,Blur;!;!;2;pal=11",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 115,
+      "name": "Blends",
+      "wledMacro": "FX_MODE_BLENDS",
+      "wledMetadata": "Blends@Shift speed,Blend speed;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 1,
+      "name": "Blink",
+      "wledMacro": "FX_MODE_BLINK",
+      "wledMetadata": "Blink@!,Duty cycle;!,!;!;01",
+      "coreStatus": "host-tested-compatibility-module-only"
+    },
+    {
+      "id": 26,
+      "name": "Blink Rainbow",
+      "wledMacro": "FX_MODE_BLINK_RAINBOW",
+      "wledMetadata": "Blink Rainbow@Frequency,Blink duration;!,!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 121,
+      "name": "Blobs",
+      "wledMacro": "FX_MODE_2DBLOBS",
+      "wledMetadata": "Blobs@!,# blobs,Blur,Trail;!;!;2;c1=8",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 163,
+      "name": "Blurz",
+      "wledMacro": "FX_MODE_BLURZ",
+      "wledMetadata": "Blurz@Fade rate,Blur;!,Color mix;!;1f;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 91,
+      "name": "Bouncing Balls",
+      "wledMacro": "FX_MODE_BOUNCINGBALLS",
+      "wledMetadata": "Bouncing Balls@Gravity,# of balls,,,,,Overlay;!,!,!;!;1;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 68,
+      "name": "Bpm",
+      "wledMacro": "FX_MODE_BPM",
+      "wledMetadata": "Bpm@!;!;!;;sx=64",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 2,
+      "name": "Breathe",
+      "wledMacro": "FX_MODE_BREATH",
+      "wledMetadata": "Breathe@!;!,!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 88,
+      "name": "Candle",
+      "wledMacro": "FX_MODE_CANDLE",
+      "wledMetadata": "Candle@!,!;!,!;!;01;sx=96,ix=224,pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 102,
+      "name": "Candle Multi",
+      "wledMacro": "FX_MODE_CANDLE_MULTI",
+      "wledMetadata": "Candle Multi@!,!;!,!;!;;sx=96,ix=224,pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 28,
+      "name": "Chase",
+      "wledMacro": "FX_MODE_CHASE_COLOR",
+      "wledMetadata": "Chase@!,Width;!,!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 37,
+      "name": "Chase 2",
+      "wledMacro": "FX_MODE_RUNNING_COLOR",
+      "wledMetadata": "Chase 2@!,Width;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 54,
+      "name": "Chase 3",
+      "wledMacro": "FX_MODE_TRICOLOR_CHASE",
+      "wledMetadata": "Chase 3@!,Size;1,2,3;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 31,
+      "name": "Chase Flash",
+      "wledMacro": "FX_MODE_CHASE_FLASH",
+      "wledMetadata": "Chase Flash@!;Bg,Fx;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 32,
+      "name": "Chase Flash Rnd",
+      "wledMacro": "FX_MODE_CHASE_FLASH_RANDOM",
+      "wledMetadata": "Chase Flash Rnd@!;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 30,
+      "name": "Chase Rainbow",
+      "wledMacro": "FX_MODE_CHASE_RAINBOW",
+      "wledMetadata": "Chase Rainbow@!,Width;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 29,
+      "name": "Chase Random",
+      "wledMacro": "FX_MODE_CHASE_RANDOM",
+      "wledMetadata": "Chase Random@!,Width;!,,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 111,
+      "name": "Chunchun",
+      "wledMacro": "FX_MODE_CHUNCHUN",
+      "wledMetadata": "Chunchun@!,Gap size;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 218,
+      "name": "Color Clouds",
+      "wledMacro": "FX_MODE_COLORCLOUDS",
+      "wledMetadata": "Color Clouds@!,!,Clouds,Colors,Distance,,,Cozy;;!;;sx=24,ix=32,c1=48,c2=64,c3=12,pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 167,
+      "name": "Colored Bursts",
+      "wledMacro": "FX_MODE_2DCOLOREDBURSTS",
+      "wledMetadata": "Colored Bursts@Speed,# of lines,,,Blur,Gradient,Smear,Dots;;!;2;c3=16",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 34,
+      "name": "Colorful",
+      "wledMacro": "FX_MODE_COLORFUL",
+      "wledMetadata": "Colorful@!,Saturation;1,2,3;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 8,
+      "name": "Colorloop",
+      "wledMacro": "FX_MODE_RAINBOW",
+      "wledMetadata": "Colorloop@!,Saturation;;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 74,
+      "name": "Colortwinkles",
+      "wledMacro": "FX_MODE_COLORTWINKLE",
+      "wledMetadata": "Colortwinkles@Fade speed,Spawn speed;;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 67,
+      "name": "Colorwaves",
+      "wledMacro": "FX_MODE_COLORWAVES",
+      "wledMetadata": "Colorwaves@!,Hue;!;!;;pal=26",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 77,
+      "name": "Copy Segment",
+      "wledMacro": "FX_MODE_COPY",
+      "wledMetadata": "Copy Segment@,Color shift,Lighten,Brighten,ID,Axis(2D),FullStack(last frame);;;12;ix=0,c1=0,c2=0,c3=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 119,
+      "name": "Crazy Bees",
+      "wledMacro": "FX_MODE_2DCRAZYBEES",
+      "wledMetadata": "Crazy Bees@!,Blur,,,,Smear;;!;2;pal=11,ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 112,
+      "name": "Dancing Shadows",
+      "wledMacro": "FX_MODE_DANCING_SHADOWS",
+      "wledMetadata": "Dancing Shadows@!,# of shadows;!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 18,
+      "name": "Dissolve",
+      "wledMacro": "FX_MODE_DISSOLVE",
+      "wledMetadata": "Dissolve@Repeat speed,Dissolve speed,,,,Random,Complete;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 19,
+      "name": "Dissolve Rnd",
+      "wledMacro": "FX_MODE_DISSOLVE_RANDOM",
+      "wledMetadata": "Dissolve Rnd@Repeat speed,Dissolve speed;,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 124,
+      "name": "Distortion Waves",
+      "wledMacro": "FX_MODE_2DDISTORTIONWAVES",
+      "wledMetadata": "Distortion Waves@!,Scale,,,,Fill,Zoom,Alt;;!;2;pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 159,
+      "name": "DJ Light",
+      "wledMacro": "FX_MODE_DJLIGHT",
+      "wledMetadata": "DJ Light@Speed;;;01f;m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 152,
+      "name": "DNA",
+      "wledMacro": "FX_MODE_2DDNA",
+      "wledMetadata": "DNA@Scroll speed,Blur,,,,Smear;;!;2;ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 182,
+      "name": "DNA Spiral",
+      "wledMacro": "FX_MODE_2DDNASPIRAL",
+      "wledMetadata": "DNA Spiral@Scroll speed,Y frequency,Blur,,,Smear;;!;2;c1=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 164,
+      "name": "Drift",
+      "wledMacro": "FX_MODE_2DDRIFT",
+      "wledMetadata": "Drift@Rotation speed,Blur,,,,Twin,Smear;;!;2;ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 123,
+      "name": "Drift Rose",
+      "wledMacro": "FX_MODE_2DDRIFTROSE",
+      "wledMetadata": "Drift Rose@Fade,Blur,,,,Smear;;!;2;pal=11",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 96,
+      "name": "Drip",
+      "wledMacro": "FX_MODE_DRIP",
+      "wledMetadata": "Drip@Gravity,# of drips,,,,,Overlay;!,!;!;;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 7,
+      "name": "Dynamic",
+      "wledMacro": "FX_MODE_DYNAMIC",
+      "wledMetadata": "Dynamic@!,!,,,,Smooth;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 117,
+      "name": "Dynamic Smooth",
+      "wledMacro": "FX_MODE_DYNAMIC_SMOOTH",
+      "wledMetadata": "Dynamic Smooth@!,!;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 12,
+      "name": "Fade",
+      "wledMacro": "FX_MODE_FADE",
+      "wledMetadata": "Fade@!;!,!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 49,
+      "name": "Fairy",
+      "wledMacro": "FX_MODE_FAIRY",
+      "wledMetadata": "Fairy@!,# of flashers;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 51,
+      "name": "Fairytwinkle",
+      "wledMacro": "FX_MODE_FAIRYTWINKLE",
+      "wledMetadata": "Fairytwinkle@!,!;!,!;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 69,
+      "name": "Fill Noise",
+      "wledMacro": "FX_MODE_FILLNOISE8",
+      "wledMetadata": "Fill Noise@!;!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 66,
+      "name": "Fire 2012",
+      "wledMacro": "FX_MODE_FIRE_2012",
+      "wledMetadata": "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 45,
+      "name": "Fire Flicker",
+      "wledMacro": "FX_MODE_FIRE_FLICKER",
+      "wledMetadata": "Fire Flicker@!,!;!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 149,
+      "name": "Firenoise",
+      "wledMacro": "FX_MODE_2DFIRENOISE",
+      "wledMetadata": "Firenoise@X scale,Y scale,,,,Palette;;!;2;pal=66",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 42,
+      "name": "Fireworks",
+      "wledMacro": "FX_MODE_FIREWORKS",
+      "wledMetadata": "Fireworks@,Frequency;!,!;!;12;ix=192,pal=11",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 90,
+      "name": "Fireworks 1D",
+      "wledMacro": "FX_MODE_EXPLODING_FIREWORKS",
+      "wledMetadata": "Fireworks 1D@Gravity,Firing side;!,!;!;12;pal=11,ix=128",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 89,
+      "name": "Fireworks Starburst",
+      "wledMacro": "FX_MODE_STARBURST",
+      "wledMetadata": "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 110,
+      "name": "Flow",
+      "wledMacro": "FX_MODE_FLOW",
+      "wledMetadata": "Flow@!,Zones;;!;;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 179,
+      "name": "Flow Stripe",
+      "wledMacro": "FX_MODE_FLOWSTRIPE",
+      "wledMetadata": "Flow Stripe@Hue speed,Effect speed;;!;pal=11",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 155,
+      "name": "Freqmap",
+      "wledMacro": "FX_MODE_FREQMAP",
+      "wledMetadata": "Freqmap@Fade rate,Starting color;!,!;!;1f;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 138,
+      "name": "Freqmatrix",
+      "wledMacro": "FX_MODE_FREQMATRIX",
+      "wledMetadata": "Freqmatrix@Speed,Sound effect,Low bin,High bin,Sensitivity;;;01f;m12=3,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 141,
+      "name": "Freqpixels",
+      "wledMacro": "FX_MODE_FREQPIXELS",
+      "wledMetadata": "Freqpixels@Fade rate,Starting color and # of pixels;!,!,;!;1f;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 137,
+      "name": "Freqwave",
+      "wledMacro": "FX_MODE_FREQWAVE",
+      "wledMetadata": "Freqwave@Speed,Sound effect,Low bin,High bin,Pre-amp;;;01f;m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 177,
+      "name": "Frizzles",
+      "wledMacro": "FX_MODE_2DFRIZZLES",
+      "wledMetadata": "Frizzles@X frequency,Y frequency,Blur,,,Smear;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 160,
+      "name": "Funky Plank",
+      "wledMacro": "FX_MODE_2DFUNKYPLANK",
+      "wledMetadata": "Funky Plank@Scroll speed,,# of bands;;;2f;si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 172,
+      "name": "Game Of Life",
+      "wledMacro": "FX_MODE_2DGAMEOFLIFE",
+      "wledMetadata": "Game Of Life@!,,Blur,,,,,Mutation;!,!;!;2;pal=11,sx=128",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 139,
+      "name": "GEQ",
+      "wledMacro": "FX_MODE_2DGEQ",
+      "wledMetadata": "GEQ@Fade speed,Ripple decay,# of bands,,Bin,Color bars;!,,Peaks;!;2f;c1=255,c2=64,pal=11,si=0,c3=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 120,
+      "name": "Ghost Rider",
+      "wledMacro": "FX_MODE_2DGHOSTRIDER",
+      "wledMetadata": "Ghost Rider@Fade rate,Blur;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 87,
+      "name": "Glitter",
+      "wledMacro": "FX_MODE_GLITTER",
+      "wledMetadata": "Glitter@!,!,,,,,Overlay;,,Glitter color;!;;pal=11,m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 46,
+      "name": "Gradient",
+      "wledMacro": "FX_MODE_GRADIENT",
+      "wledMetadata": "Gradient@!,Spread;!,!;!;;ix=16",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 156,
+      "name": "Gravcenter",
+      "wledMacro": "FX_MODE_GRAVCENTER",
+      "wledMetadata": "Gravcenter@Rate of fall,Sensitivity;!,!;!;1v;ix=128,m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 157,
+      "name": "Gravcentric",
+      "wledMacro": "FX_MODE_GRAVCENTRIC",
+      "wledMetadata": "Gravcentric@Rate of fall,Sensitivity;!,!;!;1v;ix=128,m12=3,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 158,
+      "name": "Gravfreq",
+      "wledMacro": "FX_MODE_GRAVFREQ",
+      "wledMetadata": "Gravfreq@Rate of fall,Sensitivity;!,!;!;1f;ix=128,m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 132,
+      "name": "Gravimeter",
+      "wledMacro": "FX_MODE_GRAVIMETER",
+      "wledMetadata": "Gravimeter@Rate of fall,Sensitivity;!,!;!;1v;ix=128,m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 82,
+      "name": "Halloween Eyes",
+      "wledMacro": "FX_MODE_HALLOWEEN_EYES",
+      "wledMetadata": "Halloween Eyes@Eye off time,Eye on time,,,,,Overlay;!,!;!;12",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 100,
+      "name": "Heartbeat",
+      "wledMacro": "FX_MODE_HEARTBEAT",
+      "wledMetadata": "Heartbeat@!,!;!,!;!;01;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 180,
+      "name": "Hiphotic",
+      "wledMacro": "FX_MODE_2DHIPHOTIC",
+      "wledMetadata": "Hiphotic@X scale,Y scale,,,Speed;!;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 58,
+      "name": "ICU",
+      "wledMacro": "FX_MODE_ICU",
+      "wledMetadata": "ICU@!,!,,,,,Overlay;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 53,
+      "name": "Image",
+      "wledMacro": "FX_MODE_IMAGE",
+      "wledMetadata": "Image@!,Blur,;;;12;sx=128,ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 64,
+      "name": "Juggle",
+      "wledMacro": "FX_MODE_JUGGLE",
+      "wledMetadata": "Juggle@!,Trail;;!;;sx=64,ix=128",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 130,
+      "name": "Juggles",
+      "wledMacro": "FX_MODE_JUGGLES",
+      "wledMetadata": "Juggles@!,# of balls;!,!;!;01v;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 168,
+      "name": "Julia",
+      "wledMacro": "FX_MODE_2DJULIA",
+      "wledMetadata": "Julia@,Max iterations per pixel,X center,Y center,Area size, Blur;!;!;2;ix=24,c1=128,c2=128,c3=16",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 75,
+      "name": "Lake",
+      "wledMacro": "FX_MODE_LAKE",
+      "wledMetadata": "Lake@!;Fx;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 41,
+      "name": "Lighthouse",
+      "wledMacro": "FX_MODE_COMET",
+      "wledMetadata": "Lighthouse@!,Fade rate;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 57,
+      "name": "Lightning",
+      "wledMacro": "FX_MODE_LIGHTNING",
+      "wledMetadata": "Lightning@!,!,,,,,Overlay;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 176,
+      "name": "Lissajous",
+      "wledMacro": "FX_MODE_2DLISSAJOUS",
+      "wledMetadata": "Lissajous@X frequency,Fade rate,Blur,,Speed,Smear;!;!;2;c1=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 47,
+      "name": "Loading",
+      "wledMacro": "FX_MODE_LOADING",
+      "wledMetadata": "Loading@!,Fade;!,!;!;;ix=16",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 131,
+      "name": "Matripix",
+      "wledMacro": "FX_MODE_MATRIPIX",
+      "wledMetadata": "Matripix@!,Brightness;!,!;!;1v;ix=64,m12=2,si=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 153,
+      "name": "Matrix",
+      "wledMacro": "FX_MODE_2DMATRIX",
+      "wledMetadata": "Matrix@!,Spawning rate,Trail,,,Custom color;Spawn,Trail;;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 154,
+      "name": "Metaballs",
+      "wledMacro": "FX_MODE_2DMETABALLS",
+      "wledMetadata": "Metaballs@!;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 76,
+      "name": "Meteor",
+      "wledMacro": "FX_MODE_METEOR",
+      "wledMetadata": "Meteor@!,Trail,,,,Gradient,,Smooth;;!;1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 135,
+      "name": "Midnoise",
+      "wledMacro": "FX_MODE_MIDNOISE",
+      "wledMetadata": "Midnoise@Fade rate,Max. length;!,!;!;1v;ix=128,m12=1,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 59,
+      "name": "Multi Comet",
+      "wledMacro": "FX_MODE_MULTI_COMET",
+      "wledMetadata": "Multi Comet@!,Fade;!,!;!;1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 70,
+      "name": "Noise 1",
+      "wledMacro": "FX_MODE_NOISE16_1",
+      "wledMetadata": "Noise 1@!;!;!;;pal=20",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 71,
+      "name": "Noise 2",
+      "wledMacro": "FX_MODE_NOISE16_2",
+      "wledMetadata": "Noise 2@!;!;!;;pal=43",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 72,
+      "name": "Noise 3",
+      "wledMacro": "FX_MODE_NOISE16_3",
+      "wledMetadata": "Noise 3@!;!;!;;pal=35",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 73,
+      "name": "Noise 4",
+      "wledMacro": "FX_MODE_NOISE16_4",
+      "wledMetadata": "Noise 4@!;!;!;;pal=26",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 107,
+      "name": "Noise Pal",
+      "wledMacro": "FX_MODE_NOISEPAL",
+      "wledMetadata": "Noise Pal@!,Scale;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 146,
+      "name": "Noise2D",
+      "wledMacro": "FX_MODE_2DNOISE",
+      "wledMetadata": "Noise2D@!,Scale;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 143,
+      "name": "Noisefire",
+      "wledMacro": "FX_MODE_NOISEFIRE",
+      "wledMetadata": "Noisefire@!,!;;;01v;m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 136,
+      "name": "Noisemeter",
+      "wledMacro": "FX_MODE_NOISEMETER",
+      "wledMetadata": "Noisemeter@Fade rate,Width;!,!;!;1v;ix=128,m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 145,
+      "name": "Noisemove",
+      "wledMacro": "FX_MODE_NOISEMOVE",
+      "wledMetadata": "Noisemove@Move speed,Fade rate;!,!;!;01f;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 126,
+      "name": "Octopus",
+      "wledMacro": "FX_MODE_2DOCTOPUS",
+      "wledMetadata": "Octopus@!,,Offset X,Offset Y,Legs,fasttan;;!;2;",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 62,
+      "name": "Oscillate",
+      "wledMacro": "FX_MODE_OSCILLATE",
+      "wledMetadata": "Oscillate",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 101,
+      "name": "Pacifica",
+      "wledMacro": "FX_MODE_PACIFICA",
+      "wledMetadata": "Pacifica@!,Angle;;!;;pal=51",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 151,
+      "name": "PacMan",
+      "wledMacro": "FX_MODE_PACMAN",
+      "wledMetadata": "PacMan@Speed,# of PowerDots,Blink distance,Blur,# of Ghosts,Dots,Smear,Compact;;!;1;m12=0,sx=192,ix=64,c1=64,c2=0,c3=12,o1=1,o2=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 65,
+      "name": "Palette",
+      "wledMacro": "FX_MODE_PALETTE",
+      "wledMetadata": "Palette@Shift,Size,Rotation,,,Animate Shift,Animate Rotation,Anamorphic;;!;12;ix=112,c1=0,o1=1,o2=0,o3=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 98,
+      "name": "Percent",
+      "wledMacro": "FX_MODE_PERCENT",
+      "wledMetadata": "Percent@!,% of fill,,,,One color;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 147,
+      "name": "Perlin Move",
+      "wledMacro": "FX_MODE_PERLINMOVE",
+      "wledMetadata": "Perlin Move@!,# of pixels,Fade rate;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 105,
+      "name": "Phased",
+      "wledMacro": "FX_MODE_PHASED",
+      "wledMetadata": "Phased@!,!;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 109,
+      "name": "Phased Noise",
+      "wledMacro": "FX_MODE_PHASEDNOISE",
+      "wledMetadata": "Phased Noise@!,!;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 128,
+      "name": "Pixels",
+      "wledMacro": "FX_MODE_PIXELS",
+      "wledMetadata": "Pixels@Fade rate,# of pixels;!,!;!;1v;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 129,
+      "name": "Pixelwave",
+      "wledMacro": "FX_MODE_PIXELWAVE",
+      "wledMetadata": "Pixelwave@!,Sensitivity;!,!;!;1v;ix=64,m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 97,
+      "name": "Plasma",
+      "wledMacro": "FX_MODE_PLASMA",
+      "wledMetadata": "Plasma@Phase,!;!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 178,
+      "name": "Plasma Ball",
+      "wledMacro": "FX_MODE_2DPLASMABALL",
+      "wledMetadata": "Plasma Ball@Speed,,Fade,Blur;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 133,
+      "name": "Plasmoid",
+      "wledMacro": "FX_MODE_PLASMOID",
+      "wledMetadata": "Plasmoid@Phase,# of pixels;!,!;!;01v;sx=128,ix=128,m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 174,
+      "name": "Polar Lights",
+      "wledMacro": "FX_MODE_2DPOLARLIGHTS",
+      "wledMetadata": "Polar Lights@!,Scale,,,,Flip Palette;;!;2;pal=71",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 95,
+      "name": "Popcorn",
+      "wledMacro": "FX_MODE_POPCORN",
+      "wledMetadata": "Popcorn@!,!,,,,,Overlay;!,!,!;!;;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 63,
+      "name": "Pride 2015",
+      "wledMacro": "FX_MODE_PRIDE_2015",
+      "wledMetadata": "Pride 2015@!;;",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 194,
+      "name": "PS Attractor",
+      "wledMacro": "FX_MODE_PARTICLEATTRACTOR",
+      "wledMetadata": "PS Attractor@Mass,Particles,Size,Collide,Friction,AgeColor,Move,Swallow;;!;2;pal=9,sx=100,ix=82,c1=1,c2=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 192,
+      "name": "PS Ballpit",
+      "wledMacro": "FX_MODE_PARTICLEPIT",
+      "wledMetadata": "PS Ballpit@Speed,Intensity,Size,Hardness,Saturation,Cylinder,Walls,Ground;;!;2;pal=11,sx=100,ix=220,c1=70,c2=180,c3=31,o3=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 201,
+      "name": "PS Blobs",
+      "wledMacro": "FX_MODE_PARTICLEBLOBS",
+      "wledMetadata": "PS Blobs@Speed,Blobs,Size,Life,Blur,Wobble,Collide,Pulsate;;!;2v;sx=30,ix=64,c1=200,c2=130,c3=0,o3=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 193,
+      "name": "PS Box",
+      "wledMacro": "FX_MODE_PARTICLEBOX",
+      "wledMetadata": "PS Box@!,Particles,Tilt,Hardness,Size,Random,Washing Machine,Sloshing;;!;2;pal=53,ix=50,c3=1,o1=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 188,
+      "name": "PS Fire",
+      "wledMacro": "FX_MODE_PARTICLEFIRE",
+      "wledMetadata": "PS Fire@Speed,Intensity,Flame Height,Wind,Spread,Smooth,Cylinder,Turbulence;;!;2;pal=35,sx=110,c1=110,c2=50,c3=31,o1=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 189,
+      "name": "PS Fireworks",
+      "wledMacro": "FX_MODE_PARTICLEFIREWORKS",
+      "wledMetadata": "PS Fireworks@Launches,Explosion Size,Fuse,Blur,Gravity,Cylinder,Ground,Fast;;!;2;pal=11,ix=50,c1=40,c2=0,c3=12",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 191,
+      "name": "PS Fuzzy Noise",
+      "wledMacro": "FX_MODE_PARTICLEPERLIN",
+      "wledMetadata": "PS Fuzzy Noise@Speed,Particles,Bounce,Friction,Scale,Cylinder,Smear,Collide;;!;2;pal=64,sx=50,ix=200,c1=130,c2=30,c3=5",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 217,
+      "name": "PS Galaxy",
+      "wledMacro": "FX_MODE_PARTICLEGALAXY",
+      "wledMetadata": "PS Galaxy@!,!,Size,,Color,,Starfield,Trace;;!;2;pal=59,sx=80,c1=1,c3=4",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 200,
+      "name": "PS Ghost Rider",
+      "wledMacro": "FX_MODE_PARTICLEGHOSTRIDER",
+      "wledMetadata": "PS Ghost Rider@Speed,Spiral,Blur,Color Cycle,Spread,AgeColor,Walls;;!;2;pal=1,sx=70,ix=0,c1=220,c2=30,c3=21,o1=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 195,
+      "name": "PS Impact",
+      "wledMacro": "FX_MODE_PARTICLEIMPACT",
+      "wledMetadata": "PS Impact@Launches,!,Force,Hardness,Blur,Cylinder,Walls,Collide;;!;2;pal=0,sx=32,ix=85,c1=70,c2=130,c3=0,o3=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 203,
+      "name": "PS Pinball",
+      "wledMacro": "FX_MODE_PSPINBALL",
+      "wledMetadata": "PS Pinball@Speed,!,Size,Blur,Gravity,Collide,Rolling,Position Color;,!;!;1;pal=0,ix=220,c2=0,c3=8,o1=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 197,
+      "name": "PS Spray",
+      "wledMacro": "FX_MODE_PARTICLESPRAY",
+      "wledMetadata": "PS Spray@Speed,!,Left/Right,Up/Down,Angle,Gravity,Cylinder/Square,Collide;;!;2v;pal=0,sx=150,ix=150,c1=220,c2=30,c3=21",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 187,
+      "name": "PS Volcano",
+      "wledMacro": "FX_MODE_PARTICLEVOLCANO",
+      "wledMetadata": "PS Volcano@Speed,Intensity,Move,Bounce,Spread,AgeColor,Walls,Collide;;!;2;pal=35,sx=100,ix=190,c1=0,c2=160,c3=6,o1=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 190,
+      "name": "PS Vortex",
+      "wledMacro": "FX_MODE_PARTICLEVORTEX",
+      "wledMetadata": "PS Vortex@Rotation Speed,Particle Speed,Arms,Flip,Nozzle,Smear,Direction,Random Flip;;!;2;pal=27,c1=200,c2=0,c3=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 196,
+      "name": "PS Waterfall",
+      "wledMacro": "FX_MODE_PARTICLEWATERFALL",
+      "wledMetadata": "PS Waterfall@Speed,Intensity,Variation,Collide,Position,Cylinder,Walls,Ground;;!;2;pal=9,sx=15,ix=200,c1=32,c2=160,o3=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 144,
+      "name": "Puddlepeak",
+      "wledMacro": "FX_MODE_PUDDLEPEAK",
+      "wledMetadata": "Puddlepeak@Fade rate,Puddle size,Select bin,Volume (min);!,!;!;1v;c2=0,m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 134,
+      "name": "Puddles",
+      "wledMacro": "FX_MODE_PUDDLES",
+      "wledMetadata": "Puddles@Fade rate,Puddle size;!,!;!;1v;m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 162,
+      "name": "Pulser",
+      "wledMacro": "FX_MODE_2DPULSER",
+      "wledMetadata": "Pulser@!,Blur;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 78,
+      "name": "Railway",
+      "wledMacro": "FX_MODE_RAILWAY",
+      "wledMetadata": "Railway@!,Smoothness;1,2;!;;pal=3",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 43,
+      "name": "Rain",
+      "wledMacro": "FX_MODE_RAIN",
+      "wledMetadata": "Rain@!,Spawning rate;!,!;!;12;ix=128,pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 9,
+      "name": "Rainbow",
+      "wledMacro": "FX_MODE_RAINBOW_CYCLE",
+      "wledMetadata": "Rainbow@!,Size;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 33,
+      "name": "Rainbow Runner",
+      "wledMacro": "FX_MODE_CHASE_RAINBOW_WHITE",
+      "wledMetadata": "Rainbow Runner@!,Size;Bg;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 5,
+      "name": "Random Colors",
+      "wledMacro": "FX_MODE_RANDOM_COLOR",
+      "wledMetadata": "Random Colors@!,Fade time;;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 79,
+      "name": "Ripple",
+      "wledMacro": "FX_MODE_RIPPLE",
+      "wledMetadata": "Ripple@!,Wave #,Blur,,,,Overlay;,!;!;12;c1=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 148,
+      "name": "Ripple Peak",
+      "wledMacro": "FX_MODE_RIPPLEPEAK",
+      "wledMetadata": "Ripple Peak@Fade rate,Max # of ripples,Select bin,Volume (min);!,!;!;1v;c2=0,m12=0,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 99,
+      "name": "Ripple Rainbow",
+      "wledMacro": "FX_MODE_RIPPLE_RAINBOW",
+      "wledMetadata": "Ripple Rainbow@!,Wave #;;!;12",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 185,
+      "name": "Rocktaves",
+      "wledMacro": "FX_MODE_ROCKTAVES",
+      "wledMetadata": "Rocktaves@;!,!;!;01f;m12=1,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 48,
+      "name": "Rolling Balls",
+      "wledMacro": "FX_MODE_ROLLINGBALLS",
+      "wledMetadata": "Rolling Balls@!,# of balls,,,,Collide,Overlay,Trails;!,!,!;!;1;m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 114,
+      "name": "Rotozoomer",
+      "wledMacro": "FX_MODE_2DPLASMAROTOZOOM",
+      "wledMetadata": "Rotozoomer@!,Scale,,,,Alt;;!;2;pal=54",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 15,
+      "name": "Running",
+      "wledMacro": "FX_MODE_RUNNING_LIGHTS",
+      "wledMetadata": "Running@!,Wave width;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 52,
+      "name": "Running Dual",
+      "wledMacro": "FX_MODE_RUNNING_DUAL",
+      "wledMetadata": "Running Dual@!,Wave width;L,!,R;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 16,
+      "name": "Saw",
+      "wledMacro": "FX_MODE_SAW",
+      "wledMetadata": "Saw@!,Width;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 10,
+      "name": "Scan",
+      "wledMacro": "FX_MODE_SCAN",
+      "wledMetadata": "Scan@!,# of dots,,,,,Overlay;!,!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 11,
+      "name": "Scan Dual",
+      "wledMacro": "FX_MODE_DUAL_SCAN",
+      "wledMetadata": "Scan Dual@!,# of dots,,,,,Overlay;!,!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 40,
+      "name": "Scanner",
+      "wledMacro": "FX_MODE_LARSON_SCANNER",
+      "wledMetadata": "Scanner@!,Trail,Delay,,,Dual,Bi-delay;!,!,!;!;;m12=0,c1=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 60,
+      "name": "Scanner Dual",
+      "wledMacro": "FX_MODE_DUAL_LARSON_SCANNER",
+      "wledMetadata": "Scanner Dual@!,Trail,Delay,,,Dual,Bi-delay;!,!,!;!;;m12=0,c1=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 122,
+      "name": "Scrolling Text",
+      "wledMacro": "FX_MODE_2DSCROLLTEXT",
+      "wledMetadata": "Scrolling Text@!,Y Offset,Trail,Font size,Rotate,Gradient,Custom Font,Reverse;!,!,Gradient;!;2;ix=128,c1=0,rev=0,mi=0,rY=0,mY=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 161,
+      "name": "Shimmer",
+      "wledMacro": "FX_MODE_SHIMMER",
+      "wledMetadata": "Shimmer@Speed,Interval,Size,Granular,Flow,Zebra,Reverse,Sporadic;Fx,Bg,Cx;!;1;pal=15,sx=220,ix=10,c2=0,c3=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 181,
+      "name": "Sindots",
+      "wledMacro": "FX_MODE_2DSINDOTS",
+      "wledMetadata": "Sindots@!,Dot distance,Fade rate,Blur,,Smear;;!;2;",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 108,
+      "name": "Sine",
+      "wledMacro": "FX_MODE_SINEWAVE",
+      "wledMetadata": "Sine@!,Scale;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 92,
+      "name": "Sinelon",
+      "wledMacro": "FX_MODE_SINELON",
+      "wledMetadata": "Sinelon@!,Trail;!,!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 93,
+      "name": "Sinelon Dual",
+      "wledMacro": "FX_MODE_SINELON_DUAL",
+      "wledMetadata": "Sinelon Dual@!,Trail;!,!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 94,
+      "name": "Sinelon Rainbow",
+      "wledMacro": "FX_MODE_SINELON_RAINBOW",
+      "wledMetadata": "Sinelon Rainbow@!,Trail;,,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 219,
+      "name": "Slow Transition",
+      "wledMacro": "FX_MODE_SLOW_TRANSITION",
+      "wledMetadata": "Slow Transition@Time (min),,,,,,Sweep;!;!;1;pal=2,sx=0,ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 125,
+      "name": "Soap",
+      "wledMacro": "FX_MODE_2DSOAP",
+      "wledMetadata": "Soap@!,Smoothness,Density;;!;2;pal=11",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 0,
+      "name": "Solid",
+      "wledMacro": "FX_MODE_STATIC",
+      "wledMetadata": "Solid",
+      "coreStatus": "host-tested-compatibility-module-only"
+    },
+    {
+      "id": 103,
+      "name": "Solid Glitter",
+      "wledMacro": "FX_MODE_SOLID_GLITTER",
+      "wledMetadata": "Solid Glitter@,!;Bg,,Glitter color;;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 83,
+      "name": "Solid Pattern",
+      "wledMacro": "FX_MODE_STATIC_PATTERN",
+      "wledMetadata": "Solid Pattern@Fg size,Bg size;Fg,!;!;;pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 84,
+      "name": "Solid Pattern Tri",
+      "wledMacro": "FX_MODE_TRI_STATIC_PATTERN",
+      "wledMetadata": "Solid Pattern Tri@,Size;1,2,3;;;pal=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 118,
+      "name": "Spaceships",
+      "wledMacro": "FX_MODE_2DSPACESHIPS",
+      "wledMetadata": "Spaceships@!,Blur,,,,Smear;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 20,
+      "name": "Sparkle",
+      "wledMacro": "FX_MODE_SPARKLE",
+      "wledMetadata": "Sparkle@!,,,,,,Overlay;!,!;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 21,
+      "name": "Sparkle Dark",
+      "wledMacro": "FX_MODE_FLASH_SPARKLE",
+      "wledMetadata": "Sparkle Dark@!,!,,,,,Overlay;Bg,Fx;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 22,
+      "name": "Sparkle+",
+      "wledMacro": "FX_MODE_HYPER_SPARKLE",
+      "wledMetadata": "Sparkle+@!,!,,,,,Overlay;Bg,Fx;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 85,
+      "name": "Spots",
+      "wledMacro": "FX_MODE_SPOTS",
+      "wledMetadata": "Spots@Spread,Width,,,,,Overlay;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 86,
+      "name": "Spots Fade",
+      "wledMacro": "FX_MODE_SPOTS_FADE",
+      "wledMetadata": "Spots Fade@Spread,Width,,,,,Overlay;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 150,
+      "name": "Squared Swirl",
+      "wledMacro": "FX_MODE_2DSQUAREDSWIRL",
+      "wledMetadata": "Squared Swirl@,Fade,,,Blur;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 39,
+      "name": "Stream",
+      "wledMacro": "FX_MODE_RUNNING_RANDOM",
+      "wledMetadata": "Stream@!,Zone size;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 61,
+      "name": "Stream 2",
+      "wledMacro": "FX_MODE_RANDOM_CHASE",
+      "wledMetadata": "Stream 2@!;;",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 23,
+      "name": "Strobe",
+      "wledMacro": "FX_MODE_STROBE",
+      "wledMetadata": "Strobe@!;!,!;!;01",
+      "coreStatus": "host-tested-compatibility-module-only"
+    },
+    {
+      "id": 25,
+      "name": "Strobe Mega",
+      "wledMacro": "FX_MODE_MULTI_STROBE",
+      "wledMetadata": "Strobe Mega@!,!;!,!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 24,
+      "name": "Strobe Rainbow",
+      "wledMacro": "FX_MODE_STROBE_RAINBOW",
+      "wledMetadata": "Strobe Rainbow@!;,!;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 166,
+      "name": "Sun Radiation",
+      "wledMacro": "FX_MODE_2DSUNRADIATION",
+      "wledMetadata": "Sun Radiation@Variance,Brightness;;;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 104,
+      "name": "Sunrise",
+      "wledMacro": "FX_MODE_SUNRISE",
+      "wledMetadata": "Sunrise@Time [min],Width;;!;;pal=35,sx=60",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 6,
+      "name": "Sweep",
+      "wledMacro": "FX_MODE_COLOR_SWEEP",
+      "wledMetadata": "Sweep@!,!;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 36,
+      "name": "Sweep Random",
+      "wledMacro": "FX_MODE_COLOR_SWEEP_RANDOM",
+      "wledMetadata": "Sweep Random@!;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 175,
+      "name": "Swirl",
+      "wledMacro": "FX_MODE_2DSWIRL",
+      "wledMetadata": "Swirl@!,Sensitivity,Blur;,Bg Swirl;!;2v;ix=64,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 173,
+      "name": "Tartan",
+      "wledMacro": "FX_MODE_2DTARTAN",
+      "wledMetadata": "Tartan@X scale,Y scale,,,Sharpness;;!;2",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 44,
+      "name": "Tetrix",
+      "wledMacro": "FX_MODE_TETRIX",
+      "wledMetadata": "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11,m12=1",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 13,
+      "name": "Theater",
+      "wledMacro": "FX_MODE_THEATER_CHASE",
+      "wledMetadata": "Theater@!,Gap size;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 14,
+      "name": "Theater Rainbow",
+      "wledMacro": "FX_MODE_THEATER_CHASE_RAINBOW",
+      "wledMetadata": "Theater Rainbow@!,Gap size;,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 35,
+      "name": "Traffic Light",
+      "wledMacro": "FX_MODE_TRAFFIC_LIGHT",
+      "wledMetadata": "Traffic Light@!,US style;,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 56,
+      "name": "Tri Fade",
+      "wledMacro": "FX_MODE_TRICOLOR_FADE",
+      "wledMetadata": "Tri Fade@!;1,2,3;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 55,
+      "name": "Tri Wipe",
+      "wledMacro": "FX_MODE_TRICOLOR_WIPE",
+      "wledMetadata": "Tri Wipe@!;1,2,3;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 116,
+      "name": "TV Simulator",
+      "wledMacro": "FX_MODE_TV_SIMULATOR",
+      "wledMetadata": "TV Simulator@!,!;;!;01",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 17,
+      "name": "Twinkle",
+      "wledMacro": "FX_MODE_TWINKLE",
+      "wledMetadata": "Twinkle@!,!;!,!;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 81,
+      "name": "Twinklecat",
+      "wledMacro": "FX_MODE_TWINKLECAT",
+      "wledMetadata": "Twinklecat@!,Twinkle rate,,,,Cool,Reverse;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 80,
+      "name": "Twinklefox",
+      "wledMacro": "FX_MODE_TWINKLEFOX",
+      "wledMetadata": "Twinklefox@!,Twinkle rate,,,,Cool;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 106,
+      "name": "Twinkleup",
+      "wledMacro": "FX_MODE_TWINKLEUP",
+      "wledMetadata": "Twinkleup@!,Intensity;!,!;!;;m12=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 50,
+      "name": "Two Dots",
+      "wledMacro": "FX_MODE_TWO_DOTS",
+      "wledMetadata": "Two Dots@!,Dot size,,,,,Overlay;1,2,Bg;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 113,
+      "name": "Washing Machine",
+      "wledMacro": "FX_MODE_WASHING_MACHINE",
+      "wledMetadata": "Washing Machine@!,!;;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 140,
+      "name": "Waterfall",
+      "wledMacro": "FX_MODE_WATERFALL",
+      "wledMetadata": "Waterfall@!,Adjust color,Select bin,Volume (min);!,!;!;01f;c2=0,m12=2,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 165,
+      "name": "Waverly",
+      "wledMacro": "FX_MODE_2DWAVERLY",
+      "wledMetadata": "Waverly@Amplification,Sensitivity,,,,,Blur;;!;2v;ix=64,si=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 184,
+      "name": "Wavesins",
+      "wledMacro": "FX_MODE_WAVESINS",
+      "wledMetadata": "Wavesins@!,Brightness variation,Starting color,Range of colors,Color variation;!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 127,
+      "name": "Waving Cell",
+      "wledMacro": "FX_MODE_2DWAVINGCELL",
+      "wledMetadata": "Waving Cell@!,Blur,Amplitude 1,Amplitude 2,Amplitude 3,,Flow;;!;2;ix=0",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 3,
+      "name": "Wipe",
+      "wledMacro": "FX_MODE_COLOR_WIPE",
+      "wledMetadata": "Wipe@!,!;!,!;!",
+      "coreStatus": "not-ported"
+    },
+    {
+      "id": 4,
+      "name": "Wipe Random",
+      "wledMacro": "FX_MODE_COLOR_WIPE_RANDOM",
+      "wledMetadata": "Wipe Random@!;;!",
+      "coreStatus": "not-ported"
+    }
+  ],
+  "unresolvedMetadata": [
+    {
+      "metadataSymbol": "_data_FX_MODE_PARTICLEGEQ",
+      "name": "PS GEQ 2D",
+      "wledMetadata": "PS GEQ 2D@Speed,Intensity,Diverge,Bounce,Gravity,Cylinder,Walls,Floor;;!;2f;pal=0,sx=155,ix=200,c1=0",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PARTICLECIRCULARGEQ",
+      "name": "PS GEQ Nova",
+      "wledMetadata": "PS GEQ Nova@Speed,Intensity,Rotation Speed,Color Change,Nozzle,,Direction;;!;2f;pal=13,ix=180,c1=0,c2=0,c3=8",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PARTICLEDRIP",
+      "name": "PS DripDrop",
+      "wledMetadata": "PS DripDrop@Speed,!,Splash,Blur,Gravity,Rain,PushSplash,Smooth;,!;!;1;pal=0,sx=150,ix=25,c1=220,c2=30,c3=21",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PARTICLEDANCINGSHADOWS",
+      "name": "PS Dancing Shadows",
+      "wledMetadata": "PS Dancing Shadows@Speed,!,Blur,Color Cycle,,Smear,Position Color,Smooth;,!;!;1;sx=100,ix=180,c1=0,c2=0",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_FIREWORKS1D",
+      "name": "PS Fireworks 1D",
+      "wledMetadata": "PS Fireworks 1D@Gravity,Explosion,Firing side,Blur,Color,Colorful,Trail,Smooth;,!;!;1;c2=30,o1=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_SPARKLER",
+      "name": "PS Sparkler",
+      "wledMetadata": "PS Sparkler@Move,!,Saturation,Blur,Sparklers,Slide,Bounce,Large;,!;!;1;pal=0,sx=255,c1=0,c2=0,c3=6",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_HOURGLASS",
+      "name": "PS Hourglass",
+      "wledMetadata": "PS Hourglass@Interval,!,Color,Blur,Gravity,Colorflip,Start,Fast Reset;,!;!;1;pal=34,sx=5,ix=200,c1=140,c2=80,c3=4,o1=1,o2=1,o3=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_1DSPRAY",
+      "name": "PS Spray 1D",
+      "wledMetadata": "PS Spray 1D@Speed(+/-),!,Position,Blur,Gravity(+/-),AgeColor,Bounce,Position Color;,!;!;1;sx=200,ix=220,c1=0,c2=0",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_BALANCE",
+      "name": "PS 1D Balance",
+      "wledMetadata": "PS 1D Balance@!,!,Hardness,Blur,Tilt,Position Color,Wrap,Random;,!;!;1;pal=18,c2=0,c3=4,o1=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_CHASE",
+      "name": "PS Chase",
+      "wledMetadata": "PS Chase@!,Density,Size,Hue,Blur,Playful,,Position Color;,!;!;1;pal=11,sx=50,c2=5,c3=0",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_STARBURST",
+      "name": "PS Starburst",
+      "wledMetadata": "PS Starburst@Chance,Fragments,Size,Blur,Cooling,Gravity,Colorful,Push;,!;!;1;pal=52,sx=150,ix=150,c1=120,c2=0,c3=21",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_1D_GEQ",
+      "name": "PS GEQ 1D",
+      "wledMetadata": "PS GEQ 1D@Speed,!,Size,Blur,,,,;,!;!;1f;pal=0,sx=50,ix=200,c1=0,c2=0,c3=0,o1=1,o2=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_FIRE1D",
+      "name": "PS Fire 1D",
+      "wledMetadata": "PS Fire 1D@!,!,Cooling,Blur;,!;!;1;pal=35,sx=100,ix=50,c1=80,c2=100,c3=28,o1=1,o2=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_SONICSTREAM",
+      "name": "PS Sonic Stream",
+      "wledMetadata": "PS Sonic Stream@!,!,Color,Blur,Bin,Mod,Filter,Push;,!;!;1f;c3=0,o2=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_SONICBOOM",
+      "name": "PS Sonic Boom",
+      "wledMetadata": "PS Sonic Boom@!,!,Color,Position,Bin,Mod,Filter,Blur;,!;!;1f;c2=63,c3=0,o2=1",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    },
+    {
+      "metadataSymbol": "_data_FX_MODE_PS_SPRINGY",
+      "name": "PS Springy",
+      "wledMetadata": "PS Springy@Stiffness,Damping,Density,Hue,Mode,Smear,XL,AR;,!;!;1f;pal=54,c2=0,c3=23",
+      "reason": "No matching FX_MODE_ ID in pinned FX.h; resolve mapping before using."
+    }
+  ]
+}
