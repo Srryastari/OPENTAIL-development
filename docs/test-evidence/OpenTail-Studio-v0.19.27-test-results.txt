@@ -1,0 +1,31 @@
+OpenTail Studio v0.19.27 — simulated regression results
+Date: October 23, 2026
+Source file: opentail-v0.19.27.htm
+
+PASS: node --check on extracted inline JavaScript.
+PASS: controller palette gradient rendered from supplied /json/palx RGB stops.
+PASS: palette with missing color stops reports “Preview unavailable” (not invented).
+PASS: Effects quick inline panel exposes Fx, Bg and Cs for metadata allowing all slots.
+PASS: optional shared sequence palette persists in local settings.
+PASS: sequence sends shared palette ID to compatible selected effect.
+PASS: active sequence title and Playing indicator reflect current effect.
+PASS: Stop & Restore restores pre-sequence master state and all compared segment fields.
+PASS: No delayed effect POST after Stop and tab navigation in simulated queue.
+PASS: Previously saved step effect titles unchanged after Stop.
+PASS: Stop during deliberately delayed in-flight POST enqueues restoration afterward.
+PASS: No queued playback POST reappears after in-flight Stop completes.
+PASS: Shuffle Each Loop creates a new transient effect set after a full timed cycle.
+PASS: Step titles update to reflect shuffled runtime effect selections.
+PASS: Following shuffled Stop, original saved titles and WLED state return.
+PASS: schema-v4 project export includes opt-in shared palette settings.
+PASS: Startup manual preview targets only the configured section and uses configured color.
+PASS: Startup manual preview auto-restores lighting after configured duration.
+PASS: Startup/Shutdown UI markup includes explicit manual Preview buttons.
+
+Source syntax and 18 independently named checks passed; one additional UI-markup assertion also passed.
+
+Scope and limitations:
+- These are Node.js isolated-application tests with a simulated WLED JSON API and artificial delayed POSTs, not a physical ESP32 or actual vehicle test.
+- Browser UI screenshots and manual touch interaction were not verified in this environment: Chromium navigation to local files and localhost was blocked.
+- No actual ignition voltage, ACC hardware, backup controller, watchdog, road-use failure mode or real hardware failover was tested.
+- Web-based animations must not replace brake/turn/parking/reverse lighting safety hardware.
