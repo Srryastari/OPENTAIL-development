@@ -10,6 +10,7 @@
     shows:'<path d="m12 2 2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/>',
     triggers:'<path d="m13 2-8 11h7l-1 9 8-12h-7z"/>',
     layout:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    events:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5"/>',
     settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1-2 2-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-.9 1.5v.2h-3v-.2a1.6 1.6 0 0 0-.9-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1-2-2 .1-.1a1.6 1.6 0 0 0 .3-1.8A1.6 1.6 0 0 0 6 14H5v-3h1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1 2-2 .1.1a1.6 1.6 0 0 0 1.8.3A1.6 1.6 0 0 0 12 5V4h3v1a1.6 1.6 0 0 0 .9 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1 2 2-.1.1a1.6 1.6 0 0 0-.3 1.8A1.6 1.6 0 0 0 21 11h.5v3H21a1.6 1.6 0 0 0-1.6 1Z"/>',
     wifi:'<path d="M2 9a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 15a5 5 0 0 1 8 0"/><circle cx="12" cy="19" r="1"/>',
     bluetooth:'<path d="m7 7 10 10-5 4V3l5 4L7 17"/>',
@@ -81,7 +82,7 @@
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
-  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Android v0.1.23</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
+  header.innerHTML = `<div class="ot-mobile-heading"><div><h1>OpenTail</h1><p>Lighting Studio</p></div><span class="ot-connected-badge offline ot-status-red" id="ot-connected-badge" role="status" aria-live="polite">Disconnected</span></div>
     <div id="ot-save-banner" class="ot-save-warning" hidden role="alert">Save failed · Review Studio changes</div><div class="ot-connection-grid"><button type="button" class="ot-connection-card" id="ot-wifi-card" data-active="false" aria-label="Wi-Fi connection settings">${icon('wifi')}<span><strong>Wi-Fi</strong><small id="ot-wifi-text">Not connected</small></span></button>
     <button type="button" class="ot-connection-card" id="ot-ble-card" data-active="false" aria-label="Bluetooth connection settings">${icon('bluetooth')}<span><strong>Bluetooth</strong><small id="ot-ble-text">Not connected</small></span></button></div>`;
   const settings = document.createElement('section');
@@ -104,12 +105,21 @@
   const nav = document.createElement('nav');
   nav.className = 'ot-native-nav';
   nav.setAttribute('aria-label', 'OpenTail main navigation');
-  const destinations = [ ['home','Home','home'],['scenes','Shows','shows'],['builder','Triggers','triggers'],['layout','Layout','layout'],['settings','Settings','settings'] ];
+  // Canonical six-tab OpenTail navigation; Studio's competing concept nav is suppressed below.
+  const destinations = [
+    ['home','Home','home'],
+    ['scenes','Show Modes','shows'],
+    ['layout','Layout','layout'],
+    ['builder','Triggers','triggers'],
+    ['events','Auto Events','events'],
+    ['settings','Settings','settings']
+  ];
   nav.innerHTML = destinations.map(([id,label,ic]) => `<button type="button" data-ot-destination="${id}" aria-current="false">${icon(ic)}<span>${label}</span></button>`).join('');
   document.body.prepend(header);
   document.body.appendChild(settings);
-  document.body.appendChild(nav);
+  document.body.insertBefore(nav, header.nextSibling);
   let settingsOpen = false;
+  let autoEventsOpen = false;
   const state = () => {
     try { return JSON.parse(window.OpenTailNativeApp.getState() || '{}'); } catch (_) { return {}; }
   };
@@ -174,32 +184,45 @@
     if (wifiCard) wifiCard.dataset.active = String(wifi);
     if (bleCard) bleCard.dataset.active = String(ble);
     const activeTab = document.querySelector('.tabs .tab.active');
-    let route = settingsOpen ? 'settings' : 'home';
-    if (!settingsOpen && activeTab) {
+    let route = settingsOpen ? 'settings' : autoEventsOpen ? 'events' : 'home';
+    if (!settingsOpen && !autoEventsOpen && activeTab) {
       const text = activeTab.textContent || '';
       if (/Show Modes/i.test(text)) route='scenes';
       else if (/Triggers/i.test(text)) route='builder';
       else if (/Layout/i.test(text)) route='layout';
       else if (/Connect|Diagnostics/i.test(text)) route='settings';
     }
+    document.body.classList.toggle('ot-auto-events-active',!settingsOpen && route==='events');
     document.body.classList.toggle('ot-show-active',!settingsOpen && route==='scenes');
     document.body.classList.toggle('ot-home-active',!settingsOpen && route==='home');
     const heading=document.querySelector('.ot-mobile-heading h1');
-    if(heading)heading.textContent='OpenTail — '+({home:'Home',scenes:'Shows',builder:'Triggers',layout:'Layout',settings:'Settings'}[route]||'Studio');
+    if(heading)heading.textContent='OpenTail';
     nav.querySelectorAll('button[data-ot-destination]').forEach(el => el.setAttribute('aria-current',el.dataset.otDestination===route?'page':'false'));
   }
   function navigate(target) {
-    if (target === 'settings') {settingsOpen=true;document.body.classList.add('ot-settings-active');refresh();return;}
-    settingsOpen=false;document.body.classList.remove('ot-settings-active');
-    if (typeof window.go === 'function') window.go(target);
+    if (target === 'settings') {
+      settingsOpen=true;autoEventsOpen=false;
+      document.body.classList.add('ot-settings-active');
+      refresh();return;
+    }
+    settingsOpen=false;autoEventsOpen=target==='events';
+    document.body.classList.remove('ot-settings-active');
+    // Route into the existing isolated Auto Events preview; never emulate an input.
+    if (typeof window.otConceptNavigate === 'function') window.otConceptNavigate(target);
+    else if (target!=='events' && typeof window.go === 'function') window.go(target);
     refresh();
     window.scrollTo({top:0,behavior:'instant'});
   }
   document.addEventListener('click', event => {
     const dest = event.target.closest('.ot-native-nav [data-ot-destination]');
     if (dest) {navigate(dest.dataset.otDestination);return;}
-    if (event.target.closest('#ot-wifi-card')) {navigate('settings');return;}
-    if (event.target.closest('#ot-ble-card')) {navigate('settings');return;}
+    if (event.target.closest('#ot-wifi-card')) {window.OpenTailNativeApp.connectWifi();return;}
+    if (event.target.closest('#ot-ble-card')) {
+      const live=state();
+      if (live.ble && !live.bleAuthorized) window.OpenTailNativeApp.authorizeBle();
+      else window.OpenTailNativeApp.scanBle();
+      return;
+    }
     const action = event.target.closest('[data-ot-native]');
     if (!action) return;
     const commands={
@@ -680,6 +703,7 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
 @media(max-width:350px){.ot-connected-badge{font-size:10px!important;padding:4px 6px!important}}
 `;
   css.textContent += "\n\n/* UI baseline v1: lock Android wrapper to neutral OLED system UI, not Android green. */\nhtml,body,html:not([data-ot-theme=\"light\"]) body {background:#000!important;color:#ececec!important;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Arial,sans-serif!important;color-scheme:dark!important}\n.ot-mobile-header{background:#000!important;color:#eee!important;padding:12px 16px 7px!important}\n.ot-mobile-heading h1{font-size:21px!important;line-height:1.25!important;font-weight:700!important;letter-spacing:0!important;color:#eee!important}\n.ot-mobile-heading p{color:#aaa!important;font-size:12px!important}\n.ot-native-nav{background:#050505!important;border-top:1px solid #303030!important;box-shadow:none!important}\n.ot-native-nav button{background:transparent!important;color:#aaa!important;font:600 11px -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif!important}\n.ot-native-nav button[aria-current=page]{background:#262626!important;color:#f3f3f3!important}\n.ot-native-nav button svg{color:inherit!important}\n#app>.shell{background:#000!important;padding-left:14px!important;padding-right:14px!important}\n#app main{background:#000!important}\n#app .ot-layout-approved .card,#app .ot-approved-triggers .card,#app .ot-approved-show .card{background:#000!important;color:#eee!important;border-color:#303030!important;box-shadow:none!important}\n#app .ot-chat-nav-pill{background:#101010!important;color:#aaa!important;border-color:#353535!important;border-radius:999px!important}\n#app .ot-chat-nav-pill.is-active{background:#242424!important;border-color:#777!important;color:#f4f4f4!important}\n#app .ot-chat-trigger-action{background:#101010!important;border-color:#333!important;border-radius:19px!important;box-shadow:none!important}\n#app .ot-chat-trigger-action.is-editing{background:#242424!important;border-color:#888!important}\n#app .ot-chat-trigger-action button{box-shadow:none!important}\n#app .ot-chat-trigger-select{background:transparent!important;border:0!important}\n#app .ot-chat-pill{border-radius:999px!important}\n#app .ot-chat-input{border-radius:999px!important;color:#eee!important}\n#app .ot-chat-length input[type=range],#app .ot-chat-events input[type=range]{accent-color:#c7c7c7!important}\n#app .ot-chat-led-strip{background:#090909!important;border-color:#303030!important}\n#app .ot-chat-led-strip span{background:#424242!important;box-shadow:none!important}\n#app .ot-chat-led-strip span.on{background:#d3d3d3!important;box-shadow:none!important}\n#app .ot-chat-event-strip span{background:#424242!important}\n#app .ot-chat-remove{background:#341517!important;color:#ffa9ac!important;border-color:#9e4044!important}\n#app .ot-approved-show .ot-subnav{display:flex;gap:7px;padding:5px!important;border:1px solid #303030!important;border-radius:999px!important;box-shadow:none!important;background:#080808!important}\n#app .ot-approved-show .ot-subnav button{border-radius:999px!important;background:transparent!important;color:#ccc!important;box-shadow:none!important;min-height:37px!important}\n#app .ot-approved-show .ot-subnav button.on{background:#292929!important;border-color:#646464!important;color:#f2f2f2!important}\n#app .ot-approved-triggers>.card,#app .ot-layout-approved>.card{border-radius:20px!important}\n#app .ot-approved-triggers .ot-assignments-card,#app .ot-approved-triggers .ot-editor-card{border:0!important;border-top:1px solid #303030!important;border-radius:0!important;box-shadow:none!important}\n#app .ot-chat-zone-list{border-radius:17px!important}\n#app .ot-chat-zone-toggle{border-radius:0!important}\n@media(max-width:390px){#app .ot-chat-nav-pill{font-size:10px!important}}\n\n";
+  css.textContent += "\n  /* UI baseline v2: ONE top row of six pill tabs (wrapping on narrow screens). */\n  .ot-native-nav{\n    position:sticky!important;top:0!important;left:auto!important;right:auto!important;\n    z-index:1050!important;display:flex!important;flex-wrap:wrap!important;gap:6px!important;\n    align-items:center!important;justify-content:flex-start!important;\n    max-width:960px!important;width:100%!important;margin:0 auto!important;\n    padding:8px 14px!important;background:#000!important;\n    border:0!important;border-bottom:1px solid #292929!important;box-shadow:none!important;\n  }\n  .ot-native-nav button{\n    flex:1 1 30%!important;display:flex!important;flex-direction:row!important;\n    min-width:90px!important;min-height:44px!important;gap:6px!important;\n    align-items:center!important;justify-content:center!important;\n    background:#111!important;border:1px solid #343434!important;border-radius:999px!important;\n    padding:8px!important;color:#b7b7b7!important;\n    font:600 11px/1.2 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif!important;\n  }\n  .ot-native-nav button svg{width:14px!important;height:14px!important;flex:none!important}\n  .ot-native-nav button[aria-current=page]{background:#292929!important;border-color:#777!important;color:#f2f2f2!important}\n  .ot-native-nav button:focus-visible{outline:2px solid #d7d7d7!important;outline-offset:2px!important}\n  #app .ot-chat-nav{display:none!important}\n  body:not(.ot-home-active) .ot-connection-grid{display:none!important}\n  .ot-mobile-header{padding-bottom:7px!important}\n  #app>.shell{padding-bottom:20px!important}\n  .ot-settings-page{padding-bottom:30px!important}\n  @media(min-width:700px){.ot-native-nav{padding:9px 30px!important}.ot-native-nav button{flex:1 1 auto!important}}\n  @media(max-width:350px){.ot-native-nav{padding:7px!important;gap:4px!important}.ot-native-nav button{min-width:85px!important;font-size:10px!important}}\n  html:not([data-ot-theme=\"light\"]) .ot-settings-group{background:#0d0d0d!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action{color:#ececec!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action svg{color:#bdbdbd!important}\n";
   document.head.appendChild(css);
   let route='';
   let advanced=false;
@@ -688,6 +712,7 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   let outputError='',triggerError='';
   function routeNow() {
     if (document.body.classList.contains('ot-settings-active')) return 'settings';
+    if (document.body.classList.contains('ot-auto-events-active')) return 'events';
     const name=document.querySelector('.tabs .tab.active')?.textContent?.trim() || '';
     if (/Show Modes/i.test(name)) return 'shows';
     if (/Triggers/i.test(name)) return 'triggers';
@@ -710,12 +735,12 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   function summaryMarkup(){
     if (route==='home') {
       const total = outputs ? outputs.reduce((n,o)=>n+Number(o.pixels||0),0) : null;
-      return top('Home','Your lighting controller, at a glance')+
+      return top('Home','Controller status')+
         `<div class="ot-simple-card"><h3>Controller overview</h3><div class="ot-simple-stats">
           <div class="ot-simple-stat"><strong>${outputs?outputs.length:'—'}</strong><small>Physical pixel outputs</small></div>
           <div class="ot-simple-stat"><strong>${total===null?'—':total.toLocaleString()}</strong><small>Configured pixels</small></div>
         </div><p class="ot-simple-readonly">${esc(outputs?'Read from CORE output configuration.':'Connect to CORE Wi-Fi to load live configuration.')}</p>
-        <div class="ot-simple-actions"><button class="ot-simple-button" data-ot-open="shows">Open Show Modes</button><button class="ot-simple-button secondary" data-ot-open="preview">Live Lighting Preview</button></div></div>
+        </div>
         <div class="ot-simple-card"><h3>Lighting setup</h3>${outputCards()}</div>`;
     }
     if (route==='triggers') {
