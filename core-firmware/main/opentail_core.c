@@ -446,14 +446,19 @@ static esp_err_t tm_post(httpd_req_t *r){
 static esp_err_t show_get(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_show_t cfg;bool active;uint32_t remaining;bool ready;
+    bool fx_active=false;uint16_t fx_effect_id=0;
     portENTER_CRITICAL(&state_lock);
     cfg=native_show;active=show_window(now);
+    if(active && ble_fx_enabled){fx_active=true;fx_effect_id=ble_fx_request.effect_id;}
     remaining=active?(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS):0;
     ready=native_outputs_ready;
     portEXIT_CRITICAL(&state_lock);
+    ot_wled_fx_metadata_t meta;
+    const char *active_name=fx_active&&ot_wled_fx_metadata(fx_effect_id,&meta)?
+      meta.name:ot_show_name(cfg.mode);
     char buf[390];
     snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?ot_show_name(cfg.mode):"off",(unsigned long)remaining,
+      active?"true":"false",active?active_name:"off",(unsigned long)remaining,
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
