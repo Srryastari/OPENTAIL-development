@@ -13,10 +13,12 @@
 #include "mbedtls/md.h"
 #include "status_led.h"
 #include "ble_command.h"
+#include "ble_fx_command.h"
 #include "ble_config.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
+extern bool ot_ble_apply_fx(const ot_ble_fx_packet_t *request);
 extern void ot_ble_stop_show(void);
 extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision);
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
@@ -124,6 +126,14 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
     if(n==18 && buf[0]==1 && buf[1]==4){
         authorized=owner_verify(buf+2);
         last_result=authorized?OT_BLE_OK_AUTH:OT_BLE_ERR_AUTH;
+    } else if(n>=2 && buf[0]==1 && buf[1]==OT_BLE_FX_OPCODE) {
+        ot_ble_fx_packet_t fx={0};
+        ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
+        if(result==OT_BLE_FX_OK)
+            last_result=ot_ble_apply_fx(&fx)?OT_BLE_OK_FX:OT_BLE_ERR_BUSY;
+        else if(result==OT_BLE_FX_UNAUTHORIZED)last_result=OT_BLE_ERR_AUTH;
+        else if(result==OT_BLE_FX_RANGE || result==OT_BLE_FX_UNSUPPORTED)last_result=OT_BLE_ERR_RANGE;
+        else last_result=OT_BLE_ERR_WIRE;
     } else last_result=ot_ble_parse(buf,n,token,&authorized,&show);
     if(last_result==OT_BLE_OK_SHOW && !ot_ble_apply_show(&show))last_result=OT_BLE_ERR_BUSY;
     if(last_result==OT_BLE_OK_STOP)ot_ble_stop_show();
