@@ -3,13 +3,17 @@
 const style=document.createElement('style');style.id='ot-motion-system';
 style.textContent=`
 :root{--ot-motion-fast:160ms;--ot-motion-normal:210ms;--ot-motion-ease:cubic-bezier(.22,1,.36,1)}
+/* Disable WebView's blue touch flash and accidental selection on controls, not editable fields. */
+button,[role="button"],[role="tab"],[role="radio"],.ot-mode-tabs,.ot-output-target label,.ot-connection-card,.ot-quick-action{ -webkit-tap-highlight-color:transparent; -webkit-user-select:none;user-select:none;touch-action:manipulation; }
+input,textarea,[contenteditable="true"],[role="textbox"]{ -webkit-user-select:text;user-select:text; }
+.ot-mode-tabs button{position:relative;z-index:1;}
 .ot-native-nav button,.ot-bom button,.ot-simple-button,.ot-quick-action,.ot-connection-card,#ot-direct-ble-dashboard button{transition:background-color var(--ot-motion-normal) var(--ot-motion-ease),border-color var(--ot-motion-normal) var(--ot-motion-ease),color var(--ot-motion-normal) var(--ot-motion-ease),box-shadow var(--ot-motion-normal) var(--ot-motion-ease),transform var(--ot-motion-fast) var(--ot-motion-ease)}
 .ot-native-nav button:active,.ot-bom button:active,#ot-direct-ble-dashboard button:active{transform:scale(.975)}
 .ot-bom-pill,.ot-bom-health strong,#ot-direct-state{transition:color var(--ot-motion-normal) ease,background-color var(--ot-motion-normal) ease,border-color var(--ot-motion-normal) ease}
 .ot-output-control{margin:12px 0;padding:14px;border:1px solid #3b3e40;border-radius:14px;background:#242627;color:#f5f5f5}
 .ot-output-control h3{margin:0 0 12px;font-size:15px}
 .ot-mode-tabs{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:4px;background:#131515;border-radius:12px;isolation:isolate}
-.ot-mode-slider{position:absolute;z-index:-1;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:9px;background:#3a3e3b;transform:translateX(calc(var(--ot-mode-index,0)*100%));transition:transform var(--ot-motion-normal) var(--ot-motion-ease)}
+.ot-mode-slider{position:absolute;z-index:0;pointer-events:none;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/3);border-radius:9px;background:#3a3e3b;transform:translateX(calc(var(--ot-mode-index,0)*100%));transition:transform var(--ot-motion-normal) var(--ot-motion-ease)}
 .ot-mode-tabs button{min-height:40px;padding:4px 3px;border:0;background:transparent;color:#bbb;font-size:11px;font-weight:650;border-radius:9px}
 .ot-mode-tabs button[aria-pressed=true]{color:#fff}
 .ot-mode-description{min-height:34px;margin:10px 0;color:#aeb6b0;font-size:12px;transition:opacity var(--ot-motion-fast) ease}
