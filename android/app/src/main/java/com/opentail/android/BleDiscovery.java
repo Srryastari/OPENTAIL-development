@@ -233,7 +233,7 @@ final class BleDiscovery {
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
-        command = null; reply = null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
+        command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
         writePending = false; readReplyPending = false; nextPacket = null;
@@ -524,7 +524,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+                Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -634,7 +634,7 @@ final class BleDiscovery {
         stopped = true;
         connected = false;
         connecting = false;
-        authorized = false;cfgBusy=false;cfgWatchdog++;
+        authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");cfgWatchdog++;
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; }
