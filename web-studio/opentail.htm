@@ -1990,12 +1990,26 @@ function otSimMix(a,b,part){const x=hexRgb(otSimHex(a)),y=hexRgb(otSimHex(b)),t=
 function otSimScale(hex,scale){return otSimMix('#000000',hex,scale)}
 function otSimHue(h){const x=((h%360)+360)%360/60,c=1,k=1-Math.abs(x%2-1);const q=x<1?[c,k,0]:x<2?[k,c,0]:x<3?[0,c,k]:x<4?[0,k,c]:x<5?[k,0,c]:[c,0,k];return '#'+q.map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('')}
 function otSimDraft(effect){const d=effect||{};return {fx:String(d.fxName||d.pattern||d.fx||'Solid'),fg:otSimHex(d.color||d.fg||'#ef2942'),bg:otSimHex(d.secondary||d.bg||'#000000'),accent:otSimHex(d.tertiary||d.accent||'#ffffff'),speed:otSimClamp((d.speedRaw??d.sx??Math.round((Number(d.speed??60)/100)*255))/255),intensity:otSimClamp((d.intensityRaw??d.ix??Math.round((Number(d.intensity??60)/100)*255))/255),brightness:otSimClamp(d.brightness===undefined?1:Number(d.brightness)/100),reverse:!!d.reverseEffect};}
+// Preview examples must remain useful offline, even for a new project whose trigger assignments are empty.
+// This is a VISUAL-ONLY fallback and never changes saved assignments or sends commands to CORE/WLED.
+function otSimTriggerExampleMode(){
+ if(!otSim.triggers.length)return false;
+ const visibleIds=new Set(otPreviewConfiguredZones().map(z=>z.id));
+ return !otSim.triggers.some(name=>(state.profiles?.[name]?.zones||[]).some(id=>visibleIds.has(id)));
+}
 function otSimEffectForZone(z){
  if(otUE){const d=otUE.draft;if(otUE.context==='effects'&&(otEffectIsAll()||otEffectSectionId===z.id)||otUE.context==='trigger'&&otUE.targets.includes(z.id)||otUE.context==='sequence')return {fx:otUEFxName(d.fx),fg:d.col[0],bg:d.col[1],accent:d.col[2],speed:otSimClamp((Number(d.sx)||0)/255),intensity:otSimClamp((Number(d.ix)||0)/255),brightness:otSimClamp((Number(d.bri)||0)/160),reverse:!!d.rev};
  }
  if(otSim.triggers.length){const order=['Brake','Reverse','Hazards','Left Turn','Right Turn','Park'];
-  for(const name of order){if(!otSim.triggers.includes(name))continue;const p=state.profiles?.[name];if(!p?.zones?.includes(z.id))continue;
-   const a={...p,...(p.sectionAnimations?.[z.id]||{})},d=otSimDraft(a);d.triggerName=name;d.zoneSide=z.vehicleSide||(/right/i.test(z.name)?'right':'left');if(name==='Park')d.brightness=Math.min(d.brightness,.35);if(name==='Brake')d.brightness=Math.max(d.brightness,.85);return d;}
+  const example=otSimTriggerExampleMode();
+  for(const name of order){if(!otSim.triggers.includes(name))continue;
+   const p=state.profiles?.[name]||DEFAULT_PROFILE(name,'automotive');
+   if(!example&&!p.zones?.includes(z.id))continue;
+   const a={...p,...(p.sectionAnimations?.[z.id]||{})},d=otSimDraft(a);
+   d.triggerName=name;d.zoneSide=z.vehicleSide||(/right/i.test(z.name)?'right':'left');
+   if(name==='Park')d.brightness=Math.min(d.brightness,.35);
+   if(name==='Brake')d.brightness=Math.max(d.brightness,.85);
+   return d;}
   return {fx:'Solid',fg:'#000000',bg:'#000000',accent:'#000000',speed:0,intensity:0,brightness:0,reverse:false};
  }
  if(otSim.source==='sequence'&&otSequence.length){const now=otSimElapsed();let cycle=0,ix=0,total=otSequence.reduce((v,x)=>v+otSimClamp(Number(x.ms),1500,300000),0);let mod=now%(total||1);
@@ -2030,7 +2044,7 @@ function otSimColor(d,i,n,now){
  if(/off/.test(fx))c='#000000';
  return otSimScale(c,d.brightness);
 }
-function otSimStatus(){if(!otSim.active)return null;return otSim.triggers.length?'SIMULATED · '+otSim.triggers.join(' + '):otSim.source==='sequence'?'SIMULATED · Sequence step '+(otSim.sequenceStep+1):'SIMULATED · '+(otSim.playing?'Effect':'Paused');}
+function otSimStatus(){if(!otSim.active)return null;return otSim.triggers.length?(otSimTriggerExampleMode()?'SIMULATED EXAMPLE · ':'SIMULATED · ')+otSim.triggers.join(' + '):otSim.source==='sequence'?'SIMULATED · Sequence step '+(otSim.sequenceStep+1):'SIMULATED · '+(otSim.playing?'Effect':'Paused');}
 function otSimStart(kind='effect'){
  otPreviewSynced=false;
  if(!['effect','sequence'].includes(kind))return;
@@ -2048,7 +2062,7 @@ function otSimTrigger(name){
 function otSimPause(){if(!otSim.active)return;if(otSim.playing){otSim.pauseAt=performance.now();otSim.playing=false}else{otSim.epoch+=performance.now()-(otSim.pauseAt??performance.now());otSim.pauseAt=null;otSim.playing=true}render();otSimAnimate();}
 function otSimStop(){otPreviewSynced=false;otSim.active=false;otSim.playing=false;otSim.triggers=[];otSim.source='effect';otSim.pauseAt=null;cancelAnimationFrame(otSimRaf);otSimRaf=0;render();}
 function otSimAnimate(){if(otSimRaf)return;const tick=(now)=>{otSimRaf=0;if(document.hidden)return;if(!otSim.active&&!otUE)return;if(now-otSimLastPaint>=45){otSimLastPaint=now;otPeekPaint()}if(otSim.playing||otUE)otSimRaf=requestAnimationFrame(tick)};otSimRaf=requestAnimationFrame(tick)}
-function otSimControls(){return `<div class="ot-sim-controls" aria-label="Local preview controls"><div class="ot-sim-actions"><button type="button" class="btn ${otSim.active&&otSim.source==='effect'?'primary':''}" onclick="otSimStart('effect')">▶ Preview effect</button><button type="button" class="btn ${otSim.active&&otSim.source==='sequence'?'primary':''}" onclick="otSimStart('sequence')" ${otSequence.length?'':'disabled'}>▶ Sequence</button><button type="button" class="btn" onclick="otSimPause()" ${otSim.active?'':'disabled'}>${otSim.playing?'Ⅱ Pause':'▶ Resume'}</button><button type="button" class="btn" onclick="otSimStop()" ${otSim.active?'':'disabled'}>■ Stop preview</button></div><div class="ot-sim-triggers">${OT_SIM_TRIGGERS.map(n=>`<button type="button" class="ot-sim-trigger ${otSim.triggers.includes(n)?'on':''}" aria-pressed="${otSim.triggers.includes(n)}" onclick="otSimTrigger('${n}')">${n}</button>`).join('')}</div><p class="small muted">Local visualization only; no LED or vehicle commands. Trigger playback uses assigned sections and saved local colors. Preview is approximate, not a WLED pixel capture.</p></div>`;}
+function otSimControls(){return `<div class="ot-sim-controls" aria-label="Local preview controls"><div class="ot-sim-actions"><button type="button" class="btn ${otSim.active&&otSim.source==='effect'?'primary':''}" onclick="otSimStart('effect')">▶ Preview effect</button><button type="button" class="btn ${otSim.active&&otSim.source==='sequence'?'primary':''}" onclick="otSimStart('sequence')" ${otSequence.length?'':'disabled'}>▶ Sequence</button><button type="button" class="btn" onclick="otSimPause()" ${otSim.active?'':'disabled'}>${otSim.playing?'Ⅱ Pause':'▶ Resume'}</button><button type="button" class="btn" onclick="otSimStop()" ${otSim.active?'':'disabled'}>■ Stop preview</button></div><div class="ot-sim-triggers">${OT_SIM_TRIGGERS.map(n=>`<button type="button" class="ot-sim-trigger ${otSim.triggers.includes(n)?'on':''}" aria-pressed="${otSim.triggers.includes(n)}" onclick="otSimTrigger('${n}')">${n}</button>`).join('')}</div><p class="small muted">Local visualization only; no LED or vehicle commands. Trigger examples use temporary demo lighting when no visible zone is assigned; configured assignments take priority. This changes no saved mappings and sends no hardware commands.</p></div>`;}
 function otSimPreviewForEditor(){if(!otUE)return '';const targets=otUE.context==='trigger'?otUE.targets:otUE.context==='effects'&&!otEffectIsAll()?[otEffectSectionId]:state.layout.slice(0,1).map(z=>z.id);const z=state.layout.find(x=>targets.includes(x.id))||state.layout[0];if(!z)return '';return `<div class="ot-ue-card ot-ue-preview" aria-label="Simulated effect preview"><div class="line"><strong>LED preview</strong><span class="ot-mini">SIMULATED · not sent</span></div><div class="ot-preview-row"><span class="ot-preview-label">${esc(z.name)} <small>${z.length} LEDs</small></span><span class="ot-ledstrip">${Array.from({length:Math.min(28,Math.max(1,Number(z.length)||1))},(_,i)=>`<i class="ot-led" data-ot-editor-index="${i}" data-ot-editor-zone="${esc(z.id)}" style="background:#070707;animation:none"></i>`).join('')}</span></div></div>`;}
 function otPeekPaint(){
  const live=otControllerMode==='wled'&&state.connected&&otPeekPixels&&Date.now()-otPeekAt<2500;
