@@ -52,7 +52,6 @@ jobs:
           gradle-version: '8.11.1'
       - name: Validate Android WebView JavaScript syntax and output integration contract
         run: |
-          node --check android/app/src/main/assets/ble-show-panel.js
           node --check android/qa/test_unified_ble_fx.cjs
           node android/qa/test_unified_ble_fx.cjs
           node --check android/app/src/main/assets/ble-output-panel.js
@@ -147,8 +146,8 @@ jobs:
           assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
             scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
-          assert(scene.indexOf('otNativeShowPanel()')>scene.indexOf('ot-subnav'),
-            'CORE native lighting controls must not hide Show tabs');
+          assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
+            'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
           assert(shell.includes('Android v0.1.23')&&gradle.includes("versionName '0.1.23'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
