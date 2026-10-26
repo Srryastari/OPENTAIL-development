@@ -768,6 +768,14 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
 #app .ot-chat-full{width:100%}
 #app .ot-chat-event-strip span{min-width:0!important}
 @media(max-width:370px){#app .ot-chat-nav-pill{font-size:10px;padding:8px 3px;gap:3px}#app .ot-chat-nav-pill svg{width:13px;height:13px;flex-basis:13px}}
+</style><style id="ot-custom-trigger-row-delete">
+#app .ot-chat-trigger-bottom{display:flex;width:100%;align-items:stretch;gap:8px}
+#app .ot-chat-trigger-action .ot-chat-trigger-bottom>.ot-trigger-card-test{flex:1 1 auto;width:auto!important;min-width:0;min-height:42px;border-radius:999px}
+#app .ot-chat-trigger-delete{width:44px;min-width:44px;min-height:42px;flex:0 0 44px;display:flex;align-items:center;justify-content:center;background:#301417;color:#ffb1b9;border:1px solid #79323c;border-radius:999px;cursor:pointer}
+#app .ot-chat-trigger-delete:focus-visible,#app .ot-chat-trigger-confirm button:focus-visible{outline:2px solid #dedede;outline-offset:2px}
+#app .ot-chat-trigger-confirm{width:100%;display:flex;flex-wrap:wrap;align-items:center;gap:7px;border-top:1px solid #333;padding-top:9px;font-size:12px;color:#ccc}
+#app .ot-chat-trigger-confirm span{flex:1 1 100%}
+#app .ot-chat-trigger-confirm button{flex:1 1 auto;min-height:40px}
 </style></head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
@@ -3208,11 +3216,18 @@ function otCreateSoftwareTrigger(){const el=document.getElementById('ot-trigger-
  state.profiles[name]=DEFAULT_PROFILE(name,'trigger-custom','#ffffff');state.profiles[name].pattern='Solid';
  if(!persist()){delete state.profiles[name];return;}otAddingTrigger=false;otEditTrigger(name);
 }
-function otDeleteSoftwareTrigger(n){if(state.profiles?.[n]?.kind!=='trigger-custom')return;
+let otPendingTriggerDelete=null;
+function otDeleteSoftwareTrigger(n,confirmed=false){
+ if(state.profiles?.[n]?.kind!=='trigger-custom')return;
  if(state.benchSignals?.[n]){state.triggerStatus='Turn this trigger OFF before deleting it';render();return;}
- if(!confirm('Delete custom trigger "'+n+'" and its assignments?'))return;
- delete state.profiles[n];if(state.triggerEditing===n){otTriggerEditorOpen=false;otMultiSelected=[];state.triggerEditing='Brake'}persist();render();
+ if(!confirmed){otPendingTriggerDelete=n;render();return;}
+ if(otPendingTriggerDelete!==n)return;
+ delete state.profiles[n];otPendingTriggerDelete=null;
+ otSelectedTriggerNames=otSelectedTriggerNames.filter(x=>x!==n);
+ if(state.triggerEditing===n){otTriggerEditorOpen=false;otMultiSelected=[];state.triggerEditing='Brake'}
+ persist();render();
 }
+function otCancelTriggerDelete(){otPendingTriggerDelete=null;render()}
 function otTriggerAssignmentsToggle(n,id){return otToggleTriggerAssignment(n,id)}
 function otTriggerEditAssigned(id){otMultiSelected=[id];otEditZone=id;state.selectedZone=id;render()}
 function otEditAllAssigned(){const p=state.profiles[state.triggerEditing];otMultiSelected=(p?.zones||[]).filter(id=>state.layout.some(z=>z.id===id));otEditZone=null;render()}
@@ -3272,12 +3287,16 @@ function builder(){
   ${otTriggerTestActive(t)?'<span class="ot-chat-sim-flag">SIM</span>':''}
   <strong>${esc(t)}</strong>
  </button>
- <button type="button" class="ot-trigger-card-test ot-chat-pill ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${otTriggerTestActive(t)?'■ Stop test':'▷ Test'}</button>
+ <div class="ot-chat-trigger-bottom">
+  <button type="button" class="ot-trigger-card-test ot-chat-pill ${otTriggerTestActive(t)?'is-on':''}" aria-pressed="${Boolean(otTriggerTestActive(t))}" ${otTriggerPending?'disabled':''} onclick="otTriggerTestToggle('${t}')">${otTriggerTestActive(t)?'■ Stop test':'▷ Test'}</button>
+  ${state.profiles[t]?.kind==='trigger-custom'?`<button type="button" class="ot-chat-trigger-delete" aria-label="Remove custom trigger ${esc(t)}" onclick="otDeleteSoftwareTrigger(decodeURIComponent('${encodeURIComponent(t).replace(/'/g,'%27')}'))"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg></button>`:''}
+ </div>
+ ${otPendingTriggerDelete===t?`<div class="ot-chat-trigger-confirm"><span>Remove ${esc(t)}?</span><button type="button" class="ot-chat-pill" onclick="otCancelTriggerDelete()">Cancel</button><button type="button" class="ot-chat-pill ot-chat-danger" onclick="otDeleteSoftwareTrigger(decodeURIComponent('${encodeURIComponent(t).replace(/'/g,'%27')}'),true)">Remove</button></div>`:''}
  </div>`).join('')}
  </div><div class="ot-chat-selection"><span>${otSelectedTriggers().length} selected for editing</span><div><button class="ot-chat-textbutton" onclick="otSelectAllTriggers()">All</button><button class="ot-chat-textbutton" onclick="otClearTriggerSelections()">Clear</button></div></div><button type="button" class="ot-chat-pill ot-chat-primary ot-chat-edit-selected" ${otSelectedTriggers().length?'':'disabled'} onclick="otEditSelectedTriggers()">Edit ${otSelectedTriggers().length} selected ${otSelectedTriggers().length===1?'Trigger':'Triggers'}</button>${state.triggerStatus?`<p class="ot-chat-hint" role="status">${esc(state.triggerStatus)}</p>`:''}
  ${benchBefore?`<div class="btnrow">${button('Restore previous WLED lighting','otRestorePreviousLighting()')}</div>`:''}</div>
  ${otTriggerBatchOpen&&otSelectedTriggers().length>1?otTriggerBatchMarkup():''}
- ${otTriggerEditorOpen?`<div class="ot-assignments-card ot-chat-inline-editor"><div class="line"><div><span class="ot-eyebrow">Trigger configuration</span><h2>${esc(n)} · Edit</h2></div>${p.kind==='trigger-custom'?`<button class="btn danger" onclick="otDeleteSoftwareTrigger('${n}')">Delete trigger</button>`:'<span class="ot-mini">Auto-saved</span>'}</div>
+ ${otTriggerEditorOpen?`<div class="ot-assignments-card ot-chat-inline-editor"><div class="line"><div><span class="ot-eyebrow">Trigger configuration</span><h2>${esc(n)} · Edit</h2></div><span class="ot-mini">Auto-saved</span></div>
  <div class="ot-assignment-header"><div><strong>LED sections</strong><p class="ot-help">Assign for playback; use Edit or select multiple to change animations.</p></div><span class="ot-edit-count">${assigned.length} / ${state.layout.length} assigned</span></div>
  <div class="ot-section-grid ot-assign-tiles">${state.layout.map(s=>`<div class="ot-assign ot-assignment-card ${assigned.includes(s.id)?'on':''} ${otSelection().includes(s.id)?'is-selected':''}"><div class="ot-assignment-title"><strong>${esc(s.name)}</strong><small>${s.length} pixels</small></div><div class="ot-assignment-actions"><button type="button" class="ot-assignment-toggle" aria-pressed="${assigned.includes(s.id)}" onclick="otTriggerAssignmentsToggle('${n}','${s.id}')">${assigned.includes(s.id)?'✓ Assigned':'+ Assign'}</button><button type="button" class="ot-assignment-edit" aria-label="Edit animation for ${esc(s.name)}" aria-pressed="${otSelection().includes(s.id)}" onclick="otTriggerEditAssigned('${s.id}')">✎ Edit</button><button type="button" class="ot-assignment-multi ${otSelection().includes(s.id)?'is-picked':''}" aria-label="${otSelection().includes(s.id)?'Deselect':'Select'} ${esc(s.name)} for batch animation editing" aria-pressed="${otSelection().includes(s.id)}" onclick="otToggleMultiZone('${s.id}')">${otSelection().includes(s.id)?'☑':'☐'}</button></div></div>`).join('')||'<p class="small muted">Add LED sections in Layout to assign triggers.</p>'}</div>
  <div class="ot-assignment-bottom"><span class="ot-eyebrow">${otSelection().length} selected for editing</span><div class="ot-section-shortcuts">${assigned.length>1?`<button class="ot-link-action" onclick="otEditAllAssigned()">Edit all assigned</button>`:''}${state.layout.length>1?`<button class="ot-link-action" onclick="otSelectAllZones()">Select all</button>`:''}${otSelection().length?`<button class="ot-link-action" onclick="otClearMultiZones()">Clear</button>`:''}</div></div>
