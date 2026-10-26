@@ -34,7 +34,7 @@ with zipfile.ZipFile(archive) as outer:
         print(f"{target}: {count} source files extracted")
     studio=root/"web-studio"
     studio.mkdir(exist_ok=True)
-    (web-studio/"opentail-v0.19.50.htm").write_bytes(outer.read("original-files/opentail-v0.19.50.htm"))
-    shutil.copyfile(web-studio/"opentail-v0.19.50.htm",web-studio/"opentail.htm")
+    (studio/"opentail-v0.19.50.htm").write_bytes(outer.read("original-files/opentail-v0.19.50.htm"))
+    shutil.copyfile(studio/"opentail-v0.19.50.htm",studio/"opentail.htm")
     print("studio: versioned baseline and stable deployment copy extracted")
 print("Source extraction completed; builds and hardware tests are NOT verified.")
