@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.24: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.25: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -148,7 +148,7 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.24 · Studio v0.19.56</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.25 · Studio v0.19.56</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
@@ -341,7 +341,11 @@
   panel.id='ot-compact-pages';
   panel.setAttribute('aria-live','polite');
   const header=document.querySelector('.ot-mobile-header');
-  document.body.insertBefore(panel, header?.nextSibling || document.body.firstChild);
+  // Home overview belongs AFTER the single six-tab navigation. Inserting after
+  // the header placed the entire Home overview above the navigation, which
+  // made the tabs appear at the bottom only on Home.
+  const mainNav=document.querySelector('.ot-native-nav');
+  document.body.insertBefore(panel, mainNav?.nextSibling || header?.nextSibling || document.body.firstChild);
   const css=document.createElement('style');
   css.id='ot-compact-surface-style';
   css.textContent=`

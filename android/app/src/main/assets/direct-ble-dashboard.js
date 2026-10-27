@@ -13,10 +13,9 @@
     <p id="ot-direct-detail">Connect over Bluetooth without changing your Wi-Fi.</p>
     <button id="ot-direct-connect" class="ot-direct-primary" type="button">Connect to CORE</button>
     <div class="ot-direct-actions">
-      <button id="ot-direct-pair" type="button">Pair with BOOT</button>
       <button id="ot-direct-outputs" type="button">Outputs &amp; Zones</button>
     </div>
-    <p class="ot-direct-help">First-time enrollment: keep CORE running, hold BOOT, then tap Pair with BOOT. Release BOOT after authorization. Bench use only.</p>`;
+    <p class="ot-direct-help">First-time bench enrollment may still require holding CORE BOOT while tapping Authorize. Trusted phones reconnect automatically. A no-BOOT production pairing flow is not implemented yet.</p>`;
   const css=document.createElement('style');
   css.textContent=`
     #ot-direct-ble-dashboard{display:none;box-sizing:border-box;width:calc(100% - 28px);max-width:692px;margin:10px auto 5px;padding:15px 16px;border:1px solid #353535;border-radius:19px;background:#080808;color:#f6f6f6}
@@ -39,10 +38,11 @@
   document.head.appendChild(css);
   const header=document.querySelector('.ot-mobile-header');
   if (!header) return;
-  header.insertAdjacentElement('afterend',card);
+  // Never insert Home content between the header and the six-tab navigator.
+  const nav=document.querySelector('.ot-native-nav');
+  (nav||header).insertAdjacentElement('afterend',card);
   const read=()=>{try{return JSON.parse(window.OpenTailNativeApp.getState()||'{}')}catch(_){return {}}};
   const connect=card.querySelector('#ot-direct-connect');
-  const pair=card.querySelector('#ot-direct-pair');
   const outputs=card.querySelector('#ot-direct-outputs');
   function refresh(){
     const s=read(),phase=s.blePhase||'disconnected',connected=Boolean(s.ble&&s.bleRadioOn!==false);
@@ -52,10 +52,9 @@
     const waiting=['scanning','connecting','pairing','authorizing'].includes(phase);
     status.textContent=authorized?'Connected · Authorized':connected?'Connected · Authorization needed':phase==='permission'?'Permission needed':s.bleRadioOn===false?'Bluetooth off':waiting?phase.charAt(0).toUpperCase()+phase.slice(1)+'…':'Disconnected';
     status.style.color=authorized?'#29da8b':connected||waiting?'#f6bd47':'#aaa';
-    detail.textContent=authorized?'Ready to manage outputs and zones over BLE.':(s.bleMessage&&s.bleMessage!=='BLE not connected')?s.bleMessage:connected?'Authorization required. If this app was reinstalled, hold BOOT and tap Pair with BOOT to enroll again.':phase==='permission'?'Grant nearby-device permission when prompted.':s.bleRadioOn===false?'Turn on Bluetooth to connect.':'Connect over Bluetooth without switching Wi-Fi.';
-    connect.textContent=authorized?'Manage Outputs & Zones':connected?'Authorize Controller':waiting?'Connecting…':'Connect to CORE';
+    detail.textContent=authorized?'Ready to manage outputs and zones over BLE.':(s.bleMessage&&s.bleMessage!=='BLE not connected')?s.bleMessage:connected?'Authorization required. If this app was reinstalled, hold BOOT and tap Authorize Controller to enroll again.':phase==='permission'?'Grant nearby-device permission when prompted.':s.bleRadioOn===false?'Turn on Bluetooth to connect.':'Connect over Bluetooth without switching Wi-Fi.';
+    connect.textContent=authorized?'Manage Outputs & Zones':waiting?'Connecting…':connected?'Authorize Controller':'Connect to CORE';
     connect.disabled=waiting;
-    pair.hidden=authorized;
     outputs.hidden=true; // Primary action handles navigation; avoid duplicate Home buttons.
 
   }
@@ -63,14 +62,14 @@
   connect.addEventListener('click',()=>{
     const s=read();
     if(s.ble&&s.bleAuthorized){outputs.click();return;}
-    if(s.ble&&s.bleRadioOn!==false&&!s.bleAuthorized){actionFeedback('Requesting controller authorization…');window.OpenTailNativeApp.authorizeBle();}
+    if(s.ble&&s.bleRadioOn!==false&&!s.bleAuthorized){
+      const needsEnrollment=/not paired|enrollment refused|hold BOOT/i.test(s.bleMessage||'');
+      if(needsEnrollment&&window.OpenTailNativeBLE?.pairWithBoot){
+        actionFeedback('Hold BOOT on the powered CORE while enrolling this phone…');
+        window.OpenTailNativeBLE.pairWithBoot();
+      }else{actionFeedback('Requesting controller authorization…');window.OpenTailNativeApp.authorizeBle();}
+    }
     else {actionFeedback('Requesting Bluetooth permission or opening CORE scanner…');window.OpenTailNativeApp.scanBle();}
-  });
-  pair.addEventListener('click',()=>{
-    // Enrollment is explicitly user initiated; never silently expose the owner key.
-    actionFeedback('Requesting BOOT enrollment. Hold BOOT on the powered CORE.');
-    if(window.OpenTailNativeBLE?.pairWithBoot)window.OpenTailNativeBLE.pairWithBoot();
-    else actionFeedback('Native BLE bridge unavailable. Reopen the Android app.');
   });
   outputs.addEventListener('click',()=>{
     // Reuse existing output editor; no duplicate or unverified configuration path.

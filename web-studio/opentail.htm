@@ -906,7 +906,24 @@ function otRangeInput(el){
  const output=el.closest('label')?.querySelector('output.ot-range-value');
  if(output)output.textContent=el.value;
 }
-function otPaintAllRanges(){document.querySelectorAll('input[type=range]').forEach(otRangeInput);otDecorateRangeNumbers()}
+function otPaintAllRanges(){document.querySelectorAll('input[type=range]').forEach(otRangeInput);otDecorateRangeNumbers();otBleWholeOutputOptions()}
+function otBleWholeOutputOptions(){
+ if(typeof otBleFxMode!=='function'||!otBleFxMode())return;
+ const select=document.querySelector('select[aria-label="Target for WLED effects"]');
+ if(!select)return;
+ select.setAttribute('aria-label','Target outputs and zones for CORE effects');
+ const available=otConfirmedCoreOutputs();
+ for(let i=0;i<available.length;i++){
+  if(!available[i]||!Number(available[i].pixels))continue;
+  const id=`core-output-${i}`;
+  if(!Array.from(select.options).some(o=>o.value===id)){
+   const option=document.createElement('option');option.value=id;
+   option.textContent=`Entire Output ${i+1} · ${otCoreOutputTitle(i)} (${available[i].pixels} LEDs)`;
+   select.add(option,1+i);
+  }
+ }
+ if(/^core-output-[01]$/.test(String(otEffectSectionId)))select.value=otEffectSectionId;
+}
 function otDecorateRangeNumbers(){
  for(const r of document.querySelectorAll('input[type=range]')){
   if(r.dataset.otRangeWired)continue;
@@ -1583,7 +1600,7 @@ function otBleResult(message){
    otBleSelectedPending=null;statusLine();
  }else if(message&&message.includes('OK STOP')){
    state.runningFx=null;state.runningSectionFx=null;otBleSelectedPending=null;
-   state.status='CORE confirmed effect stopped';statusLine();
+   state.status='CORE accepted Stop; verify the physical LEDs are off';statusLine();
  }else if(message&&message.includes('OK SAVED')){
    state.status='CORE confirmed effect saved to flash slot '+(otBlePresetSlot+1);statusLine();
  }else if(message&&message.includes('OK LOADED')){
@@ -1629,6 +1646,8 @@ function otBleEffectMeta(id){
 }
 function otBleTargetMasks(){
  if(otEffectIsAll())return [3,255];
+ const outputTarget=/^core-output-([01])$/.exec(String(otEffectSectionId));
+ if(outputTarget)return [1<<Number(outputTarget[1]),255];
  const zone=otPreviewConfiguredZones().find(z=>z.id===otEffectSectionId);
  if(!zone||zone.otCoreOutput>1||zone.otCoreZone>7)return null;
  return [1<<zone.otCoreOutput,1<<zone.otCoreZone];
@@ -1707,7 +1726,7 @@ function otEffectSafetyCheck(sequencePlayback=false){
 }
 function otSelectEffectSection(id){
  if(otBleFxMode()){
-   if(!otEffectIsAll(id)&&!otPreviewConfiguredZones().some(z=>z.id===id))return;
+   if(!otEffectIsAll(id)&&!/^core-output-[01]$/.test(id)&&!otPreviewConfiguredZones().some(z=>z.id===id))return;
    otEffectSectionId=id;state.runningSectionFx=null;render();return;
  }
  if(!otEffectIsAll(id)&&!state.layout.some(z=>z.id===id))return;
@@ -2525,20 +2544,22 @@ function otPeekPaint(){
  const label=document.getElementById('ot-peek-status');if(label)label.textContent=sim?otSimStatus()+(otSim.playing?' · running':' · paused'):live?otPeekStatusText():otControllerMode==='core'?'No CORE pixel telemetry · use local preview':otPeekStatusText();
  const badge=document.getElementById('ot-peek-badge');if(badge)badge.textContent=sim?(otSimPreviewZones()===OT_SIM_EXAMPLE_ZONES?'SIMULATED DEMO':otPreviewSynced&&otControllerMode==='wled'&&state.connected?'SYNCED · ESTIMATE':'SIMULATED'):live?(otPeekExact?(document.querySelector('.ot-preview')?.dataset?.otSampled==='true'?'LIVE · EXACT INDEXES':'LIVE · EXACT INDEXES'):'LIVE · PARTIAL FRAME'):otPeekPixels?'STALE':'NO PIXEL DATA';
  otPeekLiveCanvases(live,sim);
- const now=otSimElapsed();let colorCache=new Map();
+ const now=otSimElapsed(),zonesById=new Map(sim?otSimPreviewZones().map(z=>[z.id,z]):[]);
+ const colorCache=new Map(),editorZones=new Map(otUE?state.layout.map(z=>[z.id,z]):[]),editorEffects=new Map();
  for(const el of document.querySelectorAll('[data-ot-led-index]')){
   const index=Number(el.dataset.otLedIndex),zoneId=el.dataset.otPreviewZone;
   let c='#070707';
-  if(sim){const z=otSimPreviewZones().find(x=>x.id===zoneId);if(z){if(!colorCache.has(zoneId))colorCache.set(zoneId,otSimEffectForZone(z));const len=Number(el.dataset.otPreviewCount)||28,pos=Number(el.dataset.otPreviewSample)||0;c=otSimColor(colorCache.get(zoneId),pos,len,now)}}
+  if(sim){const z=zonesById.get(zoneId);if(z){if(!colorCache.has(zoneId))colorCache.set(zoneId,otSimEffectForZone(z));const len=Number(el.dataset.otPreviewCount)||28,pos=Number(el.dataset.otPreviewSample)||0;c=otSimColor(colorCache.get(zoneId),pos,len,now)}}
   else if(live&&index<otPeekPixels.length)c=otPeekPixels[index];
-  el.style.backgroundColor=c;
-  el.style.boxShadow=c!=='#000000'&&c!=='#070707'?'0 0 5px '+c+'55':'none';
+  if(el.dataset.otPaintedColor!==c){el.style.backgroundColor=c;
+   el.style.boxShadow=c!=='#000000'&&c!=='#070707'?'0 0 5px '+c+'55':'none';el.dataset.otPaintedColor=c;}
  }
  if(otUE){for(const el of document.querySelectorAll('[data-ot-editor-index]')){
-  const z=state.layout.find(x=>x.id===el.dataset.otEditorZone);if(!z)continue;
-  const i=Number(el.dataset.otEditorIndex),d=otSimEffectForZone(z);
+  const zoneId=el.dataset.otEditorZone,z=editorZones.get(zoneId);if(!z)continue;
+  if(!editorEffects.has(zoneId))editorEffects.set(zoneId,otSimEffectForZone(z));
+  const i=Number(el.dataset.otEditorIndex),d=editorEffects.get(zoneId);
   const c=otSimColor(d,i,Math.min(28,Math.max(1,z.length)),performance.now()-(otUE.previewStart|| (otUE.previewStart=performance.now())));
-  el.style.backgroundColor=c;el.style.boxShadow=c!=='#000000'?'0 0 5px '+c+'55':'none';
+  if(el.dataset.otPaintedColor!==c){el.style.backgroundColor=c;el.style.boxShadow=c!=='#000000'?'0 0 5px '+c+'55':'none';el.dataset.otPaintedColor=c;}
  }}
 }
 function otPeekRetryNow(){otPeekClose();otPeekManualStop=false;otPeekAttempts=0;otPeekConnect()}
@@ -2955,8 +2976,8 @@ function otUEMarkup(){
  <div class="ot-ue-card"><div class="ot-ue-card-head"><h3>Effect parameters</h3><small>From WLED metadata</small></div>${controls.filter(c=>!c.key.startsWith('o')).map(slider).join('')||'<p class="small muted">No adjustable sliders for this effect.</p>'}${controls.filter(c=>c.key.startsWith('o')).map(c=>`<label class="ot-ue-toggle"><input type="checkbox" ${d[c.key]?'checked':''} onchange="otUESet('${c.key}',this.checked)"> ${esc(c.label)}</label>`).join('')}</div>
  ${meta?.palette===false?'':`<div class="ot-ue-card">${otPaletteSelectHtml(d.pal,"otUESet('pal',+this.value)")}</div>`}
  <div class="ot-ue-card"><div class="ot-ue-card-head"><h3>Colors</h3><small>${colors.length} supported slot(s)</small></div>${colors.length?`<div class="ot-ue-color-grid">${colors.map(c=>`<label class="ot-ue-color"><span>${['Foreground','Background','Accent'][c.i]}</span><input type="color" id="ot-ue-slot-${c.i}" value="${esc(otUEHex(d.col[c.i]))}" aria-label="${['Foreground','Background','Accent'][c.i]}" oninput="otUESet('col${c.i}',this.value)"><small id="ot-ue-hex-${c.i}">${esc(d.col[c.i].toUpperCase())}</small><button class="ot-ue-wheel-button" type="button" onclick="otUEColorSelect(${c.i})">Wheel</button></label>`).join('')}</div>${otUEWheelOpen&&colors.some(c=>c.i===otUEColorIndex)?`<div class="ot-ue-wheel-body"><strong>${['Foreground','Background','Accent'][otUEColorIndex]} · Wheel</strong><div id="ot-ue-wheel" class="ot-ue-color-wheel" onpointerdown="otUEWheel(event)" onpointermove="if(event.buttons)otUEWheel(event)"><div class="ot-ue-wheel-pointer" style="background:${esc(d.col[otUEColorIndex])}"></div></div><div class="ot-ue-swatches">${['#ff0000','#ff9800','#ffeb3b','#39ff70','#03a9f4','#673ab7','#ffffff','#000000'].map(hex=>`<button aria-label="Set ${['Foreground','Background','Accent'][otUEColorIndex]} ${hex}" style="background:${hex}" onclick="otUESet('col${otUEColorIndex}','${hex}')"></button>`).join('')}</div><label class="ot-ue-slider"><span><strong>Color value</strong><output id="ot-ue-color-value">${Math.round(Math.max(...hexRgb(d.col[otUEColorIndex]))/255*100)}%</output></span><input type="range" min="0" max="100" value="${Math.round(Math.max(...hexRgb(d.col[otUEColorIndex]))/255*100)}" oninput="otUEColorValue(+this.value)"></label></div>`:''}`:'<p class="small muted">The selected effect does not use manual color slots.</p>'}<p class="small muted">Effect palettes can override individual colors. WLED uses Fx, Bg and Cs slots.</p></div>
- <div class="ot-ue-card"><label class="ot-ue-slider"><span><strong>Brightness ceiling</strong><output id="ot-ue-val-bri">${Math.round(d.bri/1.6)}%</output></span><input type="range" min="1" max="160" step="1" value="${d.bri}" oninput="otUESet('bri',+this.value)"></label><p class="small muted">Shared editor does not increase WLED master brightness. Sequence playback respects existing segment caps.</p></div>
- </div><footer class="ot-ue-footer"><button class="btn" onclick="otUEClose()">Cancel</button><button class="btn primary" ${otUEBusy?'disabled':''} onclick="otUEApply()">${e.context==='effects'?(otControllerMode==='core'?'Save local draft':'Apply on WLED'):'Save '+(e.context==='sequence'?'step':'animation')}</button></footer></section></div>`;
+ <div class="ot-ue-card"><label class="ot-ue-slider"><span><strong>${otBleFxMode()?'CORE brightness (bench capped)':'Brightness ceiling'}</strong><output id="ot-ue-val-bri">${Math.round(d.bri/1.6)}%</output></span><input type="range" min="1" max="160" step="1" value="${d.bri}" oninput="otUESet('bri',+this.value)"></label><p class="small muted">${otBleFxMode()?'CORE scales this value to the firmware 12.5% per-channel bench ceiling; this is not a measured current limiter.':'Shared editor does not increase WLED master brightness. Sequence playback respects existing segment caps.'}</p></div>
+ </div><footer class="ot-ue-footer"><button class="btn" onclick="otUEClose()">Cancel</button><button class="btn primary" ${otUEBusy?'disabled':''} onclick="otUEApply()">${e.context==='effects'?(otBleFxMode()?'Apply to CORE':otControllerMode==='core'?'Save local draft':'Apply on WLED'):'Save '+(e.context==='sequence'?'step':'animation')}</button></footer></section></div>`;
 }
 
 let otEffectFilter='all',otEffectQuery='';

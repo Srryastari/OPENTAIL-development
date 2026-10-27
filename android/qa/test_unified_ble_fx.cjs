@@ -4,8 +4,13 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync('web-studio/opentail.htm','utf8');
 const activity=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
+const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
+assert(shell.includes("document.body.insertBefore(panel, mainNav?.nextSibling"),
+  'Home overview must not be inserted above the canonical six-tab navigation');
 assert(!activity.includes('injectInlineBleControls('),'Obsolete standalone BLE FX panel is still injected');
 assert(!html.includes('window.__otUnifiedBleFxV1'),'Wrapper monkey patch must not ship inside Studio');
+assert(html.includes("otBleFxMode()?'Apply to CORE'"),'Connected BLE effect editor must not advertise Apply on WLED');
+assert(html.includes('Entire Output ${i+1}'),'CORE output targets must be available independently of saved zones');
 const start=html.indexOf('const OT_CORE_FX_NAMES='),end=html.indexOf('function otCompatibleEffectChoices()',start);
 assert(start>0&&end>start,'Unified BLE source must live directly inside Studio');
 const fragment=html.slice(start,end);
@@ -41,6 +46,13 @@ assert.equal(play.args[13],60,'Temporary playback TTL must not run forever');
 c.otEffectSectionId='core-1-2';
 assert.equal(c.otBleApplyEffect(32768),true,'Original particle effect uses same FX registry');
 assert.deepEqual(calls.at(-1).args.slice(0,3),[32768,2,4]);
+c.otEffectSectionId='core-output-0';
+assert.equal(c.otBleApplyEffect(0),true,'Entire Output 1 must be selectable independently');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[0,1,255]);
+c.otEffectSectionId='core-output-1';
+assert.equal(c.otBleApplyEffect(0),true,'Entire Output 2 must be selectable independently');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[0,2,255]);
+c.otEffectSectionId='core-1-2';
 assert.equal(c.otBleApplyEffect(32768,{color:'#ff0000',background:'#0000ff',bri:160,sx:90,ix:150,pal:4}),true);
 assert.equal(calls.at(-1).args[12],4,'Embers WLED-ID gradient palette must travel over BLE');
 assert.equal(c.otBleStopEffect(),true);

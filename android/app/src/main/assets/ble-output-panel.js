@@ -22,6 +22,7 @@ const phase=ble.phase==='permission'?'permission':(radioOn?(ble.phase||'disconne
 const phaseLabels={permission:'Permission required',off:'Off',disconnected:'Disconnected',scanning:'Scanning…',connecting:'Connecting…',connected:'Connected',pairing:'Waiting for BOOT…',authorizing:'Authorizing…',authorized:'Authorized',reading:'Reading…',saving:'Saving…'};
 const phaseText=phaseLabels[phase]||'Disconnected';
 const working=['scanning','connecting','pairing','authorizing','reading','saving'].includes(phase);
+const enrollmentNeeded=/not paired|enrollment refused|hold BOOT/i.test(message+' '+(ble.message||''));
 const health = !radioOn || phase==='permission' || (!connected && !working) ? 'red'
   : enabled && !working ? 'green' : 'amber';
 const chipText = !radioOn ? 'Bluetooth off' : phase==='permission' ? 'Permission needed'
@@ -36,8 +37,8 @@ return `<div class="ot-bom-head"><div><h2>Bluetooth Output Manager</h2><small>2 
    <div><span>Authorization</span><strong>${enabled?'Authorized':connected?'Required':'Not connected'}</strong></div>
  </div>
  <p class="ot-bom-feedback" role="status" aria-live="polite">${escape(message)}</p>
- <div class="ot-bom-row">${button('Find BLE','scan')}${button('Pair with BOOT','pair')}${button('Authorize','authorize')}${button('Reload Output','reload')}${button('Legacy Wi-Fi auth','wifi')}</div>
- <p class="ot-bom-note">BLE-only setup: connect, then hold the powered-on CORE BOOT button while tapping Pair with BOOT. Future BLE reconnects authenticate automatically. Optional legacy Wi-Fi authorization remains available. This is bench enrollment, not production-grade anti-MITM pairing.</p>
+ <div class="ot-bom-row">${button('Find BLE','scan')}${button(enrollmentNeeded?'Hold BOOT + Authorize':'Authorize Controller','authorize')}${button('Reload Output','reload')}${button('Legacy Wi-Fi auth','wifi')}</div>
+ <p class="ot-bom-note">One authorization control: returning phones use stored credentials; first-time bench enrollment still requires holding CORE BOOT when prompted. Optional legacy Wi-Fi authorization remains available. No-BOOT production enrollment is not implemented yet.</p>
  <div class="ot-bom-row">${[0,1].map(i=>`<button data-ble-out="select" data-index="${i}" class="${selected===i?'active':''}">${escape(draft[i]?.name||`Output ${i+1}`)} · GPIO${i?17:16}</button>`).join('')}</div>
  ${output?`<div class="ot-bom-fields">
  <label>Output name<input data-out="name" maxlength="24" value="${escape(output.name)}"></label>
@@ -80,7 +81,9 @@ if(!isLayout())return;
 if(document.getElementById('ot-ble-output-card'))return;
 const main=document.querySelector('#app main');if(!main)return;
 const node=document.createElement('section');node.id='ot-ble-output-card';node.className='ot-bom';
-const existing=main.querySelector('.ot-om-card');if(existing)existing.before(node);else main.prepend(node);
+// The approved Layout editor is the primary surface. BLE service controls
+// follow it instead of pushing the actual Layout card to the bottom.
+main.append(node);
 paint();
 }
 function announceSelection(){document.dispatchEvent(new CustomEvent('opentail:ble-output-selected',{detail:{index:selected}}));}
@@ -113,8 +116,11 @@ document.addEventListener('click',e=>{
 const b=e.target.closest('#ot-ble-output-card [data-ble-out]');if(!b)return;
 const action=b.dataset.bleOut;
 if(action==='scan')window.OpenTailNativeBLE.scan();
-else if(action==='authorize')window.OpenTailNativeBLE.authorize();
-else if(action==='pair')window.OpenTailNativeBLE.pairWithBoot();
+else if(action==='authorize'){
+ const st=nativeState(),needsBoot=/not paired|enrollment refused|hold BOOT/i.test(message+' '+(st.message||''));
+ if(needsBoot)window.OpenTailNativeBLE.pairWithBoot();
+ else window.OpenTailNativeBLE.authorize();
+}
 else if(action==='wifi')window.OpenTailNativeBLE.authorizeWifiLegacy();
 else if(action==='select'){if(busy){message='Wait for the current BLE operation before switching outputs';paint();return;}const next=Number(b.dataset.index);if(next!==0&&next!==1)return;selected=next;paint();announceSelection();load(selected);}
 else if(action==='reload')load(selected);

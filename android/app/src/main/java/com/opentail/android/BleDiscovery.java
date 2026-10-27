@@ -18,6 +18,13 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
 import java.nio.charset.StandardCharsets;
@@ -398,7 +405,16 @@ final class BleDiscovery {
     BleDiscovery(Activity activity, StatusListener listener) {
         this.activity = activity;
         this.listener = listener;
-        entries = new ArrayAdapter<>(activity, android.R.layout.simple_list_item_1, labels);
+        entries = new ArrayAdapter<String>(activity, android.R.layout.simple_list_item_1, labels) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView row = (TextView) super.getView(position, convertView, parent);
+                row.setTextColor(Color.WHITE);
+                row.setBackgroundColor(Color.rgb(9, 9, 9));
+                row.setPadding(24, 20, 24, 20);
+                row.setMinHeight(58);
+                return row;
+            }
+        };
     }
 
     boolean handlePermissions(int requestCode, int[] results) {
@@ -452,8 +468,10 @@ final class BleDiscovery {
         entries.notifyDataSetChanged();
         if (!background) {
             preferredPending = null;
+            SpannableString title = new SpannableString("Find OpenTail CORE");
+            title.setSpan(new ForegroundColorSpan(Color.WHITE), 0, title.length(), 0);
             scanDialog = new AlertDialog.Builder(activity)
-                    .setTitle("Find OpenTail CORE")
+                    .setTitle(title)
                     .setAdapter(entries, (dialog, position) -> {
                         String address = new ArrayList<>(found.keySet()).get(position);
                         stopScan();
@@ -464,6 +482,15 @@ final class BleDiscovery {
                     .create();
             scanDialog.setOnDismissListener(dialog -> stopScan());
             scanDialog.show();
+            if (scanDialog.getWindow() != null) {
+                GradientDrawable panel = new GradientDrawable();
+                panel.setColor(Color.rgb(9, 9, 9));
+                panel.setCornerRadius(24f * activity.getResources().getDisplayMetrics().density);
+                panel.setStroke(1, Color.rgb(48, 48, 48));
+                scanDialog.getWindow().setBackgroundDrawable(panel);
+            }
+            if (scanDialog.getButton(AlertDialog.BUTTON_NEGATIVE) != null)
+                scanDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.WHITE);
         }
         try {
             scanning = true;
