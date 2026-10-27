@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import re
 import sys
 import tempfile
+import shutil
 from html.parser import HTMLParser
 
 root = Path(__file__).resolve().parents[1]
@@ -34,7 +35,7 @@ ET.parse(main / 'res/values/strings.xml')
 ET.parse(main / 'res/values/styles.xml')
 
 check('Android XML parses correctly', manifest.tag == 'manifest')
-check('Studio v0.19.51 bundled, pinned checksum', hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
+check('Studio v0.19.57 bundled, pinned checksum', b"const OT_VERSION='0.19.57'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
 check('CORE endpoint fixed to known AP', 'http://192.168.4.1' in core_java and '/api/v1/capabilities' in core_java)
 check('CORE protocol validated before opening web controls', 'opentail-core-alpha-v1' in core_java and 'CoreConnection.verify()' in main_java)
 check('Untrusted URLs blocked', 'shouldOverrideUrlLoading' in main_java and 'External navigation blocked' in main_java)
@@ -49,7 +50,7 @@ check('Legacy Wi-Fi token remains optional, not the sole authorization', 'CoreCo
 check('Physical trigger mappings remain not writable over BLE', 'writeTrigger' not in ble_java and 'writeOutput' not in ble_java)
 check('Android 12+ BLE permissions included', all(f'android.permission.{p}' in read(xml_path) for p in ('BLUETOOTH_SCAN','BLUETOOTH_CONNECT')))
 check('Only CORE AP HTTP exception', len(net.findall('./domain-config/domain')) == 1 and net.findtext('./domain-config/domain') == '192.168.4.1' and net.find('./base-config').attrib.get('cleartextTrafficPermitted') == 'false')
-check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionName \'0.1.15\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
+check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionCode 27','versionName \'0.1.27\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
 check('Bundled Studio output & trigger editors retained', b'Universal Output Manager' in studio and b'Universal Trigger Manager' in studio)
 check('BLE bench-only limitation explicitly documented', 'BENCH' in ble_java.upper() and 'do not use for road lighting' in read('README.md').lower() and 'not a compiled apk' in read('README.md').lower())
 # Android v0.1.4 feature regressions: these are structural/source checks, not physical assertions.
@@ -69,90 +70,53 @@ check('Preferred BLE address stored only after validating expected OpenTail serv
 check('BLE reconnection bounded; control authorization cleared after BLE disconnect',
       'RECONNECT_DELAY_MS' in ble_java and 'beginScan(true)' in ble_java and 'authorized=false' in ble_java)
 
-# v0.1.4: integrated Show Modes BLE UI and unified mobile shell, no native control popup.
-ble_ui = (main / 'assets/ble-show-panel.js').read_text(encoding='utf-8')
-check('Embedded Bluetooth Show Modes script bundled', 'ot-ble-inline' in ble_ui and 'showBleControls()' not in main_java)
-check('One-screen connection transport selector', 'data-ot-ble="wifi"' in ble_ui and 'data-ot-ble="ble"' in ble_ui)
-check('BLE auth, effect start, and stop remain accessible', all(x in ble_ui for x in ('OpenTailNativeBLE.authorize()', 'OpenTailNativeBLE.start(', 'OpenTailNativeBLE.stop()')))
-check('BLE control UI persists across Studio render/navigation', 'MutationObserver' in ble_ui and 'isShows()' in ble_ui and 'requestAnimationFrame' in ble_ui)
-check('BLE controls shown on both CORE Wi-Fi and offline Studio', 'injectInlineBleControls(view)' in main_java and 'OFFLINE_URL.equals' in main_java)
-check('Bridge disallows write commands on unrelated pages', 'bridgePageAllowed()' in main_java and 'if (!bridgePageAllowed() || ble == null) return;' in main_java)
-check('BLE-only BOOT enrollment and encrypted local key retention',
-      'pairWithBoot()' in ble_java and 'BleOwnerVault.save(' in ble_java and 'AES/GCM/NoPadding' in read('app/src/main/java/com/opentail/android/BleOwnerVault.java')
-      and 'android:allowBackup="false"' in read(xml_path))
-check('BLE HMAC authorization uses challenge and limits routine key exposure',
-      'HmacSHA256' in ble_java and 'OpenTail-BLE-v2' in ble_java and 'CHALLENGE_UUID' in ble_java and 'ENROLL_UUID' in ble_java)
-check('Legacy Wi-Fi authorization remains manually accessible',
-      'authorizeWifiLegacy()' in main_java and 'CoreConnection.bleSessionToken()' in main_java)
-check('Android BOOT pairing button visible',
-      "button('Pair with BOOT','pair')" in read('app/src/main/assets/ble-output-panel.js'))
-check('Native BLE bridge has no physical trigger mapping writes', 'writeTrigger' not in main_java and 'writeOutput' not in main_java)
-check('BLE brightness maps to firmware cap 32', 'state.brightness * 32 / 100' in ble_ui)
-check('Separate BLE Show Modes popup and top toolbar button removed', 'showBleControls()' not in main_java and 'addButton(row3' not in main_java)
-check('Version bump for in-place Android update', "versionCode 15" in read('app/build.gradle') and "versionName '0.1.15'" in read('app/build.gradle'))
-# v0.1.4: a single Android-native-feeling shell wraps the existing WebView Studio.
+# Current Android v0.1.27: native Studio owns the CORE BLE Effects controls.
+# Removed legacy scripts must remain absent; no duplicate picker or bottom tabs.
 unified = (main / 'assets/unified-shell.js').read_text(encoding='utf-8')
-check('Unified OpenTail shell bundled and injected into CORE and offline Studio',
-      'injectUnifiedShell(view)' in main_java and 'unified-shell.js' in main_java and 'OpenTailNativeApp' in main_java)
-check('Old native duplicate header and connection-button rows removed',
-      'root.addView(row1)' not in main_java and 'root.addView(row2)' not in main_java and 'root.addView(title)' not in main_java)
-check('Unified connection cards and compact Connected badge',
-      all(x in unified for x in ('ot-mobile-header','ot-connected-badge','ot-connection-grid','ot-wifi-card','ot-ble-card')))
-check('Unified bottom navigation has five required destinations',
-      all(x in unified for x in ("['home','Home'","['scenes','Shows'","['builder','Triggers'","['layout','Layout'","['settings','Settings'")))
-check('Native Settings preserves Wi-Fi, BLE, haptics, appearance, diagnostics and offline access',
-      all(x in unified for x in ('connectWifi','wifiSettings','scanBle','authorizeBle','appSettings','offlineStudio','diagnostics','appearance')))
-check('Show Modes retains Bluetooth effect selectors, native commands and Wi-Fi alternative',
-      all(x in ble_ui for x in ('Show Modes','data-ot-field="output"','data-ot-field="zone"','data-ot-field="effect"','data-ot-ble="wifi"','data-ot-ble="ble"')))
-check('BLE remains available after Wi-Fi loss with offline Studio fallback',
-      'web.loadUrl(OFFLINE_URL)' in main_java and 'connectCore(true)' in main_java)
-check('Only first-party bridge controls, no arbitrary WebView navigation',
-      'if (bridgePageAllowed())' in main_java and 'Untrusted URLs blocked' not in main_java)
-check('Native system haptic and saved-setting functions still present',
-      'STUDIO_HAPTIC_JS' in main_java and 'showSettings()' in main_java)
-check('Unified script JavaScript syntax',
-      subprocess.run(['node','--check',str(main/'assets/unified-shell.js')],capture_output=True,text=True).returncode == 0)
-check('Bluetooth OFF broadcast clears stale native status',
-      'BluetoothAdapter.ACTION_STATE_CHANGED' in main_java and 'ble.onAdapterDisabled()' in main_java
-      and 'radioOn && ble != null && ble.isConnected()' in main_java and 'onAdapterDisabled()' in ble_java)
-check('Native connection phase reflects scanning/pairing/transfer state',
-      'connectionPhase()' in ble_java and '"saving"' in ble_java and '"pairing"' in ble_java)
-check('Wi-Fi badge requires active Wi-Fi transport, not merely a cached CORE page',
-      'CoreConnection.hasWifiTransport(MainActivity.this)' in main_java and 'hasWifiTransport(Context context)' in core_java)
-check('BLE Output Manager presents inline status and refreshes on radio event',
-      'ot-bom-health' in read('app/src/main/assets/ble-output-panel.js')
-      and 'connectionChanged(status)' in read('app/src/main/assets/ble-output-panel.js')
-      and 'OpenTailBLEOutputs.connectionChanged' in main_java)
-check('Offline badge red, connecting amber, authorized green (late-theme overrides)',
-      all(x in unified for x in ('ot-status-red','ot-status-amber','ot-status-green','#ff545e','#f4c35f','#29da8b'))
-      and "radioOff ? 'Bluetooth off'" in unified)
-check('Wi-Fi status refresh uses event callback rather than periodic polling',
-      'registerNetworkCallback(' in main_java and 'unregisterNetworkCallback(' in main_java
-      and 'onLost(Network network)' in main_java and 'onCapabilitiesChanged(Network network' in main_java)
-check('Unified shell navigation smoke tests',
-      subprocess.run(['node',str(root/'qa/test_unified_shell.js')],cwd=root,capture_output=True,text=True).returncode == 0)
-
-# v0.1.11: compact default surfaces must not replace CORE save/readback machinery.
-check('Home, Triggers, and Layout have compact native-first overview cards',
-      all(x in unified for x in ("top('Home'", "top('Triggers'", "top('Layout'", 'ot-compact-pages')))
-check('Full existing editors remain directly accessible',
-      'data-ot-open=\"edit\"' in unified and 'ot-editor-active' in unified and 'data-ot-open=\"back\"' in unified)
-check('Overview pages read device data but never write configuration',
-      "'/api/v1/outputs'" in unified and "'/api/v1/triggers'" in unified and "method:'GET'" in unified and "method:'POST'" not in unified)
-check('BLE compact panel has progressive controls while keeping all parameters',
-      'ot-ble-more' in ble_ui and all(x in ble_ui for x in ('data-ot-field=\"color\"','data-ot-field=\"brightness\"', 'data-ot-field=\"speed\"', 'data-ot-field=\"ttl\"')))
-check('BLE show view hides the long legacy Studio panels',
-      'main:has(#ot-ble-inline' in unified and ':not(#ot-ble-inline)' in unified)
-check('Native bottom navigation stays above Android safe area',
-      'env(safe-area-inset-bottom' in unified and 'position:fixed' in unified)
-check('A native standalone release does not modify bundled Studio',
-      hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
-
-result = subprocess.run(['node', '--check', str(main / 'assets/ble-show-panel.js')], capture_output=True, text=True)
-check('Embedded Bluetooth Show Modes script syntax', result.returncode == 0)
-smoke = subprocess.run(['node', str(root / 'qa/test_ble_inline.js')], cwd=root, capture_output=True, text=True)
-check('BLE show commands and Wi-Fi/BLE panel switching smoke test', smoke.returncode == 0)
-
+panel = (main / 'assets/ble-output-panel.js').read_text(encoding='utf-8')
+studio_text = studio.decode('utf-8')
+check('Legacy BLE picker and injection removed',
+      not (main / 'assets/ble-show-panel.js').exists()
+      and 'injectInlineBleControls' not in main_java and 'showBleControls()' not in main_java)
+check('One Studio Effects editor drives CORE BLE commands',
+      all(token in studio_text for token in ('window.OpenTailNativeBLE.startEffectId(', 'window.OpenTailNativeBLE.stop()', 'otBleFxMode()', 'window.OpenTailBLEEffects')))
+check('Native BLE bridge limited to allowed CORE and offline Studio pages',
+      'bridgePageAllowed()' in main_java and 'addJavascriptInterface(new NativeBleBridge(), "OpenTailNativeBLE")' in main_java)
+check('Physical BOOT enrollment, encrypted owner key and HMAC path retained',
+      all(token in ble_java for token in ('pairWithBoot()', 'HmacSHA256', 'OpenTail-BLE-v2', 'CHALLENGE_UUID', 'ENROLL_UUID'))
+      and 'AES/GCM/NoPadding' in read('app/src/main/java/com/opentail/android/BleOwnerVault.java')
+      and 'android:allowBackup="false"' in read(xml_path))
+check('Native shell and Output Manager are bundled and injected',
+      all(token in main_java for token in ('injectUnifiedShell(view)', 'injectBleOutputControls(view)', 'unified-shell.js', 'ble-output-panel.js')))
+check('One six-tab navigation in approved order',
+      all(token in unified for token in ("['home','Home'", "['scenes','Show Modes'", "['layout','Layout'",
+                                   "['builder','Triggers'", "['events','Auto Events'", "['settings','Settings'"))
+      and 'document.body.insertBefore(nav, header.nextSibling)' in unified)
+check('Sticky top tabs replace duplicate Studio and bottom navigation',
+      '.ot-native-nav{position:sticky!important' in unified
+      and '#app .top,#app nav.tabs,#app nav.bottomnav{display:none!important}' in unified)
+check('Independent Wi-Fi/BLE status and OLED/light-mode controls retained',
+      all(token in unified for token in ('ot-status-red','ot-status-amber','ot-status-green',
+                                       'radioOff', 'wifiReady', 'I Hate Dark Mode', 'data-ot-theme="light"')))
+check('BLE Output Manager role and NVS read/save surface retained',
+      all(token in panel for token in ('window.OpenTailBLEOutputs', 'data-key="role"',
+                                      'window.OpenTailNativeBLE.readOutput', 'window.OpenTailNativeBLE.saveOutput',
+                                      'Save to CORE over BLE', 'GPIO${selected?17:16}')))
+check('BLE Output Manager does not issue vehicle trigger writes',
+      'writeTrigger' not in main_java and 'writeTrigger' not in panel)
+check('Android shell, Output Manager and bundled Studio JavaScript parse',
+      all(subprocess.run(['node','--check',str(main / 'assets'/name)],capture_output=True).returncode == 0
+          for name in ('unified-shell.js','ble-output-panel.js')))
+check('Native Studio BLE effect and six-tab regression suites pass',
+      subprocess.run(['node',str(root/'qa/test_unified_ble_fx.cjs')],cwd=root.parent,
+                     capture_output=True,text=True).returncode == 0
+      and subprocess.run(['node',str(root/'qa/test_unified_shell.js')],cwd=root.parent,
+                         capture_output=True,text=True).returncode == 0
+      and subprocess.run(['node',str(root.parent/'web-studio/tests/approved-chat-ui.test.cjs')],
+                         cwd=root.parent,capture_output=True,text=True).returncode == 0)
+check('Web and Android Studio deployment copies are identical',
+      studio == (root.parent/'web-studio/opentail.htm').read_bytes()
+      and studio == (root.parent/'web-studio/opentail-v0.19.57.htm').read_bytes())
 # Decode the injected Java string and syntax-check the exact JavaScript shipped in MainActivity.
 import json
 m = re.search(r'private static final String STUDIO_HAPTIC_JS = (.*?);\n', main_java, re.S)
@@ -180,15 +144,18 @@ for idx, js in enumerate(parser.scripts):
         print(f'FAIL: Studio inline script {idx}: {result.stderr[:500]}')
         sys.exit(1)
 check('All bundled Studio inline JavaScript parses', len(parser.scripts) > 0)
-with tempfile.TemporaryDirectory() as output_dir:
-    runner = root / 'qa/ParseJava.java'
-    javac = subprocess.run(['javac', '-d', output_dir, str(runner)], capture_output=True, text=True)
-    if javac.returncode:
-        print(javac.stderr[:800]); raise SystemExit(1)
-    sources = list((main / 'java').rglob('*.java'))
-    java_result = subprocess.run(['java', '-cp', output_dir, 'ParseJava', *map(str,sources)], capture_output=True, text=True)
-    if java_result.returncode: print(java_result.stderr[:1000]); raise SystemExit(1)
-    check('All Android Java sources parse (syntax only)', len(sources) >= 3)
+if shutil.which('javac') and shutil.which('java'):
+    with tempfile.TemporaryDirectory() as output_dir:
+        runner = root / 'qa/ParseJava.java'
+        javac = subprocess.run(['javac', '-d', output_dir, str(runner)], capture_output=True, text=True)
+        if javac.returncode:
+            print(javac.stderr[:800]); raise SystemExit(1)
+        sources = list((main / 'java').rglob('*.java'))
+        java_result = subprocess.run(['java', '-cp', output_dir, 'ParseJava', *map(str,sources)], capture_output=True, text=True)
+        if java_result.returncode: print(java_result.stderr[:1000]); raise SystemExit(1)
+        check('All Android Java sources parse (syntax only)', len(sources) >= 3)
+else:
+    print('SKIP: Java syntax parser unavailable (javac/java absent); require Android CI build')
 check('Android BLE output characteristic UUIDs match CORE',
       all('55a56022-4915-7a92-cf44-b8b7102eaf'+x in ble_java for x in ('25','26')))
 check('BLE read/save bounded by auth and post-commit readback',

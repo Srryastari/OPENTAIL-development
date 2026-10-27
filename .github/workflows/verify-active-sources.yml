@@ -132,11 +132,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.56.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.57.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.56' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.57' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
@@ -165,6 +165,7 @@ jobs:
           node --check web-studio/tests/approved-chat-ui.test.cjs
           node web-studio/tests/approved-chat-ui.test.cjs
           node --check android/app/src/main/assets/unified-shell.js
+          node android/qa/test_unified_shell.js
           node - <<'JS'
           const fs=require('node:fs'),assert=require('node:assert/strict');
           const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
@@ -181,7 +182,7 @@ jobs:
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
           assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
             'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
-          assert(shell.includes('Android v0.1.26')&&gradle.includes("versionName '0.1.26'"),
+          assert(shell.includes('Android v0.1.27')&&gradle.includes("versionName '0.1.27'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS

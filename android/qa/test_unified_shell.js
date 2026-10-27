@@ -2,12 +2,13 @@
 const assert = require('assert');
 const vm = require('vm');
 const fs = require('fs');
+const path = require('path');
 const handlers = {};
 const calls = [];
 const nodes = {};
 const emptyClassList = () => ({values: new Set(),add(n){this.values.add(n)}, remove(n){this.values.delete(n)},contains(n){return this.values.has(n)},toggle(n,v){ if(v)this.add(n);else this.remove(n)}});
-const body = {classList:emptyClassList(),prepend(node){nodes.header=node},appendChild(node){nodes[node.className]=node},insertBefore(node){nodes[node.id]=node}};
-const navButtons = ['home','scenes','builder','layout','settings'].map(t=>({dataset:{otDestination:t},setAttribute(k,v){this[k]=v}}));
+const body = {classList:emptyClassList(),prepend(node){nodes.header=node},appendChild(node){nodes[node.className]=node},insertBefore(node){nodes[node.id||node.className]=node}};
+const navButtons = ['home','scenes','layout','builder','events','settings'].map(t=>({dataset:{otDestination:t},setAttribute(k,v){this[k]=v}}));
 const statusNodes = {
   'ot-connected-badge':{classList:emptyClassList(),dataset:{},textContent:'',setAttribute(k,v){this[k]=v}},
   'ot-wifi-text':{textContent:''},'ot-ble-text':{textContent:''},
@@ -31,13 +32,14 @@ const native = {
 };
 const context = {document,window:{OpenTailNativeApp:native,go(page){currentPage=page;calls.push('go:'+page)},scrollTo(){}},MutationObserver:class {observe(){}},requestAnimationFrame(fn){fn()},setInterval(){},location:{hostname:"localhost"}};
 vm.createContext(context);
-vm.runInContext(fs.readFileSync('app/src/main/assets/unified-shell.js','utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../app/src/main/assets/unified-shell.js'),'utf8'),context);
 assert(nodes.header.innerHTML.includes('<h1>OpenTail</h1>'));
 assert(nodes.header.innerHTML.includes('Bluetooth'));
-assert(nodes.header.innerHTML.includes('Android v0.1.15'));
+assert(nodes['ot-settings-page'].innerHTML.includes('Android v0.1.27'));
 assert(nodes['ot-native-nav'].innerHTML.includes('Layout'));
 assert(nodes['ot-native-nav'].innerHTML.includes('Settings'));
-assert(calls.includes('go:scenes'),'default Show Modes view');
+assert(nodes['ot-native-nav'].innerHTML.includes('Auto Events'));
+assert(calls.includes('go:home'),'default Home view');
 assert(statusNodes['ot-connected-badge'].innerHTML.includes('Connected'));
 assert(statusNodes['ot-connected-badge'].dataset.health === 'green');
 assert.strictEqual(statusNodes['ot-connected-badge'].title,'Bluetooth connected and authorized');
@@ -95,11 +97,11 @@ assert(calls.includes('scanBle'));
 click({selector:'.ot-native-nav [data-ot-destination]',node:{dataset:{otDestination:'builder'}}});
 assert(!body.classList.values.has('ot-settings-active'));
 assert(calls.includes('go:builder'));
-assert(nodes['ot-compact-pages'].innerHTML.includes('Input assignments'), 'compact Triggers overview visible');
-assert(nodes['ot-compact-pages'].innerHTML.includes('Edit assignments'), 'full editor reachable');
-assert(body.classList.values.has('ot-compact-view'),'Trigger summary should replace old long Studio view');
-click({selector:'#ot-compact-pages [data-ot-open]',node:{dataset:{otOpen:'edit'}}});
-assert(body.classList.values.has('ot-editor-active'),'Verified full Studio editor remains accessible');
-click({selector:'#ot-compact-pages [data-ot-open]',node:{dataset:{otOpen:'back'}}});
-assert(body.classList.values.has('ot-compact-view'),'Return from full editor to concise overview');
-console.log('PASS: Unified header, transport cards, Shows default, Settings, BLE scan and Triggers route.');
+assert(!body.classList.values.has('ot-compact-view'),'Triggers must show the full Studio editor, not a redundant overview');
+assert(!body.classList.values.has('ot-editor-active'),'Only Home controls its compact-mode editor state');
+click({selector:'.ot-native-nav [data-ot-destination]',node:{dataset:{otDestination:'layout'}}});
+assert(calls.includes('go:layout'),'Layout must route to the full Studio editor');
+assert(!body.classList.values.has('ot-compact-view'),'Layout must not hide its primary editor');
+click({selector:'.ot-native-nav [data-ot-destination]',node:{dataset:{otDestination:'scenes'}}});
+assert(calls.includes('go:scenes'),'Show Modes remains directly accessible');
+console.log('PASS: Six-tab shell, OLED statuses, Settings, BLE scan and full Triggers/Layout editors.');

@@ -1,4 +1,13 @@
-# OpenTail Android v0.1.26 — CORE output UI parity and navigation cleanup
+# OpenTail Android v0.1.27 — Studio preview pacing and canvas invalidation
+
+- Updated bundled Studio to v0.19.57, preserving the approved OLED layout and independent CORE outputs.
+- WLED binary preview frames now coalesce to one UI paint per browser animation frame; the newest frame wins without altering device output.
+- Exact indexed live canvases redraw only for a new WLED frame or after the view is recreated, avoiding redundant work during status aging or simulation.
+- Local simulated preview now targets approximately 30 visual updates per second when the display can sustain them, instead of the former 45ms/roughly 20Hz gate.
+- Added deterministic host tests for frame coalescing, exact-canvas invalidation, live/simulated separation and simulated preview cadence.
+- This is a software-only performance candidate; actual phone smoothness, 522-LED GPIO16 flicker and physical Stop Show remain unverified.
+
+## Prior v0.1.26 — CORE output UI parity and navigation cleanup
 
 - Kept the six primary tabs in one sticky, horizontally scrollable row on narrow phones. No wrapping, fixed bottom bar, or duplicated navigation.
 - Removed the nonfunctional development-only Output Control card. Actual independently saved outputs remain editable through the BLE Output Manager.
