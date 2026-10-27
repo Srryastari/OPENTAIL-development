@@ -13,6 +13,10 @@ class OpenTailNativeUsermod final : public Usermod {
     // Authenticated OpenTail BLE/profile integration is not yet wired in.
     overlay.setEnabled(enabled);
   }
+  void loop() override {
+    // Required WLED Usermod interface, intentionally no runtime work until
+    // authenticated BLE + saved Output Manager profile plumbing is verified.
+  }
   void handleOverlayDraw() override {
     // WLED has already rendered effects. No effect phase/state is reset.
     // Respect WLED global off; do not reilluminate after Stop.
