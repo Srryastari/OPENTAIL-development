@@ -4001,6 +4001,8 @@ function otChatAutoSet(n,k,v){
  const p=state.profiles[n];if(!p)return false;
  if(k==='eventDuration'){v=Number(v);if(!Number.isFinite(v))return false;v=Math.max(.2,Math.min(30,v))}
  else if(k==='eventFx'&&!['Solid','Sweep','Fade','Breathe'].includes(v))return false;
+ else if(k==='eventUiEnabled')v=!!v;
+ else if(k==='eventUiFadeMs'){v=Number(v);if(!Number.isFinite(v))return false;v=Math.max(0,Math.min(5000,Math.round(v)))}
  p[k]=v;
  if(!persist()){otShowToast('Could not save event configuration',true);return false}
  otChatEventStop(false);render();return true;
@@ -4012,7 +4014,7 @@ function otChatEventStop(update=true){
 function otChatEventStart(){
  if(otChatEventPlay){otChatEventStop();return}
  const n=otChatEventName,p=state.profiles[n];if(!p)return;
- otChatEventPlay={name:n,start:performance.now(),duration:Math.max(200,Math.min(30000,(Number(p.eventDuration)||2)*1000)),effect:p.eventFx||'Solid'};
+ otChatEventPlay={name:n,start:performance.now(),duration:Math.max(200,Math.min(30000,(Number(p.eventDuration)||2)*1000)),effect:p.eventFx||'Solid',fadeMs:Math.max(0,Math.min(5000,Number(p.eventUiFadeMs)||0))};
  render();
  const play=otChatEventPlay;
  const tick=(now)=>{
@@ -4023,7 +4025,9 @@ function otChatEventStart(){
    const pos=(i+.5)/Math.max(1,dots.length),lit=play.effect==='Sweep'?pos<=x:
      play.effect==='Fade'?true:play.effect==='Breathe'?true:true;
    // Shutdown must visibly extinguish to exact black; preview never sends device commands.
-   const level=play.name==='Shutdown'?(1-x):x;
+   const fadeFraction=Math.min(1,play.fadeMs/play.duration);
+   const level=play.name==='Shutdown'?(fadeFraction?Math.min(1,(1-x)/fadeFraction):(x<1?1:0)):
+     (fadeFraction?Math.min(1,x/fadeFraction):1);
    dots[i].style.background=lit?'#d7d7d7':'#000000';
    dots[i].style.opacity=lit?String(Math.max(0,Math.min(1,
      (play.effect==='Fade'?level:play.effect==='Breathe'?
@@ -4036,19 +4040,22 @@ function otChatEventStart(){
  otChatEventRaf=requestAnimationFrame(tick);
 }
 function otChatAutomaticEvents(){
- const n=otChatEventName,p=state.profiles[n]||{},fx=p.eventFx||'Solid',duration=Number(p.eventDuration)||2;
+ const n=otChatEventName,p=state.profiles[n]||{},fx=p.eventFx||'Solid',duration=Number(p.eventDuration)||2,fadeMs=Math.max(0,Math.min(5000,Number(p.eventUiFadeMs)||0));
  return `<section class="ot-chat-events card">
   <div class="ot-chat-heading"><div><h2>Automatic Events</h2><p>Design and preview locally · no connection required</p></div></div>
   <div class="ot-chat-event-tabs">${['Startup','Shutdown'].map(name=>`<button type="button" class="ot-chat-pill ${name===n?'ot-chat-primary':''}" aria-pressed="${name===n}" onclick="otChatEventStop(false);otChatEventName='${name}';render()">${name}</button>`).join('')}</div>
   <div class="ot-chat-event-fields">
    <div class="ot-chat-between"><strong>${esc(n)} animation</strong><small>OFFLINE PREVIEW</small></div>
+   <label class="ot-chat-field"><input type="checkbox" ${p.eventUiEnabled?'checked':''} onchange="otChatAutoSet('${n}','eventUiEnabled',this.checked)"> Enable ${n} (configuration only)</label>
+   <div class="ot-chat-between"><strong>Fade transition</strong><span class="ot-chat-count">${fadeMs} ms</span></div>
+   <input type="range" min="0" max="5000" step="50" value="${fadeMs}" onchange="otChatAutoSet('${n}','eventUiFadeMs',this.value)" aria-label="Offline event fade duration">
    <label class="ot-chat-field">Animation<select class="ot-chat-input" onchange="otChatAutoSet('${n}','eventFx',this.value)">${['Solid','Sweep','Fade','Breathe'].map(a=>`<option value="${a}" ${String(fx).toLowerCase()===a.toLowerCase()?'selected':''}>${a}</option>`).join('')}</select></label>
    <div class="ot-chat-between"><strong>Duration</strong><span class="ot-chat-count">${duration.toFixed(1)} sec</span></div>
    <input type="range" min=".2" max="30" step=".1" value="${Math.min(30,duration)}" onchange="otChatAutoSet('${n}','eventDuration',this.value)" aria-label="Automatic event duration">
    <button type="button" id="ot-chat-event-play" class="ot-chat-pill ot-chat-primary ot-chat-full" onclick="otChatEventStart()">${otChatEventPlay?'■ Stop preview':'▷ Preview offline'}</button>
    <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-chat-event-progress">0%</small></div>
    <div class="ot-chat-led-strip ot-chat-event-strip" aria-label="Offline automatic-event animation preview">${Array.from({length:16},()=>'<span class="ot-chat-event-pixel"></span>').join('')}</div>
-   <p class="ot-chat-hint">SIM only. The visual preview uses no WLED, CORE, Bluetooth, or vehicle input and sends no commands. Device testing is a separate bench action.</p>
+   <p class="ot-chat-hint">SIM only. Enable and fade are saved UI configuration, not wired to ignition detection or automatic CORE playback. Preview sends no WLED, CORE, Bluetooth, or vehicle commands. Device testing is a separate bench action.</p>
   </div>
  </section>`;
 }
