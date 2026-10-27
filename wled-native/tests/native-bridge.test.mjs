@@ -43,3 +43,17 @@ test('rejects control values WLED cannot accept',()=>{
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{brightness:-1})],{supported1DIds}),/brightness/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{foreground:[300,0,0]})],{supported1DIds}),/foreground/);
 });
+
+
+import {discoverNativeWled1DEffects} from '../opentail-wled-bridge.mjs';
+test('discovers 1D-capable modes directly from native WLED effect metadata',()=>{
+ const r=discoverNativeWled1DEffects(
+  ['Solid','Rainbow','2D Plasma','Audio Scan','Mixed 1D2D','Cube','Legacy'],
+  ['Solid','!,!;;!;1','!,!;;!;2','!,!;;!;1f','!,!;;!;12','!,!;;!;3',''],
+  {fxcount:7});
+ assert.deepEqual(r.effects.map(e=>e.id),[0,1,3,4,6]);
+ assert.equal(r.effects.find(e=>e.id===3).requiresAudio,true);
+ assert.equal(r.supported1DIds.has(2),false);
+ assert.equal(r.supported1DIds.has(4),true);
+ assert.throws(()=>discoverNativeWled1DEffects(['Only'],[],{fxcount:1}),/match/);
+});
