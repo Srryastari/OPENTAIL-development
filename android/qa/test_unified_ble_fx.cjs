@@ -5,8 +5,23 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const html=fs.readFileSync('web-studio/opentail.htm','utf8');
 const activity=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
 const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
+const manager=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
+const motion=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
+const home=fs.readFileSync('android/app/src/main/assets/direct-ble-dashboard.js','utf8');
 assert(shell.includes("document.body.insertBefore(panel, mainNav?.nextSibling"),
   'Home overview must not be inserted above the canonical six-tab navigation');
+assert(shell.includes('flex-wrap:nowrap!important')&&shell.includes('overflow-x:auto!important'),
+  'Six Android tabs must stay in one scrollable top row, never wrap into a second row');
+assert(shell.includes('window.OpenTailBLEOutputs?.getConfirmedOutputs?.()')&&
+       !shell.includes('<h3>Lighting setup</h3>'),
+  'Home should display confirmed Bluetooth output readback without a duplicate Wi-Fi-only card');
+assert(!motion.includes('manager.before(card)')&&!motion.includes("let mode='independent',target='one';"),
+  'Nonfunctional Output Control prototype must not be mounted');
+assert(manager.includes('<h2>CORE Outputs</h2>')&&manager.includes('background:#080808')&&
+       manager.includes('main.append(node)'),
+  'BLE Output Manager must use OLED styling and follow the actual Layout editor');
+assert(!home.includes('ot-direct-outputs')&&home.includes("window.OpenTailShell.navigate('layout')"),
+  'Home should use one contextual connection button rather than duplicate output buttons');
 assert(!activity.includes('injectInlineBleControls('),'Obsolete standalone BLE FX panel is still injected');
 assert(!html.includes('window.__otUnifiedBleFxV1'),'Wrapper monkey patch must not ship inside Studio');
 assert(html.includes("otBleFxMode()?'Apply to CORE'"),'Connected BLE effect editor must not advertise Apply on WLED');

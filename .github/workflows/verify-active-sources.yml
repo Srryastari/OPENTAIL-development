@@ -98,10 +98,9 @@ jobs:
           const ui=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
           assert(ble.includes("getSelectedIndex(){return selected;}"),'BLE selected index API missing');
           assert(ble.includes("announceSelection();load(selected);"),'Selection event must precede reload');
-          assert(ui.includes("opentail:ble-output-selected"),'Output Control selection listener missing');
-          assert(ui.includes("selectedFromManager()"),'Independent mode must follow BLE manager');
-          assert(ui.includes("let mode='independent',target='one';"),'Independent mode must be the default');
-          assert(ui.includes("if(mode==='independent'&&e.target.value==='both')"),'Independent mode must reject both targets');
+          assert(!ui.includes("manager.before(card)") && !ui.includes("let mode='independent',target='one';"),
+            'Unimplemented Output Control development card must not be injected');
+          assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
           console.log('Android WebView integration contract checks passed (static checks only).');
           JS
       - name: Compile debug APK
@@ -182,7 +181,7 @@ jobs:
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
           assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
             'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
-          assert(shell.includes('Android v0.1.25')&&gradle.includes("versionName '0.1.25'"),
+          assert(shell.includes('Android v0.1.26')&&gradle.includes("versionName '0.1.26'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS

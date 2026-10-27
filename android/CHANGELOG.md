@@ -1,3 +1,19 @@
+# OpenTail Android v0.1.26 — CORE output UI parity and navigation cleanup
+
+- Kept the six primary tabs in one sticky, horizontally scrollable row on narrow phones. No wrapping, fixed bottom bar, or duplicated navigation.
+- Removed the nonfunctional development-only Output Control card. Actual independently saved outputs remain editable through the BLE Output Manager.
+- Restyled the BLE Output Manager to pure black/neutral OLED cards and pill controls, preserving active/connected status colors and the white theme.
+- Simplified Home to one contextual Connect/Authorize/Manage button and eliminated its hidden duplicate output button.
+- Home now uses BLE-confirmed saved outputs for pixel counts and zones when CORE Wi-Fi is not connected; unverified physical lighting is never represented as telemetry.
+- Preserved Output 1/2 NVS save/readback, original GPIO16/17 mappings, BLE wire protocol, Studio deployment copies, and trigger behavior.
+- Android static/host regression checks pass locally. Native APK compilation and owner visual/physical acceptance must be independently confirmed by CI and on-device testing.
+
+## Prior v0.1.25 changes
+
+- Fixed Home navigation/content ordering, added whole-output BLE effect targets, optimized simulated preview repaint, integrated the one-button BOOT enrollment path, and restyled the native Bluetooth picker.
+
+---
+
 # OpenTail Android v0.1.15 — approved compact live status chips
 
 - Replaced the visually large/text-only header indicator with the **user-approved small, bordered OLED pill** (near-black backing, 12px icon, 11px text). All other navigation and existing screen structure remain unchanged.
