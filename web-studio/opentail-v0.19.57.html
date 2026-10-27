@@ -981,6 +981,7 @@ function otLayoutPreviewLength(id,value){
  const field=document.getElementById('ot-count-'+id);if(field)field.value=n;
  const zone=[...document.querySelectorAll('[data-ot-zone]')].find(el=>el.getAttribute('data-ot-zone')===id);if(!zone)return;
  const count=zone.querySelector('.ot-chat-count');if(count)count.textContent=n+' LEDs';
+ const idx=state.layout.findIndex(x=>x.id===id);if(idx>=0){let cursor=0;for(let j=0;j<state.layout.length;j++){const z=state.layout[j],len=j===idx?n:z.length,start=z.offsetMode==='manual'?z.start:cursor;cursor=Math.max(cursor,start+len);const el=[...document.querySelectorAll('[data-ot-zone]')][j];const range=el?.querySelector('.ot-chat-zone-toggle small');if(range)range.textContent=len+' LEDs · '+(z.reverse?'Reversed':'Forward')+' · '+start+'–'+(start+len-1);}}
  const label=document.getElementById('ot-preview-label-'+id);if(label)label.textContent='SIM · '+n+' pixels';
  const strip=zone.querySelector('.ot-zone-preview');if(!strip)return;
  const current=strip.children.length;
@@ -988,7 +989,11 @@ function otLayoutPreviewLength(id,value){
  else if(n>current){const frag=document.createDocumentFragment();for(let i=current;i<n;i++){const dot=document.createElement('span');if(otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&i===0||otLayoutIdentifyMode==='last'&&i===n-1)dot.className='on';frag.appendChild(dot)}strip.appendChild(frag)}
  if(otLayoutIdentifyMode==='last'){for(const dot of strip.children)dot.classList.remove('on');strip.lastElementChild?.classList.add('on')}
 }
-function otLayoutResize(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<1||n>10000||n===z.length)return;otLayoutCheckpoint();otSetSectionLength(id,n)}
+function otZoneAutoOffsets(){let cursor=0;for(const z of state.layout){if(z.offsetMode!=='manual')z.start=cursor;cursor=Math.max(cursor,Number(z.start)+Number(z.length));}state.segmentsSynced=false;}
+function otZoneSetOffset(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<0)return;otLayoutCheckpoint();z.start=n;z.offsetMode='manual';otZoneAutoOffsets();persist();render();}
+function otZoneAutoOffset(id){const z=state.layout.find(x=>x.id===id);if(!z)return;otLayoutCheckpoint();z.offsetMode='auto';otZoneAutoOffsets();persist();render();}
+function otZoneRecalculateLength(id,n){const z=state.layout.find(x=>x.id===id);if(!z)return;z.length=n;otZoneAutoOffsets();state.segmentsSynced=false;}
+function otLayoutResize(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<1||n>10000||n===z.length)return;otLayoutCheckpoint();otZoneRecalculateLength(id,n);persist();commitLiveLayout();render()}
 function otLayoutRename(id,name){const z=state.layout.find(x=>x.id===id);if(!z||!String(name||'').trim()||String(name).trim()===z.name)return;otLayoutCheckpoint();otRenameZone(id,name)}
 function otLayoutReverse(id,on){const z=state.layout.find(x=>x.id===id);if(!z||z.reverse===on)return;otLayoutCheckpoint();editLayout(id,'reverse',on)}
 function otLayoutIdentify(mode){otLayoutIdentifyMode=otLayoutIdentifyMode===mode?'off':mode;clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;otLayoutSweepStep=0;if(otLayoutIdentifyMode==='sweep')otLayoutSweepTimer=setInterval(()=>{otLayoutSweepStep++;otLayoutPaintIdentify()},140);otLayoutPaintIdentify()}
@@ -1006,7 +1011,7 @@ function otBaseArrangementLayout(){
    <div class="ot-chat-zone-list">
     ${state.layout.map((item,i)=>`<div class="ot-chat-zone" data-ot-zone="${esc(item.id)}">
       <button type="button" class="ot-chat-zone-toggle" aria-expanded="${item.id===otLayoutSelected}" onclick="otLayoutSelect('${item.id}')">
-       <span><strong>${esc(item.name)}</strong><small>${item.length} LEDs · ${item.reverse?'Reversed':'Forward'}</small></span>
+       <span><strong>${esc(item.name)}</strong><small>${item.length} LEDs · ${item.reverse?'Reversed':'Forward'} · ${item.start}–${item.start+item.length-1}</small></span>
        <span class="ot-chat-chevron" aria-hidden="true">${item.id===otLayoutSelected?'⌄':'›'}</span>
       </button>
       ${item.id===otLayoutSelected?`<div class="ot-zone-editor ot-chat-zone-editor">
@@ -1014,6 +1019,9 @@ function otBaseArrangementLayout(){
        <div class="ot-chat-between"><strong>Zone length</strong><span class="ot-chat-count">${item.length} LEDs</span></div>
        <div class="ot-chat-length"><input type="range" min="1" max="${Math.max(300,item.length)}" value="${item.length}" oninput="otLayoutPreviewLength('${item.id}',this.value)" onchange="otLayoutResize('${item.id}',this.value)" aria-label="Zone length in LEDs">
         <input class="ot-chat-input" id="ot-count-${item.id}" aria-label="Exact zone length" type="number" min="1" max="10000" value="${item.length}" onchange="otLayoutResize('${item.id}',this.value)"></div>
+       <div class="ot-chat-between"><strong>Pixel offset (zero-based)</strong><small>${item.offsetMode==='manual'?'Manual':'Automatic'}</small></div>
+       <div class="ot-chat-length"><input class="ot-chat-input" type="number" min="0" step="1" aria-label="Zone pixel offset" value="${item.start}" onchange="otZoneSetOffset('${item.id}',this.value)"><button type="button" class="ot-chat-pill" onclick="otZoneAutoOffset('${item.id}')">Auto</button></div>
+       <p class="ot-chat-hint">LED indices ${item.start}–${item.start+item.length-1}. Automatic offsets follow the preceding zones; manual offsets remain fixed.</p>
        <label class="ot-chat-reverse"><span><strong>Reverse</strong><small>Reverse the direction of this zone</small></span><input type="checkbox" ${item.reverse?'checked':''} onchange="otLayoutReverse('${item.id}',this.checked)"></label>
        <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-preview-label-${item.id}">SIM · ${item.length} pixels</small></div>
        <div class="ot-zone-preview ot-chat-led-strip" aria-label="Uniform simulated LED indicators in output data-index order">${Array.from({length:item.length},(_,j)=>`<span class="${otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&j===0||otLayoutIdentifyMode==='last'&&j===item.length-1?'on':''}"></span>`).join('')}</div>
