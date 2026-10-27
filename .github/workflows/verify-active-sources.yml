@@ -22,9 +22,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run native firmware logic tests
         run: bash tests/run-host-tests.sh
-      - name: Validate native WLED segment adapter
+      - name: Regression-test native WLED bridge and OpenTail overlay
         working-directory: .
-        run: node --test wled-native/tests/native-bridge.test.mjs
+        run: bash wled-native/tests/run-native-host-tests.sh
 
   core-espidf-build:
     runs-on: ubuntu-latest
