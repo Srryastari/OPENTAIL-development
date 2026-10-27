@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.23: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.27: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -80,6 +80,43 @@
   @media(max-width:350px){.ot-connected-badge{padding:7px}.ot-connection-card{padding:10px 7px;gap:5px}.ot-mobile-heading h1{font-size:22px}}
   `;
   style.textContent += "\n  .ot-settings-page .ot-settings-group>summary{\n    display:flex;align-items:center;justify-content:space-between;\n    padding:15px 16px;min-height:48px;color:#ececec;font:600 14px/1.2 inherit;\n    cursor:pointer;list-style:none;\n  }\n  .ot-settings-page .ot-settings-group>summary::-webkit-details-marker{display:none}\n  .ot-settings-page .ot-settings-group>summary svg{width:15px;height:15px;color:#999;transform:rotate(90deg)}\n  .ot-settings-page .ot-settings-group[open]>summary svg{transform:rotate(-90deg)}\n  .ot-settings-page .ot-settings-copy{font-size:12px;line-height:1.5;padding:0 16px 12px;margin:0;color:#aaa}\n  .ot-settings-page .ot-quick-action{min-height:48px;padding:13px 16px;font-size:13px;background:#111}\n  .ot-settings-page input[type=file]{max-width:150px;font-size:11px;color:#aaa}\n";
+  // LOCKED OCT-26: one TOP segmented navigation; OLED-black surfaces, no fixed bottom bar.
+  // The existing native BLE bridge and controls remain untouched.
+  style.textContent += `
+    html:not([data-ot-theme="light"]),html:not([data-ot-theme="light"]) body{background:#000!important;color:#f4f4f4!important}
+    html:not([data-ot-theme="light"]) .ot-mobile-header{background:#000!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card,
+    html:not([data-ot-theme="light"]) .ot-settings-group,
+    html:not([data-ot-theme="light"]) #ot-ble-inline,
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-card{background:#080808!important;border-color:#252525!important;color:#f3f3f3!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card strong,
+    html:not([data-ot-theme="light"]) .ot-mobile-heading h1{color:#f7f7f7!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card small{color:#aaa!important}
+    html:not([data-ot-theme="light"]) .ot-connection-card svg{color:#999!important}
+    html:not([data-ot-theme="light"]) #ot-ble-inline .ot-ble-fields select,
+    html:not([data-ot-theme="light"]) #ot-ble-inline .ot-ble-fields input[type=color]{background:#050505!important;border-color:#333!important}
+    html:not([data-ot-theme="light"]) #app .card{background:#080808!important;border-color:#252525!important}
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-output,
+    html:not([data-ot-theme="light"]) #ot-compact-pages .ot-simple-stat{background:#050505!important;border-color:#303030!important}
+    .ot-mobile-header{padding-bottom:3px!important}
+    .ot-native-nav{position:sticky!important;top:0!important;inset:auto!important;max-width:none!important;width:100%!important;
+      display:flex!important;overflow-x:auto!important;overscroll-behavior-x:contain!important;scrollbar-width:none!important;
+      gap:3px!important;margin:10px 0 4px!important;padding:4px!important;border:1px solid #252525!important;
+      border-radius:15px!important;background:#080808!important;box-shadow:none!important;box-sizing:border-box!important}
+    .ot-native-nav::-webkit-scrollbar{display:none!important}
+    .ot-native-nav button{flex:1 0 auto!important;min-width:66px!important;min-height:40px!important;
+      padding:8px 9px!important;border-radius:11px!important;color:#b0b0b0!important;font:600 11px/1.2 Inter,Roboto,sans-serif!important}
+    .ot-native-nav button svg{display:none!important}
+    .ot-native-nav button[aria-current=page]{background:#222!important;color:#fff!important}
+    #app>.shell{padding-bottom:20px!important}
+    #ot-compact-pages{padding-bottom:22px!important}
+    body.ot-settings-active .ot-settings-page{padding-bottom:20px!important}
+    html[data-ot-theme="light"] .ot-native-nav{background:#f4f4f4!important;border-color:#dedede!important}
+    html[data-ot-theme="light"] .ot-native-nav button{color:#555!important}
+    html[data-ot-theme="light"] .ot-native-nav button[aria-current=page]{background:#fff!important;color:#111!important}
+    .ot-theme-settings{font-size:13px!important}
+    @media (max-width:430px){.ot-native-nav{justify-content:flex-start!important}.ot-native-nav button{flex:0 0 auto!important}}
+  `;
   document.head.appendChild(style);
   const header = document.createElement('header');
   header.className = 'ot-mobile-header';
@@ -93,6 +130,7 @@
     <details class="ot-settings-group" open>
       <summary>App Preferences ${icon('arrow')}</summary>
       <button type="button" class="ot-quick-action" data-ot-native="prefs">Haptics and reconnection ${icon('arrow')}</button>
+      <button type="button" class="ot-quick-action ot-theme-settings" data-ot-native="appearance">I Hate Dark Mode / Back to Dark Mode ${icon('arrow')}</button>
       <button type="button" class="ot-quick-action" data-ot-native="offline">Work offline ${icon('arrow')}</button>
     </details>
     <details class="ot-settings-group">
@@ -110,7 +148,7 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.23 · Studio v0.19.56</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.27 · Studio v0.19.57</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
@@ -129,7 +167,7 @@
   nav.innerHTML = destinations.map(([id,label,ic]) => `<button type="button" data-ot-destination="${id}" aria-current="false">${icon(ic)}<span>${label}</span></button>`).join('');
   document.body.prepend(header);
   document.body.appendChild(settings);
-  document.body.insertBefore(nav, header.nextSibling);
+  document.body.insertBefore(nav, header.nextSibling); // one segmented navigator below header
   let settingsOpen = false;
   let autoEventsOpen = false;
   const state = () => {
@@ -237,6 +275,12 @@
     }
     const action = event.target.closest('[data-ot-native]');
     if (!action) return;
+    if (action.dataset.otNative === 'appearance') {
+      if (typeof window.otSetTheme === 'function') {
+        window.otSetTheme(document.documentElement.dataset.otTheme === 'light' ? 'dark' : 'light');
+      }
+      return;
+    }
     const commands={
       connect:'connectWifi',wifi:'wifiSettings',scan:'scanBle',authorize:'authorizeBle',
       prefs:'appSettings',offline:'offlineStudio'
@@ -297,7 +341,11 @@
   panel.id='ot-compact-pages';
   panel.setAttribute('aria-live','polite');
   const header=document.querySelector('.ot-mobile-header');
-  document.body.insertBefore(panel, header?.nextSibling || document.body.firstChild);
+  // Home overview belongs AFTER the single six-tab navigation. Inserting after
+  // the header placed the entire Home overview above the navigation, which
+  // made the tabs appear at the bottom only on Home.
+  const mainNav=document.querySelector('.ot-native-nav');
+  document.body.insertBefore(panel, mainNav?.nextSibling || header?.nextSibling || document.body.firstChild);
   const css=document.createElement('style');
   css.id='ot-compact-surface-style';
   css.textContent=`
@@ -732,13 +780,20 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
 @media(max-width:350px){.ot-connected-badge{font-size:10px!important;padding:4px 6px!important}}
 `;
   css.textContent += "\n\n/* UI baseline v1: lock Android wrapper to neutral OLED system UI, not Android green. */\nhtml,body,html:not([data-ot-theme=\"light\"]) body {background:#000!important;color:#ececec!important;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Arial,sans-serif!important;color-scheme:dark!important}\n.ot-mobile-header{background:#000!important;color:#eee!important;padding:12px 16px 7px!important}\n.ot-mobile-heading h1{font-size:21px!important;line-height:1.25!important;font-weight:700!important;letter-spacing:0!important;color:#eee!important}\n.ot-mobile-heading p{color:#aaa!important;font-size:12px!important}\n.ot-native-nav{background:#050505!important;border-top:1px solid #303030!important;box-shadow:none!important}\n.ot-native-nav button{background:transparent!important;color:#aaa!important;font:600 11px -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif!important}\n.ot-native-nav button[aria-current=page]{background:#262626!important;color:#f3f3f3!important}\n.ot-native-nav button svg{color:inherit!important}\n#app>.shell{background:#000!important;padding-left:14px!important;padding-right:14px!important}\n#app main{background:#000!important}\n#app .ot-layout-approved .card,#app .ot-approved-triggers .card,#app .ot-approved-show .card{background:#000!important;color:#eee!important;border-color:#303030!important;box-shadow:none!important}\n#app .ot-chat-nav-pill{background:#101010!important;color:#aaa!important;border-color:#353535!important;border-radius:999px!important}\n#app .ot-chat-nav-pill.is-active{background:#242424!important;border-color:#777!important;color:#f4f4f4!important}\n#app .ot-chat-trigger-action{background:#101010!important;border-color:#333!important;border-radius:19px!important;box-shadow:none!important}\n#app .ot-chat-trigger-action.is-editing{background:#242424!important;border-color:#888!important}\n#app .ot-chat-trigger-action button{box-shadow:none!important}\n#app .ot-chat-trigger-select{background:transparent!important;border:0!important}\n#app .ot-chat-pill{border-radius:999px!important}\n#app .ot-chat-input{border-radius:999px!important;color:#eee!important}\n#app .ot-chat-length input[type=range],#app .ot-chat-events input[type=range]{accent-color:#c7c7c7!important}\n#app .ot-chat-led-strip{background:#090909!important;border-color:#303030!important}\n#app .ot-chat-led-strip span{background:#424242!important;box-shadow:none!important}\n#app .ot-chat-led-strip span.on{background:#d3d3d3!important;box-shadow:none!important}\n#app .ot-chat-event-strip span{background:#424242!important}\n#app .ot-chat-remove{background:#341517!important;color:#ffa9ac!important;border-color:#9e4044!important}\n#app .ot-approved-show .ot-subnav{display:flex;gap:7px;padding:5px!important;border:1px solid #303030!important;border-radius:999px!important;box-shadow:none!important;background:#080808!important}\n#app .ot-approved-show .ot-subnav button{border-radius:999px!important;background:transparent!important;color:#ccc!important;box-shadow:none!important;min-height:37px!important}\n#app .ot-approved-show .ot-subnav button.on{background:#292929!important;border-color:#646464!important;color:#f2f2f2!important}\n#app .ot-approved-triggers>.card,#app .ot-layout-approved>.card{border-radius:20px!important}\n#app .ot-approved-triggers .ot-assignments-card,#app .ot-approved-triggers .ot-editor-card{border:0!important;border-top:1px solid #303030!important;border-radius:0!important;box-shadow:none!important}\n#app .ot-chat-zone-list{border-radius:17px!important}\n#app .ot-chat-zone-toggle{border-radius:0!important}\n@media(max-width:390px){#app .ot-chat-nav-pill{font-size:10px!important}}\n\n";
-  css.textContent += "\n  /* UI baseline v2: ONE top row of six pill tabs (wrapping on narrow screens). */\n  .ot-native-nav{\n    position:sticky!important;top:0!important;left:auto!important;right:auto!important;\n    z-index:1050!important;display:flex!important;flex-wrap:wrap!important;gap:6px!important;\n    align-items:center!important;justify-content:flex-start!important;\n    max-width:960px!important;width:100%!important;margin:0 auto!important;\n    padding:8px 14px!important;background:#000!important;\n    border:0!important;border-bottom:1px solid #292929!important;box-shadow:none!important;\n  }\n  .ot-native-nav button{\n    flex:1 1 30%!important;display:flex!important;flex-direction:row!important;\n    min-width:90px!important;min-height:44px!important;gap:6px!important;\n    align-items:center!important;justify-content:center!important;\n    background:#111!important;border:1px solid #343434!important;border-radius:999px!important;\n    padding:8px!important;color:#b7b7b7!important;\n    font:600 11px/1.2 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif!important;\n  }\n  .ot-native-nav button svg{width:14px!important;height:14px!important;flex:none!important}\n  .ot-native-nav button[aria-current=page]{background:#292929!important;border-color:#777!important;color:#f2f2f2!important}\n  .ot-native-nav button:focus-visible{outline:2px solid #d7d7d7!important;outline-offset:2px!important}\n  #app .ot-chat-nav{display:none!important}\n  body:not(.ot-home-active) .ot-connection-grid{display:none!important}\n  .ot-mobile-header{padding-bottom:7px!important}\n  #app>.shell{padding-bottom:20px!important}\n  .ot-settings-page{padding-bottom:30px!important}\n  @media(min-width:700px){.ot-native-nav{padding:9px 30px!important}.ot-native-nav button{flex:1 1 auto!important}}\n  @media(max-width:350px){.ot-native-nav{padding:7px!important;gap:4px!important}.ot-native-nav button{min-width:85px!important;font-size:10px!important}}\n  html:not([data-ot-theme=\"light\"]) .ot-settings-group{background:#0d0d0d!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action{color:#ececec!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action svg{color:#bdbdbd!important}\n";
+  css.textContent += "\n  /* One sticky horizontal six-tab row; narrow phones scroll, never wrap. */\n  .ot-native-nav{\n    position:sticky!important;top:0!important;left:auto!important;right:auto!important;\n    z-index:1050!important;display:flex!important;flex-wrap:nowrap!important;gap:6px!important;\n    align-items:center!important;justify-content:flex-start!important;overflow-x:auto!important;\n    scrollbar-width:none!important;-webkit-overflow-scrolling:touch!important;\n    max-width:960px!important;width:100%!important;margin:0 auto!important;\n    padding:8px 14px!important;background:#000!important;\n    border:0!important;border-bottom:1px solid #292929!important;box-shadow:none!important;\n  }\n  .ot-native-nav::-webkit-scrollbar{display:none!important}\n  .ot-native-nav button{\n    flex:0 0 auto!important;display:flex!important;flex-direction:row!important;\n    min-width:84px!important;min-height:44px!important;gap:6px!important;\n    align-items:center!important;justify-content:center!important;white-space:nowrap!important;\n    background:#111!important;border:1px solid #343434!important;border-radius:999px!important;\n    padding:8px 12px!important;color:#b7b7b7!important;\n    font:600 11px/1.2 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif!important;\n  }\n  .ot-native-nav button svg{width:14px!important;height:14px!important;flex:none!important}\n  .ot-native-nav button[aria-current=page]{background:#292929!important;border-color:#777!important;color:#f2f2f2!important}\n  .ot-native-nav button:focus-visible{outline:2px solid #d7d7d7!important;outline-offset:2px!important}\n  #app .ot-chat-nav{display:none!important}\n  body:not(.ot-home-active) .ot-connection-grid{display:none!important}\n  .ot-mobile-header{padding-bottom:7px!important}\n  #app>.shell{padding-bottom:20px!important}\n  .ot-settings-page{padding-bottom:30px!important}\n  @media(min-width:700px){.ot-native-nav{padding:9px 30px!important}.ot-native-nav button{flex:1 1 auto!important}}\n  @media(max-width:350px){.ot-native-nav{padding:7px!important;gap:4px!important}.ot-native-nav button{min-width:78px!important;font-size:10px!important}}\n  html:not([data-ot-theme=\"light\"]) .ot-settings-group{background:#0d0d0d!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action{color:#ececec!important;border-color:#303030!important}\n  html:not([data-ot-theme=\"light\"]) .ot-quick-action svg{color:#bdbdbd!important}\n";
   document.head.appendChild(css);
   let route='';
   let advanced=false;
   let requestEpoch=0;
   let outputs=null,triggers=null;
   let outputError='',triggerError='';
+  function visibleOutputs(){
+    const confirmed=window.OpenTailBLEOutputs?.getConfirmedOutputs?.();
+    if(Array.isArray(confirmed)&&confirmed.some(Boolean)){
+      return confirmed.map((o,i)=>o?{...o,index:i,pin:i===0?16:17}:null).filter(Boolean);
+    }
+    return outputs;
+  }
   function routeNow() {
     if (document.body.classList.contains('ot-settings-active')) return 'settings';
     if (document.body.classList.contains('ot-auto-events-active')) return 'events';
@@ -751,8 +806,9 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   }
   const connection=()=>{try {return JSON.parse(window.OpenTailNativeApp.getState()||'{}')} catch(_){return {}}};
   function outputCards(){
-    if (!outputs) return `<p class="ot-muted">${esc(outputError||'Connect to CORE Wi-Fi to load saved pixel outputs.')}</p>`;
-    return outputs.map(o=>{
+    const current=visibleOutputs();
+    if (!current) return `<p class="ot-muted">${esc(outputError||'Connect and load CORE outputs over Bluetooth or Wi-Fi.')}</p>`;
+    return current.map(o=>{
       const total=Array.isArray(o.zones)?o.zones.reduce((n,z)=>n+Number(z.pixels||0),0):null;
       return `<div class="ot-simple-output"><h4>${esc(o.name||'Pixel OUT '+(Number(o.index)+1))}</h4>
         <div class="ot-simple-line"><small>GPIO${esc(o.pin)} · ${esc(o.color_order)}</small><strong>${esc(o.pixels)} pixels</strong></div>
@@ -763,14 +819,14 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   function top(title,subtitle){return `<div class="ot-simple-top"><div><h2>${title}</h2><p>${subtitle}</p></div><span class="ot-simple-tag">CORE bench</span></div>`;}
   function summaryMarkup(){
     if (route==='home') {
-      const total = outputs ? outputs.reduce((n,o)=>n+Number(o.pixels||0),0) : null;
+      const current=visibleOutputs();
+      const total = current ? current.reduce((n,o)=>n+Number(o.pixels||0),0) : null;
       return top('Home','Controller status')+
         `<div class="ot-simple-card"><h3>Controller overview</h3><div class="ot-simple-stats">
-          <div class="ot-simple-stat"><strong>${outputs?outputs.length:'—'}</strong><small>Physical pixel outputs</small></div>
+          <div class="ot-simple-stat"><strong>${current?current.length:'—'}</strong><small>Outputs read from CORE</small></div>
           <div class="ot-simple-stat"><strong>${total===null?'—':total.toLocaleString()}</strong><small>Configured pixels</small></div>
-        </div><p class="ot-simple-readonly">${esc(outputs?'Read from CORE output configuration.':'Connect to CORE Wi-Fi to load live configuration.')}</p>
-        </div>
-        <div class="ot-simple-card"><h3>Lighting setup</h3>${outputCards()}</div>`;
+        </div><p class="ot-simple-readonly">${esc(current?'Configuration read from CORE; physical LED state is not verified.':'Connect to CORE and load outputs to see saved configuration.')}</p>
+        ${outputCards()}</div>`;
     }
     if (route==='triggers') {
       const rows=triggers?.inputs || [];
@@ -843,6 +899,7 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   });
   const app=document.getElementById('app');
   if(app){let waiting=false;new MutationObserver(()=>{if(waiting)return;waiting=true;requestAnimationFrame(()=>{waiting=false;refreshVisual()})}).observe(app,{childList:true,subtree:false});}
+  document.addEventListener('opentail:ble-outputs-updated',()=>refreshVisual(true));
   if(typeof window.OpenTailShell.navigate==='function'){
     const old=window.OpenTailShell.navigate;
     window.OpenTailShell.navigate=function(target){old(target);refreshVisual(true)};
@@ -850,4 +907,31 @@ html:not([data-ot-theme="light"]) #app .ot-core-advanced[open]>summary {border-b
   refreshVisual(true);
   setInterval(()=>refreshVisual(),2500);
   window.OpenTailCompactUI={refresh:refreshVisual,readConfig};
+  // Final cascade after Android's legacy presentation layers.
+  const approvedFinalStyle=document.createElement('style');
+  approvedFinalStyle.id='ot-approved-oled-final';
+  approvedFinalStyle.textContent=`
+    html:not([data-ot-theme=light]),html:not([data-ot-theme=light]) body{background:#000!important;color:#f7f7f7!important}
+    html:not([data-ot-theme=light]) .ot-mobile-header{background:#000!important}
+    html:not([data-ot-theme=light]) .ot-connection-card,
+    html:not([data-ot-theme=light]) #ot-ble-inline,
+    html:not([data-ot-theme=light]) .ot-settings-group,
+    html:not([data-ot-theme=light]) #ot-compact-pages .ot-simple-card{background:#080808!important;border-color:#292929!important;color:#f7f7f7!important}
+    html:not([data-ot-theme=light]) #app .card{background:#080808!important;border-color:#292929!important}
+    html:not([data-ot-theme=light]) .ot-mobile-heading h1{color:#fff!important}
+    .ot-native-nav{position:sticky!important;top:0!important;bottom:auto!important;left:auto!important;right:auto!important;
+       width:100%!important;display:flex!important;overflow-x:auto!important;justify-content:flex-start!important;
+       border:1px solid #292929!important;background:#080808!important;border-radius:14px!important;
+       margin:10px 0 4px!important;padding:4px!important;box-shadow:none!important;gap:3px!important;box-sizing:border-box!important}
+    .ot-native-nav button{flex:1 0 auto!important;min-width:66px!important;min-height:38px!important;padding:8px!important;
+      color:#aaa!important;background:transparent!important;border-radius:10px!important;font-size:11px!important}
+    .ot-native-nav button svg{display:none!important}
+    .ot-native-nav button[aria-current=page]{background:#252525!important;color:#fff!important}
+    #app>.shell{padding-bottom:24px!important}
+    #ot-compact-pages,body.ot-settings-active .ot-settings-page{padding-bottom:25px!important}
+    html[data-ot-theme=light] .ot-native-nav{background:#f7f7f7!important;border-color:#ddd!important}
+    html[data-ot-theme=light] .ot-native-nav button{color:#444!important}
+    html[data-ot-theme=light] .ot-native-nav button[aria-current=page]{background:#fff!important;color:#111!important}
+  `;
+  document.head.appendChild(approvedFinalStyle);
 })();

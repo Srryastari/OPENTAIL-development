@@ -13,11 +13,19 @@
 #include "mbedtls/md.h"
 #include "status_led.h"
 #include "ble_command.h"
+#include "ble_fx_command.h"
+#include "effects_1d.h"
+#include "fx_preset_record.h"
 #include "ble_config.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
+extern bool ot_ble_apply_fx(const ot_ble_fx_packet_t *request);
 extern void ot_ble_stop_show(void);
+extern void ot_ble_disconnect_show(void);
+extern bool ot_ble_save_fx_preset(uint8_t slot);
+extern bool ot_ble_play_fx_preset(uint8_t slot);
+extern bool ot_ble_delete_fx_preset(uint8_t slot);
 extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision);
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
 static uint8_t token[OT_BLE_TOKEN_BYTES];
@@ -102,11 +110,12 @@ static const ble_uuid128_t ot_cfg_cmd_uuid=BLE_UUID128_INIT(0x25,0xaf,0x2e,0x10,
 static const ble_uuid128_t ot_cfg_rsp_uuid=BLE_UUID128_INIT(0x26,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_enroll_uuid=BLE_UUID128_INIT(0x27,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_challenge_uuid=BLE_UUID128_INIT(0x28,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE 0.1.24 | BLE HMAC enrollment bench v2";
+    const char *message="OpenTail CORE 0.1.25 | BLE HMAC enrollment bench v2";
     return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -114,6 +123,25 @@ static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
     const char *result=conn==active_conn?ot_ble_result_string(last_result):"ERR AUTH";
     return os_mbuf_append(ctx->om,result,strlen(result))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+/* Read-only BLE FX capability descriptor. No Wi-Fi, WLED runtime or authentication
+ * is required to discover what this firmware actually implements. Version 1:
+ * [version,count, little-endian effect IDs...] for current six-mode prototype.
+ * A future >9-mode library needs a paginated characteristic or long-read protocol.
+ */
+static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    uint16_t ids[9]={0};
+    size_t total=ot_effects_1d_supported_ids(ids,9u);
+    if(total>9u)total=9u; /* Do not advertise truncated modes as fully discoverable. */
+    uint8_t payload[20]={1,(uint8_t)total};
+    for(size_t i=0;i<total;i++){
+        payload[2+i*2]=(uint8_t)ids[i];
+        payload[3+i*2]=(uint8_t)(ids[i]>>8);
+    }
+    return os_mbuf_append(ctx->om,payload,2u+total*2u)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
@@ -124,6 +152,26 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
     if(n==18 && buf[0]==1 && buf[1]==4){
         authorized=owner_verify(buf+2);
         last_result=authorized?OT_BLE_OK_AUTH:OT_BLE_ERR_AUTH;
+    } else if(n==3 && buf[0]==OT_BLE_WIRE_V1 &&
+             buf[1]>=OT_BLE_FX_SAVE_PRESET && buf[1]<=OT_BLE_FX_DELETE_PRESET){
+        if(!authorized)last_result=OT_BLE_ERR_AUTH;
+        else if(buf[2]>=OT_FX_PRESET_SLOTS)last_result=OT_BLE_ERR_RANGE;
+        else {
+            bool ok=buf[1]==OT_BLE_FX_SAVE_PRESET?ot_ble_save_fx_preset(buf[2]):
+                buf[1]==OT_BLE_FX_PLAY_PRESET?ot_ble_play_fx_preset(buf[2]):
+                                                ot_ble_delete_fx_preset(buf[2]);
+            last_result=ok?(buf[1]==OT_BLE_FX_SAVE_PRESET?OT_BLE_OK_SAVED:
+                 buf[1]==OT_BLE_FX_PLAY_PRESET?OT_BLE_OK_LOADED:OT_BLE_OK_DELETED):
+                OT_BLE_ERR_BUSY;
+        }
+    } else if(n>=2 && buf[0]==1 && buf[1]==OT_BLE_FX_OPCODE) {
+        ot_ble_fx_packet_t fx={0};
+        ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
+        if(result==OT_BLE_FX_OK)
+            last_result=ot_ble_apply_fx(&fx)?OT_BLE_OK_FX:OT_BLE_ERR_BUSY;
+        else if(result==OT_BLE_FX_UNAUTHORIZED)last_result=OT_BLE_ERR_AUTH;
+        else if(result==OT_BLE_FX_RANGE || result==OT_BLE_FX_UNSUPPORTED)last_result=OT_BLE_ERR_RANGE;
+        else last_result=OT_BLE_ERR_WIRE;
     } else last_result=ot_ble_parse(buf,n,token,&authorized,&show);
     if(last_result==OT_BLE_OK_SHOW && !ot_ble_apply_show(&show))last_result=OT_BLE_ERR_BUSY;
     if(last_result==OT_BLE_OK_STOP)ot_ble_stop_show();
@@ -234,6 +282,7 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_info_uuid.u,.access_cb=info_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_reply_uuid.u,.access_cb=reply_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_fx_caps_uuid.u,.access_cb=fx_capabilities_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
@@ -262,7 +311,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
-        ot_st_ble_connected(false);ot_ble_stop_show();cfg_reset();advertise();
+        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }

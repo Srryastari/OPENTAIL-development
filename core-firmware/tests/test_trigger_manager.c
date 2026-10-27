@@ -30,7 +30,7 @@ int main(void){
     ot_tm_defaults(&p);
     uint8_t m=ot_tm_resolve(&p,OT_SIG_PARK|OT_SIG_BRAKE|OT_SIG_LEFT|OT_SIG_RIGHT);
     ot_arbitration_t a=ot_arbitrate(m,false,true);
-    assert(a.mode==OT_ARB_VEHICLE&&a.hazards&&a.brake_over_parking&&a.show_suppressed);
+    assert(a.mode==OT_ARB_SHOW&&a.hazards&&a.brake_over_parking&&!a.show_suppressed);
     ot_rgb_t brake=ot_om_trigger_color(OT_OM_PARK_BRAKE,m,32);
     assert(brake.r==32&&brake.g==0&&brake.b==0);
     /* Zone roles follow logical functions regardless of which input provides them. */

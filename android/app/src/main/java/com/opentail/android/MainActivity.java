@@ -218,7 +218,6 @@ public final class MainActivity extends Activity {
                     // Intercept Studio's project export to use Android's user-chosen document picker.
                     view.evaluateJavascript("window.download=function(name,text){window.OpenTailApp.exportJson(String(name),String(text));};", null);
                     view.evaluateJavascript(STUDIO_HAPTIC_JS, null);
-                    injectInlineBleControls(view);
                     injectBleOutputControls(view);
                     injectUnifiedShell(view);
                     injectDirectBleDashboard(view);
@@ -257,11 +256,16 @@ public final class MainActivity extends Activity {
             bleLabel.setText("BLE · " + message);
             if (web != null && bridgePageAllowed()) {
                 web.evaluateJavascript("window.OpenTailBLEPanel&&window.OpenTailBLEPanel.statusChanged(" + JSONObject.quote(message) + ");", null);
+                web.evaluateJavascript("window.OpenTailBLEEffects&&window.OpenTailBLEEffects.statusChanged(" + JSONObject.quote(message) + ");",null);
                 updateConnectionSurfaces();
                 web.evaluateJavascript("window.OpenTailBLEOutputs&&window.OpenTailBLEOutputs.connectionChanged(" + JSONObject.quote(message) + ");",null);
             }
         });
         ble.setPreferredListener(address -> preferences.edit().putString("preferred_ble_address", address).apply());
+        ble.setFxCapabilitiesListener(ids -> {
+            if(web!=null&&bridgePageAllowed())web.evaluateJavascript(
+                "window.OpenTailBLEEffects&&window.OpenTailBLEEffects.capabilities(" + ids + ");",null);
+        });
         ble.setConfigListener(result -> {
             if(web!=null&&bridgePageAllowed())web.evaluateJavascript(
                 "window.OpenTailBLEOutputs&&window.OpenTailBLEOutputs.onResult(" + JSONObject.quote(result) + ");",null);
@@ -392,18 +396,6 @@ public final class MainActivity extends Activity {
     /** Install the same Show Modes BLE controls into both offline and CORE-hosted Studio.
      *  Repeating Studio rendering does not destroy them: the script mounts on each tab render.
      */
-    private void injectInlineBleControls(WebView view) {
-        try (InputStream in = getAssets().open("ble-show-panel.js");
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
-            view.evaluateJavascript(out.toString("UTF-8"), null);
-        } catch (Exception ex) {
-            android.util.Log.e("OpenTail", "Failed to inject native BLE Show Modes", ex);
-        }
-    }
-
     private void injectBleOutputControls(WebView view) {
         try (InputStream in = getAssets().open("ble-output-panel.js");
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -506,6 +498,12 @@ public final class MainActivity extends Activity {
                 return j.toString();
             } catch (Exception ignored) { return "{}"; }
         }
+        @JavascriptInterface public void effectPreset(int action,int slot) {
+            runOnUiThread(() -> {if(bridgePageAllowed()&&ble!=null)ble.fxPreset(action,slot);});
+        }
+        @JavascriptInterface public void readEffectCapabilities() {
+            runOnUiThread(() -> {if(bridgePageAllowed()&&ble!=null)ble.readFxCapabilities();});
+        }
         @JavascriptInterface public void readOutput(int index) {
             runOnUiThread(() -> { if(bridgePageAllowed()&&ble!=null)ble.readOutput(index); });
         }
@@ -523,6 +521,18 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void authorizeWifiLegacy(){
             runOnUiThread(() -> { if(bridgePageAllowed()) enableBleWifiFallback(); });
+        }
+        /** Used by the *one* Show Modes effect editor once supported FX IDs are discovered.
+         * Kept independent of legacy five-effect BLE panel during migration.
+         */
+        @JavascriptInterface public void startEffectId(int effectId,int output,int zone,
+                int r,int g,int b,int bgR,int bgG,int bgB,
+                int brightness,int speed,int intensity,int paletteId,int ttl) {
+            runOnUiThread(() -> {
+                if (!bridgePageAllowed() || ble == null) return;
+                ble.showFx(effectId,output,zone,r,g,b,bgR,bgG,bgB,
+                           brightness,speed,intensity,paletteId,ttl);
+            });
         }
         @JavascriptInterface public void stop() {
             runOnUiThread(() -> { if (bridgePageAllowed() && ble != null) ble.stopShow(); });

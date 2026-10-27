@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'core-firmware/**'
+      - 'wled-native/**'
       - 'android/**'
       - 'web-studio/**'
       - '.github/workflows/verify-active-sources.yml'
@@ -21,6 +22,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run native firmware logic tests
         run: bash tests/run-host-tests.sh
+      - name: Regression-test native WLED bridge and OpenTail overlay
+        working-directory: .
+        run: bash wled-native/tests/run-native-host-tests.sh
 
   core-espidf-build:
     runs-on: ubuntu-latest
@@ -33,6 +37,40 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
+      - name: Verify ESP32-S3 flash images and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=core-firmware/build
+          test -s "$build/opentail_core_alpha.bin"
+          test -s "$build/bootloader/bootloader.bin"
+          test -s "$build/partition_table/partition-table.bin"
+          test -s "$build/flasher_args.json"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          build=Path('core-firmware/build')
+          meta=json.loads((build/'flasher_args.json').read_text())
+          files=meta.get('flash_files',{})
+          assert isinstance(files,dict) and len(files)>=3, 'Flasher manifest needs bootloader, partitions and app'
+          for name in files.values():
+              p=build/name
+              assert p.is_file() and p.stat().st_size>0, f'Missing referenced flash image: {p}'
+          print('Validated flash images and flasher offsets:',list(files))
+          PY
+      - name: Upload flashable CORE bench firmware package
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-esp32s3-bench-firmware
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+            core-firmware/build/flash_args
+            core-firmware/build/project_description.json
+          if-no-files-found: error
+          retention-days: 14
 
   android-debug-apk:
     runs-on: ubuntu-latest
@@ -52,6 +90,8 @@ jobs:
           gradle-version: '8.11.1'
       - name: Validate Android WebView JavaScript syntax and output integration contract
         run: |
+          node --check android/qa/test_unified_ble_fx.cjs
+          node android/qa/test_unified_ble_fx.cjs
           node --check android/app/src/main/assets/ble-output-panel.js
           node --check android/app/src/main/assets/output-control-motion.js
           node --check android/app/src/main/assets/direct-ble-dashboard.js
@@ -62,10 +102,9 @@ jobs:
           const ui=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
           assert(ble.includes("getSelectedIndex(){return selected;}"),'BLE selected index API missing');
           assert(ble.includes("announceSelection();load(selected);"),'Selection event must precede reload');
-          assert(ui.includes("opentail:ble-output-selected"),'Output Control selection listener missing');
-          assert(ui.includes("selectedFromManager()"),'Independent mode must follow BLE manager');
-          assert(ui.includes("let mode='independent',target='one';"),'Independent mode must be the default');
-          assert(ui.includes("if(mode==='independent'&&e.target.value==='both')"),'Independent mode must reject both targets');
+          assert(!ui.includes("manager.before(card)") && !ui.includes("let mode='independent',target='one';"),
+            'Unimplemented Output Control development card must not be injected');
+          assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
           console.log('Android WebView integration contract checks passed (static checks only).');
           JS
       - name: Compile debug APK
@@ -97,11 +136,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.56.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.57.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.56' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.57' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
@@ -130,6 +169,7 @@ jobs:
           node --check web-studio/tests/approved-chat-ui.test.cjs
           node web-studio/tests/approved-chat-ui.test.cjs
           node --check android/app/src/main/assets/unified-shell.js
+          node android/qa/test_unified_shell.js
           node - <<'JS'
           const fs=require('node:fs'),assert=require('node:assert/strict');
           const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
@@ -144,9 +184,9 @@ jobs:
           assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
             scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
-          assert(scene.indexOf('otNativeShowPanel()')>scene.indexOf('ot-subnav'),
-            'CORE native lighting controls must not hide Show tabs');
-          assert(shell.includes('Android v0.1.23')&&gradle.includes("versionName '0.1.23'"),
+          assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
+            'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
+          assert(shell.includes('Android v0.1.27')&&gradle.includes("versionName '0.1.27'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS

@@ -1,0 +1,82 @@
+'use strict';
+/* Exercise the native BLE transport extracted from the actual Studio source.
+ * A separate Android script must not inject/override the effects editor. */
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync('web-studio/opentail.htm','utf8');
+const activity=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
+const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
+const manager=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
+const motion=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
+const home=fs.readFileSync('android/app/src/main/assets/direct-ble-dashboard.js','utf8');
+assert(shell.includes("document.body.insertBefore(panel, mainNav?.nextSibling"),
+  'Home overview must not be inserted above the canonical six-tab navigation');
+assert(shell.includes('flex-wrap:nowrap!important')&&shell.includes('overflow-x:auto!important'),
+  'Six Android tabs must stay in one scrollable top row, never wrap into a second row');
+assert(shell.includes('window.OpenTailBLEOutputs?.getConfirmedOutputs?.()')&&
+       !shell.includes('<h3>Lighting setup</h3>'),
+  'Home should display confirmed Bluetooth output readback without a duplicate Wi-Fi-only card');
+assert(!motion.includes('manager.before(card)')&&!motion.includes("let mode='independent',target='one';"),
+  'Nonfunctional Output Control prototype must not be mounted');
+assert(manager.includes('<h2>CORE Outputs</h2>')&&manager.includes('background:#080808')&&
+       manager.includes('main.append(node)'),
+  'BLE Output Manager must use OLED styling and follow the actual Layout editor');
+assert(!home.includes('ot-direct-outputs')&&home.includes("window.OpenTailShell.navigate('layout')"),
+  'Home should use one contextual connection button rather than duplicate output buttons');
+assert(!activity.includes('injectInlineBleControls('),'Obsolete standalone BLE FX panel is still injected');
+assert(!html.includes('window.__otUnifiedBleFxV1'),'Wrapper monkey patch must not ship inside Studio');
+assert(html.includes("otBleFxMode()?'Apply to CORE'"),'Connected BLE effect editor must not advertise Apply on WLED');
+assert(html.includes('Entire Output ${i+1}'),'CORE output targets must be available independently of saved zones');
+const start=html.indexOf('const OT_CORE_FX_NAMES='),end=html.indexOf('function otCompatibleEffectChoices()',start);
+assert(start>0&&end>start,'Unified BLE source must live directly inside Studio');
+const fragment=html.slice(start,end);
+let connected=true,authorized=true;
+const calls=[],ble={
+ getState:()=>JSON.stringify({connected,authorized}),
+ readEffectCapabilities:()=>calls.push({cmd:'caps'}),
+ startEffectId:(...args)=>calls.push({cmd:'fx',args}),
+ stop:()=>calls.push({cmd:'stop'})
+};
+const state={status:'',wledEffects:[],wledEdit:{fx:3,color:'#ff0000',background:'#000000',bri:160,sx:80,ix:140}};
+const c={window:{OpenTailNativeBLE:ble},state,otControllerMode:'core',
+ otChosenEffectId:null,otEffectSectionId:'__all__',otEffectIsAll(){return c.otEffectSectionId==='__all__'},
+ otPreviewConfiguredZones(){return [{id:'core-1-2',name:'Zone 3',otCoreOutput:1,otCoreZone:2}]},
+ render(){},statusLine(){},setTimeout(){return 1},clearTimeout(){},console};
+vm.createContext(c);vm.runInContext(fragment,c,{filename:'Studio native BLE effects'});
+assert.equal(c.otBleFxMode(),true);
+c.otBleRequestCapabilities();
+assert.equal(calls.at(-1).cmd,'caps');
+c.window.OpenTailBLEEffects.capabilities([0,1,3,6,12,23,32768,65535,3]);
+assert.equal(vm.runInContext('otBleFxIds.length',c),7,'Unimplemented modes must not be listed');
+assert.equal(c.otBleEffectMeta(32768).palette,true,'Embers exposes verified CORE palette subset');
+assert.equal(c.otBleEffectMeta(3).palette,false,'WLED Wipe palette parity is not implemented');
+assert.equal(c.otBleApplyEffect(65535),false,'Unimplemented mode must be rejected');
+assert.equal(c.otBleApplyEffect(3),true);
+const play=calls.at(-1);
+assert.equal(play.cmd,'fx');
+assert.deepEqual(play.args.slice(0,3),[3,3,255]);
+assert.deepEqual(play.args.slice(3,6),[255,0,0]);
+assert.equal(play.args[9],Math.round(160*32/255),'CORE brightness limited to bench cap');
+assert.equal(play.args[12],0,'Only implemented palettes are enabled');
+assert.equal(play.args[13],60,'Temporary playback TTL must not run forever');
+c.otEffectSectionId='core-1-2';
+assert.equal(c.otBleApplyEffect(32768),true,'Original particle effect uses same FX registry');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[32768,2,4]);
+c.otEffectSectionId='core-output-0';
+assert.equal(c.otBleApplyEffect(0),true,'Entire Output 1 must be selectable independently');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[0,1,255]);
+c.otEffectSectionId='core-output-1';
+assert.equal(c.otBleApplyEffect(0),true,'Entire Output 2 must be selectable independently');
+assert.deepEqual(calls.at(-1).args.slice(0,3),[0,2,255]);
+c.otEffectSectionId='core-1-2';
+assert.equal(c.otBleApplyEffect(32768,{color:'#ff0000',background:'#0000ff',bri:160,sx:90,ix:150,pal:4}),true);
+assert.equal(calls.at(-1).args[12],4,'Embers WLED-ID gradient palette must travel over BLE');
+assert.equal(c.otBleStopEffect(),true);
+assert.equal(calls.at(-1).cmd,'stop');
+authorized=false;
+assert.equal(c.otBleApplyEffect(3),false,'No unauthorized command dispatch');
+connected=false;
+c.otBleResult('BLE disconnected');
+assert.equal(vm.runInContext('otBleFxIds.length',c),0,'Cached capabilities must clear after disconnect');
+assert(!html.slice(html.indexOf('function scenes(){'),html.indexOf('let otPresetEditorId=null;')).includes('otNativeShowPanel()'),
+  'No duplicate CORE Effects picker belongs in Show Modes');
+console.log('Native Studio BLE transport + single Effects UI + capability/mask/auth checks passed');

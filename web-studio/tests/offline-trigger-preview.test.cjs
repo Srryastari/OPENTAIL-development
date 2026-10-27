@@ -9,8 +9,11 @@ function section(from,to){
 }
 const source=section('const OT_SIM_EXAMPLE_ZONES=', 'function otSimElapsed()')+
  '\n'+section('function otPixelPreview()', 'function home()');
-assert(html.includes('if(sim){const z=otSimPreviewZones().find('),
- 'Simulation paint path must resolve rendered (including demo) zones');
+assert(html.includes('new Map(sim?otSimPreviewZones().map(z=>[z.id,z]):[])') &&
+       html.includes('if(sim){const z=zonesById.get(zoneId)'),
+ 'Simulation paint path must resolve rendered (including demo) zones from the cached lookup');
+assert(html.includes('if(el.dataset.otPaintedColor!==c)'),
+ 'Preview must skip redundant per-pixel style writes');
 assert(html.includes("const demo=otSim.active&&zones===OT_SIM_EXAMPLE_ZONES"),
  'Offline demo must have its own pixel capacity');
 const makeFactory=new Function('otSim','state','otPreviewConfiguredZones','otUE','otSimDraft',

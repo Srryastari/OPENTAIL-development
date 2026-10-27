@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-only OpenTail v0.1.24 suite: source contracts, C tests, Studio mocks and embedded HTML."""
+"""Host-only OpenTail v0.1.25 suite: source contracts, C tests, Studio mocks and embedded HTML."""
 from pathlib import Path
 import gzip, re, subprocess, tempfile, shutil, sys, os, json
 p=Path(__file__).resolve().parents[1]
@@ -14,7 +14,11 @@ def check(condition, description):
 check((p/'opentail.htm').read_bytes()==html, 'Stable and versioned Studio copies identical')
 check(gzip.decompress((p/'main/assets/studio.htm.gz').read_bytes())==html, 'Embedded Studio matches standalone HTML byte-for-byte')
 check("const OT_VERSION='0.19.51'" in text and 'v0.19.51</title>' in text,'Studio version and title updated')
-check('#define OT_FW "0.1.24-alpha"' in fw, 'CORE firmware version bumped')
+check('#define OT_FW "0.1.25-alpha"' in fw, 'CORE firmware version bumped')
+check('.mem_block_symbols=(ch==0?1024:64)' in fw and '.flags={.with_dma=(ch==0)}' in fw,
+      'Long Output 1 DMA buffer increased without changing stable Output 2 RMT mode')
+check('stop_request_generation++' in fw and 'stop_render_generation=local_stop_generation' in fw and '"stop_rendered"' in fw.replace('\\"','"'),
+      'Stop cancellation and per-output software refresh diagnostics retained')
 check('"trigger_manager.c"' in (p/'main/CMakeLists.txt').read_text(),'New Trigger Manager included in ESP-IDF build')
 check('OT_OUT_LEFT_GPIO 16' in (p/'main/board_config.h').read_text() and 'OT_OUT_RIGHT_GPIO 17' in (p/'main/board_config.h').read_text(),'Previously verified GPIO16 and GPIO17 unchanged')
 check('OT_INPUT_GPIO_LIST {4,5,6,7,8,9,10,11}' in (p/'main/board_config.h').read_text(),'Physical input pin mapping unchanged')

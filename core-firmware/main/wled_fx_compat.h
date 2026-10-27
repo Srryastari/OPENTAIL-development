@@ -5,7 +5,8 @@
  * copyright (c) 2016 Harm Aldick and WLED contributors, EUPL-1.2-or-later.
  * Source pin: wled/WLED commit 20e7a717664295eefc6ad77972cee1888d2da072.
  *
- * BENCH ONLY: No controller, GPIO, trigger or LED-bus integration here.
+ * BENCH ONLY: CORE can now dispatch supported IDs over BLE to the local LED
+ * render task. The pure C module itself remains independent of GPIO/network.
  */
 #include <stdbool.h>
 #include <stddef.h>
@@ -14,6 +15,9 @@
 enum {
     OT_WLED_SOLID = 0,      /* WLED FX_MODE_STATIC */
     OT_WLED_BLINK = 1,      /* WLED FX_MODE_BLINK */
+    OT_WLED_WIPE = 3,       /* WLED FX_MODE_COLOR_WIPE */
+    OT_WLED_SWEEP = 6,      /* WLED FX_MODE_COLOR_SWEEP */
+    OT_WLED_FADE = 12,      /* WLED FX_MODE_FADE */
     OT_WLED_STROBE = 23     /* WLED FX_MODE_STROBE */
 };
 
@@ -29,7 +33,7 @@ typedef struct {
     ot_wled_rgb_t background;
 } ot_wled_fx_config_t;
 typedef struct {
-    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe */
+    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe; other modes are time-derived */
 } ot_wled_fx_state_t;
 
 typedef struct {
@@ -41,10 +45,14 @@ typedef struct {
 } ot_wled_fx_metadata_t;
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out);
+/* Enumerates exactly the locally implemented FX IDs for BLE capabilities. */
+size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids);
 void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
+ * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
+ * Sweep, Fade and Strobe. Full upstream parity remains unverified.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */

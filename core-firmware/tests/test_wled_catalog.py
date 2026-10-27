@@ -14,8 +14,8 @@ assert len(catalog["unresolvedMetadata"]) == catalog["unmappedMetadataSymbols"] 
 assert len({item["id"] for item in effects}) == len(effects)
 assert effects == sorted(effects, key=lambda i: (i["name"].casefold(), i["id"]))
 host_ids = {x["id"] for x in effects if x["coreStatus"] == "host-tested-compatibility-module-only"}
-assert host_ids == set(catalog["coreCompatibilityModuleIds"]) == {0, 1, 23}
-for effect_id, name in [(0, "Solid"), (1, "Blink"), (23, "Strobe")]:
+assert host_ids == set(catalog["coreCompatibilityModuleIds"]) == {0, 1, 3, 6, 12, 23}
+for effect_id, name in [(0, "Solid"), (1, "Blink"), (3, "Wipe"), (6, "Sweep"), (12, "Fade"), (23, "Strobe")]:
     effect = next(e for e in effects if e["id"] == effect_id)
     assert effect["name"] == name
 assert all(item["coreStatus"] in ("host-tested-compatibility-module-only", "not-ported") for item in effects)

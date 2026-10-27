@@ -1,0 +1,46 @@
+name: Experimental WLED-native OpenTail build
+on:
+  pull_request:
+    paths:
+      - 'wled-native/**'
+      - '.github/workflows/native-wled-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: opentail-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-wled-s3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PlatformIO environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'platformio>=6.1.18,<7'
+      - name: Native bridge and trigger overlay regression tests
+        run: bash wled-native/tests/run-native-host-tests.sh
+      - name: Compile pinned native WLED with opt-in OpenTail usermod
+        run: bash wled-native/build-native.sh "$RUNNER_TEMP/opentail-wled-source"
+      - name: Validate separate ESP32-S3 images (NEVER flash)
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/opentail-wled-source/.pio/build/opentail_s3_n16r8"
+          test -s "$build/firmware.bin"
+          test -s "$build/bootloader.bin"
+          test -s "$build/partitions.bin"
+          sha256sum "$build"/{firmware,bootloader,partitions}.bin
+      - name: Archive native experimental images only
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-native-wled-experimental-esp32s3
+          path: |
+            ${{ runner.temp }}/opentail-wled-source/.pio/build/opentail_s3_n16r8/firmware.bin
+            ${{ runner.temp }}/opentail-wled-source/.pio/build/opentail_s3_n16r8/bootloader.bin
+            ${{ runner.temp }}/opentail-wled-source/.pio/build/opentail_s3_n16r8/partitions.bin
+          if-no-files-found: error
+          retention-days: 7

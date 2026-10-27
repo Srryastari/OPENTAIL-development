@@ -1,6 +1,6 @@
 # WLED → OpenTail CORE effect-port plan
 
-**Status:** initial compatibility scaffold (host tested in CI; no pixel-output integration yet).  
+**Status:** six WLED-compatible effect IDs now have an experimental BLE->CORE render path; no physical LED or automotive validation yet. The private CORE particle 1D foundation is compiled but not yet linked to a particle-based effect.  
 **Source:** https://github.com/wled/WLED at commit `20e7a717664295eefc6ad77972cee1888d2da072` (2026-10-25).  
 **WLED core source:** `wled00/FX.cpp`, `wled00/FX.h`, `wled00/FX_fcn.cpp`, palette/math dependencies as required.  
 **License:** EUPL-1.2-or-later; see `LICENSE` and `README.md` here. Follow obligations and review compatibility before distributing combined binaries.
@@ -17,19 +17,19 @@
 
 ## What was added in this stage
 
-`main/wled_fx_compat.[ch]` implements a **pure C, allocation-free 1D adapter** with WLED IDs 0 Solid, 1 Blink and 23 Strobe. Blink/Strobe share WLED's cycle-time, on-time, and `SEGENV.step` frame-catch-up semantics; host tests cover boundaries, skipped frames, brightness and unsupported configs. Only `palette_id=0` direct colors work. WLED palette lookup, custom controls, per-zone runtime, gamma and full frame parity are pending.
+`main/wled_fx_compat.[ch]` implements a **pure C, allocation-free 1D adapter** with WLED IDs 0 Solid, 1 Blink, 3 Wipe, 6 Sweep, 12 Fade, and 23 Strobe. Wipe/Sweep/Fade use pinned WLED frame math (including width/intensity-dependent partial-pixel blending and triangle timing) with host regression fixtures. Blink/Strobe share WLED's cycle-time, on-time, and `SEGENV.step` frame-catch-up semantics; host tests cover boundaries, skipped frames, brightness and unsupported configs. Only `palette_id=0` direct colors work. WLED palette lookup, custom controls, per-zone runtime, gamma and full frame parity are pending.
 
-`effects-catalog.json` indexes the pinned upstream effect names and raw metadata for offline support discovery. It resolves **201 distinct mode IDs**, with **16 upstream metadata symbols requiring more mapping** (the source contains one duplicate registration). Only three IDs say `host-tested-compatibility-module-only`; all others are `not-ported`.
+`effects-catalog.json` indexes the pinned upstream effect names and raw metadata for offline support discovery. It resolves **201 distinct mode IDs**, with **16 upstream metadata symbols requiring more mapping** (the source contains one duplicate registration). Only six upstream WLED IDs say `host-tested-compatibility-module-only`; all others are `not-ported`. These six are now connected to an **experimental local CORE LED output path** but have not been verified on hardware. OpenTail's original Embers (0x8000) lives in the **separate internal unified registry**, not the upstream catalog.
 
 ## Phases to reach full 1D capability
 
 1. **Golden parity fixtures:** derive reference frame outputs from pinned WLED C++ for Solid/Blink/Strobe on small 1D strips. Compare all RGB samples at exact timestamps, speed/intensity extrema, one-frame skips and zero/one pixel boundaries. Distinguish WLED bus brightness from OpenTail brightness cap.
 2. **Bench-only CORE selection:** add effect dispatch through the existing temporary, bounded CORE show API, *without* changing trigger priority, NVS output layouts or persistent road-lighting. Map WLED `uint8_t` speed/intensity exactly; reject unavailable modes and unsupported palettes. Track each zone's independent `step` and reset when configuration changes.
 3. **Accurate preview:** expose/reuse the same source-proven pixel renderer in the app; render the full configured zone then sample <=30 uniform indicator positions. Show effect/sequence frame timing honestly, and no writes during preview.
-4. **More 1D algorithms:** port deterministically, beginning with Fade, Wipe, Sweep, Rainbow, Theater and Chase classes. Add color/palette blend primitives and explicit seeded random state, then per-zone effect memory as needed. Do not claim parity based only on WLED metadata.
-5. **Feature-gated complexity:** audio-reactive requires an independent, actually measured audio pipeline; 2D/matrix/particle modes are disabled until their dimensional and memory requirements are met. WLED usermods are not automatically included.
+4. **More 1D algorithms:** port deterministically, continuing with Rainbow, Theater and Chase classes (Fade, Wipe, and Sweep compatibility adapters are now implemented). Add color/palette blend primitives and explicit seeded random state, then per-zone effect memory as needed. Do not claim parity based only on WLED metadata.
+5. **Feature-gated complexity:** audio-reactive requires an independent, actually measured audio pipeline; 2D/matrix and upstream WLED Particle System recipes remain unsupported until ported and tested. The original OpenTail Embers particle effect is compiled and host-tested but not WLED particle parity. WLED usermods are not automatically included.
 6. **Bench acceptance:** measured simultaneous Brake+Hazards preemption, deterministic restoration, offline disconnection, minimum/max zone lengths, output direction, memory/CPU/per-channel FPS with WS2815 full-count lighting. No automotive-safety certification is implied.
 
 ## Deliberately not changed
 
-No CORE trigger precedence, BLE authorization, output mapping, live pixel rendering, firmware API version, user projects/presets, or approved UI layout was modified by this stage. The compatibility engine is compiled but not yet used for physical LED output. PR #6 stays in draft pending validation and owner approval.
+CORE BLE command dispatch and render-task integration were added in the continuation branch without changing road-trigger precedence, output layouts, authentication, NVS saved projects, or the approved Studio screens. Android now injects a bridge into the existing Studio Effects editor and removes the redundant BLE selector; browser-only Studio has no native Bluetooth API. Android phone/GATT/visual testing is still pending. No hardware output has been tested. The particle subsystem is an internal library, NOT another effect menu entry. PR #6 stays draft until validation. See docs/CORE-BLE-FX-ARCHITECTURE.md.

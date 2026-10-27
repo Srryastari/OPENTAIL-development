@@ -18,6 +18,13 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
 import android.widget.ArrayAdapter;
 import android.widget.Toast;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +50,7 @@ final class BleDiscovery {
     private static final UUID ENROLL_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf27");
     private static final UUID CHALLENGE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf28");
     private static final UUID REPLY_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf24");
+    private static final UUID FX_CAPS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf29");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
 
@@ -61,6 +69,35 @@ final class BleDiscovery {
     private volatile boolean connecting = false;
     private volatile BluetoothGattCharacteristic command;
     private BluetoothGattCharacteristic reply;
+    private volatile BluetoothGattCharacteristic fxCaps;
+    private volatile boolean fxCapsBusy=false;
+    private Consumer<String> fxCapabilitiesListener;
+    void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
+    @SuppressWarnings("MissingPermission")
+    void readFxCapabilities(){
+        if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry supported effects");return;
+        }
+        fxCapsBusy=true;
+        try {if(!gatt.readCharacteristic(fxCaps)){fxCapsBusy=false;fxNotify("[]");}}
+        catch(SecurityException ex){fxCapsBusy=false;fxNotify("[]");}
+    }
+    private void fxNotify(String json){
+        if(fxCapabilitiesListener!=null)ui.post(()->fxCapabilitiesListener.accept(json));
+    }
+    private void fxRead(byte[] raw,int status){
+        fxCapsBusy=false;
+        if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
+        int n=raw[1]&255;
+        if(n>9||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
+        StringBuilder ids=new StringBuilder("[");
+        for(int i=0;i<n;i++){
+            if(i>0)ids.append(',');
+            ids.append((raw[2+i*2]&255)|((raw[3+i*2]&255)<<8));
+        }
+        fxNotify(ids.append(']').toString());pumpQueue();
+    }
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
     private String activeAddress="";
@@ -203,7 +240,7 @@ final class BleDiscovery {
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
-        command = null; reply = null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
+        command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
         writePending = false; readReplyPending = false; nextPacket = null;
@@ -282,6 +319,34 @@ final class BleDiscovery {
         enqueueWrite(new byte[]{1,2,(byte)effect,(byte)chainMask,(byte)zoneMask,
             (byte)r,(byte)g,(byte)b,(byte)brightness,(byte)speed,(byte)ttl});
     }
+    /** One shared WLED-compatible ID, not an Android-only or particle-only effect menu.
+     * The CORE performs all frame generation; this sends a single 17-byte BLE control packet.
+     * Only capabilities exposed by firmware can be selected in the unified Studio editor.
+     */
+    void showFx(int effectId,int chainMask,int zoneMask,
+                int r,int g,int b,int bgR,int bgG,int bgB,
+                int brightness,int speed,int intensity,int paletteId,int ttl) {
+        if (!canControl()) {notifyStatus("BLE FX control not authorized");return;}
+        if (effectId<0||effectId>65535||chainMask<1||chainMask>3||
+            zoneMask<1||zoneMask>255||brightness<0||brightness>32||
+            speed<0||speed>255||intensity<0||intensity>255||!(paletteId==0||(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4)))||
+            ttl<1||ttl>60||r<0||r>255||g<0||g>255||b<0||b>255||
+            bgR<0||bgR>255||bgG<0||bgG>255||bgB<0||bgB>255) {
+            notifyStatus("Unsupported or invalid BLE FX settings");return;
+        }
+        enqueueWrite(new byte[]{1,5,(byte)effectId,(byte)(effectId>>8),
+          (byte)chainMask,(byte)zoneMask,(byte)r,(byte)g,(byte)b,
+          (byte)bgR,(byte)bgG,(byte)bgB,(byte)brightness,(byte)speed,
+          (byte)intensity,(byte)paletteId,(byte)ttl});
+    }
+    /** Explicit NVS preset actions: 8 slots, owner authorized; no auto-start on boot. */
+    void fxPreset(int action,int slot) {
+        if (!canControl()) {notifyStatus("Authorize BLE before preset changes");return;}
+        if (action<6||action>8||slot<0||slot>=8){
+            notifyStatus("Invalid CORE preset action or slot");return;
+        }
+        enqueueWrite(new byte[]{1,(byte)action,(byte)slot});
+    }
     void stopShow() {
         if (!canControl()) {notifyStatus("BLE show control not authorized");return;}
         enqueueWrite(new byte[]{1,3});
@@ -289,7 +354,7 @@ final class BleDiscovery {
 
     /** Serialize Android GATT operations; BLE GATT only allows one pending request. */
     private void enqueueWrite(byte[] data) {
-        if (writePending || readReplyPending || cfgBusy) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy) {
             // One pending latest action; explicit STOP replaces queued starts.
             nextPacket=Arrays.copyOf(data,data.length);return;
         }
@@ -314,7 +379,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){writePending=false;authPending=false;notifyStatus("BLE permission missing");}
     }
     private void pumpQueue(){
-        if (!writePending&&!readReplyPending&&!cfgBusy&&nextPacket!=null){
+        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&nextPacket!=null){
             pendingPacket=nextPacket;nextPacket=null;writeNow();
         }
     }
@@ -340,7 +405,16 @@ final class BleDiscovery {
     BleDiscovery(Activity activity, StatusListener listener) {
         this.activity = activity;
         this.listener = listener;
-        entries = new ArrayAdapter<>(activity, android.R.layout.simple_list_item_1, labels);
+        entries = new ArrayAdapter<String>(activity, android.R.layout.simple_list_item_1, labels) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView row = (TextView) super.getView(position, convertView, parent);
+                row.setTextColor(Color.WHITE);
+                row.setBackgroundColor(Color.rgb(9, 9, 9));
+                row.setPadding(24, 20, 24, 20);
+                row.setMinHeight(58);
+                return row;
+            }
+        };
     }
 
     boolean handlePermissions(int requestCode, int[] results) {
@@ -394,8 +468,10 @@ final class BleDiscovery {
         entries.notifyDataSetChanged();
         if (!background) {
             preferredPending = null;
+            SpannableString title = new SpannableString("Find OpenTail CORE");
+            title.setSpan(new ForegroundColorSpan(Color.WHITE), 0, title.length(), 0);
             scanDialog = new AlertDialog.Builder(activity)
-                    .setTitle("Find OpenTail CORE")
+                    .setTitle(title)
                     .setAdapter(entries, (dialog, position) -> {
                         String address = new ArrayList<>(found.keySet()).get(position);
                         stopScan();
@@ -406,6 +482,15 @@ final class BleDiscovery {
                     .create();
             scanDialog.setOnDismissListener(dialog -> stopScan());
             scanDialog.show();
+            if (scanDialog.getWindow() != null) {
+                GradientDrawable panel = new GradientDrawable();
+                panel.setColor(Color.rgb(9, 9, 9));
+                panel.setCornerRadius(24f * activity.getResources().getDisplayMetrics().density);
+                panel.setStroke(1, Color.rgb(48, 48, 48));
+                scanDialog.getWindow().setBackgroundDrawable(panel);
+            }
+            if (scanDialog.getButton(AlertDialog.BUTTON_NEGATIVE) != null)
+                scanDialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.WHITE);
         }
         try {
             scanning = true;
@@ -474,7 +559,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+                Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -496,6 +581,7 @@ final class BleDiscovery {
             // Existing read-only connection remains compatible with older CORE firmware.
             command = service.getCharacteristic(COMMAND_UUID);
             reply = service.getCharacteristic(REPLY_UUID);
+            fxCaps = service.getCharacteristic(FX_CAPS_UUID);
             enroll = service.getCharacteristic(ENROLL_UUID);
             challenge = service.getCharacteristic(CHALLENGE_UUID);
             activeAddress=connection.getDevice().getAddress();
@@ -512,6 +598,7 @@ final class BleDiscovery {
             if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(value,status);return;}
             if (CFG_RSP_UUID.equals(characteristic.getUuid())) { cfgResponse(value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
+            if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE connected · " + new String(value, StandardCharsets.UTF_8));
                 if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
@@ -530,6 +617,7 @@ final class BleDiscovery {
                 if (REPLY_UUID.equals(characteristic.getUuid())) {
                     acceptReply(characteristic.getValue(),status);return;
                 }
+                if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                     byte[] value = characteristic.getValue();
                     notifyStatus("BLE connected · " + new String(value == null ? new byte[0] : value, StandardCharsets.UTF_8));
@@ -581,7 +669,7 @@ final class BleDiscovery {
         stopped = true;
         connected = false;
         connecting = false;
-        authorized = false;cfgBusy=false;cfgWatchdog++;
+        authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");cfgWatchdog++;
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; }

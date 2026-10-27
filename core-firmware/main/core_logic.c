@@ -39,7 +39,10 @@ ot_rgb_t ot_pixel_color(const ot_layout_t *cfg, int chain, unsigned pixel, uint8
     const ot_rgb_t off={0,0,0};
     if (!ot_layout_valid(cfg) || chain<0 || chain>=OT_CHAIN_COUNT) return off;
     const int section=ot_section_for_pixel(cfg,pixel);
-    const ot_arbitration_t arbitration=ot_arbitrate(signal_mask,demo&&demo->mode!=OT_DEMO_OFF,false);
+    /* Compatibility-only helper keeps its older vehicle-over-demo contract.
+     * Actual CORE output rendering now composites input overlays per configured
+     * Output Manager zone and permits Parking underneath live Show Modes. */
+    const ot_arbitration_t arbitration=ot_arbitrate(signal_mask,false,false);
     const ot_zone_mode_t zone=ot_arb_zone(&arbitration,chain,section,0,0);
     ot_rgb_t c=off;
     if(zone==OT_ZONE_BRAKE)c=rgb(255,0,0);

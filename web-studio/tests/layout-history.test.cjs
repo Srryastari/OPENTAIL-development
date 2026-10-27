@@ -19,8 +19,9 @@ const mockRemove=(id)=>{const z=state.layout.find(x=>x.id===id);if(!z)return;
 const mockSetLength=(id,n)=>{const i=state.layout.findIndex(x=>x.id===id),old=state.layout[i].length,delta=n-old;
  state.layout[i].length=n;for(let j=i+1;j<state.layout.length;j++)state.layout[j].start+=delta;};
 const make=new Function('state','persist','render','removeSection','otSetSectionLength',
- 'otRenameZone','editLayout','confirm','clearInterval','setInterval','document',
+ 'otRenameZone','editLayout','confirm','clearInterval','setInterval','document','commitLiveLayout',
  code+';return {snapshot:otLayoutSnapshot,remove:otLayoutRemove,undo:otLayoutUndoChange,redo:otLayoutRedoChange,rename:otLayoutRename,resize:otLayoutResize,move:otLayoutMove,select:otLayoutSelect,identify:otLayoutIdentify};');
+let liveLayoutCommits=0;
 let identifyCalls=[];
 const buttons=['off','all','first','last','sweep'].map(mode=>({dataset:{otIdentify:mode},setAttribute:(key,value)=>identifyCalls.push([mode,key,value])}));
 const pixels=Array.from({length:5},()=>({classList:{toggle:()=>{}}}));
@@ -29,7 +30,7 @@ const doc={querySelector:(selector)=>selector==='.ot-zone-preview'?{children:pix
 const app=make(state,save,rerender,mockRemove,mockSetLength,
  (id,name)=>{state.layout.find(x=>x.id===id).name=name},
  (id,key,value)=>{state.layout.find(x=>x.id===id)[key]=value},
- ()=>true,()=>{},()=>1,doc);
+ ()=>true,()=>{},()=>1,doc,()=>{liveLayoutCommits++;return true;});
 app.remove('zone_b');
 assert.equal(state.layout.length,2);
 assert.equal(state.removedSections.length,1);
@@ -46,9 +47,14 @@ app.undo();
 assert.equal(state.layout[0].name,'Parking');
 app.resize('zone_a',13);
 assert.equal(state.layout[1].start,13);
+assert.equal(liveLayoutCommits,1,'Resizing a zone should request a live layout commit');
 app.undo();
 assert.equal(state.layout[0].length,10);
 assert.equal(state.layout[1].start,10);
+app.resize('zone_a',347);
+assert.equal(state.layout[1].start,347,'Automatic next-zone offset must handle arbitrary pixel counts');
+assert.equal(state.layout[2].start,353,'Following zones must shift by the same amount');
+app.undo();
 app.move('zone_c',-1);
 assert.deepEqual(state.layout.map(z=>z.id),['zone_a','zone_c','zone_b']);
 assert.deepEqual(state.layout.map(z=>z.start),[0,10,14]);

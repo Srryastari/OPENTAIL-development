@@ -755,7 +755,7 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
 @media(max-width:365px){#app .ot-chat-trigger-action{padding:10px!important}#app .ot-chat-trigger-select strong{font-size:12px!important}}
 </style><style id="ot-concept-navigation-01956">
 /* Native in-chat four-pill navigation. No supplemental decorative headings. */
-#app .ot-chat-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:0 0 13px;width:100%;background:#000}
+#app .ot-chat-nav{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 13px;width:100%;background:var(--ot-bg,#000)}
 #app .ot-chat-nav-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 5px;min-height:42px;min-width:0;border:1px solid #353535;border-radius:999px;background:#101010;color:#bababa;font:600 11px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;box-shadow:none}
 #app .ot-chat-nav-pill svg{height:15px;width:15px;flex:0 0 15px}
 #app .ot-chat-nav-pill.is-active{color:#f4f4f4;border-color:#888;background:#242424}
@@ -776,6 +776,11 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
 #app .ot-chat-trigger-confirm{width:100%;display:flex;flex-wrap:wrap;align-items:center;gap:7px;border-top:1px solid #333;padding-top:9px;font-size:12px;color:#ccc}
 #app .ot-chat-trigger-confirm span{flex:1 1 100%}
 #app .ot-chat-trigger-confirm button{flex:1 1 auto;min-height:40px}
+
+/* Only one visible primary nav. Retain hidden desktop tab DOM because the
+   Android native shell still reads its active route during BLE display updates. */
+#app nav.tabs,#app nav.bottomnav{display:none!important}
+@media(max-width:760px){#app>.shell{padding-bottom:16px!important}#app .ot-chat-nav{display:flex;overflow-x:auto;overflow-y:hidden;gap:7px;scrollbar-width:none;overscroll-behavior-x:contain;scroll-snap-type:x proximity;padding-bottom:6px}#app .ot-chat-nav::-webkit-scrollbar{display:none}#app .ot-chat-nav-pill{flex:0 0 auto;min-width:max-content;padding:10px 13px;scroll-snap-align:start}}
 </style></head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
@@ -901,7 +906,24 @@ function otRangeInput(el){
  const output=el.closest('label')?.querySelector('output.ot-range-value');
  if(output)output.textContent=el.value;
 }
-function otPaintAllRanges(){document.querySelectorAll('input[type=range]').forEach(otRangeInput);otDecorateRangeNumbers()}
+function otPaintAllRanges(){document.querySelectorAll('input[type=range]').forEach(otRangeInput);otDecorateRangeNumbers();otBleWholeOutputOptions()}
+function otBleWholeOutputOptions(){
+ if(typeof otBleFxMode!=='function'||!otBleFxMode())return;
+ const select=document.querySelector('select[aria-label="Target for WLED effects"]');
+ if(!select)return;
+ select.setAttribute('aria-label','Target outputs and zones for CORE effects');
+ const available=otConfirmedCoreOutputs();
+ for(let i=0;i<available.length;i++){
+  if(!available[i]||!Number(available[i].pixels))continue;
+  const id=`core-output-${i}`;
+  if(!Array.from(select.options).some(o=>o.value===id)){
+   const option=document.createElement('option');option.value=id;
+   option.textContent=`Entire Output ${i+1} · ${otCoreOutputTitle(i)} (${available[i].pixels} LEDs)`;
+   select.add(option,1+i);
+  }
+ }
+ if(/^core-output-[01]$/.test(String(otEffectSectionId)))select.value=otEffectSectionId;
+}
 function otDecorateRangeNumbers(){
  for(const r of document.querySelectorAll('input[type=range]')){
   if(r.dataset.otRangeWired)continue;
@@ -1517,6 +1539,7 @@ async function otLoadFxMetadata(){
  catch(e){otFxMetadata=[];otFxMetadataStatus='Unavailable: '+e.message+' (basic controls only)';}
 }
 function otEffectMeta(id){
+ if(otBleFxMode())return otBleEffectMeta(id);
  const raw=otFxMetadata[id];if(typeof raw!=='string')return null;
  const parts=raw.split(';'),keys=['sx','ix','c1','c2','c3','o1','o2','o3'];
  const names=['Speed','Intensity','Custom 1','Custom 2','Custom 3','Option 1','Option 2','Option 3'];
@@ -1530,13 +1553,147 @@ function otEffectMeta(id){
 // When metadata is unavailable, expose only conservative, established 1D fallbacks.
 const OT_SAFE_1D_FALLBACK=new Set(['solid','solid glitter','chase','wipe','strobe','rainbow','blink','breathe','fade','twinkle','colorloop','sparkle','theater','fireworks 1d']);
 function otEffectCompatible(id){
+ if(otBleFxMode())return otBleFxIds.includes(Number(id));
  const name=String(state.wledEffects?.[id]||'').trim().toLowerCase();
  if(!name||name==='rsvd'||name==='-')return false;
  const meta=otEffectMeta(id);
  if(meta){const flags=String(meta.flags||'1');return flags.includes('1')||flags.includes('0');}
  return OT_SAFE_1D_FALLBACK.has(name);
 }
-function otCompatibleEffectChoices(){return (state.wledEffects||[]).map((name,id)=>({name,id})).filter(e=>otEffectCompatible(e.id));}
+/* CORE BLE is a transport of the one Show Modes editor, NOT an injected second app.
+ * This is compiled into Studio itself; Android supplies GATT through OpenTailNativeBLE.
+ * No local pixel streaming and no requirement for WLED Wi-Fi. */
+const OT_CORE_FX_NAMES=Object.freeze({0:'Solid',1:'Blink',3:'Wipe',6:'Sweep',12:'Fade',23:'Strobe',32768:'Embers'});
+let otBleFxIds=[],otBleCapsPending=false,otBleSelectedPending=null,otBleFxTimer=null,otBlePreviouslyAuthorized=false;
+let otBlePresetSlot=0;
+function otBleFxMode(){
+ if(!window.OpenTailNativeBLE)return false;
+ if(otControllerMode==='core')return true;
+ try{return !!JSON.parse(window.OpenTailNativeBLE.getState()||'{}').connected}
+ catch{return false}
+}
+function otBleStatus(){
+ try{return JSON.parse(window.OpenTailNativeBLE?.getState?.()||'{}')}catch{return {}}
+}
+function otBleAuthorized(){const x=otBleStatus();return !!(x.connected&&x.authorized)}
+function otBleEffectNames(){return otBleFxIds.map(id=>({id,name:OT_CORE_FX_NAMES[id]})).filter(x=>x.name)}
+function otBleRequestCapabilities(force=false){
+ if(!otBleFxMode())return;
+ const x=otBleStatus();
+ if(!x.connected){otBleFxIds=[];otBleCapsPending=false;otBlePreviouslyAuthorized=false;return}
+ if(!x.authorized)return; // owner auth may be in progress: never race its GATT read
+ if(!force&&otBleCapsPending)return;
+ otBleCapsPending=true;
+ window.OpenTailNativeBLE.readEffectCapabilities();
+}
+function otBleResult(message){
+ if(!otBleFxMode())return;
+ const x=otBleStatus();
+ if(!x.connected){
+   otBleFxIds=[];otBleCapsPending=false;otBlePreviouslyAuthorized=false;
+   otBleSelectedPending=null;state.runningSectionFx=null;return;
+ }
+ if(x.authorized&&!otBlePreviouslyAuthorized){otBlePreviouslyAuthorized=true;otBleRequestCapabilities(true)}
+ if(message&&message.includes('OK FX')&&otBleSelectedPending!==null){
+   state.runningSectionFx=otBleSelectedPending;state.runningFx=otBleSelectedPending;
+   state.status='CORE acknowledged '+(OT_CORE_FX_NAMES[otBleSelectedPending]||'effect')+' (temporary BLE bench show)';
+   otBleSelectedPending=null;statusLine();
+ }else if(message&&message.includes('OK STOP')){
+   state.runningFx=null;state.runningSectionFx=null;otBleSelectedPending=null;
+   state.status='CORE accepted Stop; verify the physical LEDs are off';statusLine();
+ }else if(message&&message.includes('OK SAVED')){
+   state.status='CORE confirmed effect saved to flash slot '+(otBlePresetSlot+1);statusLine();
+ }else if(message&&message.includes('OK LOADED')){
+   otBleSelectedPending=null;state.runningSectionFx=null;
+   state.status='CORE confirmed saved preset playback · continues after Bluetooth disconnect';statusLine();
+ }else if(message&&message.includes('OK DELETED')){
+   state.status='CORE confirmed preset slot deleted';statusLine();
+ }else if(message&&message.includes('ERR')){
+   otBleSelectedPending=null;state.status='CORE Bluetooth: '+message;statusLine();
+ }
+}
+window.OpenTailBLEEffects={
+ capabilities(ids){
+   otBleCapsPending=false;
+   if(!otBleFxMode())return;
+   // Unknown IDs remain hidden until Studio has validated their parameter metadata.
+   otBleFxIds=[...new Set((Array.isArray(ids)?ids:[]).filter(id=>Number.isInteger(id)&&OT_CORE_FX_NAMES[id]))];
+   state.wledEffects=[];
+   state.wledPalettes=['Default',undefined,'Color 1','Colors 1&2','Color Gradient'];
+   for(const id of otBleFxIds)state.wledEffects[id]=OT_CORE_FX_NAMES[id];
+   if(otBleFxIds.length&&!otBleFxIds.includes(otChosenEffectId)){
+     const requested=Number(state.wledEdit?.fx);
+     otChosenEffectId=otBleFxIds.includes(requested)?requested:otBleFxIds[0];
+     // Preserve the existing session's colors/sliders when learning capabilities.
+     // Only reset invalid/missing fields, never silently whiten the selection.
+     state.wledEdit={color:'#ffffff',background:'#000000',tertiary:'#ffffff',
+       sx:128,ix:128,bri:160,pal:0,...(state.wledEdit||{}),fx:otChosenEffectId};
+   }
+   state.status=otBleFxIds.length?'CORE Bluetooth confirms '+otBleFxIds.length+' effect modes':'No supported FX capability reply from CORE';
+   render();
+ },
+ statusChanged:otBleResult,
+ refresh(){otBleRequestCapabilities(true)}
+};
+function otBleEffectMeta(id){
+ if(!otBleFxIds.includes(Number(id)))return null;
+ id=Number(id);
+ const colors=id===0?[{i:0,label:'Fx'}]:[{i:0,label:'Fx'},{i:1,label:'Bg'}];
+ const controls=id===0?[]:[{key:'sx',label:'Speed',max:255}];
+ if([1,3,6,32768].includes(id))controls.push({key:'ix',label:id===32768?'Density':id===1?'Duty cycle':'Edge softness',max:255});
+ return {colors,
+   controls,palette:id===32768,flags:'1',defaults:{sx:128,ix:128,pal:0}};
+}
+function otBleTargetMasks(){
+ if(otEffectIsAll())return [3,255];
+ const outputTarget=/^core-output-([01])$/.exec(String(otEffectSectionId));
+ if(outputTarget)return [1<<Number(outputTarget[1]),255];
+ const zone=otPreviewConfiguredZones().find(z=>z.id===otEffectSectionId);
+ if(!zone||zone.otCoreOutput>1||zone.otCoreZone>7)return null;
+ return [1<<zone.otCoreOutput,1<<zone.otCoreZone];
+}
+function otBleChannel(hex,fallback){
+ const color=/^#[0-9a-f]{6}$/i.test(hex||'')?hex:fallback;
+ return [1,3,5].map(i=>parseInt(color.slice(i,i+2),16));
+}
+function otBleClamped(n,max,fallback=0){
+ return Number.isFinite(Number(n))?Math.max(0,Math.min(max,Math.round(Number(n)))):fallback;
+}
+function otBleApplyEffect(id,edit=state.wledEdit){
+ if(!otBleFxMode()||!otBleFxIds.includes(Number(id))){
+   state.status='CORE has not reported support for that effect. Check Bluetooth capabilities.';render();return false;
+ }
+ if(!otBleAuthorized()){
+   state.status='Connect and authorize CORE over Bluetooth before playing effects.';render();return false;
+ }
+ const mask=otBleTargetMasks();
+ if(!mask){state.status='Choose All outputs or one confirmed CORE zone.';render();return false}
+ const fx=otBleChannel(edit?.color,'#ffffff'),bg=otBleChannel(edit?.background,'#000000');
+ const bri=otBleClamped(otBleClamped(edit?.bri,255,160)*32/255,32,20);
+ window.OpenTailNativeBLE.startEffectId(Number(id),mask[0],mask[1],
+   ...fx,...bg,bri,otBleClamped(edit?.sx,255,128),otBleClamped(edit?.ix,255,128),
+   Number(id)===32768&&[0,2,3,4].includes(Number(edit?.pal))?Number(edit.pal):0,60);
+ otChosenEffectId=Number(id);state.wledEdit={...(edit||{}),fx:Number(id)};
+ otBleSelectedPending=Number(id);
+ state.status='Sent '+OT_CORE_FX_NAMES[id]+' over Bluetooth; awaiting CORE acknowledgement.';
+ render();return true;
+}
+function otBlePreset(action){
+ if(!otBleFxMode()||!otBleAuthorized()){
+   state.status='Connect and authorize CORE Bluetooth for preset operations';render();return false;
+ }
+ if(![6,7,8].includes(action)||otBlePresetSlot<0||otBlePresetSlot>7)return false;
+ window.OpenTailNativeBLE.effectPreset(action,otBlePresetSlot);
+ state.status=(action===6?'Save':action===7?'Play':'Delete')+' preset slot '+(otBlePresetSlot+1)+' sent to CORE; awaiting acknowledgement.';
+ render();return true;
+}
+function otBleStopEffect(){
+ if(!otBleAuthorized()){state.status='CORE Bluetooth authorization required to stop effects';render();return false}
+ clearTimeout(otBleFxTimer);
+ window.OpenTailNativeBLE.stop();
+ state.status='Stop requested over BLE; awaiting CORE OK STOP. A continuing rainbow means Stop is not verified.';render();return true;
+}
+function otCompatibleEffectChoices(){return otBleFxMode()?otBleEffectNames():(state.wledEffects||[]).map((name,id)=>({name,id})).filter(e=>otEffectCompatible(e.id));}
 function otCanonicalEffect(value){
  const desired=otCleanEffectName(value).toLocaleLowerCase();
  const hit=otCompatibleEffectChoices().find(x=>x.name.toLocaleLowerCase()===desired);
@@ -1568,12 +1725,17 @@ function otEffectSafetyCheck(sequencePlayback=false){
  if(Object.values(state.benchSignals||{}).some(Boolean))throw Error('Turn off active triggers before applying show effects.');
 }
 function otSelectEffectSection(id){
+ if(otBleFxMode()){
+   if(!otEffectIsAll(id)&&!/^core-output-[01]$/.test(id)&&!otPreviewConfiguredZones().some(z=>z.id===id))return;
+   otEffectSectionId=id;state.runningSectionFx=null;render();return;
+ }
  if(!otEffectIsAll(id)&&!state.layout.some(z=>z.id===id))return;
  otChosenEffectId=null;state.runningSectionFx=null;otEffectSectionId=id;
  if(!otEffectIsAll(id))state.selectedZone=id;
  otResetPendingEffects();otReadEffectSection();
 }
 async function otReadEffectSection(){
+ if(otBleFxMode()){otBleRequestCapabilities();render();return}
  const targetScope=otEffectSectionId;
  try{
   if(!state.connected){render();return}
@@ -1630,7 +1792,7 @@ function otInlineColorControls(){
  const e=state.wledEdit||{},meta=otEffectMeta(Number(e.fx??otChosenEffectId??0));
  const colors=meta?.colors||[{i:0,label:'Fx'},{i:1,label:'Bg'},{i:2,label:'Cs'}];
  const keys=['color','background','tertiary'],labels=['Fx · Foreground','Bg · Background','Cs · Accent'];
- return `<div class="ot-inline-colors"><div class="ot-inline-heading"><strong>Quick colors</strong><small>Changes apply directly to WLED; effect-specific slots only</small></div><div class="ot-inline-grid">${colors.map(c=>`<label class="ot-inline-color"><span>${labels[c.i]}</span><input type="color" value="${esc(otUEHex(e[keys[c.i]],c.i===1?'#000000':'#ffffff'))}" aria-label="Edit ${labels[c.i]}" oninput="otSetColorSlot(${c.i},this.value);this.nextElementSibling.textContent=this.value.toUpperCase()"><small>${esc(otUEHex(e[keys[c.i]],c.i===1?'#000000':'#ffffff').toUpperCase())}</small></label>`).join('')||'<p class="small muted">This effect does not expose direct color controls.</p>'}</div></div>`;
+ return `<div class="ot-inline-colors"><div class="ot-inline-heading"><strong>Quick colors</strong><small>${otBleFxMode()?'CORE receives these colors when Start is pressed':'WLED effect-specific color slots'}</small></div><div class="ot-inline-grid">${colors.map(c=>`<label class="ot-inline-color"><span>${labels[c.i]}</span><input type="color" value="${esc(otUEHex(e[keys[c.i]],c.i===1?'#000000':'#ffffff'))}" aria-label="Edit ${labels[c.i]}" oninput="otSetColorSlot(${c.i},this.value);this.nextElementSibling.textContent=this.value.toUpperCase()"><small>${esc(otUEHex(e[keys[c.i]],c.i===1?'#000000':'#ffffff').toUpperCase())}</small></label>`).join('')||'<p class="small muted">This effect does not expose direct color controls.</p>'}</div></div>`;
 }
 function switchColorTab(tab){
  const idx=['fx','bg','cs'].indexOf(tab),meta=otEffectMeta(state.wledEdit?.fx);
@@ -1656,6 +1818,17 @@ function otEffectWaitForWrites(){return otEffectWriteInFlight?new Promise(resolv
 let otColorExtraOpen=false;
 function otResetPendingEffects(){clearTimeout(effectTimer);otPendingEditKeys.clear()}
 function setWledEdit(k,v){
+ if(otBleFxMode()){
+   const meta=otBleEffectMeta(state.wledEdit?.fx);
+   const allowed=new Set(['bri',...(meta?.palette?['pal']:[]),...(meta?.controls||[]).map(x=>x.key),...(meta?.colors||[]).map(x=>['color','background','tertiary'][x.i])]);
+   if(!allowed.has(k))return;
+   state.wledEdit??={};state.wledEdit[k]=v;
+   clearTimeout(otBleFxTimer);
+   if(otBleAuthorized()&&otBleFxIds.includes(Number(state.wledEdit.fx)))
+     otBleFxTimer=setTimeout(()=>otBleApplyEffect(state.wledEdit.fx,{...state.wledEdit}),180);
+   const el=document.getElementById('w-'+k);if(el)el.textContent=String(v);
+   return;
+ }
  const meta=otEffectMeta(state.wledEdit?.fx);
  if(meta){
   const allowed=new Set(meta.controls.map(c=>c.key));if(meta.palette)allowed.add('pal');allowed.add('bri');
@@ -1740,6 +1913,7 @@ function otFreshEffectSettings(id,targets){
   col:[[255,255,255],[0,0,0],[255,255,255]]};
 }
 async function applyWledEffect(id){
+ if(otBleFxMode())return otBleApplyEffect(id,{fx:id,color:'#ffffff',background:'#000000',bri:160,sx:128,ix:128,pal:0});
  if(otEffectApplyBusy)return false;
  if(!otEffectCompatible(id)){state.status='This effect is not verified for a 1D strip. Matrix-only effects are hidden.';render();return false;}
  otResetPendingEffects();
@@ -2370,20 +2544,22 @@ function otPeekPaint(){
  const label=document.getElementById('ot-peek-status');if(label)label.textContent=sim?otSimStatus()+(otSim.playing?' · running':' · paused'):live?otPeekStatusText():otControllerMode==='core'?'No CORE pixel telemetry · use local preview':otPeekStatusText();
  const badge=document.getElementById('ot-peek-badge');if(badge)badge.textContent=sim?(otSimPreviewZones()===OT_SIM_EXAMPLE_ZONES?'SIMULATED DEMO':otPreviewSynced&&otControllerMode==='wled'&&state.connected?'SYNCED · ESTIMATE':'SIMULATED'):live?(otPeekExact?(document.querySelector('.ot-preview')?.dataset?.otSampled==='true'?'LIVE · EXACT INDEXES':'LIVE · EXACT INDEXES'):'LIVE · PARTIAL FRAME'):otPeekPixels?'STALE':'NO PIXEL DATA';
  otPeekLiveCanvases(live,sim);
- const now=otSimElapsed();let colorCache=new Map();
+ const now=otSimElapsed(),zonesById=new Map(sim?otSimPreviewZones().map(z=>[z.id,z]):[]);
+ const colorCache=new Map(),editorZones=new Map(otUE?state.layout.map(z=>[z.id,z]):[]),editorEffects=new Map();
  for(const el of document.querySelectorAll('[data-ot-led-index]')){
   const index=Number(el.dataset.otLedIndex),zoneId=el.dataset.otPreviewZone;
   let c='#070707';
-  if(sim){const z=otSimPreviewZones().find(x=>x.id===zoneId);if(z){if(!colorCache.has(zoneId))colorCache.set(zoneId,otSimEffectForZone(z));const len=Number(el.dataset.otPreviewCount)||28,pos=Number(el.dataset.otPreviewSample)||0;c=otSimColor(colorCache.get(zoneId),pos,len,now)}}
+  if(sim){const z=zonesById.get(zoneId);if(z){if(!colorCache.has(zoneId))colorCache.set(zoneId,otSimEffectForZone(z));const len=Number(el.dataset.otPreviewCount)||28,pos=Number(el.dataset.otPreviewSample)||0;c=otSimColor(colorCache.get(zoneId),pos,len,now)}}
   else if(live&&index<otPeekPixels.length)c=otPeekPixels[index];
-  el.style.backgroundColor=c;
-  el.style.boxShadow=c!=='#000000'&&c!=='#070707'?'0 0 5px '+c+'55':'none';
+  if(el.dataset.otPaintedColor!==c){el.style.backgroundColor=c;
+   el.style.boxShadow=c!=='#000000'&&c!=='#070707'?'0 0 5px '+c+'55':'none';el.dataset.otPaintedColor=c;}
  }
  if(otUE){for(const el of document.querySelectorAll('[data-ot-editor-index]')){
-  const z=state.layout.find(x=>x.id===el.dataset.otEditorZone);if(!z)continue;
-  const i=Number(el.dataset.otEditorIndex),d=otSimEffectForZone(z);
+  const zoneId=el.dataset.otEditorZone,z=editorZones.get(zoneId);if(!z)continue;
+  if(!editorEffects.has(zoneId))editorEffects.set(zoneId,otSimEffectForZone(z));
+  const i=Number(el.dataset.otEditorIndex),d=editorEffects.get(zoneId);
   const c=otSimColor(d,i,Math.min(28,Math.max(1,z.length)),performance.now()-(otUE.previewStart|| (otUE.previewStart=performance.now())));
-  el.style.backgroundColor=c;el.style.boxShadow=c!=='#000000'?'0 0 5px '+c+'55':'none';
+  if(el.dataset.otPaintedColor!==c){el.style.backgroundColor=c;el.style.boxShadow=c!=='#000000'?'0 0 5px '+c+'55':'none';el.dataset.otPaintedColor=c;}
  }}
 }
 function otPeekRetryNow(){otPeekClose();otPeekManualStop=false;otPeekAttempts=0;otPeekConnect()}
@@ -2408,19 +2584,33 @@ function otPreviewTabs(){
 }
 // Read-only adapter: existing renderer, pixel styling, Live/Synced/Simulated engine are preserved.
 // In CORE mode the rendered horizontal strips mirror the device's confirmed Output Manager zones.
+function otConfirmedCoreOutputs(){
+ if(otBleFxMode()){
+  const confirmed=window.OpenTailBLEOutputs?.getConfirmedOutputs?.();
+  if(Array.isArray(confirmed)&&confirmed.some(Boolean))
+   return confirmed.map((o,i)=>o||otOMData?.outputs?.[i]||null);
+ }
+ return Array.isArray(otOMData?.outputs)?otOMData.outputs:[];
+}
+function otCoreOutputTitle(index){
+ const o=otConfirmedCoreOutputs()[index];
+ return String(o?.name||`Output ${index+1}`).trim()||`Output ${index+1}`;
+}
 function otPreviewConfiguredZones(){
- if(otControllerMode!=='core')return state.layout;
- const outputs=otOMData?.outputs;
- if(!Array.isArray(outputs))return []; // Never substitute stale local WLED sections for CORE hardware zones.
+ if(!otBleFxMode()&&otControllerMode!=='core')return state.layout;
+ const outputs=otConfirmedCoreOutputs();
  const result=[];let offset=0;
  for(let outputIndex=0;outputIndex<outputs.length;outputIndex++){
-  const o=outputs[outputIndex];const cap=Math.max(0,Number(o.pixels)||0);
+  const o=outputs[outputIndex];if(!o)continue;
+  const cap=Math.max(0,Number(o.pixels)||0),outputName=otCoreOutputTitle(outputIndex);
   let within=0;
   for(let zoneIndex=0;zoneIndex<(o.zones||[]).length;zoneIndex++){
    const z=o.zones[zoneIndex],raw=Math.max(0,Number(z.pixels)||0);
    const len=Math.min(raw,Math.max(0,cap-within));
-   if(len>0)result.push({id:`core-${outputIndex}-${zoneIndex}`,name:String(z.name||`Zone ${zoneIndex+1}`),
-     start:offset+within,length:len,otCoreRole:z.role,otCoreOutput:outputIndex,otCoreZone:zoneIndex});
+   if(len>0)result.push({id:`core-${outputIndex}-${zoneIndex}`,
+     name:`${outputName} · ${String(z.name||`Zone ${zoneIndex+1}`)}`,
+     start:offset+within,length:len,otCoreRole:z.role,
+     otCoreOutput:outputIndex,otCoreZone:zoneIndex});
    within+=raw;
   }
   offset+=cap;
@@ -2432,7 +2622,7 @@ function otPixelPreview(){
  const zones=otSimPreviewZones();
  const demo=otSim.active&&zones===OT_SIM_EXAMPLE_ZONES;
  const total=demo?OT_SIM_EXAMPLE_ZONES[OT_SIM_EXAMPLE_ZONES.length-1].start+OT_SIM_EXAMPLE_ZONES[OT_SIM_EXAMPLE_ZONES.length-1].length:
-   otControllerMode==='core'?(otOMData?.outputs||[]).reduce((sum,o)=>sum+Math.max(0,Number(o.pixels)||0),0):
+   (otControllerMode==='core'||(typeof otBleFxMode==='function'&&otBleFxMode()))?(typeof otConfirmedCoreOutputs==='function'?otConfirmedCoreOutputs():(otOMData?.outputs||[])).reduce((sum,o)=>sum+Math.max(0,Number(o?.pixels)||0),0):
    !state.connected?Math.max(0,...state.layout.map(z=>Number(z.start)+Number(z.length))):configured;
  const activeZones=zones.filter(z=>z.start<total&&Number(z.length)>0);
  return `<section class="card ot-preview" data-ot-sampled="${activeZones.some(z=>Number(z.length)>28)}" aria-label="LED strip preview in ascending output data index order"><div class="line"><div><h2>Live Lighting Preview</h2><span id="ot-peek-status" class="small muted">${esc(otSimStatus()||otPeekStatusText())}</span></div><span id="ot-peek-badge" class="ot-mini">${otSim.active?'SIMULATED':'NO PIXEL DATA'}</span></div>${otPreviewTabs()}
@@ -2457,6 +2647,7 @@ function otShowBenchSnapshotHint(){
  return `<div class="ot-show-snapshot-hint"><span>Previous trigger-test lighting is saved. Stop Show can turn WLED OFF without deleting that snapshot.</span>${button('Restore previous lighting','otRestorePreviousLighting()')}</div>`;
 }
 async function otStopShow(){
+ if(otBleFxMode())return otBleStopEffect();
  if(otStopShowBusy)return false;
  const active=Object.entries(state.benchSignals||{}).filter(([,on])=>on).map(([name])=>name);
  if(active.length){state.status='Active bench trigger'+(active.length===1?'':'s')+': '+active.join(', ')+'. Stop the trigger test first; Stop Show will not override an active trigger.';render();return false;}
@@ -2618,6 +2809,7 @@ async function otStopSequence(){
  })();
  otSequenceRestoring=restore;return restore;
 }
+document.addEventListener('opentail:ble-outputs-updated',()=>{if(otBleFxMode())render();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&(otSequenceRun||otSequenceBusy))void otStopSequence()});
 const otFavKey='opentail-effect-favorites';
 let otEffectFavorites=(()=>{try{return JSON.parse(localStorage.getItem(otFavKey)||'[]')}catch{return []}})();
@@ -2744,6 +2936,11 @@ async function otUEApply(keepOpen=false){
    if(state.connected&&state.benchSignals[state.triggerEditing])applyBenchTriggers();
    otShowToast('Animation saved · assignments preserved');return true;
   }
+  if(context==='effects'&&otBleFxMode()){
+   const data={fx:id,sx:d.sx,ix:d.ix,bri:d.bri,color:d.col?.[0],background:d.col?.[1],pal:d.pal};
+   if(!otBleApplyEffect(id,data))return false;
+   if(!keepOpen)otUE=null;render();return true;
+  }
   if(context==='effects'&&otControllerMode==='core'){
    otCoreStoreValue('ot-core-effect-draft-v1',JSON.stringify(d));
    otUE=null;render();otShowToast('Effect draft saved locally — not running on CORE');return true;
@@ -2779,8 +2976,8 @@ function otUEMarkup(){
  <div class="ot-ue-card"><div class="ot-ue-card-head"><h3>Effect parameters</h3><small>From WLED metadata</small></div>${controls.filter(c=>!c.key.startsWith('o')).map(slider).join('')||'<p class="small muted">No adjustable sliders for this effect.</p>'}${controls.filter(c=>c.key.startsWith('o')).map(c=>`<label class="ot-ue-toggle"><input type="checkbox" ${d[c.key]?'checked':''} onchange="otUESet('${c.key}',this.checked)"> ${esc(c.label)}</label>`).join('')}</div>
  ${meta?.palette===false?'':`<div class="ot-ue-card">${otPaletteSelectHtml(d.pal,"otUESet('pal',+this.value)")}</div>`}
  <div class="ot-ue-card"><div class="ot-ue-card-head"><h3>Colors</h3><small>${colors.length} supported slot(s)</small></div>${colors.length?`<div class="ot-ue-color-grid">${colors.map(c=>`<label class="ot-ue-color"><span>${['Foreground','Background','Accent'][c.i]}</span><input type="color" id="ot-ue-slot-${c.i}" value="${esc(otUEHex(d.col[c.i]))}" aria-label="${['Foreground','Background','Accent'][c.i]}" oninput="otUESet('col${c.i}',this.value)"><small id="ot-ue-hex-${c.i}">${esc(d.col[c.i].toUpperCase())}</small><button class="ot-ue-wheel-button" type="button" onclick="otUEColorSelect(${c.i})">Wheel</button></label>`).join('')}</div>${otUEWheelOpen&&colors.some(c=>c.i===otUEColorIndex)?`<div class="ot-ue-wheel-body"><strong>${['Foreground','Background','Accent'][otUEColorIndex]} · Wheel</strong><div id="ot-ue-wheel" class="ot-ue-color-wheel" onpointerdown="otUEWheel(event)" onpointermove="if(event.buttons)otUEWheel(event)"><div class="ot-ue-wheel-pointer" style="background:${esc(d.col[otUEColorIndex])}"></div></div><div class="ot-ue-swatches">${['#ff0000','#ff9800','#ffeb3b','#39ff70','#03a9f4','#673ab7','#ffffff','#000000'].map(hex=>`<button aria-label="Set ${['Foreground','Background','Accent'][otUEColorIndex]} ${hex}" style="background:${hex}" onclick="otUESet('col${otUEColorIndex}','${hex}')"></button>`).join('')}</div><label class="ot-ue-slider"><span><strong>Color value</strong><output id="ot-ue-color-value">${Math.round(Math.max(...hexRgb(d.col[otUEColorIndex]))/255*100)}%</output></span><input type="range" min="0" max="100" value="${Math.round(Math.max(...hexRgb(d.col[otUEColorIndex]))/255*100)}" oninput="otUEColorValue(+this.value)"></label></div>`:''}`:'<p class="small muted">The selected effect does not use manual color slots.</p>'}<p class="small muted">Effect palettes can override individual colors. WLED uses Fx, Bg and Cs slots.</p></div>
- <div class="ot-ue-card"><label class="ot-ue-slider"><span><strong>Brightness ceiling</strong><output id="ot-ue-val-bri">${Math.round(d.bri/1.6)}%</output></span><input type="range" min="1" max="160" step="1" value="${d.bri}" oninput="otUESet('bri',+this.value)"></label><p class="small muted">Shared editor does not increase WLED master brightness. Sequence playback respects existing segment caps.</p></div>
- </div><footer class="ot-ue-footer"><button class="btn" onclick="otUEClose()">Cancel</button><button class="btn primary" ${otUEBusy?'disabled':''} onclick="otUEApply()">${e.context==='effects'?(otControllerMode==='core'?'Save local draft':'Apply on WLED'):'Save '+(e.context==='sequence'?'step':'animation')}</button></footer></section></div>`;
+ <div class="ot-ue-card"><label class="ot-ue-slider"><span><strong>${otBleFxMode()?'CORE brightness (bench capped)':'Brightness ceiling'}</strong><output id="ot-ue-val-bri">${Math.round(d.bri/1.6)}%</output></span><input type="range" min="1" max="160" step="1" value="${d.bri}" oninput="otUESet('bri',+this.value)"></label><p class="small muted">${otBleFxMode()?'CORE scales this value to the firmware 12.5% per-channel bench ceiling; this is not a measured current limiter.':'Shared editor does not increase WLED master brightness. Sequence playback respects existing segment caps.'}</p></div>
+ </div><footer class="ot-ue-footer"><button class="btn" onclick="otUEClose()">Cancel</button><button class="btn primary" ${otUEBusy?'disabled':''} onclick="otUEApply()">${e.context==='effects'?(otBleFxMode()?'Apply to CORE':otControllerMode==='core'?'Save local draft':'Apply on WLED'):'Save '+(e.context==='sequence'?'step':'animation')}</button></footer></section></div>`;
 }
 
 let otEffectFilter='all',otEffectQuery='';
@@ -2864,7 +3061,7 @@ async function otNativeStop(){
  finally{otNativeBusy=false;}
 }
 
-function scenes(){return `<div class="ot-approved-show"><div class="ot-subnav">${['Effects','Sequences','Presets'].map(t=>`<button class="ot-select ${otSub===t?'on':''}" onclick="otSelectSub('${t}')">${esc(t)} ${otSub===t?'✓':'○'}</button>`).join('')}</div>${otPixelPreview()}${otSub==='Effects'?`<div class="card"><h2>Effects</h2><p class="small muted">Select the target and adjust the current effect below. Foreground, Background and Accent remain editable inline whenever supported. ${otControllerMode==='core'?'This WLED effect editor is a local design workspace in CORE mode. Use the CORE native lighting controls below for supported physical bench effects.':'Tap an effect below to play it on the selected WLED segments. Vehicle-trigger tests take priority.'}</p><label class="field">Apply effect to<select aria-label="Target for WLED effects" onchange="otSelectEffectSection(this.value)"><option value="${OT_EFFECT_ALL}" ${otEffectIsAll()?'selected':''}>All connected LEDs (default)</option>${state.layout.map(z=>`<option value="${esc(z.id)}" ${otEffectSectionId===z.id?'selected':''}>${esc(z.name)} (${z.length} LEDs)</option>`).join('')}</select></label>${otRecoveryBanner()}<section class="ot-effect-settings-top ot-effect-panel" id="ot-effect-settings" aria-label="Effect settings"><div class="line"><div><h2>Effect settings</h2><p class="small muted">Foreground, Background and Accent are directly editable. Open the full editor for palettes and effect-specific controls.</p></div><button class="btn primary" onclick="otUEOpen('effects')">⚙ Edit effect</button></div>${otInlineColorControls()}<details class="ot-legacy-controls"><summary>Classic inline controls</summary>${wledEffectControls()}</details></section><div class="line ot-stop-show-row"><p id="live-status" role="status" aria-live="polite" class="notice">${esc(state.status||'Ready to choose an effect')}</p>${button('Stop Show',otControllerMode==='core'?'otCoreStop()':'otStopShow()','danger')}</div>${otShowBenchSnapshotHint()}${otEffectLibrary()}</div>`:otSub==='Sequences'?otSequencePanel():otPresetsPanel()}${otControllerMode==='core'?`<details class="card ot-core-advanced ot-core-native-show" ${otCoreConnected?'open':''}><summary>CORE native lighting controls · Advanced</summary>${otNativeShowPanel()}</details>`:''}</div>`}
+function scenes(){return `<div class="ot-approved-show"><div class="ot-subnav">${['Effects','Sequences','Presets'].map(t=>`<button class="ot-select ${otSub===t?'on':''}" onclick="otSelectSub('${t}')">${esc(t)} ${otSub===t?'✓':'○'}</button>`).join('')}</div>${otPixelPreview()}${otSub==='Effects'?`<div class="card"><h2>Effects</h2><p class="small muted">Select the target and adjust the current effect below. Foreground, Background and Accent remain editable inline whenever supported. ${otBleFxMode()?'CORE runs effects locally over Bluetooth. Only firmware-confirmed effect IDs are shown. Road-light triggers take priority.':otControllerMode==='core'?'CORE Bluetooth requires the Android app. Offline editing is available here.':'Tap an effect below to play it on the selected WLED segments. Vehicle-trigger tests take priority.'}</p><label class="field">Apply effect to<select aria-label="Target for WLED effects" onchange="otSelectEffectSection(this.value)"><option value="${OT_EFFECT_ALL}" ${otEffectIsAll()?'selected':''}>All connected LEDs (default)</option>${(otBleFxMode()?otPreviewConfiguredZones():state.layout).map(z=>`<option value="${esc(z.id)}" ${otEffectSectionId===z.id?'selected':''}>${esc(z.name)} ${otBleFxMode()?'· Output '+(z.otCoreOutput+1):''} (${z.length} LEDs)</option>`).join('')}</select></label>${otRecoveryBanner()}<section class="ot-effect-settings-top ot-effect-panel" id="ot-effect-settings" aria-label="Effect settings"><div class="line"><div><h2>Effect settings</h2><p class="small muted">Foreground, Background and Accent are directly editable. Open the full editor for palettes and effect-specific controls.</p></div><button class="btn primary" onclick="otUEOpen('effects')">⚙ Edit effect</button></div>${otInlineColorControls()}<details class="ot-legacy-controls"><summary>Classic inline controls</summary>${wledEffectControls()}</details></section><div class="line ot-stop-show-row"><p id="live-status" role="status" aria-live="polite" class="notice">${esc(state.status||'Ready to choose an effect')}</p>${button('Stop Show',otBleFxMode()?'otStopShow()':otControllerMode==='core'?'otCoreStop()':'otStopShow()','danger')}</div>${otShowBenchSnapshotHint()}${otEffectLibrary()}</div>`:otSub==='Sequences'?otSequencePanel():otPresetsPanel()}</div>`}
 let otPresetEditorId=null;
 function otPresetCurrent(){return (state.savedPresets||[]).find(p=>p.id===otPresetEditorId)}
 function otPresetEdit(id){otPresetEditorId=otPresetEditorId===id?null:id;render()}
@@ -2893,7 +3090,9 @@ async function otApplySavedPreset(id){
  catch(e){state.status='Preset failed: '+e.message;render()}
 }
 function otDeleteSavedPreset(id){const p=(state.savedPresets||[]).find(x=>x.id===id);if(!p||!confirm('Delete saved preset "'+p.name+'"?'))return;state.savedPresets=state.savedPresets.filter(x=>x.id!==id);otPresetEditorId=null;persist();render()}
-function otPresetsPanel(){const ps=state.savedPresets||[];const legacy=Object.values(state.profiles||{}).filter(p=>p?.kind==='custom');return `<div class="card"><div class="line"><h2>Saved Presets</h2><button class="btn primary" onclick="otAddSavedPreset()">+ Add Preset</button></div>${ps.length||legacy.length?'':`<p class="small muted">No saved presets yet. Tap + to capture the current WLED lighting.</p>`}${ps.map(p=>`<div class="ot-preset-item"><button class="btn" onclick="otApplySavedPreset('${p.id}')">▶ ${esc(p.name)}</button><button class="btn" aria-label="Edit ${esc(p.name)}" onclick="otPresetEdit('${p.id}')">✎ Edit</button></div>${otPresetEditorId===p.id?`<div class="ot-inline-edit"><label class="field">Preset name<input value="${esc(p.name)}" maxlength="48" onchange="otRenameSavedPreset('${p.id}',this.value)"></label><div class="btnrow"><button class="btn" onclick="otOverwriteSavedPreset('${p.id}')">Update from current lights</button><button class="btn danger" onclick="otDeleteSavedPreset('${p.id}')">Delete</button></div></div>`:''}`).join('')}</div>`}
+function otPresetsPanel(){
+ if(otBleFxMode())return `<div class="card"><h2>CORE Presets</h2><p class="small muted">Eight controller-flash effect snapshots. Save the current active effect, play without Wi-Fi, or delete a slot. A saved effect keeps running after Bluetooth disconnect, but does not restart automatically when CORE boots. Brake/turn/reverse inputs still override it.</p><label class="field">Preset slot<select aria-label="CORE preset slot" onchange="otBlePresetSlot=Number(this.value)">${Array.from({length:8},(_,i)=>`<option value="${i}" ${otBlePresetSlot===i?'selected':''}>Slot ${i+1}</option>`).join('')}</select></label><div class="btnrow"><button class="btn primary" onclick="otBlePreset(6)">Save current effect</button><button class="btn" onclick="otBlePreset(7)">▶ Play saved</button><button class="btn danger" onclick="otBlePreset(8)">Remove from CORE</button></div><p class="small muted">CORE confirms each operation over BLE. Empty slots return an error. Saved records are versioned and checksummed, not synchronised to the browser's WLED presets.</p></div>`;
+ const ps=state.savedPresets||[];const legacy=Object.values(state.profiles||{}).filter(p=>p?.kind==='custom');return `<div class="card"><div class="line"><h2>Saved Presets</h2><button class="btn primary" onclick="otAddSavedPreset()">+ Add Preset</button></div>${ps.length||legacy.length?'':`<p class="small muted">No saved presets yet. Tap + to capture the current WLED lighting.</p>`}${ps.map(p=>`<div class="ot-preset-item"><button class="btn" onclick="otApplySavedPreset('${p.id}')">▶ ${esc(p.name)}</button><button class="btn" aria-label="Edit ${esc(p.name)}" onclick="otPresetEdit('${p.id}')">✎ Edit</button></div>${otPresetEditorId===p.id?`<div class="ot-inline-edit"><label class="field">Preset name<input value="${esc(p.name)}" maxlength="48" onchange="otRenameSavedPreset('${p.id}',this.value)"></label><div class="btnrow"><button class="btn" onclick="otOverwriteSavedPreset('${p.id}')">Update from current lights</button><button class="btn danger" onclick="otDeleteSavedPreset('${p.id}')">Delete</button></div></div>`:''}`).join('')}</div>`}
 
 
 let otSelectedTriggerNames=[],otTriggerBatchOpen=false;
@@ -3467,6 +3666,11 @@ function otCoreSelectMode(next){
     otCoreConnected=false;otCoreStatus=null;otCoreCaps=null;otCoreMonitorSampleAt=0;
   }
   otControllerMode=next;
+  // Never leak the CORE's 7 firmware-implemented IDs into a WLED Wi-Fi library
+  // or reuse a stale WLED catalog while selecting native Bluetooth effects.
+  state.wledEffects=[];state.wledPalettes=[];otChosenEffectId=null;
+  if(next==='core')otBleRequestCapabilities(true);
+  else{otBleFxIds=[];otBleCapsPending=false;}
   otCoreStoreValue('ot-controller-mode-v1',next);
   otCoreMessage=next==='core'?'Ready to connect to OpenTail CORE.':'WLED mode selected.';
   render();
@@ -3768,10 +3972,16 @@ function otConceptNavigate(target){
  otConceptActive='normal';go(target);render();
 }
 function otConceptNav(){
- if(!['builder','layout','scenes'].includes(state.tab))return '';
- const items=[['builder','Triggers','<path d="m13 2-8 11h7l-1 9 8-12h-7z"/>'],['layout','Layout','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],['events','Auto Events','<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5"/>'],['scenes','Show Modes','<path d="m12 2 2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/>']];
+ const items=[
+  ['home','Home','<path d="M3 10 12 3l9 7v10H3z"/><path d="M9 20v-7h6v7"/>'],
+  ['scenes','Show Modes','<path d="m12 2 2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/>'],
+  ['layout','Layout','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
+  ['builder','Triggers','<path d="m13 2-8 11h7l-1 9 8-12h-7z"/>'],
+  ['events','Auto Events','<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5-1.5"/>'],
+  ['device','Settings','<circle cx="12" cy="12" r="3"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.5 1.5m11.2 11.2 1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5-1.5"/>']
+ ];
  const active=otConceptActive==='events'?'events':state.tab;
- return `<nav class="ot-chat-nav" aria-label="OpenTail concept tabs">${items.map(([id,name,icon])=>`<button type="button" class="ot-chat-nav-pill ${active===id?'is-active':''}" aria-current="${active===id?'page':'false'}" onclick="otConceptNavigate('${id}')"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">${icon}</svg><span>${name}</span></button>`).join('')}</nav>`;
+ return `<nav class="ot-chat-nav" aria-label="OpenTail main navigation">${items.map(([id,name,icon])=>`<button type="button" class="ot-chat-nav-pill ${active===id?'is-active':''}" aria-current="${active===id?'page':'false'}" onclick="otConceptNavigate('${id}')"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">${icon}</svg><span>${name}</span></button>`).join('')}</nav>`;
 }
 function otChatAutoSet(n,k,v){
  if(!['Startup','Shutdown'].includes(n))return false;
@@ -3853,7 +4063,7 @@ const OT_NAV_ICONS={
 function otNavIcon(id){return '<svg class="ot-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(OT_NAV_ICONS[id]||OT_NAV_ICONS.home)+'</svg>'}
 const OT_PAGE_SUBS={home:'Your vehicle lighting, at a glance.',device:'Controllers, connections and safe bench testing.',scenes:'Create lighting effects, sequences and presets.',builder:'Configure lighting behaviors and vehicle events.',layout:'Organize sections and pixel output mapping.',diagnostics:'Health, logs and controller capabilities.'};
 function otPageIntro(){const tab=TABS.find(item=>item[0]===state.tab)||TABS[0];return `<section class="ot-page-intro"><div><div class="ot-eyebrow">${otControllerMode==='core'?'CORE WORKSPACE':'WLED WORKSPACE'} <span aria-hidden="true">/</span> ${esc(state.projectName||'Untitled project')}</div><h1>${esc(tab[2])}</h1><p>${OT_PAGE_SUBS[tab[0]]||''}</p></div><div class="ot-mode-tag">${otControllerMode==='core'?'CORE Alpha':'WLED'}</div></section>`;}
-function render(){document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div><nav class="bottomnav">${TABS.map(([id,ic,t])=>`<button class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
+function render(){document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
 
 otMigrateLegacyDefaultTriggers();
 // Existing F1 Brake saved projects retain their settings in a legacy backup; Brake absorbs their section assignments.
