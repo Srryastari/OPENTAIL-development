@@ -33,3 +33,16 @@ For **1:1 effect behavior**, native WLED must perform the rendering. Reimplement
 - [ ] WLED licensing and firmware distribution review.
 
 **Do not label v0.1.25 ESP-IDF CORE or this adapter as a completed 1:1 WLED port.** Native integration is under development and unmerged; physical safety/failover remains separately unverified.
+
+
+## October 27: optional WLED-native firmware build and regression gates
+
+- `usermods/opentail_native/opentail_native.cpp` uses WLED's official v2 usermod `handleOverlayDraw()` hook after WLED's own 1D FX renderer. It never intercepts effect IDs, rewrites output pins or resets per-segment show state.
+- `ot_native_overlay.h` offers a bounded, allocation-free per-zone trigger overlay with user-provided colors. Parking is a baseline only when a zone has no active show; brake, turn and reverse remain local to explicitly assigned zones.
+- `platformio_override.ini` extends the pinned upstream WLED ESP32-S3 16MB/QIO + 8MB/OPI PSRAM environment. `build-native.sh` clones the exact pinned WLED commit into a NEW directory and builds; it **never flashes or erases** a controller.
+- `tests/run-native-host-tests.sh` checks native JSON mapping, input priority, 522+30 pixel bounds, disabled/no-op defaults, transactional invalid-profile rejection and independent zones.
+- Existing `verify-active-sources.yml` runs the new host regressions alongside unchanged ESP-IDF CORE, Studio and Android checks. Separate `native-wled-build.yml` builds upstream WLED with our optional usermod.
+
+**Integration remains incomplete:** The native WLED module defaults disabled and currently has no authenticated OpenTail BLE/profile bridge feeding its overlay. It cannot replace the current ESP-IDF firmware or reproduce OpenTail Output Manager settings yet. Native effect rendering, if successfully compiled, belongs to upstream WLED itself; *1:1 BLE-powered OpenTail functionality is not yet achieved*.
+
+**Release gates:** Original CI and native target compilation, full effect capability metadata, BLE authorization, Output Manager NVS compatibility, no phase-reset on triggers, Stop black-frame correctness, and level-shifted/fused 522 LED physical testing. Existing CORE images and GPIO assignments are retained for rollback; no firmware flashing or profile migration is performed.
