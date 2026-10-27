@@ -28,6 +28,8 @@ int main() {
   o.setEnabled(true);
   assert(render(o).empty()); // Enabled configuration is not authorization.
   o.setSessionAuthorized(true);
+  assert(render(o).empty()); // Pre-authorization inputs must not be replayed.
+  o.setInputs(Brake|Left|Right); // Fresh authenticated sample.
   auto spans=render(o);
   assert(spans.size()==4);
   assert(eq(spans[0],{0,118,0xFF0000}));
