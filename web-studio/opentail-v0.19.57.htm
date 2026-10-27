@@ -976,6 +976,18 @@ function otLayoutSelect(id){otLayoutSelected=otLayoutSelected===id?null:id;otLay
 function otLayoutAdd(){otLayoutCheckpoint();addSection();otLayoutSelected=state.layout[state.layout.length-1]?.id||null;render()}
 function otLayoutRemove(id){const z=state.layout.find(x=>x.id===id);if(!z||!confirm('Remove '+z.name+'?'))return;otLayoutCheckpoint();if(otLayoutSelected===id){otLayoutSelected=null;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;}removeSection(id)}
 function otLayoutMove(id,direction){const a=state.layout,i=a.findIndex(x=>x.id===id),j=i+direction;if(i<0||j<0||j>=a.length)return;otLayoutCheckpoint();[a[i],a[j]]=[a[j],a[i]];let start=Math.min(...a.map(x=>x.start));for(const z of a){z.start=start;start+=z.length}state.segmentsSynced=false;persist();render()}
+function otLayoutPreviewLength(id,value){
+ const n=Math.round(Number(value));if(!Number.isFinite(n)||n<1||n>10000)return;
+ const field=document.getElementById('ot-count-'+id);if(field)field.value=n;
+ const zone=[...document.querySelectorAll('[data-ot-zone]')].find(el=>el.getAttribute('data-ot-zone')===id);if(!zone)return;
+ const count=zone.querySelector('.ot-chat-count');if(count)count.textContent=n+' LEDs';
+ const label=document.getElementById('ot-preview-label-'+id);if(label)label.textContent='SIM · '+n+' pixels';
+ const strip=zone.querySelector('.ot-zone-preview');if(!strip)return;
+ const current=strip.children.length;
+ if(n<current){while(strip.children.length>n)strip.lastElementChild.remove()}
+ else if(n>current){const frag=document.createDocumentFragment();for(let i=current;i<n;i++){const dot=document.createElement('span');if(otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&i===0||otLayoutIdentifyMode==='last'&&i===n-1)dot.className='on';frag.appendChild(dot)}strip.appendChild(frag)}
+ if(otLayoutIdentifyMode==='last'){for(const dot of strip.children)dot.classList.remove('on');strip.lastElementChild?.classList.add('on')}
+}
 function otLayoutResize(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<1||n>10000||n===z.length)return;otLayoutCheckpoint();otSetSectionLength(id,n)}
 function otLayoutRename(id,name){const z=state.layout.find(x=>x.id===id);if(!z||!String(name||'').trim()||String(name).trim()===z.name)return;otLayoutCheckpoint();otRenameZone(id,name)}
 function otLayoutReverse(id,on){const z=state.layout.find(x=>x.id===id);if(!z||z.reverse===on)return;otLayoutCheckpoint();editLayout(id,'reverse',on)}
@@ -1000,11 +1012,11 @@ function otBaseArrangementLayout(){
       ${item.id===otLayoutSelected?`<div class="ot-zone-editor ot-chat-zone-editor">
        <label class="ot-chat-field">Zone name<input class="ot-chat-input" maxlength="48" value="${esc(item.name)}" onchange="otLayoutRename('${item.id}',this.value)"></label>
        <div class="ot-chat-between"><strong>Zone length</strong><span class="ot-chat-count">${item.length} LEDs</span></div>
-       <div class="ot-chat-length"><input type="range" min="1" max="${Math.max(300,item.length)}" value="${item.length}" oninput="document.getElementById('ot-count-${item.id}').value=this.value" onchange="otLayoutResize('${item.id}',this.value)" aria-label="Zone length in LEDs">
+       <div class="ot-chat-length"><input type="range" min="1" max="${Math.max(300,item.length)}" value="${item.length}" oninput="otLayoutPreviewLength('${item.id}',this.value)" onchange="otLayoutResize('${item.id}',this.value)" aria-label="Zone length in LEDs">
         <input class="ot-chat-input" id="ot-count-${item.id}" aria-label="Exact zone length" type="number" min="1" max="10000" value="${item.length}" onchange="otLayoutResize('${item.id}',this.value)"></div>
        <label class="ot-chat-reverse"><span><strong>Reverse</strong><small>Reverse the direction of this zone</small></span><input type="checkbox" ${item.reverse?'checked':''} onchange="otLayoutReverse('${item.id}',this.checked)"></label>
-       <div class="ot-chat-between"><strong>LED preview</strong><small>SIM · ${Math.min(16,item.length)} indexed samples</small></div>
-       <div class="ot-zone-preview ot-chat-led-strip" aria-label="Uniform simulated LED indicators in output data-index order">${Array.from({length:Math.min(16,item.length)},(_,j)=>`<span class="${otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&j===0||otLayoutIdentifyMode==='last'&&j===Math.min(16,item.length)-1?'on':''}"></span>`).join('')}</div>
+       <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-preview-label-${item.id}">SIM · ${item.length} pixels</small></div>
+       <div class="ot-zone-preview ot-chat-led-strip" aria-label="Uniform simulated LED indicators in output data-index order">${Array.from({length:item.length},(_,j)=>`<span class="${otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&j===0||otLayoutIdentifyMode==='last'&&j===item.length-1?'on':''}"></span>`).join('')}</div>
        <details class="ot-chat-disclosure"><summary>Identify LEDs <span>›</span></summary><div class="ot-zone-identify">${['off','all','first','last','sweep'].map(m=>`<button type="button" class="ot-chat-pill" data-ot-identify="${m}" aria-pressed="${otLayoutIdentifyMode===m}" onclick="otLayoutIdentify('${m}')">${m==='all'?'All':m[0].toUpperCase()+m.slice(1)}</button>`).join('')}</div><p class="ot-chat-hint">Local identification simulation; no real LEDs are controlled.</p></details>
        <button type="button" class="ot-chat-pill ot-chat-danger ot-chat-remove" onclick="otLayoutRemove('${item.id}')">▤ Remove Zone</button>
       </div>`:''}
@@ -1164,7 +1176,7 @@ async function safeSectionOff(z){try{
  if(!match||match.on!==false)throw Error('WLED did not confirm OFF');return true;
  }catch(e){state.status='Section OFF failed: '+e.message;render();return false}}
 
-function addSection(){let i=state.layout.length+1;state.layout.push({id:otNewZoneId(),name:'Custom '+i,start:state.layout.reduce((a,z)=>Math.max(a,z.start+z.length),0),length:30,kind:'strip',offsetX:0,offsetY:0,rotation:0,reverse:false,protocol:'WS2815'});state.segmentsSynced=false;persist();render();otAutoSyncLayout()}
+function addSection(){let i=state.layout.length+1;state.layout.push({id:otNewZoneId(),name:'Custom '+i,start:state.layout.reduce((a,z)=>Math.max(a,z.start+z.length),0),length:1,kind:'strip',offsetX:0,offsetY:0,rotation:0,reverse:false,protocol:'WS2815'});state.segmentsSynced=false;persist();render();otAutoSyncLayout()}
 async function paintSelection(){let z=state.layout.find(x=>x.id===state.selectedZone);if(!z)return;let a=Math.max(0,Math.min(z.length-1,state.selectionStart||0)),b=Math.min(z.length,a+(state.selectionCount||1));state.selectedPixels[z.id]??={};for(let i=a;i<b;i++)state.selectedPixels[z.id][i]=state.paintColor;persist();render();await liveRange(z.id,a,b,state.paintColor)}
 async function clearSelection(){let z=state.layout.find(x=>x.id===state.selectedZone);if(!z)return;let a=Math.max(0,Math.min(z.length-1,state.selectionStart||0)),b=Math.min(z.length,a+(state.selectionCount||1));state.selectedPixels[z.id]??={};for(let i=a;i<b;i++)state.selectedPixels[z.id][i]='#000000';persist();render();await liveRange(z.id,a,b,'#000000')}
 function paintPixel(){let z=state.selectedZone;if(!state.layout.some(x=>x.id===z))return;state.selectedPixels[z]??={};state.selectedPixels[z][state.selectedPixel]=state.paintColor;persist();render();livePixel(z,state.selectedPixel,state.paintColor)}
