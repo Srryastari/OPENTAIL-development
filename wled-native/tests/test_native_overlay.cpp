@@ -26,6 +26,8 @@ int main() {
   o.setInputs(Brake|Left|Right);
   assert(render(o).empty()); // Disabled by default: no effects changed.
   o.setEnabled(true);
+  assert(render(o).empty()); // Enabled configuration is not authorization.
+  o.setSessionAuthorized(true);
   auto spans=render(o);
   assert(spans.size()==4);
   assert(eq(spans[0],{0,118,0xFF0000}));
@@ -47,6 +49,10 @@ int main() {
   assert(!o.configure(invalid,1,552));
   Zone zero[]={zones[0]};zero[0].start=zero[0].stop;
   assert(!o.configure(zero,1,552));
+  o.setSessionAuthorized(false);assert(render(o).empty());
+  assert(o.inputs()==0); // Disconnect clears stale vehicle signals.
+  o.setInputs(Brake);assert(render(o).empty()); // No unauthenticated replay.
+  o.setSessionAuthorized(true);assert(render(o).empty()); // Must refresh inputs.
   o.setInputs(0);assert(render(o).empty());
   o.setInputs(Brake);o.setEnabled(false);assert(render(o).empty());
   return 0;
