@@ -4008,6 +4008,12 @@ function otConceptNav(){
  const active=otConceptActive==='events'?'events':state.tab;
  return `<nav class="ot-chat-nav" aria-label="OpenTail main navigation">${items.map(([id,name,icon])=>`<button type="button" class="ot-chat-nav-pill ${active===id?'is-active':''}" aria-current="${active===id?'page':'false'}" onclick="otConceptNavigate('${id}')"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">${icon}</svg><span>${name}</span></button>`).join('')}</nav>`;
 }
+function otChatPreviewFade(n,value){
+ if(n!==otChatEventName)return;
+ const ms=Math.max(0,Math.min(5000,Math.round(Number(value)||0)));
+ const label=document.querySelector('.ot-chat-event-fields .ot-chat-count');if(label)label.textContent=ms+' ms';
+ if(otChatEventPlay&&otChatEventPlay.name===n)otChatEventPlay.fadeMs=ms;
+}
 function otChatAutoSet(n,k,v){
  if(!['Startup','Shutdown'].includes(n))return false;
  const p=state.profiles[n];if(!p)return false;
@@ -4015,8 +4021,8 @@ function otChatAutoSet(n,k,v){
  else if(k==='eventFx'&&!['Solid','Sweep','Fade','Breathe'].includes(v))return false;
  else if(k==='eventUiEnabled')v=!!v;
  else if(k==='eventUiFadeMs'){v=Number(v);if(!Number.isFinite(v))return false;v=Math.max(0,Math.min(5000,Math.round(v)))}
- p[k]=v;
- if(!persist()){otShowToast('Could not save event configuration',true);return false}
+ const previous=p[k];p[k]=v;
+ if(!persist()){p[k]=previous;otShowToast('Could not save event configuration',true);return false}
  otChatEventStop(false);render();return true;
 }
 function otChatEventStop(update=true){
@@ -4060,7 +4066,7 @@ function otChatAutomaticEvents(){
    <div class="ot-chat-between"><strong>${esc(n)} animation</strong><small>OFFLINE PREVIEW</small></div>
    <label class="ot-chat-field"><input type="checkbox" ${p.eventUiEnabled?'checked':''} onchange="otChatAutoSet('${n}','eventUiEnabled',this.checked)"> Enable ${n} (configuration only)</label>
    <div class="ot-chat-between"><strong>Fade transition</strong><span class="ot-chat-count">${fadeMs} ms</span></div>
-   <input type="range" min="0" max="5000" step="50" value="${fadeMs}" onchange="otChatAutoSet('${n}','eventUiFadeMs',this.value)" aria-label="Offline event fade duration">
+   <input type="range" min="0" max="5000" step="50" value="${fadeMs}" oninput="otChatPreviewFade('${n}',this.value)" onchange="otChatAutoSet('${n}','eventUiFadeMs',this.value)" aria-label="Offline event fade duration">
    <label class="ot-chat-field">Animation<select class="ot-chat-input" onchange="otChatAutoSet('${n}','eventFx',this.value)">${['Solid','Sweep','Fade','Breathe'].map(a=>`<option value="${a}" ${String(fx).toLowerCase()===a.toLowerCase()?'selected':''}>${a}</option>`).join('')}</select></label>
    <div class="ot-chat-between"><strong>Duration</strong><span class="ot-chat-count">${duration.toFixed(1)} sec</span></div>
    <input type="range" min=".2" max="30" step=".1" value="${Math.min(30,duration)}" onchange="otChatAutoSet('${n}','eventDuration',this.value)" aria-label="Automatic event duration">
