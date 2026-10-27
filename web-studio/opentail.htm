@@ -4022,9 +4022,12 @@ function otChatEventStart(){
   for(let i=0;i<dots.length;i++){
    const pos=(i+.5)/Math.max(1,dots.length),lit=play.effect==='Sweep'?pos<=x:
      play.effect==='Fade'?true:play.effect==='Breathe'?true:true;
-   dots[i].style.background=lit?'#d7d7d7':'#424242';
-   dots[i].style.opacity=play.effect==='Fade'?String(.25+.75*x):
-     play.effect==='Breathe'?String(.35+.65*Math.sin(x*Math.PI)): '1';
+   // Shutdown must visibly extinguish to exact black; preview never sends device commands.
+   const level=play.name==='Shutdown'?(1-x):x;
+   dots[i].style.background=lit?'#d7d7d7':'#000000';
+   dots[i].style.opacity=lit?String(Math.max(0,Math.min(1,
+     (play.effect==='Fade'?level:play.effect==='Breathe'?
+       level*(.35+.65*Math.sin(x*Math.PI)):play.name==='Shutdown'?level:1)))):'0';
   }
   const v=document.getElementById('ot-chat-event-progress');if(v)v.textContent=Math.round(x*100)+'%';
   if(x<1)otChatEventRaf=requestAnimationFrame(tick);
@@ -4041,7 +4044,7 @@ function otChatAutomaticEvents(){
    <div class="ot-chat-between"><strong>${esc(n)} animation</strong><small>OFFLINE PREVIEW</small></div>
    <label class="ot-chat-field">Animation<select class="ot-chat-input" onchange="otChatAutoSet('${n}','eventFx',this.value)">${['Solid','Sweep','Fade','Breathe'].map(a=>`<option value="${a}" ${String(fx).toLowerCase()===a.toLowerCase()?'selected':''}>${a}</option>`).join('')}</select></label>
    <div class="ot-chat-between"><strong>Duration</strong><span class="ot-chat-count">${duration.toFixed(1)} sec</span></div>
-   <input type="range" min=".2" max="5" step=".1" value="${Math.min(5,duration)}" onchange="otChatAutoSet('${n}','eventDuration',this.value)" aria-label="Automatic event duration">
+   <input type="range" min=".2" max="30" step=".1" value="${Math.min(30,duration)}" onchange="otChatAutoSet('${n}','eventDuration',this.value)" aria-label="Automatic event duration">
    <button type="button" id="ot-chat-event-play" class="ot-chat-pill ot-chat-primary ot-chat-full" onclick="otChatEventStart()">${otChatEventPlay?'■ Stop preview':'▷ Preview offline'}</button>
    <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-chat-event-progress">0%</small></div>
    <div class="ot-chat-led-strip ot-chat-event-strip" aria-label="Offline automatic-event animation preview">${Array.from({length:16},()=>'<span class="ot-chat-event-pixel"></span>').join('')}</div>
