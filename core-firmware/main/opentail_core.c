@@ -28,6 +28,7 @@
 #include "ble_command.h"
 #include "ble_fx_command.h"
 #include "effects_1d.h"
+#include "ot_transition.h"
 #include "fx_preset_record.h"
 #include "fx_zone_bank.h"
 #include "palette_1d.h"
@@ -68,6 +69,8 @@ static bool native_outputs_ready=false;
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
+/* Default remains instant until adjustable transition settings are exposed. */
+#define OT_FX_ENTRY_FADE_MS 0u
 static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect assignments */
 static ot_ble_fx_packet_t ble_fx_request={0};
 
@@ -1102,7 +1105,15 @@ static void led_task(void *p) {
                        if(!trigger_here){
                            if(fx_here){
                                ot_wled_rgb_t fx=fx_frame[ch][px];
-                               c=(ot_rgb_t){fx.r,fx.g,fx.b};
+                               const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][zone];
+                               const uint16_t progress=ot_transition_progress(
+                                   (uint32_t)(frame_ms-slot->started_ms),
+                                   OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
+                               const ot_transition_rgb_t black={0,0,0};
+                               const ot_transition_rgb_t target={fx.r,fx.g,fx.b};
+                               const ot_transition_rgb_t blended=ot_transition_blend(
+                                   black,target,progress);
+                               c=(ot_rgb_t){blended.r,blended.g,blended.b};
                            }else if(legacy_here){
                                c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
                            }else if(demo_here){
