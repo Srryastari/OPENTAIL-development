@@ -92,3 +92,34 @@ export function assertNativeWledCapacity(info,outputs,maxSegmentsFallback=32){
     throw new RangeError('Physical layout exceeds WLED configured LED count');
   return true;
 }
+
+
+/**
+ * Discover every compiled native WLED 1D-capable mode from /json/eff and
+ * /json/fxdata metadata, not a hard-coded subset. WLED 1D flag defaults to 1;
+ * 2D and 3D flags exclude the effect unless 1 or single-LED flag 0 is set.
+ * v/f indicate effects whose native behavior depends on sound data.
+ */
+export function discoverNativeWled1DEffects(effectNames,fxdata,info){
+  if(!Array.isArray(effectNames)||!Array.isArray(fxdata)||
+     !Number.isInteger(info?.fxcount)||
+     effectNames.length!==info.fxcount||fxdata.length!==info.fxcount)
+    throw new TypeError('Native WLED effect catalog and metadata must match info.fxcount');
+  const effects=[];
+  for(let id=0;id<info.fxcount;id++){
+    const name=effectNames[id],meta=fxdata[id];
+    if(typeof name!=='string'||!name.trim()||typeof meta!=='string')continue;
+    const fields=meta.split(';');
+    const flags=fields.length>3&&fields[3]!==''?fields[3]:'1';
+    if(!/^[0123vf]+$/.test(flags))
+      throw new TypeError(`WLED effect ${id}: unrecognized metadata flags`);
+    if((flags.includes('2')||flags.includes('3'))&&!flags.includes('1')&&!flags.includes('0'))
+      continue;
+    effects.push(Object.freeze({
+      id,name,metadata:meta,requiresAudio:flags.includes('v')||flags.includes('f'),
+      flags,supportsPalette:fields.length>2?fields[2]!=='' : true
+    }));
+  }
+  return Object.freeze({effects:Object.freeze(effects),
+    supported1DIds:new Set(effects.map(x=>x.id))});
+}
