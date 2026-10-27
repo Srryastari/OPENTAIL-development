@@ -1,0 +1,6 @@
+{
+  "name": "opentail_native",
+  "version": "0.0.1",
+  "build": { "libArchive": false },
+  "dependencies": {}
+}
