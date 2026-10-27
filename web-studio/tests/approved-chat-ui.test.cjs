@@ -14,7 +14,7 @@ assert(layout.includes('ot-chat-pill ot-chat-primary')&&layout.includes('Add Zon
 assert(layout.includes('ot-chat-zone-toggle')&&layout.includes('aria-expanded=')&&layout.includes('ot-chat-chevron'),'Expandable zones with chevrons required');
 assert(layout.includes('ot-chat-input')&&layout.includes('ot-chat-length'),'Pill project/zone names and clean length slider required');
 assert(layout.includes('>Reverse</strong>'),'Control must be named Reverse without mirror');
-assert(layout.includes('ot-chat-led-strip')&&layout.includes('Math.min(16,item.length)'),'Uniform 16-sample physical-index preview');
+assert(layout.includes('ot-chat-led-strip')&&layout.includes('Array.from({length:item.length}')&&html.includes('function otLayoutPreviewLength('),'One-to-one pixel preview updates during slider input');
 assert(layout.indexOf('ot-chat-led-strip')<layout.indexOf('ot-chat-remove'),'Red Remove Zone pill must follow preview');
 assert(html.includes('ot-chat-danger')&&html.includes('border-radius:999px'),'Neutral pill controls plus red destructive action');
 assert(html.includes('otConceptNav()')&&html.includes("['events','Auto Events'"),'Four top concept icons/tabs must remain');
