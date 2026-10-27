@@ -1,8 +1,10 @@
-HOST QA PASSED: 40 gates. ESP-IDF 5.5.5 cross-build and physical electrical/hardware tests NOT run in this environment.
+HOST QA PASSED: 42 gates. ESP-IDF 5.5.5 cross-build and physical electrical/hardware tests NOT run in this environment.
 PASS: Stable and versioned Studio copies identical
 PASS: Embedded Studio matches standalone HTML byte-for-byte
 PASS: Studio version and title updated
 PASS: CORE firmware version bumped
+PASS: Long Output 1 DMA buffer increased without changing stable Output 2 RMT mode
+PASS: Stop cancellation and per-output software refresh diagnostics retained
 PASS: New Trigger Manager included in ESP-IDF build
 PASS: Previously verified GPIO16 and GPIO17 unchanged
 PASS: Physical input pin mapping unchanged

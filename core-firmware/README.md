@@ -1,8 +1,10 @@
-# OpenTail CORE v0.1.24-alpha — physical BOOT BLE bench enrollment
+# OpenTail CORE v0.1.25-alpha — 522-pixel RMT bench diagnostic build
 
 > **Current PR #12:** For a free Windows ESP32-S3 build, follow [BUILD-PR12-WINDOWS.md](BUILD-PR12-WINDOWS.md) and run [BUILD-CORE-WINDOWS.ps1](BUILD-CORE-WINDOWS.ps1). This packages the flashable images but never flashes hardware. The older PREPARE-AND-BUILD instructions below describe the historical v0.1.24 enrollment bench release.
 
-This is a test build based on working v0.1.23: same HTTP Studio, output/trigger NVS profiles, BLE shows, BLE Output Manager read/write and Wi-Fi fallback.
+**Unverified physical fix candidate:** Output 1 / GPIO16 (522-pixel DMA chain) now uses a 1024-symbol RMT DMA buffer instead of 64; Output 2 / GPIO17 retains its previously stable non-DMA 64-symbol configuration. Espressif documents 1024 symbols as a way to reduce CPU overhead in DMA mode. `/api/v1/status` now exposes `output_refreshes`, `stop_requested`, and `stop_rendered` to distinguish a Stop accepted by firmware from subsequent successful *software* refreshes. These counters cannot verify the colors or OFF state of physical pixels. The reported GPIO16 flicker, stale illumination after Stop, and lack of brightness response **remain unverified** until a 5V level-shifted signal and adequate fused power are tested. Do not claim the issue is fixed based only on build success.
+
+This is a test build retaining the HTTP Studio, output/trigger NVS profiles, BLE shows, BLE Output Manager read/write and Wi-Fi fallback.
 
 ## BLE onboarding
 
