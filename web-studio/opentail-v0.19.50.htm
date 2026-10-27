@@ -517,6 +517,27 @@ body{background:#000!important;color:#f0f0f0!important}
 #app .ot-page-intro{color:#eee}
 /* Intentionally no declarations targeting .ot-preview, .ot-led, .ot-ledstrip, or preview simulation. */
 </style>
+<style id="ot-range-borderless-fix">
+/* OT slider outer-frame correction: remove inherited .field input border. */
+#app input[type="range"], #app .field input[type="range"], #app input.wide-slider,
+input[type="range"], .field input[type="range"], .wide-slider {
+  border:0!important;
+  outline:0!important;
+  box-shadow:none!important;
+  background:transparent!important;
+  background-image:none!important;
+  padding:0!important;
+  -webkit-appearance:none;
+  appearance:none;
+}
+#app input[type="range"]:focus, #app input[type="range"]:focus-visible,
+input[type="range"]:focus, input[type="range"]:focus-visible {
+  border:0!important;
+  outline:0!important;
+  box-shadow:none!important;
+}
+</style>
+<!-- OT slider outer-frame correction -->
 </head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
