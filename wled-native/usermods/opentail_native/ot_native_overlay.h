@@ -35,7 +35,7 @@ class Overlay final {
   bool sessionAuthorized() const { return authorized_; }
   void clearInputs() { inputs_=0; }
   bool enabled() const { return enabled_; }
-  void setInputs(uint8_t mask) { inputs_=mask & 31u; }
+  void setInputs(uint8_t mask) { if (authorized_) inputs_=mask & 31u; }
   uint8_t inputs() const { return inputs_; }
   void setShowActive(std::size_t zoneIndex,bool active) {
     if(zoneIndex < count_) zones_[zoneIndex].showActive=active;
