@@ -47,7 +47,7 @@ assert.equal(single.example(),true,'Empty assignments must use local examples');
 const markup=single.html();
 assert.equal((markup.match(/class="ot-preview-row ot-static-preview"/g)||[]).length,6);
 assert.equal((markup.match(/class="ot-led"/g)||[]).length,144);
-assert(markup.includes('DEMO OUTPUTS'),'Clear simulated-only badge required');
+assert(markup.includes('SIMULATED'),'Clear simulated-only badge required');
 assert.equal(JSON.stringify(single.state),single.before,'Demo must not mutate saved project');
 function lit(trigger,z){return trigger.effect(z).brightness>0}
 assert.deepEqual(sample.map(z=>lit(single,z)),[true,false,false,true,false,false],
