@@ -14,4 +14,4 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/co
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/core_logic.c main/show_logic.c main/wled_1d.c tests/test_wled_1d.c -o /tmp/ot-wled-1d-tests && /tmp/ot-wled-1d-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/core_logic.c main/arbitration_logic.c main/show_logic.c main/wled_1d.c tests/test_wled_1d.c -o /tmp/ot-wled-1d-tests && /tmp/ot-wled-1d-tests
