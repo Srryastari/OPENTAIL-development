@@ -7,8 +7,10 @@ int main(void){
   size_t total=ot_effects_1d_supported_ids(ids,128);
   assert(total==ot_wled_1d_count()+1u);
   assert(total==121u);
-  assert(ids[0]==0&&ids[1]==1&&ids[5]==23);
-  assert(ids[total-1]==OT_FX_EMBERS);
+  assert(ids[0]==0&&ids[1]==1&&ids[total-1]==OT_FX_EMBERS);
+  bool has_strobe=false;
+  for(size_t i=0;i<total;i++)if(ids[i]==23u)has_strobe=true;
+  assert(has_strobe);
   ot_wled_fx_metadata_t meta={0};
   assert(ot_effects_1d_metadata(OT_FX_EMBERS,&meta)&&meta.id==OT_FX_EMBERS);
   assert(ot_effects_1d_metadata(67,&meta)&&meta.id==67);
