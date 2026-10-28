@@ -5,7 +5,7 @@
 static int equal(ot_rgb_t a,ot_rgb_t b){return a.r==b.r && a.g==b.g && a.b==b.b;}
 int main(void){
   ot_layout_t l={{6,6,6,6,6},30,32};
-  ot_show_t s={OT_SHOW_SOLID,{255,0,0},24,50,3,31};
+  ot_show_t s={.mode=OT_SHOW_SOLID,.color={255,0,0},.brightness=24,.speed=50,.chain_mask=3,.section_mask=31};
   assert(ot_show_valid(&s,&l));
   assert(strcmp(ot_show_name(s.mode),"solid")==0);
   assert(equal(ot_show_pixel(&s,&l,0,0,0),(ot_rgb_t){24,0,0}));
