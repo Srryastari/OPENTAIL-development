@@ -32,7 +32,7 @@ int main(void){
   /* Effect catalog is ABI-stable for legacy BLE IDs 1..5; all added effects are bounded. */
   const char *extended[]={"strobe","scan","pulse","fade","blink","plasma_sweep",
                            "sparkle","meteor","color_waves","twinkle"};
-  for(int mode=OT_SHOW_STROBE;mode<=OT_SHOW_LAST;++mode){
+  for(int mode=OT_SHOW_STROBE;mode<=OT_SHOW_TWINKLE;++mode){
     assert(strcmp(ot_show_name((ot_show_mode_t)mode),extended[mode-OT_SHOW_STROBE])==0);
     s.mode=(ot_show_mode_t)mode;
     assert(ot_show_valid(&s,&l));
