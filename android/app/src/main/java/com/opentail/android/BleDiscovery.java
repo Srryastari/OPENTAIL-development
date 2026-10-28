@@ -90,7 +90,7 @@ final class BleDiscovery {
         fxCapsBusy=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
         int n=raw[1]&255;
-        if(n>9||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
+        if(n>127||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
         StringBuilder ids=new StringBuilder("[");
         for(int i=0;i<n;i++){
             if(i>0)ids.append(',');
