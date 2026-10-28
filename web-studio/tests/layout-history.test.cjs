@@ -20,18 +20,22 @@ const mockSetLength=(id,n)=>{const i=state.layout.findIndex(x=>x.id===id),old=st
  state.layout[i].length=n;for(let j=i+1;j<state.layout.length;j++)state.layout[j].start+=delta;};
 const make=new Function('state','persist','render','removeSection','otSetSectionLength',
  'otRenameZone','editLayout','confirm','clearInterval','setInterval','document','commitLiveLayout',
- code+';return {snapshot:otLayoutSnapshot,remove:otLayoutRemove,undo:otLayoutUndoChange,redo:otLayoutRedoChange,rename:otLayoutRename,resize:otLayoutResize,move:otLayoutMove,select:otLayoutSelect,identify:otLayoutIdentify};');
+ code+';return {snapshot:otLayoutSnapshot,remove:otLayoutRemove,confirm:otLayoutConfirmRemove,undo:otLayoutUndoChange,redo:otLayoutRedoChange,rename:otLayoutRename,resize:otLayoutResize,move:otLayoutMove,select:otLayoutSelect,identify:otLayoutIdentify};');
 let liveLayoutCommits=0;
 let identifyCalls=[];
 const buttons=['off','all','first','last','sweep'].map(mode=>({dataset:{otIdentify:mode},setAttribute:(key,value)=>identifyCalls.push([mode,key,value])}));
 const pixels=Array.from({length:5},()=>({classList:{toggle:()=>{}}}));
-const doc={querySelector:(selector)=>selector==='.ot-zone-preview'?{children:pixels}:null,
+const zoneNode={getAttribute:()=> 'zone_a',querySelector:(selector)=>selector==='.ot-zone-preview'?{children:pixels}:null,
  querySelectorAll:()=>buttons};
+const doc={querySelector:(selector)=>selector==='.ot-zone-preview'?{children:pixels}:null,
+ querySelectorAll:(selector)=>selector==='[data-ot-zone]'?[zoneNode]:buttons};
 const app=make(state,save,rerender,mockRemove,mockSetLength,
  (id,name)=>{state.layout.find(x=>x.id===id).name=name},
  (id,key,value)=>{state.layout.find(x=>x.id===id)[key]=value},
  ()=>true,()=>{},()=>1,doc,()=>{liveLayoutCommits++;return true;});
 app.remove('zone_b');
+assert.equal(state.layout.length,3,'Remove opens inline confirmation before changing the layout');
+app.confirm('zone_b');
 assert.equal(state.layout.length,2);
 assert.equal(state.removedSections.length,1);
 app.undo();
@@ -60,8 +64,8 @@ assert.deepEqual(state.layout.map(z=>z.id),['zone_a','zone_c','zone_b']);
 assert.deepEqual(state.layout.map(z=>z.start),[0,10,14]);
 app.undo();
 assert.deepEqual(state.layout,initial);
-app.identify('first');
+app.identify('zone_a','first');
 assert(identifyCalls.some(([mode,key,value])=>mode==='first'&&key==='aria-pressed'&&value==='true'));
-app.identify('off');
+app.identify('zone_a','off');
 assert(identifyCalls.some(([mode,key,value])=>mode==='off'&&key==='aria-pressed'&&value==='true'));
 console.log('Layout undo/redo, archived zones, reorder, resize, rename, identify tests passed');
