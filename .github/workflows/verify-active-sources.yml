@@ -136,11 +136,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.57.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.62.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.57' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.62' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
