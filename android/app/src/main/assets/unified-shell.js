@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.27: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.28: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -148,7 +148,7 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.27 · Studio v0.19.57</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.28 · Studio v0.19.62</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
