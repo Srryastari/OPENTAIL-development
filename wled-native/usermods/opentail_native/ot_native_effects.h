@@ -82,7 +82,7 @@ class Engine final {
           case Id::MaterializeSparks: {
             const uint8_t sparkle=uint8_t((noise>>24)&255u);
             const uint8_t threshold=uint8_t(255u-z.intensity);
-            if(sparkle>=threshold) out=blend(z.background,z.foreground,uint8_t(160u+(sparkle>>2)));
+            if(sparkle>=threshold) out=blend(z.background,z.foreground,uint8_t(80u+(uint16_t(sparkle)*z.intensity)/510u));
             else out=blend(z.background,z.foreground,uint8_t((sparkle*z.intensity)/1020u));
             break;
           }
