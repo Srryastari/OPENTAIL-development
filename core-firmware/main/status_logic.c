@@ -38,9 +38,9 @@ ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool en
             return rgb(0,255,255,(uint8_t)((brightness*wave)/100u));
         }
         case OT_ST_DISCONNECTED:{
-            /* Disconnected: two distinct red pulses per 2200 ms cycle.
+            /* Disconnected: two distinct red pulses per 1200 ms cycle.
              * Fault remains a much faster continuous 90 ms blink. */
-            uint32_t phase=t%2200u;
+            uint32_t phase=t%1200u;
             uint8_t wave=portion(phase,130u,330u);
             if(phase>=420u && phase<750u)
                 wave=portion(phase-420u,130u,330u);
