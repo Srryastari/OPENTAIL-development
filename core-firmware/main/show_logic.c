@@ -81,7 +81,8 @@ ot_rgb_t ot_show_pixel(const ot_show_t *s,const ot_layout_t *layout,int chain,
       }
       case OT_SHOW_STROBE:{
         const unsigned beat=80u+(100u-s->speed)*4u;
-        if(elapsed_ms%beat >=beat/6u)return black();break;
+        if(elapsed_ms%beat >=beat/6u)return black();
+        break;
       }
       case OT_SHOW_SCAN:{
         const unsigned pos=triangle((unsigned)(elapsed_ms/8u),count>1u?2u*(count-1u):2u);
@@ -98,7 +99,8 @@ ot_rgb_t ot_show_pixel(const ot_show_t *s,const ot_layout_t *layout,int chain,
         return scale(c,(unsigned)s->brightness*triangle(phase,period)/255u);
       }
       case OT_SHOW_BLINK:{
-        if(phase>=period/2u)return black();break;
+        if(phase>=period/2u)return black();
+        break;
       }
       case OT_SHOW_PLASMA_SWEEP:{
         const unsigned a=triangle((unsigned)(local*13u+elapsed_ms/9u),512u);
