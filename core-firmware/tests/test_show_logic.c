@@ -29,6 +29,26 @@ int main(void){
   ot_rgb_t rainbow=ot_show_pixel(&s,&l,0,0,100);
   assert(rainbow.r<=32 && rainbow.g<=32 && rainbow.b<=32);
   assert(!equal(rainbow,ot_show_pixel(&s,&l,0,0,600)));
+  /* Effect catalog is ABI-stable for legacy BLE IDs 1..5; all added effects are bounded. */
+  const char *extended[]={"strobe","scan","pulse","fade","blink","plasma_sweep",
+                           "sparkle","meteor","color_waves","twinkle"};
+  for(int mode=OT_SHOW_STROBE;mode<=OT_SHOW_LAST;++mode){
+    assert(strcmp(ot_show_name((ot_show_mode_t)mode),extended[mode-OT_SHOW_STROBE])==0);
+    s.mode=(ot_show_mode_t)mode;
+    assert(ot_show_valid(&s,&l));
+    for(unsigned t=0;t<4000;t+=37){
+      for(unsigned px=0;px<30;++px){
+        ot_rgb_t out=ot_show_pixel(&s,&l,0,px,t);
+        assert(out.r<=32&&out.g<=32&&out.b<=32);
+        assert(equal(out,ot_show_pixel(&s,&l,0,px,t))); /* stateless deterministic */
+      }
+    }
+    assert(equal(ot_show_pixel(&s,&l,0,30,30),(ot_rgb_t){0,0,0}));
+    s.section_mask=1;
+    assert(equal(ot_show_pixel(&s,&l,0,6,100),(ot_rgb_t){0,0,0}));
+    s.section_mask=31;
+  }
+  s.mode=OT_SHOW_TWINKLE;
   s.brightness=33;assert(!ot_show_valid(&s,&l));
   s.brightness=32;s.section_mask=0;assert(!ot_show_valid(&s,&l));
   s.section_mask=31;s.speed=101;assert(!ot_show_valid(&s,&l));
