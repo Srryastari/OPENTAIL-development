@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
  mapNativeWledZones,buildNativeWledState,assertNativeWledCapacity,
- discoverNativeWled1DEffects,parseNativeWledEffectMetadata
+ discoverNativeWled1DEffects,parseNativeWledEffectMetadata,mergeUnifiedEffectCatalog
 } from '../opentail-wled-bridge.mjs';
 const outputs=[
   {start:0,pixels:522,zones:[{pixels:118},{pixels:109},{pixels:42},{pixels:253}]},
@@ -86,4 +86,19 @@ test('refuses to silently discard unsupported metadata control fields',()=>{
  assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,31)],{
   supported1DIds:new Set([31]),metadataById:new Map([[31,meta]])
  }),/does not yet support c4/);
+});
+
+test('merges WLED and OpenTail providers into one collision-safe catalog',()=>{
+ const wled=parseNativeWledEffectMetadata(31,'Chase Flash','Chase Flash@Speed;Bg,Fx;!;1;sx=64');
+ const native={key:'materialize_sparks',name:'Materialize Sparks',
+  parameterLabels:['Speed','Density'],colorSlots:[{index:0,label:'Foreground'},{index:1,label:'Background'}],
+  supportsPalette:true,dimensions:{oneD:true,matrix:false,threeD:false},requiresAudio:false};
+ const catalog=mergeUnifiedEffectCatalog([wled],[native]);
+ assert.deepEqual(catalog.map(e=>[e.catalogId,e.provider,e.providerId]),
+  [['wled:31','wled',31],['opentail:materialize_sparks','opentail','materialize_sparks']]);
+ assert.deepEqual(catalog[1].colorSlots.map(c=>c.label),['Foreground','Background']);
+ assert.equal(Object.isFrozen(catalog),true);
+ assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,key:'materialize_sparks'}]),/Duplicate/);
+ assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,key:'Bad Key'}]),/stable lowercase key/);
+ assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,dimensions:{oneD:false}}]),/not declared 1D/);
 });
