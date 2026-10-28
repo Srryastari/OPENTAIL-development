@@ -855,7 +855,7 @@ static void led_task(void *p) {
            if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
        }
-       vTaskDelay(pdMS_TO_TICKS(1)); /* yield; real FPS is limited by RMT frame length */
+       taskYIELD(); /* avoid adding a mandatory 1ms delay to near-16ms 522-pixel frames */
     }
 }
 void app_main(void) {
