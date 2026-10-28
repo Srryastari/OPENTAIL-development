@@ -6,13 +6,14 @@ using namespace opentail::render;
 
 struct FakeProvider final : EffectProvider {
   unsigned calls = 0;
+  bool success = true;
   uint16_t lastId = 0;
   Rgb value{0,0,0};
   bool render(const EffectState& effect, uint32_t, Rgb* frame,
               std::size_t count) override {
     ++calls; lastId = effect.effectId;
     for (std::size_t i=0; i<count; ++i) frame[i] = value;
-    return true;
+    return success;
   }
 };
 struct FakeTriggers final : TriggerLayer {
@@ -66,6 +67,12 @@ int main() {
   c.setGlobalOff(true);
   assert(c.renderFrame(20,wled,native,triggers,output,frame,4));
   assert(output.commits==2 && triggers.calls==1);
+  for (std::size_t i=0;i<4;++i)
+    assert(output.last[i].r==0 && output.last[i].g==0 && output.last[i].b==0);
+  c.setGlobalOff(false);
+  native.success=false;
+  assert(!c.renderFrame(30,wled,native,triggers,output,frame,4));
+  assert(output.commits==3); // Provider failure explicitly commits black.
   for (std::size_t i=0;i<4;++i)
     assert(output.last[i].r==0 && output.last[i].g==0 && output.last[i].b==0);
   return 0;
