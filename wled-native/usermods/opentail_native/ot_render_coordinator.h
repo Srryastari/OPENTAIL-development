@@ -78,7 +78,12 @@ class Coordinator final {
       const Zone& z = zones_[i];
       EffectProvider& provider = z.provider == Provider::WledNative ? wled : native;
       if (!provider.render(z.effect, nowMs, frame + z.start,
-                           static_cast<std::size_t>(z.stop - z.start))) return false;
+                           static_cast<std::size_t>(z.stop - z.start))) {
+        // Fail closed on provider error: never leave a stale illuminated frame.
+        for (std::size_t p = 0; p < pixelCount_; ++p) frame[p] = Rgb{0,0,0};
+        (void)output.commit(frame, pixelCount_);
+        return false;
+      }
     }
     triggers.apply(frame, pixelCount_);
     // Exactly one output commit per successfully rendered frame.
