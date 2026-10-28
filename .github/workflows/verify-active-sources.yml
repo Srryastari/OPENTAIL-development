@@ -69,8 +69,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.50.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.59.html').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
-          assert b'OpenTail Studio v0.19.50' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.59' in a, 'Unexpected Studio version'
           print('Studio baseline file checks passed (not browser/hardware tests).')
           PY
