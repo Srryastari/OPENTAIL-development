@@ -2,17 +2,19 @@
 
 This branch expands the original five native show modes without importing WLED code or altering the approved OpenTail Studio styling, saved output NVS schema, trigger map, or BLE wire IDs. The first five enum values are preserved for existing Android/BLE clients. Ten new modes are Wi-Fi show API controlled until the BLE protocol is versioned.
 
-## Native catalog
+## Single unified catalog
 
-Existing: Solid, Chase, Breathe, Wipe, Rainbow.
+Studio v0.19.61 uses **one Effects list** (search, favorites and selection); there are no visual WLED/native categories and there is no duplicate CORE-specific effect selector. It shows the union of 120 1D non-audio WLED names and 15 earlier OpenTail names, deduplicated by display name. The controller advertises available keys; unsupported effects are visible but disabled instead of silently substituting another effect. WLED-compatible IDs follow the inspected upstream WLED catalog at commit `4afd1d3c015563228f359af26904d4405f691c38` with retained upstream numeric IDs.
 
-New: Strobe, Scan, Pulse, Fade, Blink, Plasma Sweep, Sparkle, Meteor, Color Waves, Twinkle.
+Original CORE effects: Solid, Chase, Breathe, Wipe, Rainbow, Strobe, Scan, Pulse, Fade, Blink, Plasma Sweep, Sparkle, Meteor, Color Waves and Twinkle. The existing first-five enum values and BLE command range remain unchanged.
 
-These are original, bounded, deterministic 1D effect recipes, **not** a complete port of the WLED effect library. The existing original `effects/Effects1D.h` particle implementation is not integrated into the physical render task by this patch.
+The new `wled_1d.c` contains **120 bounded original compatibility recipes** with WLED names/IDs and 1D effect families. **These are not direct translations of every WLED algorithm, and visual/pixel parity has not been established.** This must not be described as a verified full WLED engine port. WLED's matrix-only, audio-reactive and 1D particle effects are not implemented by this branch. The existing `effects/Effects1D.h` particle implementation is not integrated into the physical render task. WLED source metadata is licensed under EUPL 1.2-or-later; see `https://github.com/wled/WLED/blob/main/LICENSE`.
+
+The requested unified effect catalog is implemented as a user-interface contract now. Exact WLED algorithm equivalence, effect-specific parameters, native palette parity and audio/particle rendering are separate validation/completion gaps, **not user-facing effect categories**.
 
 ## Bench controls
 
-Studio > CORE Alpha > Home > CORE · Live bench tests > CORE Native Effects. The same card appears in native Show Modes if rendered. Choose firmware-reported effect, output and zone, capped bench brightness and run time, then Start or Stop. Durations: 15/30/60 seconds on older firmware; 2 and 3 minutes only when `/api/v1/caps` reports `native_show_max_ms` supporting them. Real physical inputs continue to override effects using existing arbitration; restoring the effect when released is governed by the selected show deadline. This branch **does not implement per-zone trigger/show compositing** or animation sequences.
+Studio > CORE Alpha > Show Modes > Effects (one catalog); Home > CORE · Live bench tests links to it. The same card appears in native Show Modes if rendered. Choose a firmware-reported available effect, output and zone, capped bench brightness and run time, then Start or Stop. Durations: 15/30/60 seconds on older firmware; 2 and 3 minutes only when `/api/v1/caps` reports `native_show_max_ms` supporting them. Real physical inputs continue to override effects using existing arbitration; restoring the effect when released is governed by the selected show deadline. This branch **does not implement per-zone trigger/show compositing** or native animation sequences.
 
 ## FPS feasibility
 
