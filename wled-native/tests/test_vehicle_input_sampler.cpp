@@ -26,7 +26,7 @@ int main() {
   assert(s.stablePhysicalMask()==0x0e);
 
   // A configurable profile can disable an input or remap a physical input.
-  const uint8_t map[kInputCount]={0,kReverse,kBrake,kRight,kLeft,0,0,0};
+  const uint8_t map[kInputCount]={0,kReverse,kBrake,kLeft,kRight,0,0,0};
   assert(s.configureMapping(map));
   assert(s.logicalMask()==(kReverse|kBrake|kLeft)); // current stable state remapped immediately
   const uint8_t invalid[kInputCount]={3,0,0,0,0,0,0,0};
