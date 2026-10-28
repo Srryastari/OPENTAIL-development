@@ -1246,20 +1246,8 @@ const makeDefaults=()=>{const p={};for(const n of PRESETS)p[n]=DEFAULT_PROFILE(n
  p.Reverse.color='#ffffff';for(const t of ['Park','Brake'])p[t].color='#ff0000';
  for(const t of ['Left Turn','Right Turn','Hazards'])p[t].color='#ffbf00';
  return p};
-// The GS400 wiring below is retained solely as a migration/example TEMPLATE; no renderer,
-// trigger engine, or new project assumes these sections or this pixel count.
-function otGs400Example(){const p=makeDefaults();const keys=ZONES.map(z=>z[0]);
- const names={Park:['topL','bottomL','trunkL','topR','bottomR','trunkR'],Brake:['topL','bottomL','trunkL','topR','bottomR','trunkR'],
- 'Left Turn':['turnL'],'Right Turn':['turnR'],Hazards:['turnL','turnR'],Reverse:['reverseL','reverseR']};
- for(const name of ['Show','Startup','Shutdown'])p[name].zones=[...keys];
- for(const [name,ids] of Object.entries(names))p[name].zones=[...ids];
- return {layout:ZONES.map(([id,name,start,length])=>({id,name,start,length,kind:'strip',offsetX:0,offsetY:0,rotation:0,reverse:false,protocol:'WS2815',colorOrder:'BRG'})),profiles:p};}
-function otLoadExampleLayout(){
- if(state.layout.length){otShowToast('Example is available only for an empty project; export your current project first.',true);return;}
- if(!confirm('Load the GS400 example (1,246 LEDs)? This is an optional template, not an OpenTail requirement.'))return;
- const example=otGs400Example();state.layout=example.layout;state.profiles=example.profiles;state.projectName='GS400 example';state.selectedZone=state.layout[0].id;
- state.defaultTriggerMapV195=true;otMigrateZoneRegistry();state.segmentsSynced=false;persist();render();otShowToast('GS400 example loaded locally; WLED output not changed');
-}
+// Historical wiring IDs are retained only for migrating previously saved projects.
+// No new project or zone configuration is created from this vehicle-specific data.
 function otSetProjectName(name){state.projectName=String(name||'Untitled project').trim().slice(0,64)||'Untitled project';persist();render();}
 const DEFAULT={projectName:'Untitled project',tab:'home',mode:'demo',url:(location.protocol==='http:' && !['localhost','127.0.0.1'].includes(location.hostname) ? location.origin : 'http://4.3.2.1'),connected:false,current:'Show',profiles:makeDefaults(),selectedZone:'',selectedPixel:0,selectionStart:0,selectionCount:1,selectedPixels:{},removedSections:[],layout:[],selectedEffects:[],sectionStyles:{},wledInfo:null,segmentsSynced:false,mirror:false,masterBrightness:60,wledEffects:[],wledPalettes:[],paintColor:'#ff3558',status:'Demo mode — no controller connected',benchSignals:{},testMode:false,benchIsolation:true};
 let state;try{const stored=JSON.parse(localStorage.getItem('opentail-v1')||'null');state={...DEFAULT,...stored,connected:false,status:'Ready — connect a controller or use demo mode'};if(!stored?.url&&location.protocol==='http:'&&!['localhost','127.0.0.1'].includes(location.hostname))state.url=location.origin;if(!state.profiles)state.profiles=makeDefaults();state.projectName=String(state.projectName||'My lighting project').slice(0,64);state.sectionStyles ||= {};state.removedSections ||= [];state.selectionStart ??= 0;state.selectionCount ??= 1;state.segmentsSynced=false;
@@ -4381,7 +4369,7 @@ function otOMEdit(key,value,zone=-1){
 function otOMSelect(i){if(otOMBusy||!otOMDraft)return;otOMSelected=i;render();}
 function otOMAddZone(){
  const o=otOMDraft?.[otOMSelected];if(!o||otOMBusy||o.zones.length>=8)return;
- o.zones.push({name:`Zone ${o.zones.length+1}`,pixels:0,role:'decorative'});
+ o.zones.push({name:`Zone ${o.zones.length+1}`,pixels:0,role:'off'});
  otOMSaveState='unsaved';otOMMessage='Zone added to draft · Save to CORE when ready.';render();
 }
 function otOMRemoveZone(i){
@@ -4395,21 +4383,20 @@ function otOMCalibrate(key,i,value){
  else o.calibration[key][i]=Math.min(255,Math.max(0,Math.round(Number(value)||0)));
  otOMSaveState='unsaved';otOMMessage='Calibration changed in draft · Save to CORE to apply.';render();
 }
-function otOMGS400Main(){
+/* Neutral, user-owned zone configuration. A draft reset never changes saved
+ * controller settings until the user explicitly presses Save to CORE. */
+function otOMResetDraft(){
  if(!otOMDraft||otOMBusy)return;
+ if(!confirm('Clear this output draft to one unassigned zone? Your saved CORE configuration remains unchanged until Save.'))return;
  const o=otOMDraft[otOMSelected];
- o.name=otOMSelected===0?'GS400 Left Main':'GS400 Right Main';
- o.pixels=522;
- const roles=['park_brake',otOMSelected===0?'left_turn':'right_turn','reverse','park_brake','off'];
- o.zones=['Top Tail','Turn Signal','Reverse','Bottom Tail','Trunk (not fitted)'].map((name,i)=>({name,pixels:[118,109,42,253,0][i],role:roles[i]}));
- otOMSaveState='unsaved';otOMMessage='522-pixel main-housing draft ready. Existing corrected color order kept. Review then save to CORE.';render();
-}
-function otOMExample(){
- if(!otOMDraft||otOMBusy)return;
- const o=otOMDraft[otOMSelected],names=['Tail A','Turn','Reverse','Tail B','Tail C'];
- o.name='Pixel OUT '+(otOMSelected+1);o.pixels=30;o.color_order='BRG';
- o.zones=names.map((name,i)=>({name,pixels:6,role:i===1?(otOMSelected===0?'left_turn':'right_turn'):i===2?'reverse':'park_brake'}));
- otOMSaveState='unsaved';otOMMessage='Example loaded as an unsaved draft · Use Save to write CORE.';render();
+ if(!o)return;
+ o.name='Pixel OUT '+(otOMSelected+1);
+ o.pixels=1;
+ o.zones=[{name:'Zone 1',pixels:1,role:'off'}];
+ // Keep the previously selected wire color order and calibration untouched.
+ otOMSaveState='unsaved';
+ otOMMessage='Neutral unassigned draft created. Set pixel count, zones and roles before saving to CORE.';
+ render();
 }
 async function otOMSave(){
  if(!otOMSupported()||!otCoreConnected||!otOMDraft||otOMBusy)return;
@@ -4454,7 +4441,7 @@ function otOutputManagerCard(){
   <label><input type="checkbox" ${c.calibration?.gamma_enabled?'checked':''} onchange="otOMCalibrate('gamma_enabled',0,this.checked)"> Gamma correction (optional)</label></div>
   <p class="small ${total!==c.pixels?'error':'muted'}" id="ot-om-total">${total} assigned of ${c.pixels} active pixels${total!==c.pixels?' · Must match':''}</p>
   <div class="btnrow"><button type="button" class="btn primary" id="ot-om-save" ${!active||otOMBusy?'disabled':''} onclick="otOMSave()">${otOMBusy?'Saving…':'Save to CORE'}</button>
-  <button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMRead()">Reload device</button><button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMGS400Main()">GS400 main housing · 522</button><button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMExample()">Reset draft to example</button></div>
+  <button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMRead()">Reload device</button><button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMResetDraft()">Clear zone assignments</button></div>
   <p class="ot-core-help" id="ot-om-message" role="status" aria-live="polite">${esc(otOMMessage)}</p>
   <p class="small muted">To save: stop Shows/demos and release all physical 12V inputs. Names permit letters, numbers, spaces, hyphens and basic punctuation. Settings are not a current limit. The full 12-output controller is a future hardware revision.</p>
  </section>`;
