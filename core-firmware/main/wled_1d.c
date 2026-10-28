@@ -11,7 +11,7 @@ static const ot_wled_1d_meta_t catalog[]={
     {5,"random_color","Random Colors",5},
     {6,"color_sweep","Sweep",3},
     {7,"dynamic","Dynamic",10},
-    {8,"rainbow","Colorloop",6},
+    {8,"colorloop","Colorloop",6},
     {9,"rainbow_cycle","Rainbow",6},
     {10,"scan","Scan",7},
     {11,"dual_scan","Scan Dual",7},
