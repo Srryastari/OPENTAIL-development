@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
  mapNativeWledZones,buildNativeWledState,assertNativeWledCapacity,
- discoverNativeWled1DEffects,parseNativeWledEffectMetadata,mergeUnifiedEffectCatalog
+ discoverNativeWled1DEffects,parseNativeWledEffectMetadata,mergeUnifiedEffectCatalog,getOpenTailNativeEffectMetadata
 } from '../opentail-wled-bridge.mjs';
 const outputs=[
   {start:0,pixels:522,zones:[{pixels:118},{pixels:109},{pixels:42},{pixels:253}]},
@@ -101,4 +101,19 @@ test('merges WLED and OpenTail providers into one collision-safe catalog',()=>{
  assert.throws(()=>mergeUnifiedEffectCatalog([wled],[native,{...native}]),/Duplicate/);
  assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,key:'Bad Key'}]),/stable lowercase key/);
  assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,dimensions:{oneD:false}}]),/not declared 1D/);
+});
+
+test('publishes the five compiled OpenTail-native effects to the unified catalog',()=>{
+ const native=getOpenTailNativeEffectMetadata();
+ assert.deepEqual(native.map(e=>e.key),
+  ['embers','materialize_sparks','random_materialize','smooth_fade','plasma_sweep']);
+ assert.ok(native.every(e=>e.dimensions.oneD && e.colorSlots.length===2));
+ const merged=mergeUnifiedEffectCatalog(
+  [parseNativeWledEffectMetadata(1,'Rainbow','Rainbow@Speed;Bg,Fx;!;1')],
+  native
+ );
+ assert.equal(merged.length,6);
+ assert.deepEqual(merged.slice(1).map(e=>e.catalogId),
+  ['opentail:embers','opentail:materialize_sparks','opentail:random_materialize',
+   'opentail:smooth_fade','opentail:plasma_sweep']);
 });
