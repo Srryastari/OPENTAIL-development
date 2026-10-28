@@ -89,7 +89,10 @@ class Engine final {
           case Id::RandomMaterialize: {
             const uint8_t sparkle=uint8_t((noise>>16)&255u);
             const uint8_t threshold=uint8_t(255u-z.intensity);
-            if(sparkle>=threshold) out=(sparkle>245u)?0x00ffffffu:wheel(uint8_t(x+phase*7u+local*13u));
+            if(sparkle>=threshold) {
+              const uint32_t rainbow=wheel(uint8_t(x+phase*7u+local*13u));
+              out=(sparkle>245u)?0x00ffffffu:blend(rainbow,z.foreground,uint8_t(z.intensity/2u));
+            }
             else out=z.background;
             break;
           }
