@@ -35,7 +35,7 @@ ET.parse(main / 'res/values/strings.xml')
 ET.parse(main / 'res/values/styles.xml')
 
 check('Android XML parses correctly', manifest.tag == 'manifest')
-check('Studio v0.19.57 bundled, pinned checksum', b"const OT_VERSION='0.19.57'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
+check('Studio v0.19.62 bundled, pinned checksum', b"const OT_VERSION='0.19.62'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
 check('CORE endpoint fixed to known AP', 'http://192.168.4.1' in core_java and '/api/v1/capabilities' in core_java)
 check('CORE protocol validated before opening web controls', 'opentail-core-alpha-v1' in core_java and 'CoreConnection.verify()' in main_java)
 check('Untrusted URLs blocked', 'shouldOverrideUrlLoading' in main_java and 'External navigation blocked' in main_java)
@@ -116,7 +116,7 @@ check('Native Studio BLE effect and six-tab regression suites pass',
                          cwd=root.parent,capture_output=True,text=True).returncode == 0)
 check('Web and Android Studio deployment copies are identical',
       studio == (root.parent/'web-studio/opentail.htm').read_bytes()
-      and studio == (root.parent/'web-studio/opentail-v0.19.57.htm').read_bytes())
+      and studio == (root.parent/'web-studio/opentail-v0.19.62.htm').read_bytes())
 # Decode the injected Java string and syntax-check the exact JavaScript shipped in MainActivity.
 import json
 m = re.search(r'private static final String STUDIO_HAPTIC_JS = (.*?);\n', main_java, re.S)
