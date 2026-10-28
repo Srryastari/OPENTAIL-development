@@ -149,7 +149,7 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.29 · Studio v0.19.62</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.29 · Studio v0.19.118</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
