@@ -15,7 +15,7 @@ git -C "${TARGET}" fetch origin "${WLED_SHA}"
 git -C "${TARGET}" checkout --detach "${WLED_SHA}"
 [[ "$(git -C "${TARGET}" rev-parse HEAD)" == "${WLED_SHA}" ]] || exit 2
 mkdir -p "${TARGET}/usermods/opentail_native"
-cp "${ROOT}/usermods/opentail_native/"{opentail_native.cpp,ot_native_overlay.h,library.json} "${TARGET}/usermods/opentail_native/"
+cp "${ROOT}/usermods/opentail_native/"{opentail_native.cpp,ot_native_overlay.h,ot_render_coordinator.h,library.json} "${TARGET}/usermods/opentail_native/"
 cp "${ROOT}/platformio_override.ini" "${TARGET}/platformio_override.ini"
 (cd "${TARGET}" && pio run -e opentail_s3_n16r8)
 printf 'Native WLED build completed (NOT FLASHED). Upstream: %s\n' "${WLED_SHA}"
