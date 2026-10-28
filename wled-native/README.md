@@ -83,3 +83,9 @@ CI success proves only the software checks/build. It cannot prove exact pixel pa
 - [ ] Physical bench validation and migration/rollback review.
 
 Do not describe the combined runtime as complete until these gates pass. Do not flash the experimental image until the native build, BLE, settings migration and bench gates pass. This alpha is not independently verified as a safety-rated or fail-safe road-lighting controller.
+
+## Local vehicle input sampler (new, hardware-independent)
+
+`usermods/opentail_native/ot_vehicle_input_sampler.h` now provides a tested, GPIO-independent 8-input debouncer. A board adapter supplies an electrical-level bitmask every 10 ms and selects active-low or active-high polarity. The default mapping follows the locked IN1..IN8 order (Park, Brake, Left, Right, Reverse, Aux1..Aux3); road-light overlay output currently represents Park/Brake/Left/Right/Reverse. Each channel requires four consecutive samples by default, simultaneous signals remain simultaneous for the downstream arbitration layer, and mapping updates are validated transactionally.
+
+**Integration boundary:** this sampler is not yet called by the WLED usermod and does not configure GPIO pins. Do not treat it as physical-input integration until a board-specific adapter confirms pin ownership, optocoupler polarity, startup-safe levels and actual sample cadence. The WLED-native build remains an experimental alternative image, not the flashed CORE firmware.
