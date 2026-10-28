@@ -4384,21 +4384,6 @@ function otOMCalibrate(key,i,value){
  else o.calibration[key][i]=Math.min(255,Math.max(0,Math.round(Number(value)||0)));
  otOMSaveState='unsaved';otOMMessage='Calibration changed in draft · Save to CORE to apply.';render();
 }
-/* Neutral, user-owned zone configuration. A draft reset never changes saved
- * controller settings until the user explicitly presses Save to CORE. */
-function otOMResetDraft(){
- if(!otOMDraft||otOMBusy)return;
- if(!confirm('Clear this output draft to one unassigned zone? Your saved CORE configuration remains unchanged until Save.'))return;
- const o=otOMDraft[otOMSelected];
- if(!o)return;
- o.name='Pixel OUT '+(otOMSelected+1);
- o.pixels=1;
- o.zones=[{name:'Zone 1',pixels:1,role:'off'}];
- // Keep the previously selected wire color order and calibration untouched.
- otOMSaveState='unsaved';
- otOMMessage='Neutral unassigned draft created. Set pixel count, zones and roles before saving to CORE.';
- render();
-}
 async function otOMSave(){
  if(!otOMSupported()||!otCoreConnected||!otOMDraft||otOMBusy)return;
  const c=otOMDraft[otOMSelected],sum=c.zones.reduce((a,z)=>a+Number(z.pixels||0),0);
@@ -4442,7 +4427,7 @@ function otOutputManagerCard(){
   <label><input type="checkbox" ${c.calibration?.gamma_enabled?'checked':''} onchange="otOMCalibrate('gamma_enabled',0,this.checked)"> Gamma correction (optional)</label></div>
   <p class="small ${total!==c.pixels?'error':'muted'}" id="ot-om-total">${total} assigned of ${c.pixels} active pixels${total!==c.pixels?' · Must match':''}</p>
   <div class="btnrow"><button type="button" class="btn primary" id="ot-om-save" ${!active||otOMBusy?'disabled':''} onclick="otOMSave()">${otOMBusy?'Saving…':'Save to CORE'}</button>
-  <button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMRead()">Reload device</button><button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMResetDraft()">Clear zone assignments</button></div>
+  <button type="button" class="btn" ${otOMBusy?'disabled':''} onclick="otOMRead()">Reload device</button></div>
   <p class="ot-core-help" id="ot-om-message" role="status" aria-live="polite">${esc(otOMMessage)}</p>
   <p class="small muted">To save: stop Shows/demos and release all physical 12V inputs. Names permit letters, numbers, spaces, hyphens and basic punctuation. Settings are not a current limit. The full 12-output controller is a future hardware revision.</p>
  </section>`;
