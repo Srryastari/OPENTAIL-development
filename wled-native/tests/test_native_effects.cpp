@@ -57,6 +57,18 @@ int main() {
     if(blueFrame[i]!=yellowFrame[i])backgroundChangesOutput=true;
   }
   assert(foregroundChangesOutput && backgroundChangesOutput);
+  // Zero intensity must suppress sparks and white/rainbow accents entirely.
+  Engine zeroIntensity;
+  const Zone zeroZones[]={
+    {0,16,Id::MaterializeSparks,0x00ffffffu,0x00123456u,120,0},
+    {16,32,Id::RandomMaterialize,0x00ffffffu,0x00654321u,120,0}
+  };
+  assert(zeroIntensity.configure(zeroZones,2,32));
+  zeroIntensity.setAuthorized(true);zeroIntensity.setEnabled(true);
+  uint32_t zeroFrame[32]{};
+  zeroIntensity.apply(zeroFrame,32,0xffffffffu);
+  for(int i=0;i<16;i++)assert(zeroFrame[i]==0x00123456u);
+  for(int i=16;i<32;i++)assert(zeroFrame[i]==0x00654321u);
   e.setAuthorized(false);
   for(auto& p:frame)p=0x00112233u;
   e.apply(frame,40,2000);
