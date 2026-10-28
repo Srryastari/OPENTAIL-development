@@ -68,14 +68,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p core-firmware/releases
-          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
+          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin
       - name: Upload flashable CORE bench firmware package
         uses: actions/upload-artifact@v4
         with:
-          name: opentail-core-v0.1.27-alpha-studio-v0.19.62-esp32s3-bench-firmware
+          name: opentail-core-v0.1.27-alpha-studio-v0.19.118-esp32s3-bench-firmware
           path: |
             core-firmware/build/opentail_core_alpha.bin
-            core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
+            core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
@@ -148,11 +148,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.62.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.62' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.118' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
