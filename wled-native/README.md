@@ -12,7 +12,7 @@ The coordinator combines two rendering providers:
 
 Both providers publish their effect metadata to **one catalog** and render only the zones assigned by OpenTail. The final arbitration/output stage applies vehicle triggers to assigned zones and commits frames through the configured output driver. There is one owner of physical pixel writes, not two renderers racing over the LEDs.
 
-For WLED effects, use the upstream WLED runtime as the provider to preserve pixel parity. For original OpenTail effects, preserve their algorithm but adapt them to the shared frame/output interface. Where an upstream WLED usermod cannot safely register effects or intercept the needed render stage, integrate the provider at the pinned WLED effect-registry/render-loop layer rather than pretending the usermod stub is sufficient.
+For WLED effects, use the upstream WLED runtime as the provider to preserve pixel parity. For original OpenTail effects, preserve their algorithm but adapt them to the shared frame/output interface. A fail-closed build patch now inserts `opentailNativePostRender(_pixels, totalLen)` at the pinned WLED compositor seam in `wled00/FX_fcn.cpp`, after WLED segment blending and before gamma/color conversion and bus mapping. This is a real integration hook, but it currently enables the trigger-overlay seam only: the native-effect provider, authenticated BLE bridge and profile-driven zone setup are still not connected. The build script rejects unexpected source drift rather than patching a different function.
 
 ## OpenTail automotive control plane
 
@@ -50,14 +50,15 @@ RGBW, RGB+CCT/dual-white and white-only channel controls are permitted only when
 `.github/workflows/wled-native-integration.yml` now schedules checks on relevant PRs and pushes:
 - Node host tests for metadata parsing and native WLED state mapping;
 - strict C++17 host tests for trigger overlays;
-- a no-flash build of the pinned WLED source with the OpenTail usermod;
+- a no-flash build of the pinned WLED source with the OpenTail usermod and actual compositor hook;
+- a source-patch self-test for idempotence and fail-closed behavior;
 - an unflashed firmware artifact upload if the build succeeds.
 
 CI success proves only the software checks/build. It cannot prove exact pixel parity, safe current, status LED timing, BLE behavior, or physical trigger arbitration. Those require golden-frame comparisons and the bench acceptance tests below.
 
 ## Required integration stages
 
-1. Wire the coordinator into the pinned WLED render loop and native effect registry; remove competing pixel-write ownership.
+1. [partial] Patch the pinned WLED compositor to call OpenTail after segment blending and before final color/bus conversion. Next, wire the coordinator/native provider into that frame stage and register OpenTail-native effects; keep the provider disabled until the bridge/profile path is complete.
 2. Integrate authenticated OpenTail BLE transport and profile/zone/scene state into that same firmware.
 3. Connect the existing trigger manager/arbitration to post-render zone overlays and phase-preserving restoration.
 4. Generate the unified catalog from compiled WLED metadata plus registered OpenTail-native metadata; wire all supported color slots and parameters into Studio and Android.
@@ -71,6 +72,8 @@ CI success proves only the software checks/build. It cannot prove exact pixel pa
 - [x] OpenTail-to-WLED zone/state mapping adapter exists.
 - [x] Metadata parser and host tests cover declared color slots, dual colors, defaults, palette/capability flags and unsupported controls.
 - [x] Automatic CI workflow added for host checks and the native WLED build.
+- [x] Build script applies a narrow, idempotent compositor patch and fails closed if the pinned source anchor changes.
+- [ ] Verify the new compositor-hook commit passes CI and the patched native image compiles.
 - [ ] Confirm CI runs green on this exact branch head.
 - [ ] OpenTail-owned render coordinator wired into the actual WLED render loop and shared physical output stage.
 - [ ] OpenTail-native effects registered into the shared catalog/coordinator.
