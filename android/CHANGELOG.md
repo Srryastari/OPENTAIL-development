@@ -1,4 +1,5 @@
 ## v0.1.29 — unified top navigation
+- Sync the approved Studio v0.19.118 into the stable web deployment, versioned release, and Android offline bundle.
 - Remove the fixed bottom navigation bar; use the same six-destination, in-flow pill navigation as the approved Studio structure.
 - Preserve destination order: Home, Show Modes, Layout, Triggers, Auto Events, Settings.
 - Remove bottom-bar padding that unnecessarily reduced workspace space; Settings remains reachable in the same navigation.
