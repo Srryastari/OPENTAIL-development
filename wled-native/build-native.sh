@@ -15,7 +15,9 @@ git -C "${TARGET}" fetch origin "${WLED_SHA}"
 git -C "${TARGET}" checkout --detach "${WLED_SHA}"
 [[ "$(git -C "${TARGET}" rev-parse HEAD)" == "${WLED_SHA}" ]] || exit 2
 mkdir -p "${TARGET}/usermods/opentail_native"
-cp "${ROOT}/usermods/opentail_native/"{opentail_native.cpp,ot_native_overlay.h,ot_render_coordinator.h,library.json} "${TARGET}/usermods/opentail_native/"
+cp "${ROOT}/usermods/opentail_native/"{opentail_native.cpp,ot_native_overlay.h,ot_render_coordinator.h,ot_wled_render_hook.h,library.json} "${TARGET}/usermods/opentail_native/"
+# Apply only against the pinned, expected compositor seam; fail closed on drift.
+python3 "${ROOT}/patch_wled_render_hook.py" "${TARGET}"
 cp "${ROOT}/platformio_override.ini" "${TARGET}/platformio_override.ini"
 (cd "${TARGET}" && pio run -e opentail_s3_n16r8)
 printf 'Native WLED build completed (NOT FLASHED). Upstream: %s\n' "${WLED_SHA}"
