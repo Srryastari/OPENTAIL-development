@@ -18,7 +18,8 @@ Studio > CORE Alpha > Home > CORE · Live bench tests > CORE Native Effects. The
 
 **Target:** 62 rendered frames per second; **observed on hardware:** not yet measured for this branch.
 
-At 800 kHz WS2815-compatible timing, 522 RGB pixels need approximately 15.66 ms of wire transmission per output, excluding reset and software overhead. The current render loop calls the synchronous `led_strip_refresh()` for GPIO16 and GPIO17 sequentially, so the theoretical ceiling with two full outputs is about **31.9 combined frames/sec** before software overhead, not 62. The new `target_fps:62` is a declared objective only; `measured_fps` remains measured real throughput from the controller. **Do not report 62 FPS PASS without device evidence.** Achieving it with two full outputs requires genuinely concurrent RMT transfers and timing validation; for longer/multiple outputs capacity constraints become more significant.
+At 800 kHz WS2815-compatible timing, 522 RGB pixels need approximately 15.66 ms of wire transmission per output, excluding reset and software overhead. The previous renderer called synchronous `led_strip_refresh()` for GPIO16 then GPIO17, limiting two full outputs to a theoretical ~31.9 combined frames/sec before overhead. This patch pins `led_strip==3.1.1` and calls `led_strip_refresh_async()` for both RMT channels, then `led_strip_refresh_async_done()` for both before buffer reuse. **Parallel transmission is a candidate improvement, not proof of 62 FPS.** The wire-time ceiling for a single full chain is about 63.9 FPS before reset and CPU overhead, leaving only ~0.47 ms of margin at 62 FPS. `target_fps:62` remains a declared objective and `measured_fps` reports actual throughput. Test both physical outputs and check for corruption/jitter at full pixel count; no actual FPS measurement has been made.
+
 
 ## Validation plan
 
@@ -31,4 +32,4 @@ At 800 kHz WS2815-compatible timing, 522 RGB pixels need approximately 15.66 ms 
 
 ## Scope held for later
 
-Full WLED effect parity, configurable native effect editor parity, arbitrary custom palettes, persistent sequences, per-zone show/trigger compositing, synchronized dual-output 62 FPS RMT scheduling, backup controller/watchdog, and automotive protections are separate milestones. Preserve previous release artifacts.
+Full WLED effect parity, configurable native effect editor parity, arbitrary custom palettes, persistent sequences, per-zone show/trigger compositing, verified stable dual-output 62 FPS timing, backup controller/watchdog, and automotive protections are separate milestones. Preserve previous release artifacts.
