@@ -842,8 +842,12 @@ static void led_task(void *p) {
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }
                // Driver reserves 522 pixels per channel; unused pixels remain black.
-               ESP_ERROR_CHECK(led_strip_refresh(strip[ch]));
+               // Start each RMT lane without waiting; independent buffers can transmit concurrently.
+               ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
            }
+           // No double buffering in led_strip 3.1.x: finish ALL transfers before next frame.
+           for(int ch=0;ch<OT_CHAIN_COUNT;++ch)
+               ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
            uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
            frame_window_frames++;
            if(frame_window_start_ms==0)frame_window_start_ms=ms;
