@@ -1,4 +1,5 @@
 #include "show_logic.h"
+#include "wled_1d.h"
 #include <stddef.h>
 
 static ot_rgb_t black(void){return (ot_rgb_t){0,0,0};}
@@ -38,7 +39,7 @@ const char *ot_show_name(ot_show_mode_t mode){
       case OT_SHOW_TWINKLE:return "twinkle";default:return "off";}
 }
 bool ot_show_valid(const ot_show_t *s,const ot_layout_t *layout){
-    return s && ot_layout_valid(layout) && s->mode>=OT_SHOW_OFF && s->mode<=OT_SHOW_LAST &&
+    return s && ot_layout_valid(layout) && s->mode>=OT_SHOW_OFF && s->mode<=OT_SHOW_LAST && (s->mode!=OT_SHOW_WLED_COMPAT||ot_wled_1d_by_id(s->compat_id)) &&
       s->brightness<=layout->brightness_cap && s->speed<=100u &&
       s->chain_mask && !(s->chain_mask & ~3u) &&
       s->section_mask && !(s->section_mask & ~255u);
@@ -53,6 +54,9 @@ ot_rgb_t ot_show_pixel(const ot_show_t *s,const ot_layout_t *layout,int chain,
     unsigned offset=0;
     for(int i=0;i<zone;++i)offset+=layout->sections[i];
     unsigned local=pixel-offset, count=layout->sections[zone];
+    if(s->mode==OT_SHOW_WLED_COMPAT)
+        return scale(ot_wled_1d_pixel(s->compat_id,local,count,elapsed_ms,s->speed,
+                     s->intensity,s->color,s->background,s->accent),s->brightness);
     unsigned period=3200u-(unsigned)s->speed*26u; /* 3200..600 ms per main cycle */
     unsigned phase=elapsed_ms%period;
     ot_rgb_t c=s->color;
