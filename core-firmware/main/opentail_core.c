@@ -733,7 +733,10 @@ void ot_ble_disconnect_show(void){
  /* Disconnect expires only temporary zones; explicitly loaded NVS effects
   * remain local on CORE. Vehicle inputs override only their assigned zones.
   * A legacy HTTP show is not owned by the BLE session. */
+ bool owned_before,enabled_before,owned_after,enabled_after,active_after;
  portENTER_CRITICAL(&state_lock);
+ owned_before=ble_owns_show;
+ enabled_before=ble_fx_enabled;
  if(ble_owns_show){
      ot_fx_bank_stop_temporary(&fx_bank);
      bool active=ble_fx_enabled&&
@@ -743,7 +746,12 @@ void ot_ble_disconnect_show(void){
          stop_request_generation++;
      }
  }
+ owned_after=ble_owns_show;
+ enabled_after=ble_fx_enabled;
+ active_after=show_window(xTaskGetTickCount());
  portEXIT_CRITICAL(&state_lock);
+ ESP_LOGI(TAG,"BLE disconnect cleanup: owned=%d->%d enabled=%d->%d active_after=%d",
+          owned_before,owned_after,enabled_before,enabled_after,active_after);
 }
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
