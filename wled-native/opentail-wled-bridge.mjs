@@ -25,26 +25,23 @@ function parseDefaults(raw){
   }
   return Object.freeze(result);
 }
-/**
- * Parse the pinned WLED FX metadata format:
- * name@slider labels ; color-slot labels ; palette marker ; capability flags ; defaults
- * Raw metadata is retained for diagnostics. The parser never invents absent slots.
- */
+/** Parse the native WLED effect metadata format and preserve the raw source. */
 export function parseNativeWledEffectMetadata(id,name,raw){
   integer(id,0,65535,'effect id');
   if(typeof name!=='string'||!name.trim()||typeof raw!=='string')
     throw new TypeError('Effect name and raw WLED metadata are required');
-  const fields=raw.split(';');
-  const head=fields[0]??'';
-  const at=head.indexOf('@');
+  const fields=raw.split(';'),head=fields[0]??'',at=head.indexOf('@');
   const canonicalName=(at<0?head:head.slice(0,at)).trim()||name.trim();
-  const parameterText=at<0?'':head.slice(at+1);
+  const parameterLabels=splitList(at<0?'':head.slice(at+1));
   const flags=fields.length>3&&fields[3]!==''?fields[3]:'1';
   if(!/^[0123vf]+$/.test(flags))
     throw new TypeError(`WLED effect ${id}: unrecognized metadata flags`);
-  const parameterLabels=splitList(parameterText);
   const colorLabels=splitList(fields[1]??'').filter(x=>x!==''&&x!=='-');
   const defaults=parseDefaults(fields[4]??'');
+  const customControls=Object.freeze(Object.entries(defaults)
+    .filter(([key])=>/^c[1-5]$/.test(key)).map(([key,value])=>Object.freeze({key,value})));
+  const options=Object.freeze(Object.entries(defaults)
+    .filter(([key])=>/^o[1-3]$/.test(key)).map(([key,value])=>Object.freeze({key,value})));
   return Object.freeze({
     id,name:canonicalName,rawMetadata:raw,parameterLabels:Object.freeze(parameterLabels),
     colorSlots:Object.freeze(colorLabels.map((label,index)=>Object.freeze({
@@ -52,18 +49,12 @@ export function parseNativeWledEffectMetadata(id,name,raw){
     }))),
     supportsPalette:fields.length>2&&fields[2]!==''&&fields[2]!=='-',
     flags,requiresAudio:flags.includes('v')||flags.includes('f'),
-    dimensions:Object.freeze({
-      oneD:flags.includes('1')||flags.includes('0'),
-      matrix:flags.includes('2')||flags.includes('3'),
-      threeD:flags.includes('3')
-    }),
-    defaults
+    dimensions:Object.freeze({oneD:flags.includes('1')||flags.includes('0'),
+      matrix:flags.includes('2')||flags.includes('3'),threeD:flags.includes('3')}),
+    defaults,customControls,options
   });
 }
-/**
- * Outputs MUST use the bus starts configured in actual WLED hardware.
- * WLED stop is exclusive. Zones are 1D and receive distinct global IDs.
- */
+/** Map each configured 1D zone to a stable WLED segment ID. */
 export function mapNativeWledZones(outputs,maxSegments=32){
   if(!Array.isArray(outputs)||outputs.length<1||outputs.length>12)
     throw new RangeError('Expected 1..12 configured physical outputs');
@@ -86,15 +77,14 @@ export function mapNativeWledZones(outputs,maxSegments=32){
       result.push(Object.freeze({id:nextId++,output,zone,start:index,stop:index+size}));
       index+=size;
     });
-    if(index!==stop)
-      throw new RangeError(`Output ${output} zones do not cover its configured pixel count`);
+    if(index!==stop)throw new RangeError(`Output ${output} zones do not cover its configured pixel count`);
   });
   return Object.freeze(result);
 }
 /**
- * Each assignment may carry metadata parsed from the same native WLED build.
- * WLED's native effect runtime interprets the effect controls; this adapter
- * validates IDs and maps declared color slots to the native segment col array.
+ * Build WLED /json/state segment assignments. metadataById must be obtained
+ * from the same native WLED build. Native metadata defaults are applied first;
+ * explicit OpenTail saved values override them. WLED remains the renderer.
  */
 export function buildNativeWledState(outputs,assignments,{
   supported1DIds,maxSegments=32,transition=0,metadataById
@@ -109,17 +99,17 @@ export function buildNativeWledState(outputs,assignments,{
     const out=integer(a?.output,0,outputs.length-1,'output');
     const zone=integer(a?.zone,0,outputs[out].zones.length-1,'zone');
     const mapping=zones.find(z=>z.output===out&&z.zone===zone);
-    if(!mapping||seen.has(mapping.id))
-      throw new RangeError('Missing or duplicate segment assignment');
+    if(!mapping||seen.has(mapping.id))throw new RangeError('Missing or duplicate segment assignment');
     seen.add(mapping.id);
     const fx=integer(a.effectId,0,65535,'effectId');
-    if(!supported1DIds.has(fx))
-      throw new RangeError(`WLED 1D mode ${fx} is not verified in this firmware`);
-    const sx=integer(a.speed,0,255,'speed');
-    const ix=integer(a.intensity,0,255,'intensity');
-    const pal=integer(a.paletteId,0,255,'paletteId');
-    const bri=integer(a.brightness,0,255,'brightness');
+    if(!supported1DIds.has(fx))throw new RangeError(`WLED 1D mode ${fx} is not verified in this firmware`);
     const meta=metadataById instanceof Map?metadataById.get(fx):undefined;
+    const d=meta?.defaults??{};
+    const resolve=(key,explicit,fallback,min,max)=>integer(explicit??d[key]??fallback,min,max,key);
+    const sx=resolve('sx',a.speed,128,0,255);
+    const ix=resolve('ix',a.intensity,128,0,255);
+    const pal=resolve('pal',a.paletteId,0,0,255);
+    const bri=integer(a.brightness??255,0,255,'brightness');
     const provided=[a.foreground,a.background,a.tertiary].filter(v=>v!==undefined);
     if(meta&&provided.length<meta.colorSlots.length)
       throw new RangeError(`Effect ${fx} requires ${meta.colorSlots.length} declared color slots`);
@@ -130,8 +120,19 @@ export function buildNativeWledState(outputs,assignments,{
       color(a.background??[0,0,0],'background'),
       color(a.tertiary??[0,0,0],'tertiary')
     ];
-    seg.push({id:mapping.id,start:mapping.start,stop:mapping.stop,fx,sx,ix,pal,bri,col,
-      on:true,rev:Boolean(a.reverse),mi:Boolean(a.mirror),frz:false});
+    const segment={id:mapping.id,start:mapping.start,stop:mapping.stop,fx,sx,ix,pal,bri,col,
+      on:true,rev:Boolean(a.reverse),mi:Boolean(a.mirror),frz:false};
+    // Current WLED JSON state supports c1-c3/o1-o3. Reject metadata fields
+    // outside this transport rather than silently dropping effect controls.
+    for(const key of ['c1','c2','c3','o1','o2','o3']){
+      if(a[key]!==undefined||d[key]!==undefined)
+        segment[key]=integer(a[key]??d[key],0,255,key);
+    }
+    for(const key of ['c4','c5']){
+      if(a[key]!==undefined||d[key]!==undefined)
+        throw new RangeError(`WLED JSON state adapter does not yet support ${key}; refusing to drop metadata control`);
+    }
+    seg.push(segment);
   }
   return {on:true,transition,seg};
 }
@@ -141,17 +142,12 @@ export function assertNativeWledCapacity(info,outputs,maxSegmentsFallback=32){
   if(!leds||!Number.isInteger(leds.count)||!Number.isInteger(leds.maxseg))
     throw new TypeError('Expected native WLED /json/info with leds.count and leds.maxseg');
   const zones=mapNativeWledZones(outputs,Math.min(maxSegmentsFallback,leds.maxseg));
-  if(zones.some(z=>z.stop>leds.count))
-    throw new RangeError('Physical layout exceeds WLED configured LED count');
+  if(zones.some(z=>z.stop>leds.count))throw new RangeError('Physical layout exceeds WLED configured LED count');
   return true;
 }
-/**
- * Discover compiled 1D-capable effects from /json/eff and /json/fxdata.
- * Metadata comes from the actual target firmware; never hardcode parity.
- */
+/** Discover compiled 1D-capable effects from the actual WLED firmware metadata. */
 export function discoverNativeWled1DEffects(effectNames,fxdata,info){
-  if(!Array.isArray(effectNames)||!Array.isArray(fxdata)||
-     !Number.isInteger(info?.fxcount)||
+  if(!Array.isArray(effectNames)||!Array.isArray(fxdata)||!Number.isInteger(info?.fxcount)||
      effectNames.length!==info.fxcount||fxdata.length!==info.fxcount)
     throw new TypeError('Native WLED effect catalog and metadata must match info.fxcount');
   const effects=[];
