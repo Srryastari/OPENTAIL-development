@@ -25,6 +25,10 @@ if(-not $existing -or $existing -match 'OpenTailLab-ChangeMe'){
 $lines=@();if(Test-Path $config){$lines=@(Get-Content $config | Where-Object {$_ -notmatch '^CONFIG_OPENTAIL_AP_PASSWORD='})}
 $lines+= $existing
 [System.IO.File]::WriteAllLines($config,[string[]]$lines,[System.Text.UTF8Encoding]::new($false))
+# Keep CORE's embedded /studio page synchronized with the reviewed web-studio source.
+# This changes the build artifact only; it does not flash the device or erase NVS.
+& python (Join-Path $PSScriptRoot 'tools/sync_studio_asset.py')
+if($LASTEXITCODE -ne 0){throw 'Studio asset synchronization failed. Do not flash.'}
 Write-Host 'Existing custom AP password preserved (not displayed). Configuring v0.1.24...'
 & idf.py reconfigure
 if($LASTEXITCODE -ne 0){throw 'ESP-IDF configure failed. Do not flash.'}
