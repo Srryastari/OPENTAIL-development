@@ -38,6 +38,25 @@ int main() {
   assert(e.zoneCount()==5);
   const Zone outOfRange[]={{0,41,Id::Embers,0x00ff0000u,0,120,100}};
   assert(!e.configure(outOfRange,1,40));
+  // Both logical color slots must affect Random Materialize output.
+  Engine fgA,fgB,bgA,bgB;
+  const Zone redFg={0,128,Id::RandomMaterialize,0x00ff0000u,0x00000020u,120,120};
+  const Zone greenFg={0,128,Id::RandomMaterialize,0x0000ff00u,0x00000020u,120,120};
+  const Zone blueBg={0,128,Id::RandomMaterialize,0x00ff0000u,0x00000020u,120,120};
+  const Zone yellowBg={0,128,Id::RandomMaterialize,0x00ff0000u,0x00002000u,120,120};
+  assert(fgA.configure(&redFg,1,128)&&fgB.configure(&greenFg,1,128));
+  assert(bgA.configure(&blueBg,1,128)&&bgB.configure(&yellowBg,1,128));
+  fgA.setAuthorized(true);fgA.setEnabled(true);fgB.setAuthorized(true);fgB.setEnabled(true);
+  bgA.setAuthorized(true);bgA.setEnabled(true);bgB.setAuthorized(true);bgB.setEnabled(true);
+  uint32_t redFrame[128]{},greenFrame[128]{},blueFrame[128]{},yellowFrame[128]{};
+  fgA.apply(redFrame,128,1200);fgB.apply(greenFrame,128,1200);
+  bgA.apply(blueFrame,128,1200);bgB.apply(yellowFrame,128,1200);
+  bool foregroundChangesOutput=false,backgroundChangesOutput=false;
+  for(int i=0;i<128;i++){
+    if(redFrame[i]!=greenFrame[i])foregroundChangesOutput=true;
+    if(blueFrame[i]!=yellowFrame[i])backgroundChangesOutput=true;
+  }
+  assert(foregroundChangesOutput && backgroundChangesOutput);
   e.setAuthorized(false);
   for(auto& p:frame)p=0x00112233u;
   e.apply(frame,40,2000);
