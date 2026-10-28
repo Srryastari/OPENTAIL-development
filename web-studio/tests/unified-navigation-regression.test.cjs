@@ -5,9 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const stable = fs.readFileSync('web-studio/opentail.htm', 'utf8');
-const versioned = fs.readFileSync('web-studio/opentail-v0.19.62.htm', 'utf8');
+const versioned = fs.readFileSync('web-studio/opentail-v0.19.118.htm', 'utf8');
 assert.equal(stable, versioned, 'Stable deployment and versioned release must be identical');
 
+assert(stable.includes("const OT_VERSION='0.19.118'"), 'Approved Studio version constant must match its release filename');
 const renderStart = stable.indexOf('function render(){');
 const renderEnd = stable.indexOf('</footer>', renderStart);
 assert(renderStart >= 0 && renderEnd > renderStart, 'Main render function must exist');
