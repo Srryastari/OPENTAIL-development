@@ -3,7 +3,7 @@
 ## Single source of truth
 
 - Stable deployment: `web-studio/opentail.htm`
-- Versioned release: `web-studio/opentail-v0.19.62.htm`
+- Versioned release: `web-studio/opentail-v0.19.118.htm`
 - Android offline bundle: `android/app/src/main/assets/opentail.htm`
 
 These three files must be byte-identical. CI verifies the invariant before accepting a build. UI changes should be made in the stable source and then propagated to the versioned release and Android bundle in the same change set.
