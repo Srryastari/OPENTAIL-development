@@ -164,6 +164,9 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
                  buf[1]==OT_BLE_FX_PLAY_PRESET?OT_BLE_OK_LOADED:OT_BLE_OK_DELETED):
                 OT_BLE_ERR_BUSY;
         }
+    } else if(n==2 && buf[0]==OT_BLE_WIRE_V1 && buf[1]==OT_BLE_RELEASE_TEMPORARY){
+        if(!authorized)last_result=OT_BLE_ERR_AUTH;
+        else {ot_ble_disconnect_show();last_result=OT_BLE_OK_RELEASED;}
     } else if(n>=2 && buf[0]==1 && buf[1]==OT_BLE_FX_OPCODE) {
         ot_ble_fx_packet_t fx={0};
         ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
