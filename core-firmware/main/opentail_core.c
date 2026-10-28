@@ -1,4 +1,4 @@
-/* OpenTail CORE Alpha 0.1.25 — 522-pixel + status semantics, NOT vehicle lighting firmware.
+/* OpenTail CORE Alpha 0.1.27 — 522-pixel + status semantics, NOT vehicle lighting firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
  * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
  */
@@ -38,7 +38,7 @@
 #include "nvs.h"
 #include "esp_timer.h"
 
-#define OT_FW "0.1.25-alpha"
+#define OT_FW "0.1.27-alpha"
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
 extern void ot_ble_start(void);
@@ -787,7 +787,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":121,\"target_fps\":62,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -1126,11 +1126,15 @@ static void led_task(void *p) {
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }
                // Driver reserves 522 pixels per channel; unused pixels remain black.
-               ESP_ERROR_CHECK(led_strip_refresh(strip[ch]));
+               ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
            }
+           /* Start both output transfers before waiting, so RMT lanes overlap.
+            * Wait for both before reusing their pixel buffers on the next frame. */
+           for(int ch=0;ch<OT_CHAIN_COUNT;ch++)
+               ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
            if(!native_rendering){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
@@ -1146,7 +1150,7 @@ static void led_task(void *p) {
            if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
        }
-       vTaskDelay(pdMS_TO_TICKS(1)); /* yield; real FPS is limited by RMT frame length */
+       taskYIELD(); /* avoid an unconditional 1ms penalty on near-16ms frames */
     }
 }
 void app_main(void) {
