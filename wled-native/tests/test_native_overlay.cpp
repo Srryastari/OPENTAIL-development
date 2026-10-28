@@ -23,14 +23,17 @@ int main() {
   };
   assert(o.configure(zones,5,552));
   assert(o.zoneCount()==5);
-  o.setInputs(Brake|Left|Right);
+  o.setVehicleInputsLocal(Brake|Left|Right);
   assert(render(o).empty()); // Disabled by default: no effects changed.
   o.setEnabled(true);
-  assert(render(o).empty()); // Enabled configuration is not authorization.
+  auto spans=render(o); // Local vehicle inputs work without a BLE session.
+  assert(spans.size()==4);
   o.setSessionAuthorized(true);
-  assert(render(o).empty()); // Pre-authorization inputs must not be replayed.
-  o.setInputs(Brake|Left|Right); // Fresh authenticated sample.
-  auto spans=render(o);
+  assert(render(o).size()==4); // Pairing does not gate local vehicle inputs.
+  o.setSessionAuthorized(false);
+  assert(render(o).size()==4); // Disconnect must not disable road-signal overrides.
+  o.setSessionAuthorized(true);
+  spans=render(o);
   assert(spans.size()==4);
   assert(eq(spans[0],{0,118,0xFF0000}));
   assert(eq(spans[1],{118,227,0xFF8000}));
@@ -45,12 +48,12 @@ int main() {
   assert(frame[269]==0xFF0000 && frame[521]==0xFF0000);
   assert(frame[522]==0xFF8000 && frame[551]==0xFF8000);
   o.applyToFrame(nullptr,552); // Null buffer is a no-op.
-  o.setInputs(Park);
+  o.setVehicleInputsLocal(Park);
   assert(render(o).empty()); // Parking does not preempt active shows.
   o.setShowActive(0,false);o.setShowActive(3,false);
   spans=render(o);assert(spans.size()==2);
   assert(eq(spans[0],{0,118,0x080000}));
-  o.setInputs(Reverse|Brake);spans=render(o);
+  o.setVehicleInputsLocal(Reverse|Brake);spans=render(o);
   assert(spans.size()==3);
   assert(eq(spans[1],{227,269,0xFFFFFF}));
   Zone overlap[]={zones[0],zones[0]};
@@ -60,11 +63,12 @@ int main() {
   assert(!o.configure(invalid,1,552));
   Zone zero[]={zones[0]};zero[0].start=zero[0].stop;
   assert(!o.configure(zero,1,552));
-  o.setSessionAuthorized(false);assert(render(o).empty());
-  assert(o.inputs()==0); // Disconnect clears stale vehicle signals.
-  o.setInputs(Brake);assert(render(o).empty()); // No unauthenticated replay.
-  o.setSessionAuthorized(true);assert(render(o).empty()); // Must refresh inputs.
-  o.setInputs(0);assert(render(o).empty());
-  o.setInputs(Brake);o.setEnabled(false);assert(render(o).empty());
+  o.setSessionAuthorized(false);
+  assert(render(o).size()==3); // BLE disconnect cannot suppress local reverse/brake signals.
+  assert(o.inputs()==(Reverse|Brake));
+  o.setVehicleInputsLocal(Brake);
+  assert(render(o).size()==2); // Brake overlays the two tail zones.
+  o.setVehicleInputsLocal(0);assert(render(o).empty());
+  o.setVehicleInputsLocal(Brake);o.setEnabled(false);assert(render(o).empty());
   return 0;
 }
