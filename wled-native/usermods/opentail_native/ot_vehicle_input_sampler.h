@@ -37,6 +37,7 @@ class Sampler final {
       if (v && ((v & (v - 1u)) || (v & ~kSupportedTriggers))) return false;
     }
     for (unsigned i = 0; i < kInputCount; ++i) mapping_[i] = mapping[i];
+    recomputeLogical();
     return true;
   }
 
@@ -58,10 +59,7 @@ class Sampler final {
         counts_[i] = 0;
       }
     }
-    uint8_t logical = 0;
-    for (unsigned i = 0; i < kInputCount; ++i)
-      if (stablePhysical_ & static_cast<uint8_t>(1u << i)) logical |= mapping_[i];
-    logical_ = logical;
+    recomputeLogical();
     return logical_;
   }
 
@@ -73,6 +71,13 @@ class Sampler final {
   }
 
  private:
+  void recomputeLogical() {
+    uint8_t logical = 0;
+    for (unsigned i = 0; i < kInputCount; ++i)
+      if (stablePhysical_ & static_cast<uint8_t>(1u << i)) logical |= mapping_[i];
+    logical_ = logical;
+  }
+
   uint8_t debounceSamples_;
   uint8_t mapping_[kInputCount]{};
   uint8_t counts_[kInputCount]{};
