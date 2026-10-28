@@ -17,7 +17,7 @@
 static const char *TAG="OT_STATUS_LED";
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static led_strip_handle_t status_pixel=NULL;
-static bool available=false,wifi_ready=false,had_session=false,show_active=false,fault=false,ble_connected=false;
+static bool available=false,wifi_ready=false,had_session=false,had_ble_session=false,show_active=false,fault=false,ble_connected=false;
 static uint32_t startup_ms=0,last_heartbeat_ms=0;
 /* No NVS persistence; 5-second diagnostic test affects ONLY onboard WS2812. */
 static ot_st_mode_t self_test_mode=OT_ST_OFF;
@@ -38,7 +38,7 @@ static ot_st_mode_t mode_at(uint32_t now){
     if(wifi_session && ble_connected)return OT_ST_BOTH;
     if(ble_connected)return OT_ST_BLE;
     if(wifi_session)return OT_ST_CONNECTED;
-    if(had_session)return OT_ST_DISCONNECTED;
+    if(had_session || had_ble_session)return OT_ST_DISCONNECTED;
     if(wifi_ready)return OT_ST_WIFI;
     return OT_ST_OFF;
 }
@@ -69,7 +69,12 @@ bool ot_st_self_test(ot_st_mode_t mode){
     portEXIT_CRITICAL(&lock);
     return ok;
 }
-void ot_st_ble_connected(bool active){portENTER_CRITICAL(&lock);ble_connected=active;portEXIT_CRITICAL(&lock);}
+void ot_st_ble_connected(bool active){
+    portENTER_CRITICAL(&lock);
+    ble_connected=active;
+    if(active)had_ble_session=true;
+    portEXIT_CRITICAL(&lock);
+}
 void ot_st_wifi_ready(void){portENTER_CRITICAL(&lock);wifi_ready=true;portEXIT_CRITICAL(&lock);}
 void ot_st_set_fault(const char *reason){
     portENTER_CRITICAL(&lock);fault=true;portEXIT_CRITICAL(&lock);
