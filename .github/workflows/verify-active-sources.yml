@@ -64,14 +64,15 @@ jobs:
       - name: Create versioned CORE app binary
         shell: bash
         run: |
-          cp core-firmware/build/opentail_core_alpha.bin core-firmware/build/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
+          mkdir -p core-firmware/releases
+          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
       - name: Upload flashable CORE bench firmware package
         uses: actions/upload-artifact@v4
         with:
           name: opentail-core-v0.1.27-alpha-studio-v0.19.62-esp32s3-bench-firmware
           path: |
             core-firmware/build/opentail_core_alpha.bin
-            core-firmware/build/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
+            core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
