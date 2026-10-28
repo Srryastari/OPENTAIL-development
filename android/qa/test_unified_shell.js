@@ -36,7 +36,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../app/src/main/assets/unified-shell.js'),'utf8'),context);
 assert(nodes.header.innerHTML.includes('<h1>OpenTail</h1>'));
 assert(nodes.header.innerHTML.includes('Bluetooth'));
-assert(nodes['ot-settings-page'].innerHTML.includes('Android v0.1.28'));
+assert(nodes['ot-settings-page'].innerHTML.includes('Android v0.1.29'));
 assert(nodes['ot-native-nav'].innerHTML.includes('Layout'));
 assert(nodes['ot-native-nav'].innerHTML.includes('Settings'));
 assert(nodes['ot-native-nav'].innerHTML.includes('Auto Events'));
