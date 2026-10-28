@@ -5,6 +5,11 @@
 
 /* Two present physical RMT outputs. Twelve outputs are NOT implemented. */
 #define OT_OM_OUTPUTS 2
+/* Current prototype: two RMT outputs with up to 522 allocated pixels each.
+ * These are tested-development hardware limits, not vehicle-specific zone
+ * boundaries; the output manager never assumes a particular lighting shape.
+ */
+#define OT_OM_DEFAULT_BENCH_PIXELS 30u
 #define OT_OM_ZONES 8
 #define OT_OM_NAME_LEN 25
 #define OT_OM_VERSION 2
@@ -22,9 +27,9 @@ typedef struct {
 } ot_om_zone_t;
 typedef struct {
     char name[OT_OM_NAME_LEN];
-    uint16_t active_pixels; /* 1..522 for this bench hardware */
+    uint16_t active_pixels; /* 1..522 allocated per physical output in this prototype */
     uint8_t color_order;
-    uint8_t zone_count; /* 1..8 user-managed zones, migrated from v1 5-zone model */
+    uint8_t zone_count; /* 1..8 configured zones; newly initialized device has one neutral zone */
     uint8_t rgb_gain[3]; /* per-output decorative RGB calibration, 0..255 */
     uint8_t white_gain[3]; /* additional tint correction for neutral whites */
     bool gamma_enabled; /* optional soft gamma; OFF by default to preserve colors */
