@@ -42,6 +42,7 @@ void ot_ble_session_hex(char out[33]){
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
 #include "host/ble_att.h"
+#include "host/ble_att.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "os/os_mbuf.h"
