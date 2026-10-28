@@ -34,6 +34,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Run Studio UI and interaction regression suite
+        run: node --test web-studio/tests/*.test.cjs
       - name: Test pinned-source compositor patch (idempotent and fail-closed)
         run: python wled-native/patch_wled_render_hook.py --self-test
       - name: Run native bridge tests
