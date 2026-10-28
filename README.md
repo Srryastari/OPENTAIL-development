@@ -1,6 +1,6 @@
 # OpenTail development
 
-Universal automotive addressable-lighting controller project using ESP32-S3 firmware, OpenTail Studio, Android and planned iOS clients, and custom hardware.
+Universal automotive addressable-lighting controller project using ESP32-S3 firmware, Web Studio, Android and planned iOS clients, and custom hardware.
 
 ## Repository layout
 
