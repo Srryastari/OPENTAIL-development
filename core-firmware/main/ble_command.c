@@ -25,7 +25,7 @@ const char *ot_ble_result_string(ot_ble_result_t v){
         case OT_BLE_OK_AUTH:return "OK AUTH";case OT_BLE_OK_SHOW:return "OK SHOW";
         case OT_BLE_OK_STOP:return "OK STOP";case OT_BLE_OK_FX:return "OK FX";
         case OT_BLE_OK_SAVED:return "OK SAVED";case OT_BLE_OK_LOADED:return "OK LOADED";
-        case OT_BLE_OK_DELETED:return "OK DELETED";case OT_BLE_ERR_AUTH:return "ERR AUTH";
+        case OT_BLE_OK_DELETED:return "OK DELETED";case OT_BLE_OK_RELEASED:return "OK RELEASED";case OT_BLE_ERR_AUTH:return "ERR AUTH";
         case OT_BLE_ERR_WIRE:return "ERR FORMAT";case OT_BLE_ERR_RANGE:return "ERR RANGE";
         default:return "ERR BUSY";
     }
