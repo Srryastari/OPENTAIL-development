@@ -162,3 +162,40 @@ export function discoverNativeWled1DEffects(effectNames,fxdata,info){
     supported1DIds:new Set(effects.map(x=>x.id)),
     metadataById:new Map(effects.map(x=>[x.id,x]))});
 }
+
+/**
+ * Merge both providers into one UI catalog without conflating provider IDs.
+ * WLED IDs remain numeric/native; OpenTail effects use stable string keys.
+ * This catalog merge does not claim a native effect is executable until its
+ * provider is registered by the firmware coordinator.
+ */
+export function mergeUnifiedEffectCatalog(wledEffects,openTailEffects=[]){
+  if(!Array.isArray(wledEffects)||!Array.isArray(openTailEffects))
+    throw new TypeError('Both WLED and OpenTail effect catalogs must be arrays');
+  const result=[],seen=new Set();
+  for(const effect of wledEffects){
+    if(!effect||!Number.isInteger(effect.id)||effect.id<0||effect.id>65535)
+      throw new TypeError('WLED catalog entries require a native numeric ID');
+    if(effect.dimensions?.oneD!==true)
+      throw new RangeError(`WLED effect ${effect.id} is not verified as 1D`);
+    const catalogId=`wled:${effect.id}`;
+    if(seen.has(catalogId))throw new RangeError(`Duplicate effect catalog key ${catalogId}`);
+    seen.add(catalogId);
+    result.push(Object.freeze({...effect,catalogId,provider:'wled',providerId:effect.id}));
+  }
+  for(const effect of openTailEffects){
+    if(!effect||typeof effect.key!=='string'||! /^[a-z][a-z0-9_-]{0,47}$/.test(effect.key))
+      throw new TypeError('OpenTail effects require a stable lowercase key');
+    if(typeof effect.name!=='string'||!effect.name.trim())
+      throw new TypeError('OpenTail effect name is required');
+    if(effect.dimensions?.oneD!==true)
+      throw new RangeError(`OpenTail effect ${effect.key} is not declared 1D`);
+    if(!Array.isArray(effect.colorSlots)||effect.colorSlots.length>3)
+      throw new RangeError(`OpenTail effect ${effect.key} must declare at most three color slots`);
+    const catalogId=`opentail:${effect.key}`;
+    if(seen.has(catalogId))throw new RangeError(`Duplicate effect catalog key ${catalogId}`);
+    seen.add(catalogId);
+    result.push(Object.freeze({...effect,catalogId,provider:'opentail',providerId:effect.key}));
+  }
+  return Object.freeze(result);
+}
