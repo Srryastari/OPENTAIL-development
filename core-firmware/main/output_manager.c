@@ -21,19 +21,27 @@ static bool name_ok(const char *s){
  * Never infer the customer's vehicle, pixel geometry or lighting assignments.
  * Previously saved v1/v2 output profiles are restored by om_load() unchanged.
  * A valid installation profile must be explicitly configured and saved. */
+/* Neutral bench initialization only. This is NOT a vehicle profile.
+ * Existing v1/v2 persisted mappings take precedence in om_load(). Users must
+ * assign every functional zone and trigger role for their actual installation.
+ * No chassis, tail/turn/reverse partition, or left/right behavior is presumed.
+ */
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]){
     if(!outputs)return;
     memset(outputs,0,sizeof(ot_om_output_t)*OT_OM_OUTPUTS);
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-        ot_om_output_t *cfg=&outputs[o];
-        snprintf(cfg->name,OT_OM_NAME_LEN,"Pixel OUT %u",o+1u);
-        cfg->active_pixels=1; /* inert placeholder, NOT a vehicle pixel count */
-        cfg->color_order=OT_OM_BRG; /* provisional driver order, user-configurable */
-        cfg->zone_count=1;
-        for(unsigned k=0;k<3;k++){cfg->rgb_gain[k]=255;cfg->white_gain[k]=255;}
-        strcpy(cfg->zones[0].name,"Zone 1");
-        cfg->zones[0].pixels=1;
-        cfg->zones[0].role=OT_OM_OFF;
+        ot_om_output_t *c=&outputs[o];
+        const char *name=o?"Pixel OUT 2":"Pixel OUT 1";
+        strncpy(c->name,name,OT_OM_NAME_LEN-1);
+        /* The 30-pixel value is a temporary bench-safe allocation, not a
+         * vehicle/zone geometry. Users configure 1..OT_CHAIN_PIXELS in Studio. */
+        c->active_pixels=OT_OM_DEFAULT_BENCH_PIXELS;
+        c->color_order=OT_OM_BRG;
+        c->zone_count=1;
+        for(int k=0;k<3;k++){c->rgb_gain[k]=255;c->white_gain[k]=255;}
+        strncpy(c->zones[0].name,"Zone 1",OT_OM_NAME_LEN-1);
+        c->zones[0].pixels=c->active_pixels;
+        c->zones[0].role=OT_OM_DECORATIVE;
     }
 }
 bool ot_om_valid(const ot_om_output_t *o){
