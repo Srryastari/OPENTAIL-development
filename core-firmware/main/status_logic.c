@@ -22,9 +22,11 @@ static bool double_pulse(uint32_t t){
     const uint32_t p=t%2200u;
     return p<180u || (p>=320u && p<500u);
 }
-static uint8_t triangle(uint32_t t,uint32_t period){
-    uint32_t p=t%period,half=period/2u;
-    return (uint8_t)(p<half?(p*100u/half):((period-p)*100u/(period-half)));
+static uint8_t wifi_pulse(uint32_t t){
+    const uint32_t p=t%1000u;
+    if(p<250u)return (uint8_t)(p*100u/250u);
+    if(p<650u)return (uint8_t)((650u-p)*100u/400u);
+    return 0;
 }
 ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool enabled){
     if(brightness>100u)brightness=100u;
@@ -36,7 +38,7 @@ ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool en
             return (t<160u)?rgb(255,255,255,brightness):(ot_st_rgb_t){0,0,0};
         case OT_ST_WIFI: {
             /* Wi-Fi ready: one cyan breathing pulse per second. */
-            uint8_t level=triangle(t,1000u);
+            uint8_t level=wifi_pulse(t);
             return rgb(0,255,255,(uint8_t)((uint16_t)brightness*level/100u));
         }
         case OT_ST_CONNECTED:
