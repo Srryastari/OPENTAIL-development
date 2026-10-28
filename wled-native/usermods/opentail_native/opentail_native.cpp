@@ -1,8 +1,8 @@
-// Optional WLED-native OpenTail adapter (bench only): native WLED FX engine.
-// No mode replacement, effect registry interception, output-pin changes or NVS writes.
-// Built ONLY in the explicit opentail_s3_n16r8 PlatformIO environment.
+// Experimental WLED-native OpenTail adapter. This file is not yet the complete
+// OpenTail render coordinator or authenticated BLE bridge; keep disabled by default.
 #include "wled.h"
 #include "ot_native_overlay.h"
+#include "ot_render_coordinator.h"
 
 class OpenTailNativeUsermod final : public Usermod {
   opentail::Overlay overlay;
@@ -14,11 +14,13 @@ class OpenTailNativeUsermod final : public Usermod {
     overlay.setEnabled(enabled);
   }
   void loop() override {
-    // Required WLED Usermod interface, intentionally no runtime work until
-    // authenticated BLE + saved Output Manager profile plumbing is verified.
+    // The shared coordinator contract is in ot_render_coordinator.h.
+    // Provider adapters, render-loop ownership and BLE/profile transport still
+    // require integration into this pinned WLED runtime before activation.
   }
   void handleOverlayDraw() override {
-    // WLED has already rendered effects. No effect phase/state is reset.
+    // Current bench-only overlay hook: WLED has already rendered effects.
+    // This does NOT yet combine the OpenTail provider with the WLED render loop.
     // Respect WLED global off; do not reilluminate after Stop.
     if (!enabled || bri == 0) return;
     overlay.forEachActiveSpan([](opentail::Span s) {
@@ -35,8 +37,7 @@ class OpenTailNativeUsermod final : public Usermod {
     overlay.setEnabled(enabled);
     return !cfg.isNull();
   }
-  // A future authenticated CORE BLE bridge must supply the validated profile
-  // and trigger mask. Deliberately no unsecured HTTP vehicle-trigger writes.
+  // No unsecured HTTP vehicle-trigger writes.
 };
 static OpenTailNativeUsermod opentail_native;
 REGISTER_USERMOD(opentail_native);
