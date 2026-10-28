@@ -20,10 +20,7 @@ class OpenTailNativeUsermod final : public Usermod {
   }
   void applyToFrame(uint32_t* pixels, std::size_t count) const {
     if (!enabled || !pixels || !count || bri == 0) return;
-    overlay.forEachActiveSpan([pixels, count](opentail::Span s) {
-      const std::size_t stop = s.stop < count ? s.stop : count;
-      for (std::size_t p = s.start; p < stop; ++p) pixels[p] = s.color;
-    });
+    overlay.applyToFrame(pixels, count);
   }
   void addToConfig(JsonObject& root) override {
     JsonObject cfg=root.createNestedObject("OpenTailNative");
