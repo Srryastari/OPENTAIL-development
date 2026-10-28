@@ -36,6 +36,15 @@ int main() {
   assert(eq(spans[1],{118,227,0xFF8000}));
   assert(eq(spans[2],{269,522,0xFF0000}));
   assert(eq(spans[3],{522,552,0xFF8000}));
+  uint32_t frame[552];
+  for (auto& px : frame) px = 0x010101;
+  o.applyToFrame(frame,552);
+  assert(frame[0]==0xFF0000 && frame[117]==0xFF0000);
+  assert(frame[118]==0xFF8000 && frame[226]==0xFF8000);
+  assert(frame[227]==0x010101); // Unassigned zone remains WLED-rendered.
+  assert(frame[269]==0xFF0000 && frame[521]==0xFF0000);
+  assert(frame[522]==0xFF8000 && frame[551]==0xFF8000);
+  o.applyToFrame(nullptr,552); // Null buffer is a no-op.
   o.setInputs(Park);
   assert(render(o).empty()); // Parking does not preempt active shows.
   o.setShowActive(0,false);o.setShowActive(3,false);
