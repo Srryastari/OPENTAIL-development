@@ -28,6 +28,19 @@ class OpenTailNativeUsermod final : public Usermod {
     nativeEffects.apply(pixels, count, millis());
     overlay.applyToFrame(pixels, count);
   }
+  void addToJsonInfo(JsonObject& root) override {
+    // Advertise native effects to clients from the running firmware, while
+    // keeping them disabled until an authenticated profile configures zones.
+    JsonObject ot = root.createNestedObject("OpenTailNative");
+    ot["enabled"] = enabled;
+    ot["nativeEffectsActive"] = nativeEffects.enabled();
+    JsonArray effects = ot.createNestedArray("effects");
+    addEffectInfo(effects, "embers", "Embers", "Intensity,Period", 180, 120);
+    addEffectInfo(effects, "materialize_sparks", "Materialize Sparks", "Intensity,Period", 200, 120);
+    addEffectInfo(effects, "random_materialize", "Random Materialize", "Intensity,Period", 255, 120);
+    addEffectInfo(effects, "smooth_fade", "Smooth Fade", "Intensity,Period", 220, 500);
+    addEffectInfo(effects, "plasma_sweep", "Plasma Sweep", "Intensity,Period", 200, 300);
+  }
   void addToConfig(JsonObject& root) override {
     JsonObject cfg=root.createNestedObject("OpenTailNative");
     cfg["enabled"]=enabled;
@@ -39,7 +52,34 @@ class OpenTailNativeUsermod final : public Usermod {
     return !cfg.isNull();
   }
   // Future authenticated CORE bridge must configure validated zones and inputs.
-  // Until then, overlay remains unconfigured and unauthorized (fail closed).
+  // Until then, overlay and native effects remain unconfigured and unauthorized.
+ private:
+  static void addEffectInfo(JsonArray& effects, const char* key, const char* name,
+                            const char* params, uint8_t intensity, uint16_t periodMs) {
+    JsonObject effect = effects.createNestedObject();
+    effect["key"] = key;
+    effect["name"] = name;
+    effect["provider"] = "opentail";
+    effect["oneD"] = true;
+    effect["supportsPalette"] = false;
+    effect["requiresAudio"] = false;
+    effect["intensityDefault"] = intensity;
+    effect["periodMsDefault"] = periodMs;
+    JsonArray parameters = effect.createNestedArray("parameters");
+    const char* cursor = params;
+    const char* comma = nullptr;
+    while (*cursor) {
+      comma = cursor;
+      while (*comma && *comma != ',') ++comma;
+      String label;
+      for (const char* p = cursor; p < comma; ++p) label += *p;
+      parameters.add(label);
+      cursor = *comma ? comma + 1 : comma;
+    }
+    JsonArray colors = effect.createNestedArray("colorSlots");
+    colors.add("Foreground");
+    colors.add("Background");
+  }
 };
 static OpenTailNativeUsermod opentail_native;
 REGISTER_USERMOD(opentail_native);
