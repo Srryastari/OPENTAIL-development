@@ -4,7 +4,10 @@
 #include "core_logic.h"
 
 /* Independent, VOLATILE, bench-only native effect model. No stored profiles. */
-typedef enum {OT_SHOW_OFF=0, OT_SHOW_SOLID, OT_SHOW_CHASE, OT_SHOW_BREATHE, OT_SHOW_WIPE, OT_SHOW_RAINBOW} ot_show_mode_t;
+typedef enum {OT_SHOW_OFF=0, OT_SHOW_SOLID, OT_SHOW_CHASE, OT_SHOW_BREATHE, OT_SHOW_WIPE, OT_SHOW_RAINBOW,
+    OT_SHOW_STROBE, OT_SHOW_SCAN, OT_SHOW_PULSE, OT_SHOW_FADE, OT_SHOW_BLINK,
+    OT_SHOW_PLASMA_SWEEP, OT_SHOW_SPARKLE, OT_SHOW_METEOR, OT_SHOW_COLOR_WAVES,
+    OT_SHOW_TWINKLE, OT_SHOW_LAST=OT_SHOW_TWINKLE} ot_show_mode_t;
 typedef struct {
     ot_show_mode_t mode;
     ot_rgb_t color;
