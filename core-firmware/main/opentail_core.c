@@ -25,6 +25,7 @@
 #include "board_config.h"
 #include "status_led.h"
 #include "show_logic.h"
+#include "wled_1d.h"
 #include "ble_command.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
@@ -449,7 +450,7 @@ static esp_err_t show_get(httpd_req_t *r){
     portEXIT_CRITICAL(&state_lock);
     char buf[390];
     snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?ot_show_name(cfg.mode):"off",(unsigned long)remaining,
+      active?"true":"false",active?(cfg.mode==OT_SHOW_WLED_COMPAT?(ot_wled_1d_by_id(cfg.compat_id)?ot_wled_1d_by_id(cfg.compat_id)->key:"off"):ot_show_name(cfg.mode)):"off",(unsigned long)remaining,
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
@@ -459,11 +460,17 @@ static esp_err_t show_start(httpd_req_t *r){
     cJSON *field=cJSON_GetObjectItemCaseSensitive(obj,"effect");
     const char *effect=cJSON_IsString(field)?field->valuestring:"";
     ot_show_mode_t mode=OT_SHOW_OFF;
-    for(int i=OT_SHOW_SOLID;i<=OT_SHOW_LAST;++i){
+    uint16_t compat_id=0;
+    for(int i=OT_SHOW_SOLID;i<OT_SHOW_WLED_COMPAT;++i){
         if(!strcmp(effect,ot_show_name((ot_show_mode_t)i))){mode=(ot_show_mode_t)i;break;}
     }
-    if(mode==OT_SHOW_OFF){cJSON_Delete(obj);return respond_err(r,400,"unknown native effect");}
-    ot_show_t cfg={.mode=mode,.color={255,0,0},.brightness=24,.speed=50,
+    if(mode==OT_SHOW_OFF){
+        const ot_wled_1d_meta_t *entry=ot_wled_1d_by_key(effect);
+        if(entry){mode=OT_SHOW_WLED_COMPAT;compat_id=entry->id;}
+    }
+    if(mode==OT_SHOW_OFF){cJSON_Delete(obj);return respond_err(r,400,"effect not implemented on this CORE firmware");}
+    ot_show_t cfg={.mode=mode,.compat_id=compat_id,.color={255,0,0},
+       .background={0,0,0},.accent={0,0,255},.intensity=128,.brightness=24,.speed=50,
        .chain_mask=3,.section_mask=255};
     const char *channels="both";
     field=cJSON_GetObjectItemCaseSensitive(obj,"chain");
@@ -473,15 +480,18 @@ static esp_err_t show_start(httpd_req_t *r){
     else if(strcmp(channels,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
     field=cJSON_GetObjectItemCaseSensitive(obj,"section_mask");
     if(field){if(!cJSON_IsNumber(field) || field->valuedouble!=field->valueint || field->valueint<1||field->valueint>255){cJSON_Delete(obj);return respond_err(r,400,"section_mask must be 1..255");}cfg.section_mask=(uint16_t)field->valueint;}
-    const char *keys[]={"r","g","b","brightness","speed","ttl_ms"};
-    for(int i=0;i<6;++i){field=cJSON_GetObjectItemCaseSensitive(obj,keys[i]);
+    const char *keys[]={"r","g","b","br","bg","bb","ar","ag","ab","brightness","speed","intensity","ttl_ms"};
+    for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);++i){field=cJSON_GetObjectItemCaseSensitive(obj,keys[i]);
       if(field && (!cJSON_IsNumber(field) || field->valuedouble!=field->valueint)){
           cJSON_Delete(obj);return respond_err(r,400,"integer parameters required");}
     }
     unsigned ttl=bounded_int(obj,"ttl_ms",60000,1000,OT_SHOW_MAX_MS);
     cfg.color=(ot_rgb_t){bounded_int(obj,"r",255,0,255),bounded_int(obj,"g",0,0,255),bounded_int(obj,"b",0,0,255)};
+    cfg.background=(ot_rgb_t){bounded_int(obj,"br",0,0,255),bounded_int(obj,"bg",0,0,255),bounded_int(obj,"bb",0,0,255)};
+    cfg.accent=(ot_rgb_t){bounded_int(obj,"ar",0,0,255),bounded_int(obj,"ag",0,0,255),bounded_int(obj,"ab",255,0,255)};
     cfg.brightness=bounded_int(obj,"brightness",24,0,OT_MAX_BRIGHTNESS);
     cfg.speed=bounded_int(obj,"speed",50,0,100);
+    cfg.intensity=bounded_int(obj,"intensity",128,0,255);
     if(!ot_show_valid(&cfg,&layout)){cJSON_Delete(obj);return respond_err(r,400,"invalid show settings");}
     cJSON_Delete(obj);
     TickType_t now=xTaskGetTickCount();
@@ -579,8 +589,25 @@ static esp_err_t status_get(httpd_req_t *r) {
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\",\"strobe\",\"scan\",\"pulse\",\"fade\",\"blink\",\"plasma_sweep\",\"sparkle\",\"meteor\",\"color_waves\",\"twinkle\"],\"native_show_max_ms\":180000,\"target_fps\":62,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    const char *base="{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\",\"strobe\",\"scan\",\"pulse\",\"fade\",\"blink\",\"plasma_sweep\",\"sparkle\",\"meteor\",\"color_waves\",\"twinkle\"],\"native_show_max_ms\":180000,\"target_fps\":62,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}";
+    cJSON *root=cJSON_Parse(base);
+    if(!root)return respond_err(r,500,"capabilities allocation failed");
+    cJSON *names=cJSON_GetObjectItemCaseSensitive(root,"native_effects");
+    if(!cJSON_IsArray(names)){cJSON_Delete(root);return respond_err(r,500,"capabilities missing effect list");}
+    for(size_t i=0;i<ot_wled_1d_count();++i){
+        const ot_wled_1d_meta_t *entry=ot_wled_1d_at(i);
+        if(!cJSON_AddItemToArray(names,cJSON_CreateString(entry->key))){
+            cJSON_Delete(root);return respond_err(r,500,"effect catalog allocation failed");
+        }
+    }
+    cJSON_AddNumberToObject(root,"wled_1d_effect_count",(double)ot_wled_1d_count());
+    cJSON_AddStringToObject(root,"catalog_scope","1D non-audio effects; original compatibility renderer, not identical to WLED");
+    char *out=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!out)return respond_err(r,500,"capabilities serialization failed");
+    esp_err_t result=send_json(r,out);free(out);return result;
 }
+
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
 }
