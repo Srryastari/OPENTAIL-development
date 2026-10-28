@@ -214,9 +214,9 @@ export function getOpenTailNativeEffectMetadata(){
   return Object.freeze([
     make('embers','Embers',['Intensity','Period'],{intensity:180,periodMs:120},
       'Deterministic heat-like flicker blending foreground and background.'),
-    make('materialize_sparks','Materialize Sparks',['Intensity','Period'],{intensity:200,periodMs:120},
+    make('materialize_sparks','Materialize Sparks',['Intensity','Period'],{intensity:100,periodMs:120},
       'Scattered foreground sparks over a configurable background.'),
-    make('random_materialize','Random Materialize',['Intensity','Period'],{intensity:255,periodMs:120},
+    make('random_materialize','Random Materialize',['Intensity','Period'],{intensity:80,periodMs:120},
       'Scattered rainbow materialization with bright white accents.'),
     make('smooth_fade','Smooth Fade',['Intensity','Period'],{intensity:220,periodMs:500},
       'Smooth periodic blend between foreground and background.'),
