@@ -72,7 +72,6 @@ final class BleDiscovery {
     private volatile BluetoothGattCharacteristic fxCaps;
     private volatile boolean fxCapsBusy=false;
     private volatile boolean mtuNegotiating=false;
-    private volatile boolean mtuNegotiating=false;
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
     @SuppressWarnings("MissingPermission")
