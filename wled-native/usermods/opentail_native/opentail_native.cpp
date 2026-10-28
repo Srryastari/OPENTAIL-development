@@ -3,16 +3,19 @@
 // Authenticated BLE/profile integration remains incomplete; disabled by default.
 #include "wled.h"
 #include "ot_native_overlay.h"
+#include "ot_native_effects.h"
 #include "ot_render_coordinator.h"
 #include "ot_wled_render_hook.h"
 
 class OpenTailNativeUsermod final : public Usermod {
   opentail::Overlay overlay;
+  opentail::nativefx::Engine nativeEffects;
   bool enabled = false;
  public:
   void setup() override {
     // Do not seize WLED's default data pins, buttons or PC817 GPIOs.
     overlay.setEnabled(enabled);
+    nativeEffects.setEnabled(false); // No effect zones until trusted profile arrives.
   }
   void loop() override {
     // Authenticated OpenTail BLE/profile bridge still needs integration.
@@ -20,6 +23,9 @@ class OpenTailNativeUsermod final : public Usermod {
   }
   void applyToFrame(uint32_t* pixels, std::size_t count) const {
     if (!enabled || !pixels || !count || bri == 0) return;
+    // Native effect zones, when configured and authorized, replace only their
+    // assigned logical pixels. Vehicle-trigger overlays are applied last.
+    nativeEffects.apply(pixels, count, millis());
     overlay.applyToFrame(pixels, count);
   }
   void addToConfig(JsonObject& root) override {
