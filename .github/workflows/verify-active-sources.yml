@@ -81,7 +81,7 @@ jobs:
           import re, subprocess
           from pathlib import Path
           src=Path('web-studio/opentail.htm').read_text(encoding='utf-8')
-          js='\\n'.join(re.findall(r'<script[^>]*>(.*?)</script>', src, flags=re.S|re.I))
+          js=chr(10).join(re.findall(r'<script[^>]*>(.*?)</script>', src, flags=re.S|re.I))
           assert 'function otNativeShowPanel' in js
           Path('/tmp/opentail-62fps-studio-check.js').write_text(js, encoding='utf-8')
           subprocess.run(['node','--check','/tmp/opentail-62fps-studio-check.js'],check=True)
