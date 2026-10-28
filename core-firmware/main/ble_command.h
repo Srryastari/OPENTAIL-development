@@ -16,7 +16,7 @@
 #define OT_BLE_SHOW_BYTES 11u
 /* Modes match native show_logic.h: 1=solid,2=chase,3=breathe,4=wipe,5=rainbow. */
 typedef struct {uint8_t effect,chain_mask,zone_mask,r,g,b,brightness,speed,ttl_sec;} ot_ble_show_packet_t;
-typedef enum {OT_BLE_OK_AUTH,OT_BLE_OK_SHOW,OT_BLE_OK_STOP,OT_BLE_OK_FX,OT_BLE_OK_SAVED,OT_BLE_OK_LOADED,OT_BLE_OK_DELETED,
+typedef enum {OT_BLE_OK_AUTH,OT_BLE_OK_SHOW,OT_BLE_OK_STOP,OT_BLE_OK_FX,OT_BLE_OK_SAVED,OT_BLE_OK_LOADED,OT_BLE_OK_DELETED,OT_BLE_OK_RELEASED,
   OT_BLE_ERR_WIRE,OT_BLE_ERR_AUTH,OT_BLE_ERR_RANGE,OT_BLE_ERR_BUSY} ot_ble_result_t;
 /* Only auth packets can mark this session authorized; caller clears on disconnect. */
 ot_ble_result_t ot_ble_parse(const uint8_t *packet,size_t length,
