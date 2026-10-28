@@ -69,8 +69,21 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.50.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.60.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
-          assert b'OpenTail Studio v0.19.50' in a, 'Unexpected Studio version'
-          print('Studio baseline file checks passed (not browser/hardware tests).')
+          assert b'OpenTail Studio v0.19.60' in a, 'Unexpected Studio version'
+          print('Studio v0.19.60 deployment copies identical (not browser/hardware tests).')
+          PY
+
+      - name: Verify Studio inline JavaScript syntax with Node
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          from pathlib import Path
+          src=Path('web-studio/opentail.htm').read_text(encoding='utf-8')
+          js='\\n'.join(re.findall(r'<script[^>]*>(.*?)</script>', src, flags=re.S|re.I))
+          assert 'function otNativeShowPanel' in js
+          Path('/tmp/opentail-62fps-studio-check.js').write_text(js, encoding='utf-8')
+          subprocess.run(['node','--check','/tmp/opentail-62fps-studio-check.js'],check=True)
+          print('Studio inline JS syntax: PASS (does not prove browser runtime or hardware)')
           PY
