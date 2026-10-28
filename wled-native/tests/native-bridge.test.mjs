@@ -98,7 +98,7 @@ test('merges WLED and OpenTail providers into one collision-safe catalog',()=>{
   [['wled:31','wled',31],['opentail:materialize_sparks','opentail','materialize_sparks']]);
  assert.deepEqual(catalog[1].colorSlots.map(c=>c.label),['Foreground','Background']);
  assert.equal(Object.isFrozen(catalog),true);
- assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,key:'materialize_sparks'}]),/Duplicate/);
+ assert.throws(()=>mergeUnifiedEffectCatalog([wled],[native,{...native}]),/Duplicate/);
  assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,key:'Bad Key'}]),/stable lowercase key/);
  assert.throws(()=>mergeUnifiedEffectCatalog([wled],[{...native,dimensions:{oneD:false}}]),/not declared 1D/);
 });
