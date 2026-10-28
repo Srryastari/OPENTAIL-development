@@ -17,6 +17,7 @@ assert(first.every(e=>!e.available),'Never pretend effects run when firmware has
 vm.runInContext("otCoreCaps.native_effects=['rainbow','color_wipe_random','plasma_sweep']",env);
 const available=vm.runInContext('otUnifiedChoices()',env);
 assert(available.find(x=>x.name==='Rainbow')?.key==='rainbow','Legacy CORE-only rainbow remains selectable');
+assert(first.find(x=>x.name==='Colorloop')?.key==='colorloop','WLED Colorloop must not collide with CORE Rainbow');
 assert(available.find(x=>x.name==='Wipe Random')?.available,'Firmware-confirmed WLED-style entry is available');
 assert(available.find(x=>x.name==='Plasma Sweep')?.available,'Original OpenTail entry uses same capability model');
 assert(!available.find(x=>x.name==='Twinklefox')?.available,'Unimplemented firmware entries remain disabled');
