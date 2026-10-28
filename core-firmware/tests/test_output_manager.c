@@ -67,11 +67,11 @@ int main(void){
  assert(ot_om_section(&custom[0],48)==-1);
  assert(ot_om_layout(&custom[0],&layout));
  custom[0].zone_count=1; custom[0].zones[0].pixels=48;
- assert(ot_om_valid(&custom[0])); /* Single 118-pixel zone is also valid */
- custom[0].active_pixels=118;custom[0].zones[0].pixels=118;
+ assert(ot_om_valid(&custom[0])); /* Any user-selected one-zone length is valid within allocated capacity. */
+ custom[0].active_pixels=173;custom[0].zones[0].pixels=173;
  assert(ot_om_valid(&custom[0]));
  custom[0].zone_count=8;
- for(int j=0;j<8;j++){snprintf(custom[0].zones[j].name,OT_OM_NAME_LEN,"Zone %d",j+1);custom[0].zones[j].pixels=(j==0?118:0);custom[0].zones[j].role=OT_OM_DECORATIVE;}
+ for(int j=0;j<8;j++){snprintf(custom[0].zones[j].name,OT_OM_NAME_LEN,"Zone %d",j+1);custom[0].zones[j].pixels=(j==0?173:0);custom[0].zones[j].role=OT_OM_DECORATIVE;}
  assert(ot_om_valid(&custom[0]));
  custom[0].rgb_gain[1]=190; custom[0].white_gain[2]=200;
  color(ot_om_calibrate((ot_rgb_t){32,0,0},&custom[0]),32,0,0);
