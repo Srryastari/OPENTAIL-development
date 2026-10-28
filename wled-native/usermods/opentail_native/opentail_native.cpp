@@ -1,8 +1,10 @@
-// Experimental WLED-native OpenTail adapter. This file is not yet the complete
-// OpenTail render coordinator or authenticated BLE bridge; keep disabled by default.
+// Experimental WLED-native OpenTail adapter. The compositor hook applies
+// OpenTail overlays inside WLED's logical frame before gamma and bus mapping.
+// Authenticated BLE/profile integration remains incomplete; disabled by default.
 #include "wled.h"
 #include "ot_native_overlay.h"
 #include "ot_render_coordinator.h"
+#include "ot_wled_render_hook.h"
 
 class OpenTailNativeUsermod final : public Usermod {
   opentail::Overlay overlay;
@@ -10,21 +12,17 @@ class OpenTailNativeUsermod final : public Usermod {
  public:
   void setup() override {
     // Do not seize WLED's default data pins, buttons or PC817 GPIOs.
-    // Authenticated OpenTail BLE/profile integration is not yet wired in.
     overlay.setEnabled(enabled);
   }
   void loop() override {
-    // The shared coordinator contract is in ot_render_coordinator.h.
-    // Provider adapters, render-loop ownership and BLE/profile transport still
-    // require integration into this pinned WLED runtime before activation.
+    // Authenticated OpenTail BLE/profile bridge still needs integration.
+    // No network-originated trigger writes are accepted here.
   }
-  void handleOverlayDraw() override {
-    // Current bench-only overlay hook: WLED has already rendered effects.
-    // This does NOT yet combine the OpenTail provider with the WLED render loop.
-    // Respect WLED global off; do not reilluminate after Stop.
-    if (!enabled || bri == 0) return;
-    overlay.forEachActiveSpan([](opentail::Span s) {
-      for (uint16_t p=s.start; p<s.stop; ++p) strip.setPixelColor(p,s.color);
+  void applyToFrame(uint32_t* pixels, std::size_t count) const {
+    if (!enabled || !pixels || !count || bri == 0) return;
+    overlay.forEachActiveSpan([pixels, count](opentail::Span s) {
+      const std::size_t stop = s.stop < count ? s.stop : count;
+      for (std::size_t p = s.start; p < stop; ++p) pixels[p] = s.color;
     });
   }
   void addToConfig(JsonObject& root) override {
@@ -37,7 +35,15 @@ class OpenTailNativeUsermod final : public Usermod {
     overlay.setEnabled(enabled);
     return !cfg.isNull();
   }
-  // No unsecured HTTP vehicle-trigger writes.
+  // Future authenticated CORE bridge must configure validated zones and inputs.
+  // Until then, overlay remains unconfigured and unauthorized (fail closed).
 };
 static OpenTailNativeUsermod opentail_native;
 REGISTER_USERMOD(opentail_native);
+
+// Called by the tiny pinned-source patch at WLED's real frame-compositor seam.
+// This is not strip.setPixelColor(): it edits the logical frame before WLED's
+// own correction/mapping/bus conversion, preserving one physical output owner.
+extern "C" void opentailNativePostRender(uint32_t* pixels, std::size_t count) {
+  opentail_native.applyToFrame(pixels, count);
+}
