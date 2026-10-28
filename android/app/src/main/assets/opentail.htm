@@ -1233,14 +1233,15 @@ html[data-ot-theme="light"] #app#app#app .ot-trigger-bench-tests .ot-trigger-dem
 #app#app#app .ot-ue-sequences input[type=checkbox]:disabled {cursor:not-allowed!important;opacity:.5!important}
 html[data-ot-theme="light"] #app#app#app#app .ot-ue-sequences input[type=checkbox] {accent-color:#333!important}
 </style></head><body><div id="app"></div><script>
-/* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
-const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
+/* Historical geometry from a retired project schema. Only the legacy
+ * migration functions consume this data; it is never a default layout. */
+const LEGACY_GS400_ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
 const TYPES=[['WS2815','12V · backup line'],['WS2812B','5V · RGB'],['WS2811','5/12V · RGB'],['WS2813','5V · backup line'],['SK6812','5V · RGBW'],['WS2814','12/24V · RGBW'],['WS2805','12/24V · RGBCCT'],['GS8208','12V · RGB'],['APA102','5V · clock+data'],['SK9822','5V · clock+data'],['WS2801','5V · clock+data'],['LPD8806','5V · clock+data'],['TM1814','12V · RGBW'],['UCS8903','5V · RGB'],['CUSTOM','Plugin / future driver']];
 const TABS=[['home','◉','Dashboard'],['device','⚙','Connect'],['scenes','✦','Show Modes'],['builder','▦','Triggers'],['layout','▥','Layout'],['diagnostics','⌁','Diagnostics']];
 const DEFAULT_PROFILE=(name,kind,color='#ff0000')=>({name,kind,color,secondary:'#000000',brightness:85,speed:60,intensity:60,direction:'inward',pattern:'solid',loops:1,stepMs:120,holdMs:250,override:true,zones:[],frames:[]});
 const PRESETS=['Show','Startup','Shutdown','Park','Brake','Left Turn','Right Turn','Hazards','Reverse','Lock','Unlock'];
 // Universal functional profiles have no vehicle/chassis-specific section assignments.
-// Users map any physical section to functions; a named example layout is available on request.
+// Users map any physical section to functions without built-in vehicle assignments.
 const makeDefaults=()=>{const p={};for(const n of PRESETS)p[n]=DEFAULT_PROFILE(n,'automotive');
  p.Show.color='#806bff';p.Show.pattern='chase'; // Every trigger defaults to Solid, including Startup and Shutdown.
  p.Reverse.color='#ffffff';for(const t of ['Park','Brake'])p[t].color='#ff0000';
@@ -2467,7 +2468,7 @@ function otResolvePattern(pattern,effects){
 function otResolveTriggerZone(zid,layout){
  const direct=layout.find(z=>z.id===zid||z.id===state.zoneAliases?.[zid]);
  if(direct)return direct;
- const canonical=ZONES.find(z=>z[0]===zid);
+ const canonical=LEGACY_GS400_ZONES.find(z=>z[0]===zid);
  if(!canonical)return null;
  return layout.find(z=>Number(z.start)===canonical[2]&&Number(z.length)===canonical[3])||null;
 }
@@ -2503,9 +2504,9 @@ function otRepairTriggerAssignments(){
 // 0.19.5: Repair only legacy, unedited factory assignments; preserve deliberate custom maps.
 function otMigrateLegacyDefaultTriggers(){
  if(state.defaultTriggerMapV195)return 0;
- const known=Object.fromEntries(ZONES.map(([key,,start,length])=>[key,state.layout.find(z=>Number(z.start)===start&&Number(z.length)===length)?.id]));
+ const known=Object.fromEntries(LEGACY_GS400_ZONES.map(([key,,start,length])=>[key,state.layout.find(z=>Number(z.start)===start&&Number(z.length)===length)?.id]));
  const before={Park:['topL','bottomL','trunkL'],Brake:['topL','bottomL','trunkL'],Hazards:['turnL'],Reverse:['reverseL'],'Right Turn':[], 'F1 Brake':['topL','bottomL'],Show:['topL','turnL','reverseL','bottomL','trunkL'],Startup:['topL','turnL','reverseL','bottomL','trunkL'],Shutdown:['topL','turnL','reverseL','bottomL','trunkL']};
- const after={Park:['topL','bottomL','trunkL','topR','bottomR','trunkR'],Brake:['topL','bottomL','trunkL','topR','bottomR','trunkR'],Hazards:['turnL','turnR'],Reverse:['reverseL','reverseR'],'Right Turn':['turnR'],'F1 Brake':['topL','bottomL','topR','bottomR'],Show:ZONES.map(z=>z[0]),Startup:ZONES.map(z=>z[0]),Shutdown:ZONES.map(z=>z[0])};
+ const after={Park:['topL','bottomL','trunkL','topR','bottomR','trunkR'],Brake:['topL','bottomL','trunkL','topR','bottomR','trunkR'],Hazards:['turnL','turnR'],Reverse:['reverseL','reverseR'],'Right Turn':['turnR'],'F1 Brake':['topL','bottomL','topR','bottomR'],Show:LEGACY_GS400_ZONES.map(z=>z[0]),Startup:LEGACY_GS400_ZONES.map(z=>z[0]),Shutdown:LEGACY_GS400_ZONES.map(z=>z[0])};
  let changed=0;
  for(const [name,legacy] of Object.entries(before)){
   const p=state.profiles?.[name];if(!p||!Array.isArray(p.zones))continue;
