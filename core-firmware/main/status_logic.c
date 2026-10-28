@@ -32,10 +32,19 @@ ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool en
             bool on=(q<100u)||(q>=240u&&q<340u)||(q>=480u&&q<580u);
             return t<780u&&on?rgb(255,255,255,brightness):rgb(0,0,0,0);
         }
-        case OT_ST_WIFI: case OT_ST_DISCONNECTED:{
-            /* Saturated amber standby: never red, never blue ambiguity. */
-            uint8_t wave=portion(t%2200u,250u,650u);
-            return rgb(255,145,0,(uint8_t)((brightness*wave)/100u));
+        case OT_ST_WIFI:{
+            /* Wi-Fi ready: cyan pulse, separate from disconnected status. */
+            uint8_t wave=portion(t%1000u,200u,600u);
+            return rgb(0,255,255,(uint8_t)((brightness*wave)/100u));
+        }
+        case OT_ST_DISCONNECTED:{
+            /* Disconnected: two distinct red pulses per 2200 ms cycle.
+             * Fault remains a much faster continuous 90 ms blink. */
+            uint32_t phase=t%2200u;
+            uint8_t wave=portion(phase,130u,330u);
+            if(phase>=420u && phase<750u)
+                wave=portion(phase-420u,130u,330u);
+            return rgb(255,0,0,(uint8_t)((brightness*wave)/100u));
         }
         case OT_ST_CONNECTED:return rgb(0,255,0,brightness);
         case OT_ST_BLE:return rgb(140,0,255,brightness); /* Slightly bluer saturated purple */
