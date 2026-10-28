@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mapNativeWledZones,buildNativeWledState,assertNativeWledCapacity} from '../opentail-wled-bridge.mjs';
+import {
+ mapNativeWledZones,buildNativeWledState,assertNativeWledCapacity,
+ discoverNativeWled1DEffects,parseNativeWledEffectMetadata
+} from '../opentail-wled-bridge.mjs';
 const outputs=[
   {start:0,pixels:522,zones:[{pixels:118},{pixels:109},{pixels:42},{pixels:253}]},
   {start:522,pixels:30,zones:[{pixels:30}]}
@@ -13,11 +16,11 @@ test('maps absolute pixels, exclusive stops, separate outputs',()=>{
   assert.deepEqual(mapNativeWledZones(outputs).map(({id,start,stop})=>[id,start,stop]),
     [[0,0,118],[1,118,227],[2,227,269],[3,269,522],[4,522,552]]);
 });
-test('forwards WLED IDs, per-zone brightness and palette; no pixel-stream substitute',()=>{
+test('forwards native WLED IDs and independent zone settings',()=>{
   const state=buildNativeWledState(outputs,[fx(0,3,205),fx(1,0,9,{reverse:true,brightness:10})],{supported1DIds});
   assert.deepEqual(state.seg.map(s=>[s.id,s.fx,s.start,s.stop,s.bri]),
     [[3,205,269,522,28],[4,9,522,552,10]]);
-  assert.deepEqual(state.seg[0].col,[[255,25,0],[0,0,0]]);
+  assert.deepEqual(state.seg[0].col,[[255,25,0],[0,0,0],[0,0,0]]);
   assert.equal(state.seg[1].rev,true);assert.equal(state.seg[0].pal,11);
   assert.equal(state.seg[0].sx,180);assert.equal(state.seg[0].ix,64);
   assert.equal('i' in state.seg[0],false);
@@ -38,15 +41,22 @@ test('fails closed on segment limits, overlapping buses or incorrect counts',()=
   assert.equal(assertNativeWledCapacity({leds:{count:552,maxseg:16}},outputs),true);
   assert.throws(()=>assertNativeWledCapacity({leds:{count:522,maxseg:16}},outputs),/exceeds/);
 });
-test('rejects control values WLED cannot accept',()=>{
+test('rejects controls outside native WLED ranges and non-RGB JSON colors',()=>{
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{speed:256})],{supported1DIds}),/speed/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{brightness:-1})],{supported1DIds}),/brightness/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{foreground:[300,0,0]})],{supported1DIds}),/foreground/);
+  assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{foreground:[0,0,0,255]})],{supported1DIds}),/RGB triplet/);
 });
-
-
-import {discoverNativeWled1DEffects} from '../opentail-wled-bridge.mjs';
-test('discovers 1D-capable modes directly from native WLED effect metadata',()=>{
+test('parses native metadata labels, dual colors, palette flags and defaults',()=>{
+  const m=parseNativeWledEffectMetadata(31,'Chase Flash','Chase Flash@Speed;Bg,Fx;!;1;sx=64,ix=128,pal=11,c1=5');
+  assert.equal(m.name,'Chase Flash');
+  assert.deepEqual(m.parameterLabels,['Speed']);
+  assert.deepEqual(m.colorSlots.map(c=>c.label),['Bg','Fx']);
+  assert.equal(m.supportsPalette,true);
+  assert.deepEqual({...m.defaults},{sx:64,ix:128,pal:11,c1:5});
+  assert.equal(m.dimensions.oneD,true);
+});
+test('discovers only 1D modes from exact native metadata and preserves audio capability',()=>{
  const r=discoverNativeWled1DEffects(
   ['Solid','Rainbow','2D Plasma','Audio Scan','Mixed 1D2D','Cube','Legacy'],
   ['Solid','!,!;;!;1','!,!;;!;2','!,!;;!;1f','!,!;;!;12','!,!;;!;3',''],
@@ -55,5 +65,12 @@ test('discovers 1D-capable modes directly from native WLED effect metadata',()=>
  assert.equal(r.effects.find(e=>e.id===3).requiresAudio,true);
  assert.equal(r.supported1DIds.has(2),false);
  assert.equal(r.supported1DIds.has(4),true);
+ assert.equal(r.metadataById.get(1).colorSlots.length,2);
  assert.throws(()=>discoverNativeWled1DEffects(['Only'],[],{fxcount:1}),/match/);
+});
+test('metadata color slots are validated per effect and per assignment',()=>{
+ const meta=parseNativeWledEffectMetadata(31,'Chase Flash','Chase Flash@Speed;Bg,Fx;!;1;sx=64');
+ const metadataById=new Map([[31,meta]]);
+ assert.doesNotThrow(()=>buildNativeWledState(outputs,[fx(0,0,31)],{supported1DIds:new Set([31]),metadataById}));
+ assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,31,{background:undefined})],{supported1DIds:new Set([31]),metadataById}),/requires 2 declared color slots/);
 });
