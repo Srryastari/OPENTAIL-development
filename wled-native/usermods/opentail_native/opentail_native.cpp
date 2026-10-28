@@ -36,8 +36,8 @@ class OpenTailNativeUsermod final : public Usermod {
     ot["nativeEffectsActive"] = nativeEffects.enabled();
     JsonArray effects = ot.createNestedArray("effects");
     addEffectInfo(effects, "embers", "Embers", "Intensity,Period", 180, 120);
-    addEffectInfo(effects, "materialize_sparks", "Materialize Sparks", "Intensity,Period", 200, 120);
-    addEffectInfo(effects, "random_materialize", "Random Materialize", "Intensity,Period", 255, 120);
+    addEffectInfo(effects, "materialize_sparks", "Materialize Sparks", "Intensity,Period", 100, 120);
+    addEffectInfo(effects, "random_materialize", "Random Materialize", "Intensity,Period", 80, 120);
     addEffectInfo(effects, "smooth_fade", "Smooth Fade", "Intensity,Period", 220, 500);
     addEffectInfo(effects, "plasma_sweep", "Plasma Sweep", "Intensity,Period", 200, 300);
   }
