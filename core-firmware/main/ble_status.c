@@ -41,6 +41,7 @@ void ot_ble_session_hex(char out[33]){
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
+#include "host/ble_att.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "os/os_mbuf.h"
@@ -340,6 +341,7 @@ void ot_ble_start(void){
     esp_fill_random(token,sizeof(token));
     token_ready=true;
     esp_err_t err=nimble_port_init();
+    if(err==ESP_OK)ble_att_set_preferred_mtu(247);
     if(err!=ESP_OK){token_ready=false;ESP_LOGE(TAG,"NimBLE init failed: %s",esp_err_to_name(err));return;}
     ble_svc_gap_init();ble_svc_gatt_init();
     int rc=ble_svc_gap_device_name_set("OpenTail CORE");
