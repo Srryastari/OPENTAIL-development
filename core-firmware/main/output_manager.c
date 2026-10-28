@@ -1,5 +1,6 @@
 #include "output_manager.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *const role_names[]={"off","park_brake","parking","brake","left_turn","right_turn","reverse","aux1","aux2","aux3","decorative"};
 static const char *const order_names[]={"RGB","RBG","GRB","GBR","BRG","BGR"};
@@ -16,20 +17,23 @@ static bool name_ok(const char *s){
     }
     return false;
 }
+/* Factory/unconfigured profile: one inert placeholder zone per present output.
+ * Never infer the customer's vehicle, pixel geometry or lighting assignments.
+ * Previously saved v1/v2 output profiles are restored by om_load() unchanged.
+ * A valid installation profile must be explicitly configured and saved. */
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]){
     if(!outputs)return;
     memset(outputs,0,sizeof(ot_om_output_t)*OT_OM_OUTPUTS);
-    const char *const labels[]={"Tail A","Turn","Reverse","Tail B","Tail C"};
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-        ot_om_output_t *c=&outputs[o];
-        memcpy(c->name,o?"Pixel OUT 2":"Pixel OUT 1",12);
-        c->active_pixels=30;c->color_order=OT_OM_BRG;c->zone_count=5;
-        for(int k=0;k<3;k++){c->rgb_gain[k]=255;c->white_gain[k]=255;}
-        for(unsigned z=0;z<c->zone_count;z++){
-            strncpy(c->zones[z].name,labels[z],OT_OM_NAME_LEN-1);
-            c->zones[z].pixels=6;
-            c->zones[z].role=(z==1?(o?OT_OM_RIGHT:OT_OM_LEFT):(z==2?OT_OM_REVERSE:OT_OM_PARK_BRAKE));
-        }
+        ot_om_output_t *cfg=&outputs[o];
+        snprintf(cfg->name,OT_OM_NAME_LEN,"Pixel OUT %u",o+1u);
+        cfg->active_pixels=1; /* inert placeholder, NOT a vehicle pixel count */
+        cfg->color_order=OT_OM_BRG; /* provisional driver order, user-configurable */
+        cfg->zone_count=1;
+        for(unsigned k=0;k<3;k++){cfg->rgb_gain[k]=255;cfg->white_gain[k]=255;}
+        strcpy(cfg->zones[0].name,"Zone 1");
+        cfg->zones[0].pixels=1;
+        cfg->zones[0].role=OT_OM_OFF;
     }
 }
 bool ot_om_valid(const ot_om_output_t *o){
