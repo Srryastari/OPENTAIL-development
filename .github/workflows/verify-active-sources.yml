@@ -198,7 +198,7 @@ jobs:
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
           assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
             'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
-          assert(shell.includes('Android v0.1.28')&&gradle.includes("versionName '0.1.28'"),
+          assert(shell.includes('Android v0.1.29')&&gradle.includes("versionName '0.1.29'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS
