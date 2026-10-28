@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   native-bridge-and-overlay-tests:
-    name: Bridge metadata and trigger-overlay host tests
+    name: Bridge metadata, overlay and unified-renderer host tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,19 +33,22 @@ jobs:
           node-version: "22"
       - name: Run native bridge tests
         run: node --test wled-native/tests/native-bridge.test.mjs
-      - name: Compile and run trigger-overlay tests
+      - name: Compile and run C++ host tests
         shell: bash
         run: |
           set -euo pipefail
-          test -f wled-native/tests/test_native_overlay.cpp
-          binary="$(mktemp)"
-          trap 'rm -f "$binary"' EXIT
-          c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
-            wled-native/tests/test_native_overlay.cpp -o "$binary"
-          "$binary"
+          for source in test_native_overlay test_render_coordinator; do
+            binary="$(mktemp)"
+            trap 'rm -f "$binary"' EXIT
+            c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+              "wled-native/tests/${source}.cpp" -o "$binary"
+            "$binary"
+            rm -f "$binary"
+            trap - EXIT
+          done
 
   native-wled-firmware-build:
-    name: Compile pinned WLED plus OpenTail usermod (no flashing)
+    name: Compile pinned WLED plus OpenTail integration (no flashing)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
