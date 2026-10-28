@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const html=fs.readFileSync('web-studio/opentail.htm','utf8');
-const first=html.indexOf('let otLayoutSelected=');
+const first=html.indexOf('let otLayoutOpen=');
 const last=html.indexOf('function otBaseArrangementLayout()',first);
 assert(first>0 && last>first);
 const code=html.slice(first,last);
