@@ -53,7 +53,7 @@ class Engine final {
     for(std::size_t i=0;i<count;++i) {
       const Zone& z=zones[i];
       if(z.start>=z.stop||z.stop>pixelCount||z.periodMs==0||
-         z.intensity>255||static_cast<uint8_t>(z.effect)>static_cast<uint8_t>(Id::PlasmaSweep)) return false;
+         static_cast<uint8_t>(z.effect)>static_cast<uint8_t>(Id::PlasmaSweep)) return false;
       for(std::size_t j=0;j<i;++j)
         if(z.start<zones[j].stop&&z.stop>zones[j].start) return false;
     }
