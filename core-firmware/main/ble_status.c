@@ -310,8 +310,12 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();}
         else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
+        ESP_LOGI(TAG,"GAP disconnect: handle=%u reason=%d active_handle=%u",
+                 (unsigned)ev->disconnect.conn.conn_handle,
+                 ev->disconnect.reason,(unsigned)active_conn);
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
         ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();advertise();
+        ESP_LOGI(TAG,"GAP disconnect cleanup callback completed");
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }
