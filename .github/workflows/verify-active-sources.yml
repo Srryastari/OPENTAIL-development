@@ -11,6 +11,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: verify-active-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   core-host-tests:
     runs-on: ubuntu-latest
@@ -72,7 +75,7 @@ jobs:
           b=Path('web-studio/opentail-v0.19.61.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           assert b'OpenTail Studio v0.19.61' in a, 'Unexpected Studio version'
-          print('Studio v0.19.60 deployment copies identical (not browser/hardware tests).')
+          print('Studio v0.19.61 deployment copies identical (not browser/hardware tests).')
           PY
 
       - name: Check one unified effects catalog and capability gating
