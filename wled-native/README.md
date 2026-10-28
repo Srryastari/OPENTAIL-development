@@ -12,7 +12,7 @@ The coordinator combines two rendering providers:
 
 Both providers publish their effect metadata to **one catalog** and render only the zones assigned by OpenTail. The final arbitration/output stage applies vehicle triggers to assigned zones and commits frames through the configured output driver. There is one owner of physical pixel writes, not two renderers racing over the LEDs.
 
-For WLED effects, use the upstream WLED runtime as the provider to preserve pixel parity. For original OpenTail effects, preserve their algorithm but adapt them to the shared frame/output interface. A fail-closed build patch now inserts `opentailNativePostRender(_pixels, totalLen)` at the pinned WLED compositor seam in `wled00/FX_fcn.cpp`, after WLED segment blending and before gamma/color conversion and bus mapping. This is a real integration hook, but it currently enables the trigger-overlay seam only: the native-effect provider, authenticated BLE bridge and profile-driven zone setup are still not connected. The build script rejects unexpected source drift rather than patching a different function.
+For WLED effects, use the upstream WLED runtime as the provider to preserve pixel parity. For original OpenTail effects, preserve their algorithm but adapt them to the shared frame/output interface. A fail-closed build patch now inserts `opentailNativePostRender(_pixels, totalLen)` at the pinned WLED compositor seam in `wled00/FX_fcn.cpp`, after WLED segment blending and before gamma/color conversion and bus mapping. This is a real integration hook. The compiled hook now invokes a fail-closed OpenTail-native 1D effect engine before applying vehicle-trigger overlays. Five native effect implementations are present: Embers, Materialize Sparks, Random Materialize, Smooth Fade, and Plasma Sweep. Their metadata is published into the shared catalog adapter. They remain inactive by default because authenticated BLE/profile transport and trusted per-zone configuration are not yet connected. The build script rejects unexpected source drift rather than patching a different function.
 
 ## OpenTail automotive control plane
 
@@ -48,8 +48,8 @@ RGBW, RGB+CCT/dual-white and white-only channel controls are permitted only when
 ## Automatic verification
 
 `.github/workflows/wled-native-integration.yml` now schedules checks on relevant PRs and pushes:
-- Node host tests for metadata parsing and native WLED state mapping;
-- strict C++17 host tests for trigger overlays;
+- Node host tests for metadata parsing, native WLED state mapping, and the five OpenTail-native effect catalog entries;
+- strict C++17 host tests for trigger overlays, native effect rendering/fail-closed gating, and the coordinator;
 - a no-flash build of the pinned WLED source with the OpenTail usermod and actual compositor hook;
 - a source-patch self-test for idempotence and fail-closed behavior;
 - an unflashed firmware artifact upload if the build succeeds.
@@ -58,7 +58,7 @@ CI success proves only the software checks/build. It cannot prove exact pixel pa
 
 ## Required integration stages
 
-1. [partial] Patch the pinned WLED compositor to call OpenTail after segment blending and before final color/bus conversion. Next, wire the coordinator/native provider into that frame stage and register OpenTail-native effects; keep the provider disabled until the bridge/profile path is complete.
+1. [partial] Patch the pinned WLED compositor and invoke the OpenTail-native 1D effect engine before trigger overlays. Five native effect algorithms and catalog metadata now exist and are covered by host tests. Still wire authenticated BLE/profile/zone controls and prove that WLED and native providers share saved per-zone state; keep native effects disabled until trusted configuration is complete.
 2. Integrate authenticated OpenTail BLE transport and profile/zone/scene state into that same firmware.
 3. Connect the existing trigger manager/arbitration to post-render zone overlays and phase-preserving restoration.
 4. Generate the unified catalog from compiled WLED metadata plus registered OpenTail-native metadata; wire all supported color slots and parameters into Studio and Android.
