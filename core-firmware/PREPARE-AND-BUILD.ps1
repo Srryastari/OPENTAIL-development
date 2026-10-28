@@ -25,7 +25,10 @@ if(-not $existing -or $existing -match 'OpenTailLab-ChangeMe'){
 $lines=@();if(Test-Path $config){$lines=@(Get-Content $config | Where-Object {$_ -notmatch '^CONFIG_OPENTAIL_AP_PASSWORD='})}
 $lines+= $existing
 [System.IO.File]::WriteAllLines($config,[string[]]$lines,[System.Text.UTF8Encoding]::new($false))
-Write-Host 'Existing custom AP password preserved (not displayed). Configuring v0.1.24...'
+Write-Host 'Existing custom AP password preserved (not displayed). Preparing CORE v0.1.27-alpha...'
+$syncScript=Join-Path $PSScriptRoot 'tools\sync_studio_asset.py'
+& python $syncScript
+if($LASTEXITCODE -ne 0){throw 'Studio embed synchronization failed. Do not flash.'}
 & idf.py reconfigure
 if($LASTEXITCODE -ne 0){throw 'ESP-IDF configure failed. Do not flash.'}
 # Two Ninja workers avoid the concurrent compiler crash seen on this Windows machine.
