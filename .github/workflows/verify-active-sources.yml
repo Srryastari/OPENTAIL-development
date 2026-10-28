@@ -75,6 +75,8 @@ jobs:
           print('Studio v0.19.60 deployment copies identical (not browser/hardware tests).')
           PY
 
+      - name: Check one unified effects catalog and capability gating
+        run: node web-studio/qa/unified-effects.test.mjs
       - name: Verify Studio inline JavaScript syntax with Node
         run: |
           python3 - <<'PY'
