@@ -104,7 +104,8 @@ ot_rgb_t ot_show_pixel(const ot_show_t *s,const ot_layout_t *layout,int chain,
         const unsigned a=triangle((unsigned)(local*13u+elapsed_ms/9u),512u);
         const unsigned b=triangle((unsigned)(local*7u+elapsed_ms/17u),384u);
         c=wheel((uint8_t)((a+b+elapsed_ms/30u)&255u));
-        return scale(c,(unsigned)s->brightness*(96u+(a+b)/3u)/255u);
+        const unsigned amplitude=96u+(a+b)/3u;
+        return scale(c,(unsigned)s->brightness*(amplitude>255u?255u:amplitude)/255u);
       }
       case OT_SHOW_SPARKLE:{
         uint32_t slice=elapsed_ms/(20u+(100u-s->speed)*2u);
