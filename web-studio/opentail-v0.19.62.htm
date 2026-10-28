@@ -78,6 +78,10 @@ html[data-ot-theme="light"] .ot-arb-line b[data-active="on"]{color:#12734e}
 .ot-core-advanced[open]>summary{border-bottom:1px solid #333;margin-bottom:10px}
 .ot-core-advanced .card{background:#000!important;border-color:#343434!important}
 
+/* Align CORE output mapping with the approved Layout card; keep its disclosure independent. */
+#app .ot-core-output-advanced{width:100%;max-width:100%;margin:0 0 12px!important;padding:14px!important;background:#000!important;color:#ededed!important;border:1px solid #303030!important;border-radius:20px!important;box-shadow:none!important}
+#app .ot-core-output-advanced>summary{min-height:34px;padding:5px 3px;font-size:13px;line-height:1.4;list-style-position:inside}
+#app .ot-core-output-advanced[open]>summary{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #303030}
 /* Compact offline LED example lives only inside the expandable Trigger testing panel. */
 .ot-approved-triggers .ot-trigger-demo-preview{background:#000!important;border:1px solid #303030;border-radius:15px;margin-top:13px;padding:11px;display:grid;gap:7px}
 .ot-approved-triggers .ot-trigger-demo-preview>.line{margin-bottom:2px;gap:8px;flex-wrap:wrap}
@@ -781,7 +785,47 @@ body,html[data-ot-theme="dark"] body{background:#000;color:#ededed;font-family:-
    Android native shell still reads its active route during BLE display updates. */
 #app nav.tabs,#app nav.bottomnav{display:none!important}
 @media(max-width:760px){#app>.shell{padding-bottom:16px!important}#app .ot-chat-nav{display:flex;overflow-x:auto;overflow-y:hidden;gap:7px;scrollbar-width:none;overscroll-behavior-x:contain;scroll-snap-type:x proximity;padding-bottom:6px}#app .ot-chat-nav::-webkit-scrollbar{display:none}#app .ot-chat-nav-pill{flex:0 0 auto;min-width:max-content;padding:10px 13px;scroll-snap-align:start}}
-</style><style id="ot-context-zone-v1">.ot-context-zone-card{border:1px solid #303030;border-radius:17px;background:#050505;padding:13px 13px 11px;color:#f5f5f5;margin:12px 0}.ot-context-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;font-weight:600;margin-bottom:12px}.ot-context-heading input{width:86px;text-align:right;border:0;background:transparent;color:#f5f5f5;font:600 17px inherit;appearance:textfield;-moz-appearance:textfield;padding:0}.ot-context-heading input::-webkit-inner-spin-button,.ot-context-heading input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.ot-context-slider{display:block;width:100%;height:24px;appearance:none;-webkit-appearance:none;background:#141414;border:0;border-radius:999px;cursor:pointer;margin:0 0 12px;padding:0}.ot-context-slider::-webkit-slider-thumb{-webkit-appearance:none;width:21px;height:21px;background:#fff;border:0;border-radius:50%;box-shadow:0 1px 3px #0008}.ot-context-slider::-moz-range-thumb{width:21px;height:21px;background:#fff;border:0;border-radius:50%}.ot-context-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.ot-context-stats>div{display:flex;flex-direction:column;gap:6px}.ot-context-stats small{font-size:10px;color:#bdbdbd}.ot-context-stats strong{font-size:17px;color:#fff;font-weight:650}.ot-context-stats .ot-context-next{color:#39e77b}.ot-context-zone-card>p{font-size:10px;color:#bdbdbd;margin:12px 0 0}@media(max-width:400px){.ot-context-zone-card{padding:11px}.ot-context-stats{gap:5px}.ot-context-stats small{font-size:9px}}</style><style id="ot-slider-border-fix">.ot-context-zone-card .ot-context-slider{outline:none!important;box-shadow:none!important;border:0!important;background:#141414!important;appearance:none!important;-webkit-appearance:none!important;border-radius:999px!important;padding:0!important}.ot-context-zone-card .ot-context-slider:focus,.ot-context-zone-card .ot-context-slider:focus-visible{outline:none!important;box-shadow:none!important}.ot-context-zone-card .ot-context-slider::-webkit-slider-runnable-track{height:24px;border:0!important;outline:none!important;box-shadow:none!important;background:#141414;border-radius:999px}.ot-context-zone-card .ot-context-slider::-moz-range-track{height:24px;border:0!important;outline:none!important;box-shadow:none!important;background:#141414;border-radius:999px}.ot-context-zone-card .ot-context-slider::-webkit-slider-thumb{margin-top:1.5px;box-shadow:none!important}.ot-context-zone-card .ot-context-slider::-moz-range-thumb{box-shadow:none!important}</style></head><body><div id="app"></div><script>
+</style>
+<style id="ot-zone-range-outer-border-fix-01958">
+/* Zones: eliminate the unwanted rectangular frame inherited from generic input rules.
+   Leave existing track, fill, thumb, previews and offset calculations intact. */
+#app .ot-chat-zone-editor .ot-chat-length input[type="range"],
+#app .ot-chat-zone-editor .ot-chat-length input[type="range"]:focus,
+#app .ot-chat-zone-editor .ot-chat-length input[type="range"]:focus-visible,
+#app .ot-layout-approved .ot-zone-length input[type="range"],
+#app .ot-layout-approved .ot-zone-length input[type="range"]:focus,
+#app .ot-layout-approved .ot-zone-length input[type="range"]:focus-visible {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  padding: 0 !important;
+}
+</style>
+<style id="ot-zone-slider-approved-01959">
+/* Restore the approved compact rounded slider control, without a border around the range itself. */
+#app .ot-chat-zone-editor .ot-zone-slider-panel{background:#0b0b0b!important;border:0!important;border-radius:20px!important;padding:15px 14px 13px!important;margin:6px 0 14px!important;box-shadow:none!important;min-width:0}
+#app .ot-zone-slider-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:13px}
+#app .ot-zone-slider-top strong{font-size:13px;font-weight:650;color:#f2f2f2}
+#app .ot-zone-slider-top .ot-zone-slider-count{font-size:14px;font-weight:700;color:#f5f5f5;font-variant-numeric:tabular-nums}
+#app .ot-zone-slider-controls{display:flex;align-items:center;gap:13px;min-width:0}
+#app .ot-zone-slider-controls input[type="range"],#app .ot-zone-slider-controls input[type="range"]:focus,#app .ot-zone-slider-controls input[type="range"]:focus-visible{appearance:none!important;-webkit-appearance:none!important;flex:1 1 auto!important;width:100%!important;min-width:0!important;height:30px!important;min-height:30px!important;margin:0!important;padding:0!important;border:0!important;outline:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important;background-image:none!important;cursor:pointer}
+#app .ot-zone-slider-controls input[type="range"]::-webkit-slider-runnable-track{height:6px!important;border:0!important;border-radius:999px!important;box-shadow:none!important;background:linear-gradient(to right,#4acd78 0%,#4acd78 var(--ot-range-fill,50%),#333335 var(--ot-range-fill,50%),#333335 100%)!important}
+#app .ot-zone-slider-controls input[type="range"]::-moz-range-track{height:6px!important;border:0!important;border-radius:999px!important;box-shadow:none!important;background:linear-gradient(to right,#4acd78 0%,#4acd78 var(--ot-range-fill,50%),#333335 var(--ot-range-fill,50%),#333335 100%)!important}
+#app .ot-zone-slider-controls input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none!important;appearance:none!important;width:22px!important;height:22px!important;margin-top:-8px!important;background:#fff!important;border:3px solid #ececec!important;border-radius:50%!important;box-shadow:0 1px 5px #0008!important}
+#app .ot-zone-slider-controls input[type="range"]::-moz-range-thumb{width:16px!important;height:16px!important;background:#fff!important;border:3px solid #ececec!important;border-radius:50%!important;box-shadow:0 1px 5px #0008!important}
+#app .ot-zone-slider-controls input[type="number"]{flex:0 0 74px!important;width:74px!important;min-width:74px!important;min-height:37px!important;text-align:center!important;padding:6px 8px!important;border-radius:12px!important;background:#171717!important;border:1px solid #343434!important;color:#f8f8f8!important;box-shadow:none!important;font-variant-numeric:tabular-nums}
+#app .ot-zone-slider-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:13px;padding-top:12px;border-top:1px solid #222}
+#app .ot-zone-slider-metric{display:flex;flex-direction:column;gap:5px;min-width:0}
+#app .ot-zone-slider-metric small{font-size:10px;color:#8d8d8d;font-weight:500;line-height:1.2}
+#app .ot-zone-slider-metric strong{font-size:15px;color:#f1f1f1;font-weight:700;font-variant-numeric:tabular-nums}
+#app .ot-zone-slider-metric.next strong{color:#4acd78!important}
+#app .ot-chat-zone-editor .ot-zone-manual-offset{margin:0 0 13px!important;padding:0!important;border:0!important}
+#app .ot-zone-manual-offset summary{color:#999!important;font-size:11px!important}
+#app .ot-zone-manual-offset .ot-chat-length{margin-top:8px}
+@media(max-width:390px){#app .ot-chat-zone-editor .ot-zone-slider-panel{padding:13px 11px!important}#app .ot-zone-slider-controls{gap:8px}#app .ot-zone-slider-controls input[type="number"]{flex-basis:65px!important;width:65px!important;min-width:65px!important}#app .ot-zone-slider-metric small{font-size:9px}#app .ot-zone-slider-metric strong{font-size:14px}}
+</style></head><body><div id="app"></div><script>
 /* OpenTail Studio v0.19.20 — assignment and pure-color reset fixes bench transitions, uniform segment colors, batch-edit reliability. */
 const ZONES=[['topL','Top · Left',0,118],['turnL','Turn · Left',118,109],['reverseL','Reverse · Left',227,42],['bottomL','Bottom · Left',269,253],['trunkL','Trunk · Left',522,101],['topR','Top · Right',623,118],['turnR','Turn · Right',741,109],['reverseR','Reverse · Right',850,42],['bottomR','Bottom · Right',892,253],['trunkR','Trunk · Right',1145,101]];
 const TYPES=[['WS2815','12V · backup line'],['WS2812B','5V · RGB'],['WS2811','5/12V · RGB'],['WS2813','5V · backup line'],['SK6812','5V · RGBW'],['WS2814','12/24V · RGBW'],['WS2805','12/24V · RGBCCT'],['GS8208','12V · RGB'],['APA102','5V · clock+data'],['SK9822','5V · clock+data'],['WS2801','5V · clock+data'],['LPD8806','5V · clock+data'],['TM1814','12V · RGBW'],['UCS8903','5V · RGB'],['CUSTOM','Plugin / future driver']];
@@ -975,14 +1019,26 @@ function otLayoutRedoChange(){if(!otLayoutRedo.length)return;otLayoutUndo.push(o
 function otLayoutSelect(id){otLayoutSelected=otLayoutSelected===id?null:id;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;render()}
 function otLayoutAdd(){otLayoutCheckpoint();addSection();otLayoutSelected=state.layout[state.layout.length-1]?.id||null;render()}
 function otLayoutRemove(id){const z=state.layout.find(x=>x.id===id);if(!z||!confirm('Remove '+z.name+'?'))return;otLayoutCheckpoint();if(otLayoutSelected===id){otLayoutSelected=null;otLayoutIdentifyMode='off';clearInterval(otLayoutSweepTimer);otLayoutSweepTimer=null;}removeSection(id)}
-function otLayoutMove(id,direction){const a=state.layout,i=a.findIndex(x=>x.id===id),j=i+direction;if(i<0||j<0||j>=a.length)return;otLayoutCheckpoint();[a[i],a[j]]=[a[j],a[i]];otZoneAutoOffsets();persist();render()}
+function otLayoutMove(id,direction){const a=state.layout,i=a.findIndex(x=>x.id===id),j=i+direction;if(i<0||j<0||j>=a.length)return;otLayoutCheckpoint();[a[i],a[j]]=[a[j],a[i]];let start=Math.min(...a.map(x=>x.start));for(const z of a){z.start=start;start+=z.length}state.segmentsSynced=false;persist();render()}
 function otLayoutPreviewLength(id,value){
  const n=Math.round(Number(value));if(!Number.isFinite(n)||n<1||n>10000)return;
  const field=document.getElementById('ot-count-'+id);if(field)field.value=n;
  const zone=[...document.querySelectorAll('[data-ot-zone]')].find(el=>el.getAttribute('data-ot-zone')===id);if(!zone)return;
  const count=zone.querySelector('.ot-chat-count');if(count)count.textContent=n+' LEDs';
- const zoneIdx=state.layout.findIndex(x=>x.id===id);if(zoneIdx>=0){let cursor=0;for(let j=0;j<state.layout.length;j++){const item=state.layout[j],len=j===zoneIdx?n:item.length,start=item.offsetMode==='manual'?item.start:cursor;cursor=start+len;const v=(suffix,num)=>{const el=document.getElementById('ot-zone-'+suffix+'-'+item.id);if(el)el.textContent=String(num)};v('start',start);v('end',start+len-1);v('next',start+len);}}
- const idx=state.layout.findIndex(x=>x.id===id);if(idx>=0){let cursor=0;for(let j=0;j<state.layout.length;j++){const z=state.layout[j],len=j===idx?n:z.length,start=z.offsetMode==='manual'?z.start:cursor;cursor=start+len;const el=[...document.querySelectorAll('[data-ot-zone]')][j];const range=el?.querySelector('.ot-chat-zone-toggle small');if(range)range.textContent=len+' LEDs · '+(z.reverse?'Reversed':'Forward')+' · '+start+'–'+(start+len-1);}}
+ const idx=state.layout.findIndex(x=>x.id===id);if(idx>=0){
+  let cursor=0;const starts=[];const zones=[...document.querySelectorAll('[data-ot-zone]')];
+  for(let j=0;j<state.layout.length;j++){
+   const z=state.layout[j],len=j===idx?n:z.length,start=z.offsetMode==='manual'?z.start:cursor;
+   starts.push(start);cursor=Math.max(cursor,start+len);
+   const range=zones[j]?.querySelector('.ot-chat-zone-toggle small');
+   if(range)range.textContent=len+' LEDs · '+(z.reverse?'Reversed':'Forward')+' · '+start+'–'+(start+len-1);
+  }
+  const metrics=zone.querySelector('.ot-zone-slider-metrics');
+  if(metrics){
+   const values={start:starts[idx],end:starts[idx]+n-1,next:starts[idx+1]??'—'};
+   for(const [key,val] of Object.entries(values)){const el=metrics.querySelector('[data-ot-metric="'+key+'"]');if(el)el.textContent=val;}
+  }
+ }
  const label=document.getElementById('ot-preview-label-'+id);if(label)label.textContent='SIM · '+n+' pixels';
  const strip=zone.querySelector('.ot-zone-preview');if(!strip)return;
  const current=strip.children.length;
@@ -990,7 +1046,7 @@ function otLayoutPreviewLength(id,value){
  else if(n>current){const frag=document.createDocumentFragment();for(let i=current;i<n;i++){const dot=document.createElement('span');if(otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&i===0||otLayoutIdentifyMode==='last'&&i===n-1)dot.className='on';frag.appendChild(dot)}strip.appendChild(frag)}
  if(otLayoutIdentifyMode==='last'){for(const dot of strip.children)dot.classList.remove('on');strip.lastElementChild?.classList.add('on')}
 }
-function otZoneAutoOffsets(){let cursor=0;for(const z of state.layout){if(z.offsetMode!=='manual')z.start=cursor;cursor=Number(z.start)+Number(z.length);}state.segmentsSynced=false;}
+function otZoneAutoOffsets(){let cursor=0;for(const z of state.layout){if(z.offsetMode!=='manual')z.start=cursor;cursor=Math.max(cursor,Number(z.start)+Number(z.length));}state.segmentsSynced=false;}
 function otZoneSetOffset(id,value){const z=state.layout.find(x=>x.id===id),n=Math.round(Number(value));if(!z||!Number.isFinite(n)||n<0)return;otLayoutCheckpoint();z.start=n;z.offsetMode='manual';otZoneAutoOffsets();persist();render();}
 function otZoneAutoOffset(id){const z=state.layout.find(x=>x.id===id);if(!z)return;otLayoutCheckpoint();z.offsetMode='auto';otZoneAutoOffsets();persist();render();}
 function otZoneRecalculateLength(id,n){const z=state.layout.find(x=>x.id===id);if(!z)return;z.length=n;otZoneAutoOffsets();state.segmentsSynced=false;}
@@ -1017,13 +1073,23 @@ function otBaseArrangementLayout(){
       </button>
       ${item.id===otLayoutSelected?`<div class="ot-zone-editor ot-chat-zone-editor">
        <label class="ot-chat-field">Zone name<input class="ot-chat-input" maxlength="48" value="${esc(item.name)}" onchange="otLayoutRename('${item.id}',this.value)"></label>
-       <div class="ot-context-zone-card">
-        <div class="ot-context-heading"><strong>${esc(item.name)} — Pixel count</strong><input id="ot-count-${item.id}" aria-label="Exact zone length" type="number" min="1" max="10000" value="${item.length}" oninput="otLayoutPreviewLength('${item.id}',this.value)" onchange="otLayoutResize('${item.id}',this.value)"></div>
-        <input class="ot-context-slider" type="range" min="1" max="${Math.max(1000,item.length,Number(state.wledInfo?.leds?.count||0))}" value="${item.length}" oninput="otLayoutPreviewLength('${item.id}',this.value)" onchange="otLayoutResize('${item.id}',this.value)" aria-label="Zone length in LEDs">
-        <div class="ot-context-stats"><div><small>Start index</small><strong id="ot-zone-start-${item.id}">${item.start}</strong></div><div><small>End index</small><strong id="ot-zone-end-${item.id}">${item.start+item.length-1}</strong></div><div><small>Next zone starts</small><strong class="ot-context-next" id="ot-zone-next-${item.id}">${item.start+item.length}</strong></div></div>
-        <p>Drag to adjust the zone. Following automatic offsets update live.</p>
+       <div class="ot-zone-slider-panel" data-ot-zone-slider="${esc(item.id)}">
+        <div class="ot-zone-slider-top"><strong>Zone length</strong><span class="ot-chat-count ot-zone-slider-count">${item.length} LEDs</span></div>
+        <div class="ot-zone-slider-controls">
+         <input type="range" min="1" max="${Math.max(300,item.length)}" step="1" value="${item.length}" style="--ot-range-fill:${(100*(item.length-1)/Math.max(1,Math.max(300,item.length)-1)).toFixed(2)}%" oninput="otRangeInput(this);otLayoutPreviewLength('${item.id}',this.value)" onchange="otLayoutResize('${item.id}',this.value)" aria-label="Zone length in LEDs">
+         <input class="ot-chat-input" id="ot-count-${item.id}" aria-label="Exact zone length" type="number" min="1" max="10000" value="${item.length}" onchange="otLayoutResize('${item.id}',this.value)">
+        </div>
+        <div class="ot-zone-slider-metrics" aria-live="off">
+         <span class="ot-zone-slider-metric"><small>Start index</small><strong data-ot-metric="start">${item.start}</strong></span>
+         <span class="ot-zone-slider-metric"><small>End index</small><strong data-ot-metric="end">${item.start+item.length-1}</strong></span>
+         <span class="ot-zone-slider-metric next"><small>Next zone starts</small><strong data-ot-metric="next">${state.layout[i+1]?.start??'—'}</strong></span>
+        </div>
        </div>
-       <details class="ot-chat-disclosure"><summary>Manual start override <span>›</span></summary><div class="ot-chat-length"><input class="ot-chat-input" type="number" min="0" step="1" aria-label="Manual start index" value="${item.start}" onchange="otZoneSetOffset('${item.id}',this.value)"><button type="button" class="ot-chat-pill" onclick="otZoneAutoOffset('${item.id}')">Auto</button></div><p class="ot-chat-hint">Mode: ${item.offsetMode==='manual'?'Manual':'Automatic'} · LED indices are zero-based.</p></details>
+       <details class="ot-chat-disclosure ot-zone-manual-offset">
+        <summary>Pixel offset (zero-based) · ${item.offsetMode==='manual'?'Manual':'Automatic'} <span>›</span></summary>
+        <div class="ot-chat-length"><input class="ot-chat-input" type="number" min="0" step="1" aria-label="Zone pixel offset" value="${item.start}" onchange="otZoneSetOffset('${item.id}',this.value)"><button type="button" class="ot-chat-pill" onclick="otZoneAutoOffset('${item.id}')">Auto</button></div>
+        <p class="ot-chat-hint">Automatic offsets follow the preceding zones. Manual offsets remain fixed.</p>
+       </details>
        <label class="ot-chat-reverse"><span><strong>Reverse</strong><small>Reverse the direction of this zone</small></span><input type="checkbox" ${item.reverse?'checked':''} onchange="otLayoutReverse('${item.id}',this.checked)"></label>
        <div class="ot-chat-between"><strong>LED preview</strong><small id="ot-preview-label-${item.id}">SIM · ${item.length} pixels</small></div>
        <div class="ot-zone-preview ot-chat-led-strip" aria-label="Uniform simulated LED indicators in output data-index order">${Array.from({length:item.length},(_,j)=>`<span class="${otLayoutIdentifyMode==='all'||otLayoutIdentifyMode==='first'&&j===0||otLayoutIdentifyMode==='last'&&j===item.length-1?'on':''}"></span>`).join('')}</div>
@@ -4088,6 +4154,7 @@ function otChatAutomaticEvents(){
  </section>`;
 }
 
+let otOutputMappingExpanded=false;
 function otStudioRoute(tab){
  if(tab==='builder'&&otConceptActive==='events')return otChatAutomaticEvents();
  if(otControllerMode==='core')return ({
@@ -4095,7 +4162,7 @@ function otStudioRoute(tab){
   device:()=>otCoreDevice()+otAppearanceCard(),
   scenes:()=>scenes()+`<details class="card ot-core-advanced"><summary>CORE connection and capability notes</summary>${otCoreWorkspaceBanner('Show Modes')}</details>`,
   builder:()=>builder()+`<details class="card ot-core-advanced"><summary>CORE physical trigger input mapping · Advanced</summary>${otTriggerManagerCard()}${otCoreWorkspaceBanner('Triggers')}</details>`,
-  layout:()=>layout()+`<details class="card ot-core-advanced"><summary>CORE hardware output mapping · Advanced</summary>${otOutputManagerCard()}${otCoreWorkspaceBanner('Layout')}</details>`,
+  layout:()=>layout()+`<details class="card ot-core-advanced ot-core-output-advanced" data-ot-output-mapping ${otOutputMappingExpanded?'open':''}><summary>CORE hardware output mapping · Advanced</summary>${otOutputManagerCard()}${otCoreWorkspaceBanner('Layout')}</details>`,
   diagnostics:otCoreDiagnostics
  })[tab]();
  return ({home,scenes,builder,layout,device:()=>device()+otAppearanceCard(),diagnostics})[tab]();
@@ -4114,7 +4181,7 @@ const OT_NAV_ICONS={
 function otNavIcon(id){return '<svg class="ot-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(OT_NAV_ICONS[id]||OT_NAV_ICONS.home)+'</svg>'}
 const OT_PAGE_SUBS={home:'Your vehicle lighting, at a glance.',device:'Controllers, connections and safe bench testing.',scenes:'Create lighting effects, sequences and presets.',builder:'Configure lighting behaviors and vehicle events.',layout:'Organize sections and pixel output mapping.',diagnostics:'Health, logs and controller capabilities.'};
 function otPageIntro(){const tab=TABS.find(item=>item[0]===state.tab)||TABS[0];return `<section class="ot-page-intro"><div><div class="ot-eyebrow">${otControllerMode==='core'?'CORE WORKSPACE':'WLED WORKSPACE'} <span aria-hidden="true">/</span> ${esc(state.projectName||'Untitled project')}</div><h1>${esc(tab[2])}</h1><p>${OT_PAGE_SUBS[tab[0]]||''}</p></div><div class="ot-mode-tag">${otControllerMode==='core'?'CORE Alpha':'WLED'}</div></section>`;}
-function render(){document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
+function render(){const outputPanel=document.querySelector('details[data-ot-output-mapping]');if(outputPanel)otOutputMappingExpanded=outputPanel.open;document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header><nav class="tabs">${TABS.map(([id,ic,t])=>`<button class="tab ${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''} onclick="go('${id}')">${otNavIcon(id)}<span>${t}</span></button>`).join('')}</nav>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div>${otUEMarkup()}`;otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
 
 otMigrateLegacyDefaultTriggers();
 // Existing F1 Brake saved projects retain their settings in a legacy backup; Brake absorbs their section assignments.
