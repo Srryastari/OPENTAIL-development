@@ -24,7 +24,7 @@ int main(void){
     c=ot_st_render(OT_ST_BLE,40,100,true); CHECK(c.b==255&&c.r>0);
     c=ot_st_render(OT_ST_BOTH,40,100,true); CHECK(c.g==255&&c.b==255&&c.r==0);
     c=ot_st_render(OT_ST_SHOW,0,100,true); CHECK(c.r==255&&c.g==0&&c.b==0);
-    c=ot_st_render(OT_ST_SHOW,350,100,true); CHECK(c.g==255&&c.r==0&&c.b==0);
+    c=ot_st_render(OT_ST_SHOW,467,100,true); CHECK(c.g==255&&c.r==0&&c.b==0);
     CHECK(ot_st_render(OT_ST_SHOW,0,100,true).r==ot_st_render(OT_ST_SHOW,1400,100,true).r);
     c=ot_st_render(OT_ST_FAULT,0,100,false); CHECK(c.r==255&&c.g==0&&c.b==0);
     CHECK(lit(ot_st_render(OT_ST_FAULT,89,100,true)));
