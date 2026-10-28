@@ -6,16 +6,26 @@ static void color(ot_rgb_t c,unsigned r,unsigned g,unsigned b){assert(c.r==r&&c.
 int main(void){
  ot_om_output_t out[OT_OM_OUTPUTS];ot_om_defaults(out);
  assert(ot_om_valid(&out[0])&&ot_om_valid(&out[1]));
+ /* Fresh/unconfigured profiles must not infer any vehicle zone or role. */
  assert(!strcmp(out[0].name,"Pixel OUT 1"));
- assert(!strcmp(ot_om_role_name(out[0].zones[1].role),"left_turn"));
- assert(!strcmp(ot_om_role_name(out[1].zones[1].role),"right_turn"));
- assert(ot_om_section(&out[0],0)==0&&ot_om_section(&out[0],6)==1&&ot_om_section(&out[0],29)==4);
- assert(ot_om_section(&out[0],30)==-1);
+ assert(!strcmp(out[1].name,"Pixel OUT 2"));
+ for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+   assert(out[i].active_pixels==1);
+   assert(out[i].zone_count==1);
+   assert(!strcmp(out[i].zones[0].name,"Zone 1"));
+   assert(out[i].zones[0].pixels==1 && out[i].zones[0].role==OT_OM_OFF);
+   assert(ot_om_section(&out[i],0)==0 && ot_om_section(&out[i],1)==-1);
+   ot_rgb_t inactive={1,1,1};
+   assert(!ot_om_trigger_overlay(out[i].zones[0].role,0xff,false,32,&inactive));
+ }
+
  ot_layout_t layout;assert(ot_om_layout(&out[0],&layout));
  assert(ot_om_role_from_name("reverse")==OT_OM_REVERSE);
  assert(ot_om_order_from_name("BRG")==OT_OM_BRG);
  assert(ot_om_role_from_name("bad")==-1);
- out[0].zones[0].pixels=7;assert(!ot_om_valid(&out[0]));out[0].zones[1].pixels=5;assert(ot_om_valid(&out[0]));
+ out[0].zones[0].pixels=7;assert(!ot_om_valid(&out[0]));
+ out[0].active_pixels=7;assert(ot_om_valid(&out[0]));
+ out[0].active_pixels=1;out[0].zones[0].pixels=1;assert(ot_om_valid(&out[0]));
  out[0].color_order=9;assert(!ot_om_valid(&out[0]));out[0].color_order=OT_OM_GRB;
  strcpy(out[0].name,"<script>");assert(!ot_om_valid(&out[0]));strcpy(out[0].name,"Front DRL");assert(ot_om_valid(&out[0]));
  color(ot_om_trigger_color(OT_OM_PARK_BRAKE,0,32),0,0,0);
@@ -46,7 +56,7 @@ int main(void){
  for(int i=0;i<6;i++){ot_rgb_t s=ot_om_swizzle(v,i);uint8_t actual[3]={s.b,s.r,s.g};assert(!memcmp(actual,seq[i],3));}
  /* Universal configuration accepts non-GS400 zones and unused (zero-pixel) slots. */
  ot_om_output_t custom[OT_OM_OUTPUTS];ot_om_defaults(custom);
- strcpy(custom[0].name,"Front Accent");custom[0].active_pixels=48;
+ strcpy(custom[0].name,"Front Accent");custom[0].active_pixels=48;custom[0].zone_count=2;
  for(int i=0;i<OT_OM_ZONES;i++){custom[0].zones[i].pixels=0;custom[0].zones[i].role=OT_OM_OFF;}
  strcpy(custom[0].zones[0].name,"DRL Outer");custom[0].zones[0].pixels=36;custom[0].zones[0].role=OT_OM_DECORATIVE;
  strcpy(custom[0].zones[1].name,"Signal Inner");custom[0].zones[1].pixels=12;custom[0].zones[1].role=OT_OM_LEFT;
@@ -67,6 +77,6 @@ int main(void){
  color(ot_om_calibrate((ot_rgb_t){32,0,0},&custom[0]),32,0,0);
  color(ot_om_calibrate((ot_rgb_t){20,20,20},&custom[0]),20,15,16);
  custom[0].zone_count=0;assert(!ot_om_valid(&custom[0]));
- printf("output manager: defaults, validation, generic zone map including zero-length slots, trigger priority and six color permutations passed\n");
+ printf("output manager: inert universal defaults, user-configurable zones, validation, trigger priority and six color permutations passed\n");
  return 0;
 }
