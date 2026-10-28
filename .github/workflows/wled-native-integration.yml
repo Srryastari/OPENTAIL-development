@@ -31,6 +31,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test pinned-source compositor patch (idempotent and fail-closed)
+        run: python wled-native/patch_wled_render_hook.py --self-test
       - name: Run native bridge tests
         run: node --test wled-native/tests/native-bridge.test.mjs
       - name: Compile and run C++ host tests
@@ -48,7 +53,7 @@ jobs:
           done
 
   native-wled-firmware-build:
-    name: Compile pinned WLED plus OpenTail integration (no flashing)
+    name: Compile pinned WLED with OpenTail post-render hook (no flashing)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -58,14 +63,15 @@ jobs:
           python-version: "3.12"
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
-      - name: Build pinned native WLED image
+      - name: Patch and build pinned native WLED image
         run: |
           set -euo pipefail
           bash wled-native/build-native.sh "$RUNNER_TEMP/opentail-wled-build"
-      - name: Verify firmware artifact exists
+      - name: Verify firmware artifact and actual compositor hook
         run: |
           set -euo pipefail
           test -s "$RUNNER_TEMP/opentail-wled-build/.pio/build/opentail_s3_n16r8/firmware.bin"
+          grep -q 'opentailNativePostRender(_pixels, totalLen);' "$RUNNER_TEMP/opentail-wled-build/wled00/FX_fcn.cpp"
       - name: Upload unflashed native WLED build
         uses: actions/upload-artifact@v4
         with:
