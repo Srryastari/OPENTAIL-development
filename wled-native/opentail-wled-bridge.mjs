@@ -199,3 +199,28 @@ export function mergeUnifiedEffectCatalog(wledEffects,openTailEffects=[]){
   }
   return Object.freeze(result);
 }
+
+/** Metadata for the native 1D effects compiled into the WLED compositor hook. */
+export function getOpenTailNativeEffectMetadata(){
+  const colorSlots=[
+    Object.freeze({index:0,label:'Foreground'}),
+    Object.freeze({index:1,label:'Background'})
+  ];
+  const make=(key,name,parameterLabels,defaults,description)=>Object.freeze({
+    key,name,provider:'opentail',dimensions:Object.freeze({oneD:true,matrix:false,threeD:false}),
+    requiresAudio:false,supportsPalette:false,colorSlots:Object.freeze(colorSlots.slice()),
+    parameterLabels:Object.freeze(parameterLabels),defaults:Object.freeze(defaults),description
+  });
+  return Object.freeze([
+    make('embers','Embers',['Intensity','Period'],{intensity:180,periodMs:120},
+      'Deterministic heat-like flicker blending foreground and background.'),
+    make('materialize_sparks','Materialize Sparks',['Intensity','Period'],{intensity:200,periodMs:120},
+      'Scattered foreground sparks over a configurable background.'),
+    make('random_materialize','Random Materialize',['Intensity','Period'],{intensity:255,periodMs:120},
+      'Scattered rainbow materialization with bright white accents.'),
+    make('smooth_fade','Smooth Fade',['Intensity','Period'],{intensity:220,periodMs:500},
+      'Smooth periodic blend between foreground and background.'),
+    make('plasma_sweep','Plasma Sweep',['Intensity','Period'],{intensity:200,periodMs:300},
+      'Traveling sinusoidal color sweep across a one-dimensional zone.')
+  ]);
+}
