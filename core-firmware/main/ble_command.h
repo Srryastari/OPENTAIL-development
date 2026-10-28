@@ -7,6 +7,8 @@
 #define OT_BLE_AUTH 1u
 #define OT_BLE_SHOW 2u
 #define OT_BLE_STOP 3u
+/* Graceful release of session-owned temporary FX before BLE link teardown. */
+#define OT_BLE_RELEASE_TEMPORARY 9u
 #define OT_BLE_FX_SAVE_PRESET 6u
 #define OT_BLE_FX_PLAY_PRESET 7u
 #define OT_BLE_FX_DELETE_PRESET 8u
