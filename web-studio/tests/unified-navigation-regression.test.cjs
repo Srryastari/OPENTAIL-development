@@ -9,7 +9,7 @@ const versioned = fs.readFileSync('web-studio/opentail-v0.19.62.htm', 'utf8');
 assert.equal(stable, versioned, 'Stable deployment and versioned release must be identical');
 
 const renderStart = stable.indexOf('function render(){');
-const renderEnd = stable.indexOf('\nfunction ', renderStart + 1);
+const renderEnd = stable.indexOf('</footer>', renderStart);
 assert(renderStart >= 0 && renderEnd > renderStart, 'Main render function must exist');
 const render = stable.slice(renderStart, renderEnd);
 assert(!render.includes('<nav class="tabs">'), 'Legacy duplicate navigation must not render');
@@ -19,7 +19,7 @@ assert(stable.includes('aria-label="OpenTail main navigation"'),
   'Main navigation must remain accessible and labeled');
 
 const navStart = stable.indexOf('function otConceptNav()');
-const navEnd = stable.indexOf('\nfunction ', navStart + 1);
+const navEnd = stable.indexOf('function otChatPreviewFade(', navStart + 1);
 assert(navStart >= 0 && navEnd > navStart, 'Approved navigation builder must exist');
 const nav = stable.slice(navStart, navEnd);
 const labels = ['Home', 'Show Modes', 'Layout', 'Triggers', 'Auto Events', 'Settings'];
