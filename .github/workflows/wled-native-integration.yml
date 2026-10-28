@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for source in test_native_overlay test_render_coordinator; do
+          for source in test_native_overlay test_native_effects test_render_coordinator; do
             binary="$(mktemp)"
             trap 'rm -f "$binary"' EXIT
             c++ -std=c++17 -Wall -Wextra -Werror -pedantic \
