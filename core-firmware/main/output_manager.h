@@ -9,7 +9,9 @@
  * These are tested-development hardware limits, not vehicle-specific zone
  * boundaries; the output manager never assumes a particular lighting shape.
  */
-#define OT_OM_DEFAULT_BENCH_PIXELS 30u
+/* Inert one-pixel placeholder until an installer explicitly configures output.
+ * This is not a vehicle layout nor the capacity of the hardware. */
+#define OT_OM_UNCONFIGURED_PIXELS 1u
 #define OT_OM_ZONES 8
 #define OT_OM_NAME_LEN 25
 #define OT_OM_VERSION 2
