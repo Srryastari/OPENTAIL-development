@@ -21,6 +21,23 @@ class OpenTailNativeUsermod final : public Usermod {
     // Authenticated OpenTail BLE/profile bridge still needs integration.
     // No network-originated trigger writes are accepted here.
   }
+  bool configureOverlayZones(const opentail::Zone* zones, std::size_t zoneCount,
+                             uint16_t pixelCount, bool authenticatedSession) {
+    if (!authenticatedSession || !enabled ||
+        !overlay.configure(zones, zoneCount, pixelCount)) return false;
+    overlay.setSessionAuthorized(true);
+    overlay.setEnabled(true);
+    return true;
+  }
+  void setVehicleInputsLocal(uint8_t mask) {
+    // This entry point is reserved for the local opto/GPIO sampler.
+    overlay.setVehicleInputsLocal(mask);
+  }
+  void setControlSession(bool authorized) {
+    overlay.setSessionAuthorized(authorized);
+    if (!authorized) revokeNativeEffects();
+    // Do not clear or gate local vehicle inputs on BLE disconnect.
+  }
   bool configureNativeEffects(const opentail::nativefx::Zone* zones,
                               std::size_t zoneCount, std::size_t pixelCount) {
     if (!enabled || !nativeEffects.configure(zones, zoneCount, pixelCount)) {
@@ -140,6 +157,41 @@ bool opentailNativeConfigureZonesV1(const OpenTailNativeZoneConfigV1* zones,
 void opentailNativeRevokeEffectsV1() {
   opentail_native.revokeNativeEffects();
 }
+
+// Vehicle-overlay profile is separate from the native effect profile. Its
+// colors are WLED logical packed RGBW32 values and ranges are [start, stop).
+struct OpenTailOverlayZoneConfigV1 {
+  uint16_t start, stop;
+  uint8_t role; // Park=1, Brake=2, Left=4, Right=8, Reverse=16
+  uint32_t park_color, brake_color, left_color, right_color, reverse_color;
+  uint8_t show_active;
+};
+bool opentailNativeConfigureOverlayZonesV1(
+    const OpenTailOverlayZoneConfigV1* zones, size_t zone_count,
+    size_t pixel_count, bool authenticated_session) {
+  if (!authenticated_session || !zones || zone_count == 0 ||
+      zone_count > opentail::kMaxOverlayZones || pixel_count > 65535) return false;
+  opentail::Zone validated[opentail::kMaxOverlayZones]{};
+  for (size_t i=0; i<zone_count; ++i) {
+    if (zones[i].show_active > 1 || (zones[i].role & ~uint8_t(31u))) return false;
+    validated[i] = {zones[i].start, zones[i].stop, zones[i].role,
+      zones[i].park_color, zones[i].brake_color, zones[i].left_color,
+      zones[i].right_color, zones[i].reverse_color, zones[i].show_active != 0};
+  }
+  return opentail_native.configureOverlayZones(validated, zone_count,
+      static_cast<uint16_t>(pixel_count), authenticated_session);
+}
+// Called only by the local hardware input sampler; never expose this as an
+// unauthenticated HTTP/BLE write characteristic.
+void opentailNativeSetVehicleInputsLocalV1(uint8_t mask) {
+  opentail_native.setVehicleInputsLocal(mask);
+}
+// Session revocation disables remote-configured native effects but deliberately
+// leaves saved vehicle overlays and physical input sampling operational.
+void opentailNativeSetControlSessionV1(bool authorized) {
+  opentail_native.setControlSession(authorized);
+}
+
 }
 
 
