@@ -1,3 +1,10 @@
+## v0.1.29 — unified top navigation
+- Remove the fixed bottom navigation bar; use the same six-destination, in-flow pill navigation as the approved Studio structure.
+- Preserve destination order: Home, Show Modes, Layout, Triggers, Auto Events, Settings.
+- Remove bottom-bar padding that unnecessarily reduced workspace space; Settings remains reachable in the same navigation.
+- Add regression checks that reject fixed bottom tabs and require pill navigation.
+- Software/UI source change only; Android APK build and physical-device visual verification are pending.
+
 # OpenTail Android Changelog
 
 ## v0.1.28 — unified 1D effects and status-light restoration
