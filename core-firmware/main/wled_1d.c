@@ -169,7 +169,6 @@ ot_rgb_t ot_wled_1d_pixel(unsigned id,unsigned px,unsigned len,uint32_t ms,
     if(!m||!len||px>=len)return rgb(0,0,0);
     const uint32_t period=3600u-(uint32_t)speed*10u, phase=ms%period;
     const uint32_t tick=ms/(15u+(255u-speed)/6u);
-    const uint32_t step=tick%len;
     const uint32_t sig=hash32((uint32_t)id*99991u+(uint32_t)px*2654435761u+(ms/110u)*2246822519u);
     const uint8_t wave=tri((uint32_t)px*16u+ms/(3u+(255u-speed)/64u),512u);
     const uint8_t h=(uint8_t)(px*256u/len+ms/(12u+(255u-speed)/13u));
