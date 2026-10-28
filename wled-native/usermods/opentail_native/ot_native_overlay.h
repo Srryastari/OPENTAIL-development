@@ -41,6 +41,15 @@ class Overlay final {
     if(zoneIndex < count_) zones_[zoneIndex].showActive=active;
   }
   std::size_t zoneCount() const { return count_; }
+  // Paint into WLED's logical packed-color frame, before WLED conversion.
+  // This does not access a bus or commit output.
+  void applyToFrame(uint32_t* pixels, std::size_t ledCount) const {
+    if (!pixels || !ledCount) return;
+    forEachActiveSpan([pixels, ledCount](Span s) {
+      const std::size_t stop = s.stop < ledCount ? s.stop : ledCount;
+      for (std::size_t p = s.start; p < stop; ++p) pixels[p] = s.color;
+    });
+  }
   template<class Fn> void forEachActiveSpan(Fn fn) const {
     if (!enabled_ || !authorized_ || !inputs_) return;
     for (std::size_t i=0; i<count_; ++i) {
