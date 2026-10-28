@@ -42,7 +42,7 @@ test('fails closed on segment limits, overlapping buses or incorrect counts',()=
   assert.throws(()=>assertNativeWledCapacity({leds:{count:522,maxseg:16}},outputs),/exceeds/);
 });
 test('rejects invalid controls and non-RGB JSON colors',()=>{
-  assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{speed:256})],{supported1DIds}),/speed/);
+  assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{speed:256})],{supported1DIds}),/sx/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{brightness:-1})],{supported1DIds}),/brightness/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{foreground:[300,0,0]})],{supported1DIds}),/foreground/);
   assert.throws(()=>buildNativeWledState(outputs,[fx(0,0,9,{foreground:[0,0,0,255]})],{supported1DIds}),/RGB triplet/);
@@ -61,7 +61,7 @@ test('parses native metadata labels, dual colors, palette flags and defaults',()
 test('discovers only 1D modes from exact native metadata and preserves audio capability',()=>{
  const r=discoverNativeWled1DEffects(
   ['Solid','Rainbow','2D Plasma','Audio Scan','Mixed 1D2D','Cube','Legacy'],
-  ['Solid','!,!;;!;1','!,!;;!;2','!,!;;!;1f','!,!;;!;12','!,!;;!;3',''],
+  ['Solid','Rainbow@Speed;Bg,Fx;!;1','2D Plasma@Speed;Bg,Fx;!;2','Audio Scan@Speed;Bg,Fx;!;1f','Mixed 1D2D@Speed;Bg,Fx;!;12','Cube@Speed;Bg,Fx;!;3',''],
   {fxcount:7});
  assert.deepEqual(r.effects.map(e=>e.id),[0,1,3,4,6]);
  assert.equal(r.effects.find(e=>e.id===3).requiresAudio,true);
