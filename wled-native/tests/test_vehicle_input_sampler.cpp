@@ -21,12 +21,12 @@ int main() {
   assert(s.sample(0xff,true)==0);
 
   // Simultaneous signals remain simultaneous; the overlay arbitrates priority.
-  for (int i=0;i<4;i++) s.sample(0xf1,true); // IN1, IN2, IN3 active
+  for (int i=0;i<4;i++) s.sample(0xf8,true); // IN1, IN2, IN3 active
   assert(s.logicalMask()==(kPark|kBrake|kLeft));
-  assert(s.stablePhysicalMask()==0x0e);
+  assert(s.stablePhysicalMask()==0x07);
 
   // A configurable profile can disable an input or remap a physical input.
-  const uint8_t map[kInputCount]={0,kReverse,kBrake,kLeft,kRight,0,0,0};
+  const uint8_t map[kInputCount]={kLeft,kReverse,kBrake,kRight,0,0,0,0};
   assert(s.configureMapping(map));
   assert(s.logicalMask()==(kReverse|kBrake|kLeft)); // current stable state remapped immediately
   const uint8_t invalid[kInputCount]={3,0,0,0,0,0,0,0};
