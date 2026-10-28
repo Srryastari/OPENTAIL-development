@@ -133,15 +133,25 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    uint16_t ids[9]={0};
-    size_t total=ot_effects_1d_supported_ids(ids,9u);
-    if(total>9u)total=9u; /* Do not advertise truncated modes as fully discoverable. */
-    uint8_t payload[20]={1,(uint8_t)total};
+    /* 120 WLED-compatible 1D IDs + OpenTail Embers fit in a long GATT value.
+     * Honor Read Blob offsets so Android can retrieve the complete list even
+     * when the negotiated ATT MTU is the default 23 bytes. */
+    uint16_t ids[128]={0};
+    size_t total=ot_effects_1d_supported_ids(ids,128u);
+    if(total>127u)total=127u;
+    uint8_t payload[2u+127u*2u]={1,(uint8_t)total};
     for(size_t i=0;i<total;i++){
-        payload[2+i*2]=(uint8_t)ids[i];
-        payload[3+i*2]=(uint8_t)(ids[i]>>8);
+        payload[2u+i*2u]=(uint8_t)ids[i];
+        payload[3u+i*2u]=(uint8_t)(ids[i]>>8);
     }
-    return os_mbuf_append(ctx->om,payload,2u+total*2u)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    const size_t payload_len=2u+total*2u;
+    const size_t offset=ctx->offset;
+    if(offset>payload_len)return BLE_ATT_ERR_INVALID_OFFSET;
+    size_t chunk=payload_len-offset;
+    uint16_t mtu=ble_att_mtu(conn);
+    size_t max_chunk=mtu>1u?(size_t)mtu-1u:20u;
+    if(chunk>max_chunk)chunk=max_chunk;
+    return os_mbuf_append(ctx->om,payload+offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
