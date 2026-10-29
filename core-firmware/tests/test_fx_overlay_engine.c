@@ -22,7 +22,7 @@ int main(void){
     assert(ot_fx_overlay_apply(&cfg,42,0,repeat,623,24));
     assert(memcmp(frame,repeat,sizeof(frame))==0);
     memset(repeat,0,sizeof(repeat));
-    assert(ot_fx_overlay_apply(&cfg,42,119,repeat,623,24));
+    assert(ot_fx_overlay_apply(&cfg,42,60,repeat,623,24));
     assert(lit(repeat,623)>0);
     memset(repeat,0,sizeof(repeat));
     assert(ot_fx_overlay_apply(&cfg,42,120,repeat,623,24));
