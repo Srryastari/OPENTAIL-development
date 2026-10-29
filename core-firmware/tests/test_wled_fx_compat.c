@@ -1140,6 +1140,47 @@ int main(void) {
     ot_wled_fx_reset(&tetr_b);
     assert(!tetr_a.scratch && !tetr_b.scratch);
 
+
+    /* Palette core is deterministic/source-bounded. Unsupported IDs fail
+     * without modifying outputs; this must not silently enable other FX. */
+    const ot_wled_rgb_t prim={123u,56u,9u},sec={3u,88u,174u},ter={0u,0u,0u};
+    ot_wled_palette16_t palette={0};
+    assert(!ot_wled_palette_build(7u,prim,sec,ter,&palette));
+    assert(!ot_wled_palette_build(2u,prim,sec,ter,NULL));
+    for(unsigned pal=0;pal<=6u;pal++) {
+        if(pal==1u)continue; /* WLED's dynamic random palette needs RNG/state */
+        assert(ot_wled_palette_build((uint8_t)pal,prim,sec,ter,&palette));
+        for(unsigned ix=0u;ix<256u;ix++) {
+            const ot_wled_rgb_t full=ot_wled_palette_sample(&palette,
+                (uint8_t)ix,255u,OT_WLED_PALETTE_LINEAR);
+            const ot_wled_rgb_t black=ot_wled_palette_sample(&palette,
+                (uint8_t)ix,0u,OT_WLED_PALETTE_LINEAR);
+            assert(eq(black,(ot_wled_rgb_t){0u,0u,0u}));
+            if(pal==2u)assert(eq(full,prim));
+        }
+    }
+    assert(ot_wled_palette_build(6u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,0u,255u,
+                       OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0x9Bu,0x00u,0xD5u}));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,
+                       OT_WLED_PALETTE_LINEAR),
+              (ot_wled_rgb_t){0xBDu,0x00u,0xB8u}));
+    for(uint8_t pal=2u;pal<=6u;pal++) {
+        c.effect_id=OT_WLED_COLOR_CLOUDS;
+        c.speed=24u;c.intensity=32u;c.brightness=32u;c.palette_id=pal;
+        ot_wled_fx_state_t state_pal={0};
+        ot_wled_rgb_t guarded[33]={0};
+        guarded[0]=guarded[32]=(ot_wled_rgb_t){99u,88u,77u};
+        assert(ot_wled_fx_render(&c,&state_pal,1234u,&guarded[1],31u));
+        assert(eq(guarded[0],(ot_wled_rgb_t){99u,88u,77u}));
+        assert(eq(guarded[32],(ot_wled_rgb_t){99u,88u,77u}));
+        ot_wled_fx_reset(&state_pal);
+        c.effect_id=OT_WLED_SOLID;
+        assert(!ot_wled_fx_render(&c,&state_pal,1234u,&guarded[1],31u));
+    }
+    c.palette_id=0u;
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
