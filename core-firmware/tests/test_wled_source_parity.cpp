@@ -229,6 +229,42 @@ uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
 
 #pragma GCC diagnostic pop
 
+// BEGIN PINNED colors.cpp color_add (verbatim body, host default parameter)
+uint32_t WLED_O2_ATTR color_add(uint32_t c1, uint32_t c2, bool preserveCR=false)
+{
+  if (c1 == BLACK) return c2;
+  if (c2 == BLACK) return c1;
+  const uint32_t TWO_CHANNEL_MASK = 0x00FF00FF; // mask for R and B channels or W and G if negated
+  uint32_t rb = ( c1     & TWO_CHANNEL_MASK) + ( c2     & TWO_CHANNEL_MASK); // mask and add two colors at once
+  uint32_t wg = ((c1>>8) & TWO_CHANNEL_MASK) + ((c2>>8) & TWO_CHANNEL_MASK);
+
+  if (preserveCR) { // preserve color ratios
+    uint32_t overflow = (rb | wg) & 0x01000100; // detect overflow by checking 9th bit
+    if (overflow) {
+      uint32_t r = rb >> 16; // extract single color values
+      uint32_t b = rb & 0xFFFF;
+      uint32_t w = wg >> 16;
+      uint32_t g = wg & 0xFFFF;
+      uint32_t maxval = (r > g) ? ((r > b) ? r : b) : ((g > b) ? g : b); // find max value. note: faster than using max() function or on par
+      maxval = (w > maxval) ? w : maxval; // check white channel as well to avoid division by zero in pure white input
+      const uint32_t scale = (uint32_t(255)<<8) / maxval; // division of two 8bit (shifted) values does not work -> use bit shifts and multiplaction instead
+      rb = ((rb * scale) >> 8) &  TWO_CHANNEL_MASK;
+      wg =  (wg * scale)       & ~TWO_CHANNEL_MASK;
+    } else wg <<= 8; //shift white and green back to correct position
+  } else {
+    // branchless per-channel saturation to 255 (extract 9th bit, subtract 1 if it is set, mask with 0xFF, input is 0xFF+0xFF=0x1EF max)
+    // example with overflow: input: 0x01EF01EF -> (0x0100100 - 0x00010001) = 0x00FF00FF -> input|0x00FF00FF = 0x00FF00FF (saturate)
+    // example without overflow: input: 0x007F007F -> (0x00000000 - 0x00000000) = 0x00000000 -> input|0x00000000 = input  (no change)
+    rb |= ((rb & 0x01000100) - ((rb >> 8) & 0x00010001)) & 0x00FF00FF;
+    wg |= ((wg & 0x01000100) - ((wg >> 8) & 0x00010001)) & 0x00FF00FF;
+    wg <<= 8; // restore WG position
+  }
+  return rb | wg;
+}
+
+
+// END PINNED color_add
+
 // END UPSTREAM math/color functions.
 // Only this minimal adapter code is OpenTail-specific.
 // Small RGB structs replicate upstream class conversion (gamma disabled).
@@ -240,6 +276,7 @@ struct CRGBW {
         struct {uint8_t b,g,r,w;};
     };
     CRGBW():color32(0u){}
+    CRGBW(uint8_t red,uint8_t green,uint8_t blue):color32(((uint32_t)red<<16)|((uint32_t)green<<8)|blue){}
     CRGBW(uint32_t col):color32(col){}
     unsigned getRGBaverage() const {return ((unsigned)r+(unsigned)g+(unsigned)b)/3u;}
     explicit CRGBW(CHSV32 c) {
