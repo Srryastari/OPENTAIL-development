@@ -42,7 +42,7 @@ for token in ("esp_ota_begin(", "esp_ota_write(", "esp_ota_end(",
               "X-OpenTail-Update", "Origin", "192.168.4.1",
               "esp_ota_get_partition_description(", "ot_ota_available()"):
     assert token in ota,token
-assert '".uri="/api/v1/ota"' in core
+assert '.uri="/api/v1/ota"' in core
 assert "ot_ota_confirm_boot(true)" in core
 assert "gh run download" in installer and "gh run view" in installer
 assert "gh run list" in installer and "-VerifyOnly" not in installer
