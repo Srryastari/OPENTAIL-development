@@ -19,11 +19,14 @@ for(const required of [
   'project.previewZoneOffsets(id, n)',
   'onValueChangeFinished = { applyLiveZone() }',
   'project.editZone(id, label, n, reverse)',
-  'project.setPixelColor(id, selectedPixel, hex)',
-  'project.clearPixelColor(id, selectedPixel)',
-  'PaletteEditor("Pixel " + selectedPixel',
+  'project.setPixelColor(id, activePixel, hex)',
+  'project.clearPixelColor(id, activePixel)',
+  'PaletteEditor("Pixel " + activePixel',
   'name = it', 'project.name(it)', 'confirmButton = { Pill("Done"',
 ]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
+assert(compose.includes('selectedEffect.intValue = effectId') &&
+       compose.includes('val effect = selectedEffect.intValue'),
+       'Auto Events must preview the correct selected effect immediately.');
 assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx('),
   'Authoring layout must never directly write a physical output mapping.');
 
