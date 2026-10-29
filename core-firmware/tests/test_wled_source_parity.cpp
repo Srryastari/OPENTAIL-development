@@ -26,6 +26,7 @@ extern "C" {
 #define PALETTE_SOLID_WRAP true
 using std::min;
 using std::abs;
+using byte = uint8_t;
 
 // BEGIN UPSTREAM math/color functions, unchanged source bodies.
 void hsv2rgb_rainbow(uint16_t h, uint8_t s, uint8_t v, uint8_t* rgbdata, bool isRGBW) {
