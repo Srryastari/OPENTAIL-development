@@ -70,27 +70,29 @@ int main(void){
     assert(configured[0].active_pixels==522);
     assert(configured[1].active_pixels==30);
 
-    /* New software maximum: 623 per independently-configured output,
-     * 1,246 across two outputs. These are generic capacity test fixtures,
-     * NOT factory-installed vehicle zone assumptions or physical passes. */
+    /* Capacity budget is a board-build capability, not a verified 1,246
+     * hardware result. This test uses arbitrary user-owned geometry. */
+    const unsigned lane_cap=OT_OM_MAX_PIXELS_PER_OUTPUT;
+    assert(lane_cap>522u);
+    const unsigned first=lane_cap/2u, second=lane_cap-first;
     ot_om_output_t candidate[OT_OM_OUTPUTS];ot_om_defaults(candidate);
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
         snprintf(candidate[o].name,OT_OM_NAME_LEN,"Prototype OUT %u",o+1u);
-        candidate[o].active_pixels=OT_OM_MAX_PIXELS_PER_OUTPUT;
+        candidate[o].active_pixels=(uint16_t)lane_cap;
         candidate[o].zone_count=2;
-        setzone(&candidate[o].zones[0],"Interior Group",301,OT_OM_DECORATIVE);
-        setzone(&candidate[o].zones[1],"Exterior Group",322,OT_OM_LEFT);
+        setzone(&candidate[o].zones[0],"Interior Group",(uint16_t)first,OT_OM_DECORATIVE);
+        setzone(&candidate[o].zones[1],"Exterior Group",(uint16_t)second,OT_OM_LEFT);
         assert(ot_om_valid(&candidate[o]));
-        assert(ot_om_section(&candidate[o],622)==1);
-        assert(ot_om_section(&candidate[o],623)==-1);
-        roundtrip(&candidate[o]); /* two-byte 623 count remains lossless */
-        candidate[o].active_pixels=624;
-        candidate[o].zones[1].pixels=323;
+        assert(ot_om_section(&candidate[o],lane_cap-1u)==1);
+        assert(ot_om_section(&candidate[o],lane_cap)==-1);
+        roundtrip(&candidate[o]);
+        candidate[o].active_pixels=(uint16_t)(lane_cap+1u);
+        candidate[o].zones[1].pixels=(uint16_t)(second+1u);
         assert(!ot_om_valid(&candidate[o]));
-        candidate[o].active_pixels=623;
-        candidate[o].zones[1].pixels=322;
+        candidate[o].active_pixels=(uint16_t)lane_cap;
+        candidate[o].zones[1].pixels=(uint16_t)second;
     }
-    assert(candidate[0].active_pixels+candidate[1].active_pixels==1246);
+    assert((unsigned)candidate[0].active_pixels+candidate[1].active_pixels==OT_OM_MAX_TOTAL_PIXELS);
 
     /* The physically observed GRB color correction stays configurable.
      * Test the actual byte order contract, not a screenshot color. */
@@ -136,6 +138,6 @@ int main(void){
     strcpy(remembered.name,"Front DRL");
     remembered.color_order=OT_OM_BRG;
     roundtrip(&remembered);
-    puts("PASS: neutral factory zones + saved 522/30 bench profiles + generic 623+623 software cap + GRB + masks + brake/hazards/reverse + BLE roundtrip");
+    puts("PASS: neutral factory zones + saved 522/30 bench profiles + board-derived memory budget + GRB + masks + brake/hazards/reverse + BLE roundtrip");
     return 0;
 }
