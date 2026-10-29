@@ -268,6 +268,9 @@ final class BleDiscovery {
     private boolean readReplyPending = false;
     private byte[] pendingPacket;
     private byte[] nextPacket;
+    // Preserve a queued STOP before the latest subsequent FX edit. Without
+    // this slot, last-write-wins could replace STOP with a newer start.
+    private byte[] afterStopPacket;
 
     /** Explicit state for status labels; never infer a live connection from a prior success message. */
     String connectionPhase() {
@@ -288,7 +291,7 @@ final class BleDiscovery {
         command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
-        writePending = false; readReplyPending = false; pendingPacket = null; nextPacket = null;
+        writePending = false; readReplyPending = false; pendingPacket = null; nextPacket = null; afterStopPacket = null;
         Arrays.fill(cfgKnownRevision, -1);
         if (gatt != null) { try { gatt.close(); } catch (Exception ignored) {} gatt = null; }
         notifyStatus("Bluetooth off · connection closed");
@@ -404,17 +407,31 @@ final class BleDiscovery {
     }
 
     /** Serialize Android GATT operations; BLE GATT only allows one pending request. */
+    private static boolean isStopPacket(byte[] data) {
+        return data != null && data.length == 2 && data[0] == 1 && data[1] == 3;
+    }
     private void enqueueWrite(byte[] data) {
-        if(frameCapture.busy() && data.length==2 && data[0]==1 && data[1]==3) {
+        final boolean stop = isStopPacket(data);
+        if(frameCapture.busy() && stop) {
             // STOP supersedes diagnostic reads. Drain the one in-flight GATT
             // operation before issuing STOP; never interrupt an ATT transaction.
             nextPacket=Arrays.copyOf(data,data.length);
+            afterStopPacket=null;
             frameCapture.abortForStop();
             return;
         }
         if (writePending || readReplyPending || cfgBusy || fxCapsBusy || frameCapture.busy()) {
-            // One pending latest action; explicit STOP replaces queued starts.
-            nextPacket=Arrays.copyOf(data,data.length);return;
+            if (stop) {
+                nextPacket=Arrays.copyOf(data,data.length);
+                afterStopPacket=null;
+            } else if (isStopPacket(nextPacket)) {
+                // A later FX edit must not erase a STOP waiting behind ATT.
+                // Coalesce newer edits in one successor slot after STOP.
+                afterStopPacket=Arrays.copyOf(data,data.length);
+            } else {
+                nextPacket=Arrays.copyOf(data,data.length);
+            }
+            return;
         }
         pendingPacket=Arrays.copyOf(data,data.length);
         writeNow();
@@ -438,7 +455,10 @@ final class BleDiscovery {
     }
     private void pumpQueue(){
         if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!frameCapture.busy()&&nextPacket!=null){
-            pendingPacket=nextPacket;nextPacket=null;writeNow();
+            pendingPacket=nextPacket;
+            nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;
+            afterStopPacket=null;
+            writeNow();
         }
     }
     private String preferredPending = null;
@@ -599,7 +619,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;
+        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -625,7 +645,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;
+                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
