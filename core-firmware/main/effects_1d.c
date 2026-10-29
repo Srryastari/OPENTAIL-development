@@ -34,7 +34,11 @@ bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta){
 }
 void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed){
     if(!s)return;
+    /* Free any source-ported dynamic pixel state before resetting the
+     * encompassing CORE zone. No heap lifetime can cross a replacement. */
+    ot_wled_fx_reset(&s->wled);
     memset(s,0,sizeof(*s));
+    ot_wled_fx_reset(&s->wled);
     ot_particles_1d_reset(&s->particles,seed);
 }
 static uint32_t rng(ot_particles_1d_t *s){
