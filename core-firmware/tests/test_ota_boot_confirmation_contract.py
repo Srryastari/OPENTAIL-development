@@ -27,7 +27,7 @@ assert startup.index("http_startup_ready=wifi_started&&http_start();") < startup
 # The diagnostic HTTP service must never take down physical lighting on
 # registration failure. OTA acceptance still requires service startup.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
-wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static void input_init(void)",1)[0]
+wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static bool input_init(void)",1)[0]
 assert "ESP_ERROR_CHECK(" not in wifi
 assert "abort();" not in wifi
 assert "return false;" in wifi and "return true;" in wifi
