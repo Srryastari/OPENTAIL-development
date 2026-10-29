@@ -11,6 +11,7 @@ class OpenTailNativeUsermod final : public Usermod {
   opentail::Overlay overlay;
   opentail::nativefx::Engine nativeEffects;
   bool enabled = false;
+  bool sessionAuthorized = false;
  public:
   void setup() override {
     // Do not seize WLED's default data pins, buttons or PC817 GPIOs.
@@ -23,7 +24,7 @@ class OpenTailNativeUsermod final : public Usermod {
   }
   bool configureOverlayZones(const opentail::Zone* zones, std::size_t zoneCount,
                              uint16_t pixelCount, bool authenticatedSession) {
-    if (!authenticatedSession || !enabled ||
+    if (!authenticatedSession || !sessionAuthorized || !enabled ||
         !overlay.configure(zones, zoneCount, pixelCount)) return false;
     overlay.setSessionAuthorized(true);
     overlay.setEnabled(true);
@@ -34,13 +35,14 @@ class OpenTailNativeUsermod final : public Usermod {
     overlay.setVehicleInputsLocal(mask);
   }
   void setControlSession(bool authorized) {
+    sessionAuthorized = authorized;
     overlay.setSessionAuthorized(authorized);
     if (!authorized) revokeNativeEffects();
     // Do not clear or gate local vehicle inputs on BLE disconnect.
   }
   bool configureNativeEffects(const opentail::nativefx::Zone* zones,
                               std::size_t zoneCount, std::size_t pixelCount) {
-    if (!enabled || !nativeEffects.configure(zones, zoneCount, pixelCount)) {
+    if (!enabled || !sessionAuthorized || !nativeEffects.configure(zones, zoneCount, pixelCount)) {
       revokeNativeEffects();
       return false;
     }
@@ -79,6 +81,8 @@ class OpenTailNativeUsermod final : public Usermod {
   bool readFromConfig(JsonObject& root) override {
     JsonObject cfg=root["OpenTailNative"];
     enabled=cfg["enabled"] | false;
+    sessionAuthorized = false;
+    overlay.setSessionAuthorized(false);
     overlay.setEnabled(enabled);
     revokeNativeEffects(); // Reboot/config reload never restores authorization.
     return !cfg.isNull();
