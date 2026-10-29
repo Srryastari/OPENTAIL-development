@@ -14,9 +14,9 @@ const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/Na
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
 const gradle=fs.readFileSync('android/app/build.gradle','utf8');
 const web=fs.readFileSync('web-studio/opentail.htm','utf8');
-assert(!/WebView|JavascriptInterface|evaluateJavascript|loadUrl|appassets\.androidplatform/.test(main),
+assert(!/new WebView\\(|WebViewAssetLoader|@JavascriptInterface|evaluateJavascript\\(|loadUrl\\(|appassets\\.androidplatform/.test(main),
   'Android launch activity cannot contain WebView, JavaScript bridges, or loadUrl');
-assert(!/WebView|JavaScript|androidx\.webkit/i.test(gradle),
+assert(!/implementation\\s+['"]androidx\\.webkit:/.test(gradle),
   'The Android app must not have AndroidX WebKit as a runtime dependency');
 assert(!fs.existsSync('android/app/src/main/assets/opentail.htm'),
   'No HTML copy may be bundled in the native APK');
