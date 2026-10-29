@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "core_logic.h"
 
@@ -27,3 +28,11 @@ int ot_tm_from_name(const char *name);
  * Disabled/unknown names map to zero; never interpret simulation names as GPIO pins. */
 uint8_t ot_tm_signal_mask_of(const char *name);
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t physical_bits);
+
+/* Authenticated BLE trigger-profile v1: one 11-byte write fits default ATT MTU.
+ * [version, expected_revision LE16, IN1..IN8 logical function IDs].
+ * No GPIO numbers, LED geometry, or vehicle-specific function assumptions. */
+#define OT_TM_BLE_VERSION 1u
+#define OT_TM_BLE_WRITE_BYTES (3u+OT_IN_COUNT)
+bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
+                      uint16_t *expected_revision,ot_tm_profile_t *out);
