@@ -501,28 +501,46 @@ class ComposeMainActivity : ComponentActivity() {
                 var label by remember(id) { mutableStateOf(zone.optString("name")) }
                 var count by remember(id) { mutableStateOf(zone.optInt("length").toString()) }
                 var reverse by remember(id) { mutableStateOf(zone.optBoolean("reverse")) }
+                fun applyLiveZone() {
+                    val n = count.toIntOrNull() ?: return
+                    if (n in 1..10000 && label.trim().isNotEmpty() &&
+                        project.editZone(id, label, n, reverse)) refresh()
+                }
                 AlertDialog(onDismissRequest = { editingId = null },
                     title = { Text("Edit zone") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Field(label, "Zone name", t) { label = it }
-                            Field(count, "Pixel count", t) { count = it.filter(Char::isDigit).take(5) }
+                            Caption("Live editing is always on. Changes appear immediately; " +
+                                "valid edits are auto-saved to the design. No controller NVS writes.", t)
+                            Field(label, "Zone name", t) {
+                                label = it
+                                applyLiveZone()
+                            }
+                            Field(count, "Pixel count", t) {
+                                count = it.filter(Char::isDigit).take(5)
+                                applyLiveZone()
+                            }
                             val n = count.toIntOrNull() ?: 0
                             Slider(value = n.coerceIn(1, 10000).toFloat(),
-                                   onValueChange = { count = it.toInt().coerceIn(1, 10000).toString() },
+                                   onValueChange = {
+                                       count = it.toInt().coerceIn(1, 10000).toString()
+                                       // Render downstream zero-based offsets every drag frame,
+                                       // and save only when drag finishes to avoid flash churn.
+                                   },
+                                   onValueChangeFinished = { applyLiveZone() },
                                    valueRange = 1f..10000f)
                             Caption(project.previewZoneOffsets(id, n), t)
                             Pill(if (reverse) "Reverse pixels ✓" else "Reverse pixels", t, reverse) {
                                 reverse = !reverse
+                                applyLiveZone()
                             }
                         }
                     },
-                    confirmButton = { Pill("Save", t, true) {
-                        if (project.editZone(id, label, count.toIntOrNull() ?: 0, reverse)) {
-                            editingId = null;refresh()
-                        }
+                    confirmButton = { Pill("Done", t, true) {
+                        applyLiveZone()
+                        editingId = null
                     } },
-                    dismissButton = { Pill("Cancel", t) { editingId = null } })
+                    dismissButton = { Pill("Close", t) { editingId = null } })
             }
         }
         deleteId?.let { id ->
