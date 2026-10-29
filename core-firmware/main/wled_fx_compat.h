@@ -70,7 +70,13 @@ enum {
     OT_WLED_BPM = 68,
     OT_WLED_LAKE = 75,
     OT_WLED_PLASMA = 97,
-    OT_WLED_OSCILLATE = 62
+    OT_WLED_OSCILLATE = 62,
+    OT_WLED_SCANNER = 40,
+    OT_WLED_LIGHTHOUSE = 41,
+    OT_WLED_SCANNER_DUAL = 60,
+    OT_WLED_SINELON = 92,
+    OT_WLED_SINELON_DUAL = 93,
+    OT_WLED_SINELON_RAINBOW = 94
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
