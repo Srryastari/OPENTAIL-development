@@ -27,6 +27,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
@@ -34,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -272,7 +274,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun Pill(label: String, t: Tone, selected: Boolean = false, action: () -> Unit) {
-        Box(Modifier.clip(RoundedCornerShape(99.dp))
+        Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
                 .background(if (selected) t.accent else t.raised)
                 .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 11.dp),
             contentAlignment = Alignment.Center) {
@@ -283,7 +285,8 @@ class ComposeMainActivity : ComponentActivity() {
     /** Preserve the single white Connect action from the approved UI. */
     @Composable
     private fun ConnectPill(onClick: () -> Unit) {
-        Box(Modifier.clip(RoundedCornerShape(99.dp)).background(Color.White)
+        Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
+            .background(Color.White)
             .clickable(onClick = onClick).padding(horizontal = 22.dp, vertical = 12.dp),
             contentAlignment = Alignment.Center) {
             Text("Connect", color = Color.Black, fontSize = 14.sp,
@@ -305,17 +308,51 @@ class ComposeMainActivity : ComponentActivity() {
         Text(text, color = t.fg, fontSize = 21.sp, fontWeight = FontWeight.Bold)
     }
     @Composable
-    private fun Field(value: String, hint: String, t: Tone, onChange: (String) -> Unit) {
+    private fun Field(value: String, hint: String, t: Tone,
+                      modifier: Modifier = Modifier.fillMaxWidth(), onChange: (String) -> Unit) {
         BasicTextField(
             value = value, onValueChange = onChange, singleLine = true,
             cursorBrush = SolidColor(t.accent),
             textStyle = TextStyle(color = t.fg, fontSize = 14.sp),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(99.dp))
+            modifier = modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
                 .background(t.raised).padding(horizontal = 15.dp, vertical = 13.dp),
             decorationBox = { inner ->
                 Box {
                     if (value.isEmpty()) Text(hint, fontSize = 14.sp, color = t.muted)
                     inner()
+                }
+            }
+        )
+    }
+    // Shared soft-capsule slider for all editors. Material3 retains keyboard,
+    // accessibility and touch gestures; only the thumb/track are styled.
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun CapsuleSlider(value: Int, min: Int, max: Int, t: Tone,
+                              change: (Int) -> Unit, finished: (() -> Unit)? = null) {
+        val upper = max.coerceAtLeast(min + 1)
+        Slider(
+            value = value.coerceIn(min, upper).toFloat(),
+            onValueChange = { change(it.toInt().coerceIn(min, upper)) },
+            onValueChangeFinished = finished,
+            valueRange = min.toFloat()..upper.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = t.accent, activeTrackColor = t.accent,
+                inactiveTrackColor = t.raised
+            ),
+            thumb = {
+                Box(Modifier.size(22.dp)
+                    .shadow(5.dp, RoundedCornerShape(99.dp),
+                            ambientColor = t.accent.copy(alpha = 0.25f),
+                            spotColor = t.accent.copy(alpha = 0.25f))
+                    .clip(RoundedCornerShape(99.dp)).background(t.accent))
+            },
+            track = { state ->
+                val progress = ((state.value - min) / (upper - min)).coerceIn(0f, 1f)
+                Box(Modifier.fillMaxWidth().height(12.dp)
+                    .clip(RoundedCornerShape(99.dp)).background(t.raised)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress)
+                        .clip(RoundedCornerShape(99.dp)).background(t.accent))
                 }
             }
         )
@@ -326,10 +363,7 @@ class ComposeMainActivity : ComponentActivity() {
             Text(title, Modifier.weight(1f), color = t.fg, fontSize = 13.sp)
             Text(value.toString(), color = t.accent, fontSize = 13.sp)
         }
-        Slider(value = value.coerceIn(0, max).toFloat(), onValueChange = { change(it.toInt()) },
-               valueRange = 0f..max.toFloat(), colors = SliderDefaults.colors(
-                   thumbColor = t.accent, activeTrackColor = t.accent,
-                   inactiveTrackColor = t.raised))
+        CapsuleSlider(value, 0, max, t, change)
     }
     @Composable
     private fun PaletteEditor(label: String, color: Int, t: Tone, change: (Int) -> Unit) {
@@ -341,7 +375,7 @@ class ComposeMainActivity : ComponentActivity() {
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.size(32.dp).clip(RoundedCornerShape(12.dp))
                 .background(Color(color)))
-            Field(hex, "#RRGGBB", t) { entered ->
+            Field(hex, "#RRGGBB", t, Modifier.weight(1f)) { entered ->
                 hex = entered.take(7)
                 if (Regex("^#[0-9A-Fa-f]{6}$").matches(hex))
                     change(android.graphics.Color.parseColor(hex))
@@ -474,7 +508,8 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Pixel-exact design inspection · effects require CORE rendered frames", t)
             EffectsPreview(t, effect)
             if (ble.canCaptureFrame()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Pill("OUT 1", t, captureOutput.intValue == 0) {
                         captureOutput.intValue = 0; coreFrame.value = null
                     }
@@ -583,7 +618,8 @@ class ComposeMainActivity : ComponentActivity() {
             val item = steps.optJSONObject(i) ?: continue
             Panel(t) {
                 Text(item.optString("fx") + " · " + item.optInt("ms", 1500) + " ms", color = t.fg)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Pill("↑", t) { moveSequence(i, -1) }
                     Pill("↓", t) { moveSequence(i, 1) }
                     Pill("Duplicate", t) { duplicateSequence(i) }
@@ -705,7 +741,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Text(z.optString("name"), color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Caption("Pixels " + length + " · start " + start + " · end " + (start + length - 1), t)
                 Caption("Next zone starts at " + (start + length), t)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("Edit", t) { editingId = id }
                     Pill("+ Add next", t) { addZoneAfter(i) }
                     Pill("Remove", t) { deleteId = id }
@@ -745,14 +782,9 @@ class ComposeMainActivity : ComponentActivity() {
                                 applyLiveZone()
                             }
                             val n = count.toIntOrNull() ?: 0
-                            Slider(value = n.coerceIn(1, 10000).toFloat(),
-                                   onValueChange = {
-                                       count = it.toInt().coerceIn(1, 10000).toString()
-                                       // Render downstream zero-based offsets every drag frame,
-                                       // and save only when drag finishes to avoid flash churn.
-                                   },
-                                   onValueChangeFinished = { applyLiveZone() },
-                                   valueRange = 1f..10000f)
+                            CapsuleSlider(n, 1, 10000, t,
+                                change = { count = it.toString() },
+                                finished = { applyLiveZone() })
                             Caption(project.previewZoneOffsets(id, n), t)
                             val pixelLimit = (n.coerceAtLeast(1) - 1)
                             val activePixel = selectedPixel.coerceIn(0, pixelLimit)
@@ -851,7 +883,8 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 Caption("Effect: " + profile.optString("pattern", "Solid") +
                     " · zones: " + (profile.optJSONArray("zones")?.length() ?: 0), t)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill(if (active) "Stop" else "Start", t, active) {
                         testing = if (active) testing - name else testing + name
                     }
