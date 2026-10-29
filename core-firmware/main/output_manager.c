@@ -43,7 +43,7 @@ void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]){
 }
 
 bool ot_om_valid(const ot_om_output_t *o){
-    if(!o||!name_ok(o->name)||o->active_pixels<1||o->active_pixels>522||o->zone_count<1||o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
+    if(!o||!name_ok(o->name)||o->active_pixels<1||o->active_pixels>OT_OM_MAX_PIXELS_PER_OUTPUT||o->zone_count<1||o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
     unsigned sum=0;
     for(int z=0;z<o->zone_count;z++){
         const ot_om_zone_t *a=&o->zones[z];
