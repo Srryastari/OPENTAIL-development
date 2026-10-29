@@ -507,6 +507,8 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, false, true, false, true},
     {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
      false, false, true, true, true},
+    {OT_WLED_ROCKTAVES, "Rocktaves", "Rocktaves@;!,!;!;01f;m12=1,si=0",
+     true, true, false, false, false},
     {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
      false, false, true, true, true},
     {OT_WLED_FIRE_2012, "Fire 2012", "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
@@ -4465,6 +4467,41 @@ static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st
     }
 }
 
+
+/* Pinned FX.cpp mode_rocktaves() RGB 1D adaptation. Upstream requires
+ * Usermod audio FFT_MajorPeak + magnitude. Do not synthesize those inputs. */
+static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                             ot_wled_rgb_t *pixels,size_t count) {
+    if(!cfg->audio_peak ||
+       !isfinite(cfg->audio_peak->major_peak_hz) ||
+       !isfinite(cfg->audio_peak->magnitude) ||
+       cfg->audio_peak->major_peak_hz<0.0f ||
+       cfg->audio_peak->magnitude<0.0f)return false;
+    for(size_t j=0;j<count;j++){
+        /* fadeToBlackBy(16) maps to fast_color_scale(previous,239). */
+        pixels[j].r=(uint8_t)(((uint32_t)pixels[j].r*240u)>>8);
+        pixels[j].g=(uint8_t)(((uint32_t)pixels[j].g*240u)>>8);
+        pixels[j].b=(uint8_t)(((uint32_t)pixels[j].b*240u)>>8);
+    }
+    float pitch=cfg->audio_peak->major_peak_hz;
+    const float magnitude=cfg->audio_peak->magnitude/16.0f;
+    uint8_t volume=(uint8_t)(32.0f+magnitude*1.5f);
+    if(magnitude<48.0f)volume=0u;
+    if(magnitude>144.0f)volume=255u;
+    uint8_t octave=0u;
+    while(pitch>249.0f && octave<32u) {octave++;pitch/=2.0f;}
+    pitch=fabsf((pitch-132.0f)*2.1f);
+    const unsigned bpm=8u+(unsigned)octave*4u;
+    const unsigned sin=fx_beatsin8((uint16_t)bpm,0u,255u,now);
+    const size_t pos=(size_t)((uint64_t)sin*(count-1u)/255u);
+    ot_wled_rgb_t foreground=cfg->foreground;
+    ot_wled_rgb_t dst=blend_colors(cfg->background,foreground,volume);
+    dst=scaled(dst,cfg->brightness);
+    pixels[pos].r=pacifica_add(pixels[pos].r,dst.r);
+    pixels[pos].g=pacifica_add(pixels[pos].g,dst.g);
+    pixels[pos].b=pacifica_add(pixels[pos].b,dst.b);
+    return true;
+}
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0)
@@ -4679,6 +4716,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
+    if(cfg->effect_id==OT_WLED_ROCKTAVES)
+        return rocktaves_frame(cfg,time_ms,pixels,count);
     if(cfg->effect_id==OT_WLED_PACIFICA) {
         pacifica_frame(cfg,state,time_ms,pixels,count);
         return true;
