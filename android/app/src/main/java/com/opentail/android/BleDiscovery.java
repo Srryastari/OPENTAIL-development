@@ -78,7 +78,7 @@ final class BleDiscovery {
     private CoreFrameCapture.Listener frameListener;
     private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
         CoreFrameCapture.Listener cb=frameListener;
-        if(cb!=null)ui.post(()->{if(!stopped)cb.done(output,sequence,rgb,error);});
+        if(cb!=null)ui.post(()->cb.done(output,sequence,rgb,error));
         pumpQueue();
     });
     void setFrameListener(CoreFrameCapture.Listener cb) { frameListener=cb; }
