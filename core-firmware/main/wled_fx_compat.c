@@ -216,6 +216,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_HALLOWEEN_EYES, "Halloween Eyes", "Halloween Eyes@Eye off time,Eye on time,,,,,Overlay;!,!;!;12",
      true, true, true, true, false},
     {OT_WLED_ROLLING_BALLS, "Rolling Balls", "Rolling Balls@!,# of balls,,,,Collide,Overlay,Trails;!,!,!;!;1;m12=1",
+     true, true, true, true, false},
+    {OT_WLED_POPCORN, "Popcorn", "Popcorn@!,!,,,,,Overlay;!,!,!;!;;m12=1",
      true, true, true, true, false}
 };
 
@@ -2394,6 +2396,63 @@ static void rolling_balls_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+
+/* Pinned FX.cpp Spark (20 bytes), shared by source Popcorn, Fireworks,
+ * and Drip. Keep exact layout and source per-frame update ordering. */
+typedef struct {
+    float pos, pos_x;
+    float vel, vel_x;
+    uint16_t col;
+    uint8_t col_index;
+} ot_fx_spark_t;
+_Static_assert(sizeof(ot_fx_spark_t)==20u,"Pinned WLED Spark size");
+
+static void popcorn_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,ot_wled_rgb_t *pixels,
+                          size_t count) {
+    if(count<=1u) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    /* ESP32 source uses 21 kernels / virtual strip, and FAIR_DATA_PER_SEG
+     * does not limit 420 bytes on a one-dimensional single-zone strip. */
+    const unsigned max_popcorn=21u;
+    ot_fx_spark_t *popcorn=(ot_fx_spark_t*)fx_zone_scratch(
+        state,max_popcorn*sizeof(ot_fx_spark_t));
+    if(!popcorn) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    float gravity=-0.0001f-(float)cfg->speed/200000.0f;
+    gravity*=(float)count;
+    unsigned num_popcorn=(unsigned)cfg->intensity*max_popcorn/255u;
+    if(num_popcorn==0u)num_popcorn=1u;
+    for(unsigned i=0u;i<num_popcorn;i++) {
+        if(popcorn[i].pos>=0.0f) {
+            popcorn[i].pos+=popcorn[i].vel;
+            popcorn[i].vel+=gravity;
+        } else if(fx_rand8(state,256u)<2u) {
+            popcorn[i].pos=0.01f;
+            unsigned peak=128u+fx_rand8(state,128u);
+            peak=(peak*(unsigned)(count-1u))>>8;
+            popcorn[i].vel=sqrtf(-2.0f*gravity*(float)peak);
+            /* Palette=0, no tertiary: pinned source consumes a random
+             * color-slot draw and maps every slot to primary. */
+            (void)fx_rand8(state,3u);
+            popcorn[i].col_index=0u;
+        }
+        if(popcorn[i].pos>=0.0f) {
+            const size_t index=(size_t)popcorn[i].pos;
+            if(index<count)pixels[index]=fg;
+        }
+    }
+}
+
 /* FX.cpp mode_halloween_eyes(): source 1D eye positions, fade, blink,
  * and on/off transitions. The RGB profile uses palette=0 (primary eye
  * color), no matrix or overlay options. Eye state belongs to the zone's
@@ -3166,6 +3225,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_POPCORN) {
+        popcorn_frame(cfg,state,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_ROLLING_BALLS) {
