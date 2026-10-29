@@ -21,6 +21,10 @@ assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
 assert "if(!outputs_ready)return false;" in ota
 assert "return e==ESP_OK;" in ota
 assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;" in ota
+# Factory/non-OTA images have no OTA rollback state: don't poll flash every frame.
+assert "running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0" in ota
+assert "running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;" in ota
+assert ota.index("running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0") < ota.index("esp_ota_get_state_partition(running,&state)")
 # The HTTP/BLE renderer-ready flag must not be raised during strip creation;
 # it is raised by the render task only after its frame timer exists.
 assert "native_outputs_ready=outputs_ready" not in startup
