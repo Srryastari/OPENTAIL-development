@@ -187,8 +187,11 @@ jobs:
           old=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
           assert a != old, 'Previous Studio release must remain an unchanged rollback'
           assert b"const OT_VERSION='0.19.120'" in a, 'Unexpected current web Studio version'
-          native=Path('android/app/src/main/java/com/opentail/android/MainActivity.java').read_text()
-          assert 'new WebView(' not in native, 'Android must be native, not HTML-backed'
+          native=Path('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt').read_text()
+          manifest=Path('android/app/src/main/AndroidManifest.xml').read_text()
+          assert 'class ComposeMainActivity : ComponentActivity()' in native
+          assert 'WebView(' not in native and 'MainActivity::class.java' not in native
+          assert 'android:name=".ComposeMainActivity"' in manifest and 'android:name=".MainActivity"' not in manifest, 'Compose must be the sole Android activity'
           assert not Path('android/app/src/main/assets/opentail.htm').exists(), 'Android cannot ship Studio HTML'
           print('Web Studio 0.19.120 parity passed; separate native Android UI source verified.')
           PY
