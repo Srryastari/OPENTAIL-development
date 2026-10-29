@@ -272,6 +272,9 @@ struct PinnedSeg {
     void setPixelColor(size_t i,uint32_t color) {
         if(i<pixels.size()) pixels[i]=color;
     }
+    void setPixelColor(size_t i,uint8_t r,uint8_t g,uint8_t b) {
+        setPixelColor(i,((uint32_t)r<<16)|((uint32_t)g<<8)|b);
+    }
 };
 struct PinnedEnv {
     uint32_t call=0,step=0;
@@ -346,7 +349,7 @@ static uint8_t hw_random8(uint32_t max=256u) {
 static uint8_t hw_random8(uint32_t min,uint32_t max) {
     return max>min?(uint8_t)(min+(ref_random32()%(max-min))):(uint8_t)min;
 }
-static uint16_t hw_random16(uint32_t max) {
+static uint16_t hw_random16(uint32_t max=65536u) {
     return max?(uint16_t)(ref_random32()%max):0u;
 }
 static uint16_t hw_random16(uint32_t min,uint32_t max) {
@@ -1599,6 +1602,129 @@ void mode_drip(void)
 
 // END UPSTREAM FX.cpp Drip.
 
+// BEGIN UPSTREAM FX.cpp TV Simulator (verbatim), source profile RGB.
+typedef struct TvSim {
+  uint32_t totalTime = 0;
+  uint32_t fadeTime  = 0;
+  uint32_t startTime = 0;
+  uint32_t elapsed   = 0;
+  uint32_t pixelNum  = 0;
+  uint16_t sliderValues = 0;
+  uint32_t sceeneStart    = 0;
+  uint32_t sceeneDuration = 0;
+  uint16_t sceeneColorHue = 0;
+  uint8_t  sceeneColorSat = 0;
+  uint8_t  sceeneColorBri = 0;
+  uint8_t  actualColorR = 0;
+  uint8_t  actualColorG = 0;
+  uint8_t  actualColorB = 0;
+  uint16_t pr = 0; // Prev R, G, B
+  uint16_t pg = 0;
+  uint16_t pb = 0;
+} tvSim;
+
+void mode_tv_simulator(void) {
+  int nr, ng, nb, r, g, b, i, hue;
+  uint8_t  sat, bri, j;
+
+  if (!SEGENV.allocateData(sizeof(tvSim))) FX_FALLBACK_STATIC; //allocation failed
+  TvSim* tvSimulator = reinterpret_cast<TvSim*>(SEGENV.data);
+
+  uint8_t colorSpeed     = map(SEGMENT.speed,     0, UINT8_MAX,  1, 20);
+  uint8_t colorIntensity = map(SEGMENT.intensity, 0, UINT8_MAX, 10, 30);
+
+  i = SEGMENT.speed << 8 | SEGMENT.intensity;
+  if (i != tvSimulator->sliderValues) {
+    tvSimulator->sliderValues = i;
+    SEGENV.aux1 = 0;
+  }
+
+    // create a new sceene
+    if (((strip.now - tvSimulator->sceeneStart) >= tvSimulator->sceeneDuration) || SEGENV.aux1 == 0) {
+      tvSimulator->sceeneStart    = strip.now;                                               // remember the start of the new sceene
+      tvSimulator->sceeneDuration = hw_random16(60* 250* colorSpeed, 60* 750 * colorSpeed);    // duration of a "movie sceene" which has similar colors (5 to 15 minutes with max speed slider)
+      tvSimulator->sceeneColorHue = hw_random16(   0, 768);                                    // random start color-tone for the sceene
+      tvSimulator->sceeneColorSat = hw_random8 ( 100, 130 + colorIntensity);                   // random start color-saturation for the sceene
+      tvSimulator->sceeneColorBri = hw_random8 ( 200, 240);                                    // random start color-brightness for the sceene
+      SEGENV.aux1 = 1;
+      SEGENV.aux0 = 0;
+    }
+
+    // slightly change the color-tone in this sceene
+    if (SEGENV.aux0 == 0) {
+      // hue change in both directions
+      j = hw_random8(4 * colorIntensity);
+      hue = (hw_random8() < 128) ? ((j < tvSimulator->sceeneColorHue)       ? tvSimulator->sceeneColorHue - j : 767 - tvSimulator->sceeneColorHue - j) :  // negative
+                                ((j + tvSimulator->sceeneColorHue) < 767 ? tvSimulator->sceeneColorHue + j : tvSimulator->sceeneColorHue + j - 767) ;  // positive
+
+      // saturation
+      j = hw_random8(2 * colorIntensity);
+      sat = (tvSimulator->sceeneColorSat - j) < 0 ? 0 : tvSimulator->sceeneColorSat - j;
+
+      // brightness
+      j = hw_random8(100);
+      bri = (tvSimulator->sceeneColorBri - j) < 0 ? 0 : tvSimulator->sceeneColorBri - j;
+
+      // calculate R,G,B from HSV
+      // Source: https://blog.adafruit.com/2012/03/14/constant-brightness-hsb-to-rgb-algorithm/
+      { // just to create a local scope for  the variables
+        uint8_t temp[5], n = (hue >> 8) % 3;
+        uint8_t x = ((((hue & 255) * sat) >> 8) * bri) >> 8;
+        uint8_t s = (  (256 - sat) * bri) >> 8;
+        temp[0] = temp[3] =       s;
+        temp[1] = temp[4] =   x + s;
+        temp[2] =           bri - x;
+        tvSimulator->actualColorR = temp[n + 2];
+        tvSimulator->actualColorG = temp[n + 1];
+        tvSimulator->actualColorB = temp[n    ];
+      }
+    }
+    // expand to 16 bit
+    nr = (uint8_t)(tvSimulator->actualColorR) * 257; // New R/G/B
+    ng = (uint8_t)(tvSimulator->actualColorG) * 257;
+    nb = (uint8_t)(tvSimulator->actualColorB) * 257;
+
+  if (SEGENV.aux0 == 0) {  // initialize next iteration
+    SEGENV.aux0 = 1;
+
+    // randomize total duration and fade duration for the actual color
+    tvSimulator->totalTime = hw_random16(250, 2500);                   // Semi-random pixel-to-pixel time
+    tvSimulator->fadeTime  = hw_random16(0, tvSimulator->totalTime);   // Pixel-to-pixel transition time
+    if (hw_random8(10) < 3) tvSimulator->fadeTime = 0;                 // Force scene cut 30% of time
+
+    tvSimulator->startTime = strip.now;
+  } // end of initialization
+
+  // how much time is elapsed ?
+  tvSimulator->elapsed = strip.now - tvSimulator->startTime;
+
+  // fade from prev color to next color
+  if (tvSimulator->elapsed < tvSimulator->fadeTime) {
+    r = map(tvSimulator->elapsed, 0, tvSimulator->fadeTime, tvSimulator->pr, nr);
+    g = map(tvSimulator->elapsed, 0, tvSimulator->fadeTime, tvSimulator->pg, ng);
+    b = map(tvSimulator->elapsed, 0, tvSimulator->fadeTime, tvSimulator->pb, nb);
+  } else { // Avoid divide-by-zero in map()
+    r = nr;
+    g = ng;
+    b = nb;
+  }
+
+  // set strip color
+  for (i = 0; i < (int)SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, r >> 8, g >> 8, b >> 8);  // Quantize to 8-bit
+  }
+
+  // if total duration has passed, remember last color and restart the loop
+  if ( tvSimulator->elapsed >= tvSimulator->totalTime) {
+    tvSimulator->pr = nr; // Prev RGB = new RGB
+    tvSimulator->pg = ng;
+    tvSimulator->pb = nb;
+    SEGENV.aux0 = 0;
+  }
+}
+
+// END UPSTREAM TV Simulator.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1644,7 +1770,8 @@ static const RefCase refs[]={
     {82,mode_halloween_eyes,"Halloween Eyes"},
     {48,mode_rolling_balls,"Rolling Balls"},
     {95,mode_popcorn,"Popcorn"},
-    {96,mode_drip,"Drip"}
+    {96,mode_drip,"Drip"},
+    {116,mode_tv_simulator,"TV Simulator"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
