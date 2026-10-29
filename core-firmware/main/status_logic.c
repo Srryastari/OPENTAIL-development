@@ -1,5 +1,8 @@
 #include "status_logic.h"
 
+ot_st_mode_t ot_st_connection_mode(bool wifi_session,bool ble_connected){
+    return (wifi_session||ble_connected)?OT_ST_CONNECTED:OT_ST_DISCONNECTED;
+}
 const char *ot_st_mode_name(ot_st_mode_t mode) {
     switch(mode) {
         case OT_ST_STARTUP:return "startup";
@@ -48,11 +51,9 @@ ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool en
             /* Disconnected: two red pulses every ~2.2 seconds. */
             return double_pulse(t)?rgb(255,0,0,brightness):(ot_st_rgb_t){0,0,0};
         case OT_ST_BLE:
-            /* BLE-only connection remains visually distinct from Wi-Fi. */
-            return double_pulse(t)?rgb(150,0,255,brightness):(ot_st_rgb_t){0,0,0};
         case OT_ST_BOTH:
-            /* Wi-Fi and BLE connected: cyan double pulse. */
-            return double_pulse(t)?rgb(0,255,255,brightness):(ot_st_rgb_t){0,0,0};
+            /* Legacy transport-specific modes retain ABI but use approved Connected green. */
+            return double_pulse(t)?rgb(0,255,0,brightness):(ot_st_rgb_t){0,0,0};
         case OT_ST_SHOW: {
             /* Smooth rainbow loops every 1.4 s as approved for Show Mode. */
             static const uint8_t wheel[7][3]={{255,0,0},{255,255,0},{0,255,0},
