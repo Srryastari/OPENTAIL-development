@@ -477,7 +477,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_BLENDS, "Blends", "Blends@Shift speed,Blend speed;;!",
      false, false, true, true, true},
     {OT_WLED_PALETTE, "Palette", "Palette@Shift,Size,Rotation,,,Animate Shift,Animate Rotation,Anamorphic;;!;12;ix=112,c1=0,o1=1,o2=0,o3=1",
-     false, false, true, true, true}
+     false, false, true, true, true},
+    {OT_WLED_TWINKLEFOX, "Twinklefox", "Twinklefox@!,Twinkle rate,,,,Cool;!,!;!",
+     false, true, true, true, true},
+    {OT_WLED_TWINKLECAT, "Twinklecat", "Twinklecat@!,Twinkle rate,,,,Cool,Reverse;!,!;!",
+     false, true, true, true, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2796,6 +2800,97 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Source WLED colors.cpp NeoGammaWLEDMethod::calcGammaTable(2.2f)
+ * inverse LUT, generated using the pinned powf formula and rounded to uint8.
+ * The LUT is immutable; no per-frame gamma calculation or shared state. */
+static const uint8_t ot_inv_gamma22[256]={
+    0,15,25,31,36,41,45,48,51,54,57,60,62,65,67,69,
+    71,73,75,77,79,81,83,85,86,88,90,91,93,94,96,97,
+    99,100,101,103,104,105,107,108,109,110,112,113,114,115,116,118,
+    119,120,121,122,123,124,125,126,128,129,130,131,132,133,134,135,
+    136,137,137,138,139,140,141,142,143,144,145,146,147,148,148,149,
+    150,151,152,153,154,154,155,156,157,158,158,159,160,161,162,162,
+    163,164,165,165,166,167,168,169,169,170,171,171,172,173,174,174,
+    175,176,177,177,178,179,179,180,181,181,182,183,183,184,185,185,
+    186,187,187,188,189,189,190,191,191,192,193,193,194,194,195,196,
+    196,197,198,198,199,199,200,201,201,202,202,203,204,204,205,205,
+    206,207,207,208,208,209,210,210,211,211,212,212,213,213,214,215,
+    215,216,216,217,217,218,218,219,220,220,221,221,222,222,223,223,
+    224,224,225,225,226,227,227,228,228,229,229,230,230,231,231,232,
+    232,233,233,234,234,235,235,236,236,237,237,238,238,239,239,240,
+    240,241,241,242,242,243,243,244,244,245,245,245,246,246,247,247,
+    248,248,249,249,250,250,251,251,252,252,252,253,253,254,254,255
+};
+static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t c,uint8_t amt) {
+    const unsigned scale=(unsigned)amt+1u;
+    return (ot_wled_rgb_t){
+        (uint8_t)(((unsigned)c.r*scale)>>8),
+        (uint8_t)(((unsigned)c.g*scale)>>8),
+        (uint8_t)(((unsigned)c.b*scale)>>8)
+    };
+}
+static unsigned fox_avg(ot_wled_rgb_t c) {
+    return ((unsigned)c.r+(unsigned)c.g+(unsigned)c.b)/3u;
+}
+static ot_wled_rgb_t fox_twinkle(uint32_t ms,uint8_t salt,bool cat,
+                            unsigned rate,uint8_t intensity,
+                            const ot_wled_palette16_t *palette) {
+    const unsigned ticks=ms/rate;
+    const uint8_t fast=(uint8_t)ticks;
+    uint16_t slow=(uint16_t)((ticks>>8)+salt);
+    slow=(uint16_t)(slow+wled_sin8((uint8_t)slow));
+    slow=(uint16_t)(slow*2053u+1384u);
+    const uint8_t cycle=(uint8_t)((slow&255u)+(slow>>8));
+    const unsigned density=((unsigned)intensity>>5)+1u;
+    unsigned bright=0u;
+    if(((cycle&14u)/2u)<density) {
+        unsigned phase=fast;
+        if(cat)bright=255u-phase; /* source default Reverse off */
+        else if(phase<86u)bright=phase*3u;
+        else {phase-=86u;bright=255u-(phase+phase/2u);}
+    }
+    const uint8_t hue=(uint8_t)(cycle-salt);
+    if(bright==0u)return (ot_wled_rgb_t){0,0,0};
+    ot_wled_rgb_t c=ot_wled_palette_sample(palette,hue,
+                        ot_inv_gamma22[bright],OT_WLED_PALETTE_NOBLEND);
+    if(fast>=128u) {
+        const unsigned cooling=(fast-128u)>>4;
+        c.g=(uint8_t)(c.g>cooling?c.g-cooling:0u);
+        c.b=(uint8_t)(c.b>cooling*2u?c.b-cooling*2u:0u);
+    }
+    return c;
+}
+static void twinklefox_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                             ot_wled_rgb_t *pixels,size_t count,bool cat) {
+    ot_wled_palette16_t palette;
+    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                     cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
+    const unsigned rate=cfg->speed>100u?
+        3u+((255u-(unsigned)cfg->speed)>>3):
+        22u+((100u-(unsigned)cfg->speed)>>1);
+    ot_wled_rgb_t bg=cfg->background;
+    const unsigned initial=fox_avg(bg);
+    bg=fox_video_fade(bg,ot_inv_gamma22[
+        initial>64u?16u:initial>16u?64u:86u]);
+    const unsigned bg_light=fox_avg(bg);
+    uint16_t rng=11337u;
+    for(size_t i=0;i<count;i++) {
+        rng=(uint16_t)((uint32_t)rng*2053u+1384u);
+        const unsigned offset=rng;
+        rng=(uint16_t)((uint32_t)rng*2053u+1384u);
+        const unsigned multiplier=((((rng&255u)>>4)+(rng&15u))&15u)+8u;
+        const uint32_t clock=((now*multiplier)>>3)+offset;
+        const uint8_t salt=(uint8_t)(rng>>8);
+        const ot_wled_rgb_t c=fox_twinkle(clock,salt,cat,rate,
+                                           cfg->intensity,&palette);
+        const int diff=(int)fox_avg(c)-(int)bg_light;
+        const ot_wled_rgb_t out=(diff>=32||bg_light==0u)?c:
+            diff>0?blend_colors(bg,c,(uint8_t)(diff*8)):bg;
+        pixels[i]=scaled(out,cfg->brightness);
+    }
+}
+
 /* Pinned mode_palette() ESP32 float 1D profile, source default custom
  * Rotation 0, Animate Shift enabled, Animate Rotation disabled,
  * Anamorphic enabled. No matrix reinterpretation or hardcoded LED counts. */
@@ -3863,7 +3958,9 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_FLOW_STRIPE &&
             cfg->effect_id!=OT_WLED_GLITTER &&
             cfg->effect_id!=OT_WLED_BLENDS &&
-            cfg->effect_id!=OT_WLED_PALETTE) ||
+            cfg->effect_id!=OT_WLED_PALETTE &&
+            cfg->effect_id!=OT_WLED_TWINKLEFOX &&
+            cfg->effect_id!=OT_WLED_TWINKLECAT) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4057,6 +4154,12 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_TWINKLEFOX ||
+       cfg->effect_id==OT_WLED_TWINKLECAT) {
+        twinklefox_frame(cfg,time_ms,pixels,count,
+                        cfg->effect_id==OT_WLED_TWINKLECAT);
         return true;
     }
     if(cfg->effect_id==OT_WLED_PALETTE) {
