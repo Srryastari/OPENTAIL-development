@@ -213,7 +213,7 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, true, true, true, false},
     {OT_WLED_BOUNCING_BALLS, "Bouncing Balls", "Bouncing Balls@Gravity,# of balls,,,,,Overlay;!,!,!;!;1;m12=1",
      true, true, true, true, false},
-    {OT_WLED_HALLOWEEN_EYES, "Halloween Eyes", "Halloween Eyes@Duration,Gap,,,,,Overlay;!,!;!",
+    {OT_WLED_HALLOWEEN_EYES, "Halloween Eyes", "Halloween Eyes@Eye off time,Eye on time,,,,,Overlay;!,!;!;12",
      true, true, true, true, false}
 };
 
