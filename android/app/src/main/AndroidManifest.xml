@@ -14,9 +14,7 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.OpenTail">
-        <!-- Compose is the only exported launcher in this alpha build.
-             The legacy Java Views activity is retained internally for
-             explicit developer regression comparison only. -->
+        <!-- The Kotlin/Compose activity is the only app UI entry point. -->
         <activity
             android:name=".ComposeMainActivity"
             android:exported="true"
@@ -26,9 +24,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>
