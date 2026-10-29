@@ -122,6 +122,7 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <div class="grid"><div class="card"><h3>Temporary isolated trigger simulation</h3><small>Select combinations. Hazard simulation = both turn signals. This does not change physical GPIO assignments or saved mapping.</small>
 <div class="input-grid" id="signals">
 <label><input type="checkbox" value="park">Park</label><label><input type="checkbox" value="brake">Brake</label><label><input type="checkbox" value="left">Left</label><label><input type="checkbox" value="right">Right</label><label><input type="checkbox" value="reverse">Reverse</label>
+<label><input type="checkbox" value="aux1">AUX1</label><label><input type="checkbox" value="aux2">AUX2</label><label><input type="checkbox" value="aux3">AUX3</label>
 </div>
 <label>Simulation TTL (ms)<input id="simTtl" type="number" min="100" max="10000" value="3000"></label>
 <div class="bar"><button class="primary" onclick="simulateSignals()">Apply simulation</button><button onclick="clearSimulation()">Clear simulation</button><button onclick="stopAll()">Stop ALL</button></div>
