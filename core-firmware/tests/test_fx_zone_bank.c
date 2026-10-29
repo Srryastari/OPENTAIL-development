@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #include "fx_zone_bank.h"
 static ot_ble_fx_packet_t make(unsigned fx,unsigned out,unsigned zones,unsigned ttl){
  ot_ble_fx_packet_t p={0};
@@ -60,6 +61,28 @@ int main(void){
  assert(ot_fx_bank_apply_configured(&bank,&single,outputs,600,false));
  assert(bank.zones[1][2].request.effect_id==3);
  assert(bank.zones[0][0].request.effect_id==12);
+ /* Live flare edits must preserve the underlying effect's lifetime and
+  * generation. An unrelated zone is completely untouched. */
+ const ot_fx_zone_slot_t prior=bank.zones[1][2], other=bank.zones[0][0];
+ const uint32_t next_gen=bank.next_generation;
+ const ot_fx_overlay_config_t overlay={
+   .style=OT_FX_OVERLAY_SPARKS_FLARES,.peak=24,.density=190,
+   .radius=5,.fade_ms=120,.color={255,64,12}};
+ assert(ot_fx_bank_set_overlay(&bank,outputs,2u,4u,650u,&overlay));
+ assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ assert(bank.zones[1][2].overlay.radius==5u);
+ assert(bank.zones[1][2].started_ms==prior.started_ms);
+ assert(bank.zones[1][2].generation==prior.generation);
+ assert(bank.next_generation==next_gen);
+ assert(memcmp(&bank.zones[1][2].request,&prior.request,sizeof(prior.request))==0);
+ assert(memcmp(&bank.zones[0][0],&other,sizeof(other))==0);
+ ot_fx_overlay_config_t invalid=overlay;invalid.radius=13u;
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,4u,700u,&invalid));
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,128u,700u,&overlay));
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,4u,11000u,&overlay));
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,0u,4u,700u,&overlay));
+ assert(bank.zones[1][2].overlay.radius==5u);
+ assert(bank.zones[1][2].generation==prior.generation);
  a.zone_mask=0;assert(!ot_fx_bank_apply(&bank,&a,10,false));
  a=make(1,3,255,1);
  assert(ot_fx_bank_apply(&bank,&a,UINT32_MAX-500u,false));
