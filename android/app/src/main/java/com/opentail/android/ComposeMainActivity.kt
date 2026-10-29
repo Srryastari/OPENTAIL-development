@@ -216,6 +216,32 @@ class ComposeMainActivity : ComponentActivity() {
                    inactiveTrackColor = t.raised))
     }
     @Composable
+    private fun PaletteEditor(label: String, color: Int, t: Tone, change: (Int) -> Unit) {
+        var hex by remember(color) {
+            mutableStateOf(String.format("#%06X", color and 0xffffff))
+        }
+        Caption(label + " · " + hex, t)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(12.dp))
+                .background(Color(color)))
+            Field(hex, "#RRGGBB", t) { entered ->
+                hex = entered.take(7)
+                if (Regex("^#[0-9A-Fa-f]{6}$").matches(hex))
+                    change(android.graphics.Color.parseColor(hex))
+            }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            listOf("White" to 0xffffff, "Red" to 0xff0000,
+                "Amber" to 0xffbf00, "Blue" to 0x0088ff,
+                "Green" to 0x00ff77, "Black" to 0x000000).forEach { (name, value) ->
+                val chosen = 0xff000000.toInt() or value
+                Pill(name, t, (color and 0xffffff) == value) { change(chosen) }
+            }
+        }
+    }
+    @Composable
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
         Title("Home", t)
         Panel(t) {
@@ -242,13 +268,17 @@ class ComposeMainActivity : ComponentActivity() {
         var speed by rememberSaveable { mutableIntStateOf(prefs.getInt("speed", 128)) }
         var intensity by rememberSaveable { mutableIntStateOf(prefs.getInt("intensity", 128)) }
         var brightness by rememberSaveable { mutableIntStateOf(prefs.getInt("brightness", 160)) }
+        var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
+        var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
+        var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
         Panel(t) {
             Caption("Native offline preview — CORE is the authoritative physical renderer", t)
             Canvas(Modifier.fillMaxWidth().height(64.dp)
                 .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
                 val count = 28
                 for (i in 0 until count) {
-                    val color = if (effect == 0 || i % 5 < 3) t.accent else t.surface
+                    val color = if (effect == 0 || i % 5 < 3)
+                        Color(foreground) else Color(background)
                     drawLine(color, Offset(i * size.width / count, size.height * 0.2f),
                              Offset(i * size.width / count, size.height * 0.8f),
                              strokeWidth = size.width / count * 0.65f)
@@ -268,6 +298,16 @@ class ComposeMainActivity : ComponentActivity() {
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply() }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply() }
                     ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply() }
+                    PaletteEditor("Foreground", foreground, t) {
+                        foreground = it; prefs.edit().putInt("foreground", it).apply()
+                    }
+                    PaletteEditor("Background", background, t) {
+                        background = it; prefs.edit().putInt("background", it).apply()
+                    }
+                    PaletteEditor("Accent", accent, t) {
+                        accent = it; prefs.edit().putInt("accent", it).apply()
+                    }
+                    Caption("Offline illustration only. Exact timing and palettes are rendered by CORE.", t)
                 }
                 NativeEffectCatalog.all().filter { it.name.contains(query, ignoreCase = true) }
                     .forEach { item ->
