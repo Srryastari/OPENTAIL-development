@@ -515,7 +515,7 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_NOISE_PAL, "Noise Pal", "Noise Pal@!,Scale;;!",
      false, false, true, true, true},
     {OT_WLED_ROCKTAVES, "Rocktaves", "Rocktaves@;!,!;!;01f;m12=1,si=0",
-     true, true, false, false, false},
+     true, true, false, false, true},
     {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
      false, false, true, true, true}
 };
@@ -4475,6 +4475,25 @@ static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st
 
 /* Pinned FX.cpp mode_rocktaves() RGB 1D adaptation. Upstream requires
  * Usermod audio FFT_MajorPeak + magnitude. Do not synthesize those inputs. */
+/* Pinned colors.cpp color_add(..., preserveCR=true), needed by
+ * mode_rocktaves() when repeated peaks overlap on the same pixel. */
+static uint32_t rocktaves_add(uint32_t c1,uint32_t c2) {
+    if(c1==0u)return c2;
+    if(c2==0u)return c1;
+    const uint32_t mask=0x00ff00ffu;
+    uint32_t rb=(c1&mask)+(c2&mask);
+    uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
+    if((rb|wg)&0x01000100u) {
+        const uint32_t red=rb>>16,blue=rb&0xffffu;
+        const uint32_t white=wg>>16,green=wg&0xffffu;
+        uint32_t max=red>green?(red>blue?red:blue):(green>blue?green:blue);
+        if(white>max)max=white;
+        const uint32_t scale=(255u<<8)/max;
+        rb=((rb*scale)>>8)&mask;
+        wg=(wg*scale)&~mask;
+    } else wg<<=8;
+    return rb|wg;
+}
 static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                              ot_wled_rgb_t *pixels,size_t count) {
     if(!cfg->audio_peak ||
@@ -4484,9 +4503,9 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
        cfg->audio_peak->magnitude<0.0f)return false;
     for(size_t j=0;j<count;j++){
         /* fadeToBlackBy(16) maps to fast_color_scale(previous,239). */
-        pixels[j].r=(uint8_t)(((uint32_t)pixels[j].r*240u)>>8);
-        pixels[j].g=(uint8_t)(((uint32_t)pixels[j].g*240u)>>8);
-        pixels[j].b=(uint8_t)(((uint32_t)pixels[j].b*240u)>>8);
+        pixels[j].r=(uint8_t)(((uint32_t)pixels[j].r*239u)>>8);
+        pixels[j].g=(uint8_t)(((uint32_t)pixels[j].g*239u)>>8);
+        pixels[j].b=(uint8_t)(((uint32_t)pixels[j].b*239u)>>8);
     }
     float pitch=cfg->audio_peak->major_peak_hz;
     const float magnitude=cfg->audio_peak->magnitude/16.0f;
@@ -4501,19 +4520,23 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     const unsigned sin=fx_beatsin8((uint16_t)bpm,0u,255u,now);
     const size_t pos=(size_t)((uint64_t)sin*(count-1u)/255u);
     ot_wled_rgb_t foreground=cfg->foreground;
-    ot_wled_rgb_t dst=blend_colors(cfg->background,foreground,volume);
-    dst=scaled(dst,cfg->brightness);
-    pixels[pos].r=pacifica_add(pixels[pos].r,dst.r);
-    pixels[pos].g=pacifica_add(pixels[pos].g,dst.g);
-    pixels[pos].b=pacifica_add(pixels[pos].b,dst.b);
+    if(cfg->palette_id) {
+        ot_wled_palette16_t palette={0};
+        if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return false;
+        foreground=ot_wled_palette_sample(&palette,(uint8_t)fmodf(pitch,256.0f),
+                255u,OT_WLED_PALETTE_LINEAR);
+    }
+    const ot_wled_rgb_t dst=scaled(
+           blend_colors(cfg->background,foreground,volume),cfg->brightness);
+    pixels[pos]=fx_unpack(rocktaves_add(fx_pack(pixels[pos]),fx_pack(dst)));
     return true;
 }
 
 /* Pinned WLED FX.cpp mode_exploding_fireworks(): RGB-only 1D flare, spark
  * physics, explosion and dying gravity. Spark layout is the source's
- * 20-byte struct, with source ESP32's conservative 640-byte/segment budget.
- * Fewer active segments can allow more sparks upstream; CORE retains a
- * deterministic conservative count until the live segment budget is exposed. */
+ * 20-byte struct and source ESP32-S3 64KiB/64 fair-share budget.
+ * The caller may pass active/max segment counts for exact allocation. */
 typedef struct {
     float pos,pos_x,vel,vel_x;
     uint16_t col;
@@ -4705,7 +4728,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_FIRE_2012 &&
             cfg->effect_id!=OT_WLED_PACIFICA &&
             cfg->effect_id!=OT_WLED_EXPLODING_FIREWORKS &&
-            cfg->effect_id!=OT_WLED_NOISE_PAL) ||
+            cfg->effect_id!=OT_WLED_NOISE_PAL &&
+            cfg->effect_id!=OT_WLED_ROCKTAVES) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
