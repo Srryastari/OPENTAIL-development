@@ -139,7 +139,21 @@ final class NativeEffectCatalog {
         new Effect(32770, "Random Materialize"),
         new Effect(32771, "Smooth Fade"),
         new Effect(32772, "Plasma Sweep"),
-        new Effect(32773, "Smooth Fade Out")
+        new Effect(32773, "Smooth Fade Out"),
+        new Effect(32774, "Dimensional Rift"),
+        new Effect(32775, "Meteor Storm"),
+        new Effect(32776, "Helix Drive"),
+        new Effect(32777, "Crystal Growth"),
+        new Effect(32778, "Fusion Core"),
+        new Effect(32779, "Portal Gate"),
+        new Effect(32780, "Time Fracture"),
+        new Effect(32781, "Aurora Surge"),
+        new Effect(32782, "Chromatic Shatter"),
+        new Effect(32783, "Vortex"),
+        new Effect(32784, "Quantum Collapse"),
+        new Effect(32785, "Reality Break"),
+        new Effect(32786, "Event Horizon"),
+        new Effect(32787, "Singularity Shutdown")
     };
     private static final List<Effect> SORTED;
     static {
