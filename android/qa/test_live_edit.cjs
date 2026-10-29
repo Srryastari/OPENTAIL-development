@@ -60,6 +60,11 @@ assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
        compose.includes('First visible pixel') &&
        compose.includes('NOT a simulated effect.'),
   'Preview must show indexed project pixels rather than fabricated animation frames.');
+assert(compose.includes('if (offlinePreview.value) return') &&
+       compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
+       compose.includes('offlinePreview.value = true') &&
+       compose.includes('livePreview.stop()'),
+       'Preview Offline must not issue effect or frame capture commands');
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
   'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
