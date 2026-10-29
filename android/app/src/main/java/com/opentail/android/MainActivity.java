@@ -276,9 +276,8 @@ public final class MainActivity extends Activity {
         // CORE firmware no longer serves Studio (its /studio URL redirects
         // to /dev). Never auto-navigate away from bundled authoring UI.
         // Hardware inspection stays exclusively in CORE /dev.
-        if (preferences.getBoolean(AUTO_BLE, false)) {
-            ble.tryReconnect(preferences.getString("preferred_ble_address", null));
-        }
+        // BLE is retained as a native transport but Studio starts in design
+        // mode. No background connection attempts or GATT commands at launch.
     }
 
     private TextView label(String text) {
@@ -662,11 +661,8 @@ public final class MainActivity extends Activity {
         super.onResume();
         if (!appReady) return;
         updateConnectionSurfaces();
-        if (preferences.getBoolean(AUTO_WIFI, false) && preferences.getBoolean(USE_CORE, false)
-                && !offlineSelected) connectCore(true);
-        if (preferences.getBoolean(AUTO_BLE, true) && ble != null) {
-            ble.tryReconnect(preferences.getString("preferred_ble_address", null));
-        }
+        // Do not reopen the firmware-hosted /studio URL or reconnect BLE on
+        // every resume: authoring must work independently of controller state.
     }
 
     @Override protected void onStop() {
