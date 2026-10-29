@@ -2804,6 +2804,7 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+static const uint8_t ot_inv_gamma22[256];
 /* AuroraWave source fields, per-zone scratch; fixed-point AW_SHIFT=16.
  * Avoid global wave arrays and preserve source wave lifetime and RNG order.
  * RGB-only default is the source's Aurora fixed palette ID 50. */
