@@ -51,7 +51,8 @@ for token in ('id="otaFile"', 'id="otaSend"', 'id="otaStatus"',
     assert token in dev, token
 assert "ot_ota_confirm_boot(true)" in core
 assert "gh run download" in installer and "gh run view" in installer
-assert "gh run list" in installer and "-VerifyOnly" not in installer
+assert "gh run list" in installer and "-RunId" in installer
+assert "-VerifyOnly" in installer and "if ($VerifyOnly)" in installer
 assert "gh auth status" in installer
 assert "if ($VerifyOnly)" in installer
 assert "Remove-Item -LiteralPath $work" in installer
