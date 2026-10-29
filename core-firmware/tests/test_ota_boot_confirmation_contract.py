@@ -14,7 +14,13 @@ gate = "if(full_frame && !boot_frame_verified)"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
-assert "boot_frame_verified=true;" in led.split(gate, 1)[1]
+assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
+assert "boot_frame_verified=true;" not in led, "A failed flash confirmation must retry"
+ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
+assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
+assert "if(!outputs_ready)return false;" in ota
+assert "return e==ESP_OK;" in ota
+assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;" in ota
 # The HTTP/BLE renderer-ready flag must not be raised during strip creation;
 # it is raised by the render task only after its frame timer exists.
 assert "native_outputs_ready=outputs_ready" not in startup
