@@ -10,7 +10,8 @@
  * mode_blink_rainbow(), mode_strobe_rainbow(), mode_multi_strobe(),
  * chase(), mode_two_dots(), tricolor_chase(), mode_tricolor_wipe(),
  * mode_tricolor_fade(), mode_breath(), running_base(),
- * mode_tri_static_pattern(), mode_colorful(), and gradient_base(),
+ * mode_tri_static_pattern(), mode_colorful(), gradient_base(),
+ * and mode_sinewave(),
  * plus pinned wled_math.cpp sine helpers.
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
@@ -88,6 +89,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_GRADIENT, "Gradient", "Gradient@!,Spread;!,!;!;;ix=16",
      true, true, true, true, false},
     {OT_WLED_LOADING, "Loading", "Loading@!,Fade;!,!;!;;ix=16",
+     true, true, true, true, false},
+    {OT_WLED_SINEWAVE, "Sine", "Sine@!,Scale;;!",
      true, true, true, true, false}
 };
 
@@ -696,6 +699,32 @@ static void gradient_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+/*
+ * Source adaptation: pinned WLED FX.cpp mode_sinewave() and pinned
+ * fastled_slim/fastled_slim.cpp cubicwave8() / ease8InOutCubic().
+ * The WLED palette=0 path always returns SEGCOLOR(0); CORE's RGB
+ * two-color profile supplies SEGCOLOR(1) as background. No pixel I/O.
+ */
+static uint8_t wled_cubicwave8(uint8_t phase) {
+    if (phase&0x80u) phase=(uint8_t)(255u-phase);
+    const uint8_t triangle=(uint8_t)(phase<<1);
+    const uint32_t square=(uint32_t)triangle*triangle;
+    const uint32_t factor=(3u<<8)-((uint32_t)triangle<<1);
+    return (uint8_t)((square*factor)>>16);
+}
+static void sinewave_frame(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    state->step+=(uint32_t)cfg->speed/16u;
+    const uint32_t frequency=(uint32_t)cfg->intensity/4u;
+    for(size_t i=0;i<count;i++) {
+        const uint8_t phase=(uint8_t)((uint32_t)i*frequency+state->step);
+        const uint8_t amplitude=wled_cubicwave8(phase);
+        pixels[i]=scaled(blend_colors(cfg->background,cfg->foreground,amplitude),
+                         cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -707,6 +736,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_SINEWAVE) {
+        sinewave_frame(cfg,state,pixels,count);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_COLORFUL) {
         colorful_frame(cfg,state,time_ms,pixels,count);
         return true;
