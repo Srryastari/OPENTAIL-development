@@ -16,9 +16,9 @@ assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(conf
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
-assert "http_startup_ready=http_start();" in startup
+assert "http_startup_ready=wifi_started&&http_start();" in startup
 assert "if(!http_startup_ready)ot_st_set_fault(" in startup
-assert startup.index("http_startup_ready=http_start();") < startup.index("xTaskCreate(led_task")
+assert startup.index("http_startup_ready=wifi_started&&http_start();") < startup.index("xTaskCreate(led_task")
 # The diagnostic HTTP service must never take down physical lighting on
 # registration failure. OTA acceptance still requires service startup.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
