@@ -60,6 +60,14 @@ assert(compose.includes('private fun CapsuleSlider(') &&
        !compose.includes('Slider(value = n.coerceIn(1, 10000)') &&
        compose.includes('Modifier.heightIn(min = 48.dp)'),
        'All editing controls should use the approved capsule slider and accessible pills');
+assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
+       compose.includes('verticalScroll(pageScroll)') &&
+       compose.includes('val window = total.coerceAtMost(visiblePixels)') &&
+       compose.includes('listOf(8, 16, 32, 64)') &&
+       compose.includes('pendingLoad = i') &&
+       compose.includes('title = { Text("Replace current design?") }') &&
+       compose.includes('Local trigger color swatch only. No simulated effect'),
+       'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
