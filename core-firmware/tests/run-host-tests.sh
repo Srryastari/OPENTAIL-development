@@ -12,7 +12,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/t
 
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
-# This certifies ONLY the ten enumerated RGB/gamma-off profiles, not all modes.
+# Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain -c main/wled_fx_compat.c -o /tmp/ot-wled-fx-parity.o
 c++ -std=c++17 -Wall -Wextra -Werror -Wno-parentheses -Imain tests/test_wled_source_parity.cpp /tmp/ot-wled-fx-parity.o -o /tmp/ot-wled-source-parity
 /tmp/ot-wled-source-parity
