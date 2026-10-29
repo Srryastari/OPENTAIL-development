@@ -64,7 +64,9 @@ enum {
     OT_WLED_STREAM = 39,
     OT_WLED_STREAM2 = 61,
     OT_WLED_LIGHTNING = 57,
-    OT_WLED_ICU = 58
+    OT_WLED_ICU = 58,
+    OT_WLED_FIRE_FLICKER = 45,
+    OT_WLED_WAVESINS = 184
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -93,6 +95,7 @@ typedef struct {
     uint32_t call;          /* Upstream SEGENV.call, once per rendered frame */
     uint32_t data_counter;  /* Per-zone mode_android() allocated uint32_t counter */
     uint32_t rng_state;     /* Software RNG state for source-driven random modes */
+    uint32_t held_rng_seed; /* Reproduce Fire Flicker frame between WLED updates */
 } ot_wled_fx_state_t;
 
 typedef struct {
