@@ -727,8 +727,9 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
     if(!strcmp(chain,"left"))chain_mask=1u;
     else if(!strcmp(chain,"right"))chain_mask=2u;
     else if(strcmp(chain,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
-    const char *keys[]={"r","g","b","brightness","speed","intensity"};
-    for(unsigned i=0;i<6;i++){
+    const char *keys[]={"r","g","b","brightness","speed","intensity",
+                         "spark_style","spark_peak","spark_r","spark_g","spark_b"};
+    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
         const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,keys[i]);
         if(v&&(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint)){
             cJSON_Delete(obj);return respond_err(r,400,"integer parameters required");
@@ -744,7 +745,12 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
         .speed=speed,
         .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
-        .palette_id=0,.ttl_sec=6
+        .palette_id=0,.ttl_sec=6,
+        .spark_style=(uint8_t)bounded_int(obj,"spark_style",0,0,3),
+        .spark_peak=(uint8_t)bounded_int(obj,"spark_peak",32,1,32),
+        .spark_r=(uint8_t)bounded_int(obj,"spark_r",255,0,255),
+        .spark_g=(uint8_t)bounded_int(obj,"spark_g",255,0,255),
+        .spark_b=(uint8_t)bounded_int(obj,"spark_b",255,0,255)
     };
     cJSON_Delete(obj);
     if(!ot_ble_apply_fx_internal(&req,false))
@@ -1197,7 +1203,10 @@ static void led_task(void *p) {
                                .brightness=fx->brightness,
                                .palette_id=fx->palette_id,.frame_time_ms=23,
                                .foreground={fx->r,fx->g,fx->b},
-                               .background={fx->bg_r,fx->bg_g,fx->bg_b}
+                               .background={fx->bg_r,fx->bg_g,fx->bg_b},
+                               .spark_style=fx->spark_style,
+                               .spark_peak=fx->spark_peak,
+                               .spark_color={fx->spark_r,fx->spark_g,fx->spark_b}
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
