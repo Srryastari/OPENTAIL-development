@@ -81,6 +81,24 @@ def impact(config,head):
     for path in paths: groups.update(domains_of(path))
     workflow=(ROOT/".github/workflows/verify-active-sources.yml").read_text()
     problems=[]
+    # Require deliberate test maintenance for each product surface changed
+    # since the last approved baseline; untested source edits are not green.
+    changes={
+        "core": any(p.startswith("core-firmware/main/") or
+                    p in ("core-firmware/sdkconfig.defaults","core-firmware/partitions_ota.csv")
+                    for p in paths),
+        "ui": any(p.startswith("web-studio/") and "/tests/" not in p for p in paths),
+        "android": any(p.startswith("android/") and "/qa/" not in p for p in paths),
+    }
+    probes={
+        "core": any(p.startswith("core-firmware/tests/") for p in paths),
+        "ui": any(p.startswith("web-studio/tests/") for p in paths),
+        "android": any(p.startswith("android/qa/") for p in paths),
+    }
+    for product,modified in changes.items():
+        if modified and not probes[product]:
+            problems.append("Changed "+product+" product behavior with no changed product regression test")
+
     for g in sorted(groups):
         for job in TESTS[g]:
             if not re.search(r"(?m)^  "+re.escape(job)+r":\s*$",workflow):
@@ -149,7 +167,7 @@ def main():
         groups,problems=impact(config,head)
         if args.mode=="release":
             problems.extend(physical(config,head,groups))
-            if "render" in groups:
+            if "core" in groups:
                 parity=subprocess.run([sys.executable,"tests/check_effects_release.py","--release"],
                   cwd=ROOT/"core-firmware",capture_output=True,text=True)
                 if parity.returncode:
