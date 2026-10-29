@@ -798,7 +798,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":121,\"target_fps\":62,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":121,\"target_fps\":62,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -899,7 +899,9 @@ static esp_err_t stop_post(httpd_req_t *r) {
     portENTER_CRITICAL(&state_lock);
     demo.mode=OT_DEMO_OFF;demo_deadline=now;
     sim_mask=0;sim_deadline=now;
-    ble_owns_show=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);
+    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
@@ -910,7 +912,7 @@ static const char page[]=
 "button{background:#193924;border:1px solid #39ff70;border-radius:12px;color:white;padding:12px;margin:5px;min-height:45px}"
 "pre{white-space:pre-wrap;background:#171c19;padding:14px;border-radius:12px}h1{color:#39ff70}small{color:#afb9b1}</style></head><body>"
 "<h1>OpenTail CORE Alpha</h1><p>BENCH ONLY - no road lighting or failover</p>"
-"<p><a style=\"color:#39ff70;font-weight:bold\" href=\"/studio\">Open OpenTail Studio v0.19.51 →</a></p>"
+"<p><a style=\"color:#39ff70;font-weight:bold\" href=\"/studio\">Open OpenTail Studio v0.19.118 →</a></p>"
 "<p><a style=\"color:#aaa\" href=\"/status-self-test\">Onboard RGB self-test (bench only) →</a></p>"
 "<h3>Inputs (2 second test)</h3><div id=signals></div>"
 "<h3>Color demos (3 second test)</h3><div id=colors></div>"
@@ -922,7 +924,7 @@ static const char page[]=
 "for(const n of ['park','brake','left','right','reverse']){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/simulate',{signals:[n],ttl_ms:2000});document.getElementById('signals').append(b)}"
 "for(const [n,c] of Object.entries({Red:[255,0,0],Green:[0,255,0],Blue:[0,0,255],White:[255,255,255]})){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/demo',{mode:'solid',r:c[0],g:c[1],b:c[2],brightness:24,ttl_ms:3000});document.getElementById('colors').append(b)}"
 "setInterval(refresh,1000);refresh()</script></body></html>";
-/* OpenTail Studio v0.19.51 is served locally from the CORE access point.
+/* OpenTail Studio v0.19.118 is served locally from the CORE access point.
  * Gzip is embedded into the application at compile time; no filesystem or WLED needed.
  * Browser uses same-origin /api/v1/... and does not require broad CORS access. */
 extern const uint8_t studio_gz_start[] asm("_binary_studio_htm_gz_start");
