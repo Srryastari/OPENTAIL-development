@@ -303,6 +303,10 @@ struct CRGBPalette16 {
   CRGB entries[16];
   CRGB& operator[](unsigned i){return entries[i];}
   const CRGB& operator[](unsigned i)const{return entries[i];}
+  bool operator!=(const CRGBPalette16& other) const {
+    for(unsigned i=0;i<16u;i++)if(entries[i].color32!=other.entries[i].color32)return true;
+    return false;
+  }
 };
 enum TBlendType { NOBLEND=0,LINEARBLEND=1,LINEARBLEND_NOWRAP=2 };
 static uint32_t RGBW32(uint8_t r,uint8_t g,uint8_t b,uint8_t w);
@@ -536,6 +540,15 @@ static CRGBPalette16 ref_palette(uint8_t id,uint32_t primary,uint32_t secondary,
 
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
+    uint32_t step=0u,call=0u;
+    uint16_t aux0=0u,aux1=0u;
+    uint8_t cct=0u;
+    std::vector<uint8_t> segment_data;
+    uint8_t *data=nullptr;
+    bool allocateData(size_t n) {
+      if(segment_data.size()<n)segment_data.resize(n,0u);
+      data=segment_data.data();return data!=nullptr;
+    }
     uint8_t custom1=48u,custom2=64u,custom3=12u;
     bool check1=false,check2=false,check3=false;
     void fade_out(uint8_t) { std::abort(); } // unsupported controls fail closed
@@ -2939,6 +2952,103 @@ void mode_colortwinkle() {
 #undef gamma8inv
 #undef SEGPALETTE
 
+#define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
+#define W(color) (uint8_t)((uint32_t)(color)>>24)
+// BEGIN PINNED FX.cpp Slow Transition original body.
+typedef struct SlowTransitionData {
+  CRGBPalette16 startPalette;        // initial palette
+  CRGBPalette16 currentPalette;      // blended palette for current frame, need permanent storage so we can start from this if target changes mid transition
+  CRGBPalette16 endPalette;          // target palette
+  uint8_t startWhite;
+  uint8_t currentWhite;
+  uint8_t endWhite;
+  uint8_t startCCT;
+  uint8_t currentCCT;
+  uint8_t endCCT;
+} slow_transition_data;
+
+void mode_slow_transition(void) {
+  // aliases
+  uint32_t* startTime = &SEGMENT.step;  // use step to store start time of transition
+  uint16_t* stepsDone = &SEGMENT.aux0;
+  uint16_t* startSpeed = &SEGMENT.aux1; // speed setting at the start of the transition, used to detect changes
+
+  size_t dataSize = sizeof(slow_transition_data);
+  if (!SEGMENT.allocateData(dataSize)) FX_FALLBACK_STATIC;
+  slow_transition_data* data = reinterpret_cast<slow_transition_data*>(SEGMENT.data);
+  // Note: compare currentCCT (not endCCT). SEGMENT.cct is set to currentCCT at the end of each call, if they differ, it was changed externally
+  bool changed = (data->endPalette != SEGPALETTE || *startSpeed != SEGMENT.speed || data->endWhite != W(SEGCOLOR(0)) || data->currentCCT != SEGMENT.cct); // detect changes in target color or speed setting
+
+  // (re) init
+  if (changed || SEGMENT.call == 0) {
+    if (SEGMENT.call == 0) {
+      data->startPalette = SEGPALETTE;
+      data->currentPalette = SEGPALETTE;
+      data->endPalette = SEGPALETTE;
+      data->startWhite = data->currentWhite = data->endWhite = W(SEGCOLOR(0));
+      data->startCCT = data->currentCCT = data->endCCT = SEGMENT.cct;
+      *stepsDone = 0xFFFF; // set to max, fading will start once a change is detected
+    }
+    else {
+      data->startPalette = data->currentPalette;
+      data->endPalette = SEGPALETTE;
+      data->startWhite = data->currentWhite;
+      data->endWhite = W(SEGCOLOR(0));
+      data->startCCT = data->currentCCT;
+      data->endCCT = SEGMENT.cct;
+      *stepsDone = 0; // reset counter
+    }
+    *startSpeed = SEGMENT.speed;
+    *startTime = millis(); // set start time note: intentionally not using strip.now as this is based on real time
+  }
+
+  uint32_t totalSteps = SEGMENT.check2 ? 16 * 255 : 255;
+  uint32_t duration = (SEGMENT.speed == 0) ? 10000 : (uint32_t)SEGMENT.speed * 60000; // 10s if zero (good for testing), otherwise map 1-255 to 1-255 minutes
+  uint32_t elapsed = millis() - *startTime; // note: will overflow after ~50 days if just left alone (edge case unhandled)
+  uint32_t expectedSteps = (uint64_t)elapsed * totalSteps / duration;
+  expectedSteps = min(expectedSteps, totalSteps); // limit to total steps
+
+  if (*stepsDone > expectedSteps)
+    *stepsDone = expectedSteps;// in case sweep was disabled mid transition
+
+  if (*stepsDone < expectedSteps) {
+    *stepsDone = expectedSteps; // jump to expected steps to make sure timing is correct (need up to 4080 frames, at 20fps that is ~200 seconds)
+    uint8_t blendAmount;
+    if (SEGMENT.check2) {
+      // sweep: one palette entry at a time
+      uint8_t i = *stepsDone % 16;
+      blendAmount  = *stepsDone / 16;
+      data->currentPalette[i] = CRGB(color_blend(CRGBW(data->startPalette[i]), CRGBW(data->endPalette[i]), blendAmount));
+    } else {
+      // full palette at once
+      blendAmount = (uint8_t)*stepsDone;
+      for (uint8_t i = 0; i < 16; i++) {
+        data->currentPalette[i] = CRGB(color_blend(CRGBW(data->startPalette[i]), CRGBW(data->endPalette[i]), blendAmount));
+      }
+    }
+    data->currentWhite = (data->startWhite * (255 - blendAmount) + data->endWhite * blendAmount) / 255;
+    data->currentCCT = (data->startCCT * (255 - blendAmount) + data->endCCT * blendAmount) / 255;
+    if (*stepsDone >= totalSteps) {
+      // transition complete, apply end palette
+      data->currentPalette = data->endPalette; // set to end palette (sweep may not have set all entries)
+      data->currentWhite = data->endWhite;
+      data->currentCCT = data->endCCT;
+    }
+  }
+  // display current palette (plus white) over segment
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint8_t paletteIndex = (i * 255) / SEGLEN;
+    CRGBW palcol = ColorFromPalette(data->currentPalette, paletteIndex, 255, LINEARBLEND_NOWRAP);
+    palcol.w = data->currentWhite; // TODO: currently "sweep mode" does not support white sweep
+    SEGMENT.setPixelColor(i, palcol.color32);
+  }
+  SEGMENT.cct = data->currentCCT;
+}
+
+// END PINNED Slow Transition.
+#undef SEGPALETTE
+#undef W
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2996,7 +3106,8 @@ static const RefCase refs[]={
     {80,mode_twinklefox,"Twinklefox"},
     {81,mode_twinklecat,"Twinklecat"},
     {38,mode_aurora,"Aurora"},
-    {74,mode_colortwinkle,"Colortwinkles"}
+    {74,mode_colortwinkle,"Colortwinkles"},
+    {219,mode_slow_transition,"Slow Transition"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3041,9 +3152,9 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
@@ -3070,7 +3181,7 @@ int main() {
                         fx.effect();
                         if(fx.id==49 && t!=0u && env.allocation.size() && env.data==nullptr)
                             std::abort(); // validate source allocation invariants
-                        env.call++;  // upstream effect engine increments after frame
+                        env.call++;seg.call++; // upstream effect engine increments after frame
                         if(!ot_wled_fx_render(&cfg,&state,t,actual.data(),count)) {
                             std::fprintf(stderr,"CORE rejected pinned FX %u (%s)\n",fx.id,fx.name);
                             return 1;
