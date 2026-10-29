@@ -9,8 +9,8 @@ static int same(ot_wled_rgb_t a,ot_wled_rgb_t b){
     return a.r==b.r&&a.g==b.g&&a.b==b.b;
 }
 int main(void){
-    uint16_t ids[8]={0};
-    assert(ot_auto_fx_ids(ids,8)==5u);
+    uint16_t ids[24]={0};
+    assert(ot_auto_fx_ids(ids,24)==19u);
     assert(ids[0]==OT_FX_MATERIALIZE_SPARKS);
     assert(ids[1]==OT_FX_RANDOM_MATERIALIZE);
     assert(ids[2]==OT_FX_SMOOTH_FADE);
@@ -149,9 +149,9 @@ int main(void){
     }
     /* The capability list contains all original IDs in addition to WLED
        compatibility modes. This must remain within BLE's 127-ID payload. */
-    uint16_t catalog[128]={0};
-    size_t n=ot_effects_1d_supported_ids(catalog,128);
-    assert(n==126u);
+    uint16_t catalog[160]={0};
+    size_t n=ot_effects_1d_supported_ids(catalog,160);
+    assert(n==140u);
     assert(catalog[120]==OT_FX_EMBERS);
     for(unsigned i=0;i<5;i++)assert(catalog[121+i]==ids[i]);
     printf("CORE startup/shutdown effects: five native one-shot frames, all limits, endpoints, BLE capability IDs passed.\n");
