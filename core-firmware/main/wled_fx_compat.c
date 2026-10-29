@@ -5,7 +5,9 @@
  * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase(),
  * mode_static_pattern(), mode_heartbeat(), spots_base(),
  * mode_spots(), mode_spots_fade(), mode_percent(),
- * mode_chase_flash(), and mode_running_color().
+ * mode_chase_flash(), mode_running_color(), mode_rainbow(),
+ * mode_rainbow_cycle(), mode_theater_chase_rainbow(),
+ * mode_blink_rainbow(), and mode_strobe_rainbow().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -38,7 +40,19 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_PERCENT, "Percent", "Percent@!,% of fill,,,,One color;!,!;!",
      true, true, true, true, false},
     {OT_WLED_HEARTBEAT, "Heartbeat", "Heartbeat@!,!;!,!;!;01;m12=1",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    /* Source: pinned FX.cpp mode_rainbow(), mode_rainbow_cycle(),
+     * mode_theater_chase_rainbow(), mode_strobe_rainbow(), mode_blink_rainbow(). */
+    {OT_WLED_COLORLOOP, "Colorloop", "Colorloop@!,Saturation;;!;01",
+     true, false, true, true, false},
+    {OT_WLED_RAINBOW, "Rainbow", "Rainbow@!,Size;;!",
+     false, false, true, true, false},
+    {OT_WLED_THEATER_RAINBOW, "Theater Rainbow", "Theater Rainbow@!,Gap size;,!;!",
+     false, true, true, true, false},
+    {OT_WLED_STROBE_RAINBOW, "Strobe Rainbow", "Strobe Rainbow@!;,!;!;01",
+     false, true, true, false, false},
+    {OT_WLED_BLINK_RAINBOW, "Blink Rainbow", "Blink Rainbow@Frequency,Blink duration;!,!;!;01",
+     false, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -56,7 +70,7 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 }
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
-    if (state) { state->step=0; state->aux0=0; state->aux1=0; }
+    if (state) { state->step=0; state->aux0=0; state->aux1=0; state->call=0; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -65,6 +79,44 @@ static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
         (uint8_t)((((uint32_t)c.g*brightness)+127u)/255u),
         (uint8_t)((((uint32_t)c.b*brightness)+127u)/255u)
     };
+}
+
+/*
+ * Exact palette=0, RGB-only color_wheel arithmetic from pinned WLED
+ * FX_fcn.cpp -> CHSV32 -> fastled_slim/fastled_slim.cpp hsv2rgb_rainbow.
+ * WLED's raw wheel uses 8-bit hue in a 16-bit HSV representation.
+ * No Arduino, palette, gamma or external runtime is used here.
+ */
+static ot_wled_rgb_t wheel_rgb(uint8_t hue) {
+    const uint32_t offset=((uint32_t)hue<<8)&0x1fffu;
+    const uint32_t thirds=offset*21846u;
+    const uint8_t third=(uint8_t)(thirds>>21);
+    uint8_t r,g,b;
+    if (!(hue&0x80u)) {
+        if (!(hue&0x40u)) {
+            if (!(hue&0x20u)) { r=(uint8_t)(255u-third);g=third;b=0; }
+            else {r=171;g=(uint8_t)(85u+third);b=0;}
+        } else {
+            if (!(hue&0x20u)) {
+                const uint8_t twice=(uint8_t)(thirds>>20);
+                r=(uint8_t)(171u-twice);g=(uint8_t)(170u+third);b=0;
+            } else {r=0;g=(uint8_t)(255u-third);b=third;}
+        }
+    } else {
+        if (!(hue&0x40u)) {
+            if (!(hue&0x20u)) {
+                const uint8_t twice=(uint8_t)(thirds>>20);
+                r=0;g=(uint8_t)(171u-twice);b=(uint8_t)(85u+twice);
+            } else {r=third;g=0;b=(uint8_t)(255u-third);}
+        } else {
+            if (!(hue&0x20u)) {
+                r=(uint8_t)(85u+third);g=0;b=(uint8_t)(171u-third);
+            } else {
+                r=(uint8_t)(170u+third);g=0;b=(uint8_t)(85u-third);
+            }
+        }
+    }
+    return (ot_wled_rgb_t){r,g,b};
 }
 
 /* WLED color_blend(c1,c2,blend) arithmetic from the pinned FX/colors.cpp
@@ -143,10 +195,12 @@ static void scan_frame(const ot_wled_fx_config_t *cfg, uint32_t now,
  * advances. This matters when frames skip cycles.
  */
 static void theater_frame(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
-                          uint32_t now, ot_wled_rgb_t *pixels, size_t count) {
+                          uint32_t now, ot_wled_rgb_t *pixels, size_t count,
+                          bool rainbow) {
     const uint32_t width=3u+((uint32_t)cfg->intensity>>4);
     const uint32_t iteration=now/(50u+255u-(uint32_t)cfg->speed);
-    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(rainbow ? wheel_rgb((uint8_t)state->step) : cfg->foreground,
+                                  cfg->brightness);
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     for (size_t i=0;i<count;i++) pixels[i]=(i%width)==state->aux0?fg:bg;
     if (iteration!=state->step) {
@@ -322,6 +376,32 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     if (!ot_wled_fx_metadata(cfg->effect_id, &meta)) return false;
 
     if (count>65535u) return false; /* 16-bit WLED segment indexing boundary */
+    /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
+     * the old count because rainbow blink/strobe read it BEFORE advancing. */
+    const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_COLORLOOP || cfg->effect_id==OT_WLED_RAINBOW) {
+        /* Pinned FX.cpp mode_rainbow() and mode_rainbow_cycle(): 16-bit
+         * wrap, speed timing and intensity-selected rainbow spacing. */
+        const uint16_t counter=(uint16_t)(time_ms*
+            ((uint32_t)(cfg->speed>>2)+2u));
+        const uint8_t base=(uint8_t)(counter>>8);
+        if (cfg->effect_id==OT_WLED_COLORLOOP) {
+            ot_wled_rgb_t color=wheel_rgb(base);
+            if (cfg->intensity<128u)
+                color=blend_colors(color,(ot_wled_rgb_t){255,255,255},
+                                   (uint8_t)(128u-cfg->intensity));
+            color=scaled(color,cfg->brightness);
+            for (size_t i=0;i<count;i++) pixels[i]=color;
+        } else {
+            const uint32_t spread=16u<<(cfg->intensity/29u);
+            for (size_t i=0;i<count;i++) {
+                const uint8_t index=(uint8_t)(((uint32_t)i*spread)/(uint32_t)count+base);
+                pixels[i]=scaled(wheel_rgb(index),cfg->brightness);
+            }
+        }
+        return true;
+    }
+
     if (cfg->effect_id==OT_WLED_WIPE || cfg->effect_id==OT_WLED_SWEEP) {
         wipe_frame(cfg,time_ms,pixels,count,cfg->effect_id==OT_WLED_SWEEP);
         return true;
@@ -338,8 +418,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         running_color_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
-    if (cfg->effect_id==OT_WLED_THEATER) {
-        theater_frame(cfg,state,time_ms,pixels,count);
+    if (cfg->effect_id==OT_WLED_THEATER ||
+        cfg->effect_id==OT_WLED_THEATER_RAINBOW) {
+        theater_frame(cfg,state,time_ms,pixels,count,
+                      cfg->effect_id==OT_WLED_THEATER_RAINBOW);
         return true;
     }
     if (cfg->effect_id==OT_WLED_SOLID_PATTERN) {
@@ -367,7 +449,9 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         return true;
     }
     bool on=true;
-    if (cfg->effect_id==OT_WLED_BLINK || cfg->effect_id==OT_WLED_STROBE) {
+    if (cfg->effect_id==OT_WLED_BLINK || cfg->effect_id==OT_WLED_STROBE ||
+        cfg->effect_id==OT_WLED_BLINK_RAINBOW ||
+        cfg->effect_id==OT_WLED_STROBE_RAINBOW) {
         /* Mirror WLED's 32-bit integer arithmetic in blink():
          * cycleTime=(255-speed)*20;
          * onTime=FRAMETIME + (strobe?0:(cycleTime*intensity)>>8);
@@ -377,7 +461,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
          */
         uint32_t cycle_time=(255u-(uint32_t)cfg->speed)*20u;
         uint32_t on_time=(uint32_t)cfg->frame_time_ms;
-        if (cfg->effect_id==OT_WLED_BLINK)
+        if (cfg->effect_id==OT_WLED_BLINK ||
+            cfg->effect_id==OT_WLED_BLINK_RAINBOW)
             on_time += (cycle_time * (uint32_t)cfg->intensity)>>8;
         cycle_time += (uint32_t)cfg->frame_time_ms*2u;
         uint32_t cycle_index=time_ms/cycle_time;
@@ -386,7 +471,11 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         state->step=cycle_index;
     }
 
-    const ot_wled_rgb_t color=scaled(on?cfg->foreground:cfg->background,cfg->brightness);
+    const bool rainbow_blink=(cfg->effect_id==OT_WLED_BLINK_RAINBOW ||
+                              cfg->effect_id==OT_WLED_STROBE_RAINBOW);
+    const ot_wled_rgb_t color=scaled(on ? (rainbow_blink ? wheel_rgb((uint8_t)call) :
+                                                        cfg->foreground) :
+                                            cfg->background,cfg->brightness);
     for (size_t i=0;i<count;++i) pixels[i]=color;
     return true;
 }
