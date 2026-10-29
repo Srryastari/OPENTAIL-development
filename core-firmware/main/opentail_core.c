@@ -626,7 +626,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ot_wled_fx_metadata_t meta;
     if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
-       req->chain_mask<1||req->chain_mask>3||req->zone_mask==0||
+       req->chain_mask==0||
+       (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
         return false;
     const TickType_t now=xTaskGetTickCount();
