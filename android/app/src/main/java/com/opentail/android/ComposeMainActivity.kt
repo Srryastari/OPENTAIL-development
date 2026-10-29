@@ -286,6 +286,31 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SequencePage(t: Tone, selectedEffect: Int) {
         val steps = project.sequence()
+        val opts = project.sequenceOptions()
+        var editingStep by remember { mutableIntStateOf(-1) }
+        var editedDuration by remember { mutableStateOf("") }
+        Panel(t) {
+            Caption("Playback settings are saved in the v4 design; they never command CORE.", t)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf("Shuffle" to "shuffleLoop", "Repeat" to "repeat",
+                    "Shared Palette" to "sharedPaletteEnabled").forEach { (name, key) ->
+                    val enabled = opts.optBoolean(key, false)
+                    Pill(name + (if (enabled) " ✓" else ""), t, enabled) {
+                        opts.put(key, !enabled)
+                        project.save()
+                        refresh()
+                    }
+                }
+            }
+            if (opts.optBoolean("sharedPaletteEnabled", false)) {
+                ValueSlider("Shared palette", opts.optInt("sharedPaletteId", 0), 255, t) { n ->
+                    opts.put("sharedPaletteId", n)
+                    project.save()
+                    refresh()
+                }
+            }
+        }
         Panel(t) {
             Title("Sequence designer", t)
             Caption("Locally saved. No BLE commands are sent.", t)
@@ -305,9 +330,35 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill("↑", t) { moveSequence(i, -1) }
                     Pill("↓", t) { moveSequence(i, 1) }
                     Pill("Duplicate", t) { duplicateSequence(i) }
+                    Pill("Edit time", t) {
+                        editingStep = i
+                        editedDuration = item.optInt("ms", 1500).toString()
+                    }
                     Pill("Remove", t) { removeSequence(i) }
                 }
             }
+        }
+        if (editingStep in 0 until steps.length()) {
+            AlertDialog(onDismissRequest = { editingStep = -1 },
+                title = { Text("Edit sequence duration") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Caption("50–600,000 milliseconds. Editable before saving to the design.", t)
+                        Field(editedDuration, "Duration in milliseconds", t) {
+                            editedDuration = it.filter(Char::isDigit).take(6)
+                        }
+                    }
+                },
+                confirmButton = { Pill("Save", t, true) {
+                    val ms = editedDuration.toIntOrNull()
+                    if (ms != null && ms in 50..600000) {
+                        val updated = sequenceList()
+                        updated[editingStep].put("ms", ms)
+                        updateSequence(updated)
+                        editingStep = -1
+                    }
+                } },
+                dismissButton = { Pill("Cancel", t) { editingStep = -1 } })
         }
     }
     private fun sequenceList(): MutableList<JSONObject> =
