@@ -2541,7 +2541,8 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 /* Exact pinned 1D mode_starburst structure and frame evolution.
- * ESP32 max active-star budget on one zone is min(1+N/8,2560/60).
+ * ESP32-S3 PSRAM source star budget on a single active zone is
+ * min(1+N/8,4096/60).
  * The original uses uint32_t color/float fragment[10] with 60B/star.
  * Off-strip floating point positions are explicitly discarded instead of
  * performing upstream's undefined negative-float -> unsigned cast. */
@@ -2563,7 +2564,10 @@ static void starburst_frame(const ot_wled_fx_config_t *cfg,
         for(size_t i=0;i<count;i++)pixels[i]=fg;
         return;
     }
-    const unsigned max_stars=2560u/(unsigned)sizeof(ot_fx_star_t);
+    /* FX.h: 64KiB shared/64 segments with PSRAM, multiplied by four
+     * if <= MAX_NUM_SEGMENTS/4 active segments. Never allocate per frame. */
+    const unsigned max_stars=(4u*(64u*1024u/64u))/
+                             (unsigned)sizeof(ot_fx_star_t);
     unsigned num_stars=1u+((unsigned)count>>3);
     if(num_stars>max_stars)num_stars=max_stars;
     ot_fx_star_t *stars=(ot_fx_star_t*)fx_zone_scratch(
