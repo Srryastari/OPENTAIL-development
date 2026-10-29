@@ -487,7 +487,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_COLORTWINKLE, "Colortwinkles", "Colortwinkles@Fade speed,Spawn speed;;!;;m12=0",
      false, true, true, true, true},
     {OT_WLED_SLOW_TRANSITION, "Slow Transition", "Slow Transition@Time (min),,,,,,Sweep;!;!;1;pal=2,sx=0,ix=0",
-     true, false, true, false, true}
+     true, false, true, false, true},
+    {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
+     false, false, true, true, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2812,6 +2814,92 @@ static const uint8_t ot_inv_gamma22[256];
 static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t,uint8_t);
 
 
+
+/* Pinned mode_dancing_shadows() and 1D Spotlight data, ESP32 max49
+ * independent particles per zone. No shared flare renderer, no 2D mapper. */
+typedef struct {
+    float speed;
+    uint8_t color_idx;
+    int16_t position;
+    uint32_t last;
+    uint8_t width,type;
+} ot_fx_spotlight_t;
+_Static_assert(sizeof(ot_fx_spotlight_t)==16u,"WLED ESP32 spotlight layout");
+static uint8_t fx_cubic_wave8(uint8_t x) {
+    if(x&128u)x=(uint8_t)(255u-x);
+    x=(uint8_t)(x<<1);
+    const uint32_t ii=(uint32_t)x*x;
+    const uint32_t factor=768u-2u*(uint32_t)x;
+    return (uint8_t)((ii*factor)>>16);
+}
+static void dancing_shadows_frame(const ot_wled_fx_config_t *cfg,
+                                  ot_wled_fx_state_t *state,uint32_t now,
+                                  ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        for(size_t i=0;i<count;i++)pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const unsigned n=2u+((unsigned)cfg->intensity*47u/255u);
+    const bool initialize=state->aux0!=n;
+    state->aux0=(uint16_t)n;
+    ot_fx_spotlight_t *spots=(ot_fx_spotlight_t*)fx_zone_scratch(
+                                      state,n*sizeof(ot_fx_spotlight_t));
+    if(!spots)return;
+    ot_wled_palette16_t palette;
+    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
+    for(size_t i=0;i<count;i++)pixels[i]=(ot_wled_rgb_t){0u,0u,0u};
+    for(unsigned i=0;i<n;i++) {
+        ot_fx_spotlight_t *spot=&spots[i];
+        bool respawn=false;
+        if(!initialize) {
+            const float dt=(float)(now-spot->last);
+            const int delta=(int)(dt*(spot->speed*
+                                     ((1.0f+cfg->speed)/100.0f)));
+            if(delta>=1||delta<=-1) {
+                spot->position=(int16_t)((int)spot->position+delta);
+                spot->last=now;
+            }
+            respawn=(spot->speed>0.0f&&(int)spot->position>(int)count+2)||
+               (spot->speed<0.0f&&(int)spot->position<
+                -((int)spot->width+2));
+        }
+        if(initialize||respawn) {
+            spot->color_idx=fx_rand8(state,256u);
+            spot->width=(uint8_t)(1u+fx_rand8(state,9u));
+            spot->speed=1.0f/(float)(4u+fx_rand8(state,46u));
+            if(initialize) {
+                spot->position=(int16_t)fx_rand_index(state,count);
+                if(fx_rand8(state,2u)==0u)spot->speed=-spot->speed;
+            }else if(fx_rand8(state,2u)) {
+                spot->position=(int16_t)(count+spot->width);
+                spot->speed=-spot->speed;
+            }else spot->position=-(int16_t)spot->width;
+            spot->last=now;
+            spot->type=fx_rand8(state,6u);
+        }
+        const ot_wled_rgb_t color=ot_wled_palette_sample(&palette,
+            spot->color_idx,255u,OT_WLED_PALETTE_NOWRAP);
+        const int start=spot->position;
+        const int width=spot->width;
+        const int increment=spot->type==3u?2:spot->type==4u?3:
+                            spot->type==5u?4:1;
+        for(int j=0;j<width;j+=increment) {
+            const int index=start+j;
+            if(index<0||(size_t)index>=count)continue;
+            unsigned amount=128u;
+            if(width>1&&spot->type==1u)
+                amount=fx_cubic_wave8((uint8_t)((unsigned)j*255u/
+                                                    (unsigned)(width-1)));
+            else if(width>1&&spot->type==2u)
+                amount=fx_cubic_wave8((uint8_t)((unsigned)j*510u/
+                                                    (unsigned)(width-1)));
+            pixels[index]=blend_colors(pixels[index],color,(uint8_t)amount);
+        }
+    }
+    for(size_t i=0;i<count;i++)pixels[i]=scaled(pixels[i],cfg->brightness);
+}
+
 /* Pinned slow_transition_data RGB subset. Source CCT/white are zero for
  * WS2815 RGB zones, and check2 Sweep is disabled per source metadata.
  * A changed palette or speed starts a new per-zone transition. */
@@ -4204,7 +4292,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_TWINKLECAT &&
             cfg->effect_id!=OT_WLED_AURORA &&
             cfg->effect_id!=OT_WLED_COLORTWINKLE &&
-            cfg->effect_id!=OT_WLED_SLOW_TRANSITION) ||
+            cfg->effect_id!=OT_WLED_SLOW_TRANSITION &&
+            cfg->effect_id!=OT_WLED_DANCING_SHADOWS) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4398,6 +4487,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_DANCING_SHADOWS) {
+        dancing_shadows_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_SLOW_TRANSITION) {
