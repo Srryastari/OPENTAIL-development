@@ -34,5 +34,13 @@ uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t physical_bits);
  * No GPIO numbers, LED geometry, or vehicle-specific function assumptions. */
 #define OT_TM_BLE_VERSION 1u
 #define OT_TM_BLE_WRITE_BYTES (3u+OT_IN_COUNT)
+#define OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)
 bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
                       uint16_t *expected_revision,ot_tm_profile_t *out);
+
+/* Pure encoder for the 15-byte owner-authenticated trigger GATT readback.
+ * [version,status,revision LE16,raw input mask,effective function mask,
+ *  persisted flag,IN1..IN8 function IDs]. Returns false for invalid profile. */
+bool ot_tm_ble_encode(const ot_tm_profile_t *profile,uint16_t revision,
+                      uint8_t raw,uint8_t effective,bool persisted,uint8_t status,
+                      uint8_t wire[OT_TM_BLE_READ_BYTES]);
