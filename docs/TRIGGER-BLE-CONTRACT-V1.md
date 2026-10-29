@@ -128,6 +128,18 @@ The evidence below is deliberately split between an **earlier user-observed benc
 
 **Release disposition:** Trigger software regression milestone **PASSED**. Hardware acceptance **PENDING**. Deferred-apply software tests **PASSED**; physical NVS-during-activation acceptance **PENDING**. PR #24 stays draft/unmerged. Independent CI does not waive full CORE firmware, effects, phone or physical proof gates.
 
+## One-command physical acceptance capture (read-only)
+
+From the Windows project folder, connected to the controller's bench Wi-Fi:
+
+```powershell
+python core-firmware/tools/capture_trigger_bench.py --seconds 120
+```
+
+This uses only Python's standard library and polls the real `/api/v1/triggers` endpoint. While it runs, manually apply/release independently isolated IN1–IN8 inputs and perform any approved mapping-save test. The timestamped `opentail-trigger-bench-*.jsonl` contains instantaneous GPIO, settled input masks, effective roles, saved revision, pending flags, request duration, and a summary of observed historical masks. It does not write commands or change GPIO/NVS.
+
+**Evidence interpretation:** A readback capture is not an optical measurement, electrical isolation test, BLE phone authentication test or proof of which firmware SHA was flashed. CI verifies that the tool parses; hardware acceptance requires independent multimeter/logic-analyzer observation, captured external WS2815 colors and GPIO-to-pixel latency, authenticated phone readback after reboot, and exact flashed image identification. Do not mark `11. Hardware acceptance` passed from a captured JSONL alone.
+
 ## Handoff / acceptance
 
 Native Android owns the presentation: a trigger mapping editor may add read/write/readback using this packet, preserving the approved UI. Do not edit Android from the trigger branch.
