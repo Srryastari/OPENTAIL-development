@@ -373,45 +373,22 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("All editors update the local preview instantly. Owner-authorized BLE also previews supported effects transiently; physical geometry still requires explicit controller save.", t)
         }
     }
-    /** Pixel-exact LOCAL DESIGN map. CORE's current BLE protocol accepts
-     * FX commands but cannot return authoritative post-render RGB frames. */
-    private fun projectFrame(): ExactLedFrame {
-        val end = (0 until project.zoneCount()).maxOfOrNull { i ->
-            val zone = project.zone(i)
-            (zone?.optInt("start", 0) ?: 0) +
-                (zone?.optInt("length", 0) ?: 0)
-        } ?: 0
-        if (end !in 0..ExactLedFrame.MAX_PIXELS)
-            return ExactLedFrame.fromProject(IntArray(0))
-        val rgb = IntArray(end) { android.graphics.Color.BLACK }
-        for (zoneIndex in 0 until project.zoneCount()) {
-            val zone = project.zone(zoneIndex) ?: continue
-            val id = zone.optString("id")
-            val start = zone.optInt("start", 0)
-            val length = zone.optInt("length", 0)
-            val reverse = zone.optBoolean("reverse", false)
-            if (start < 0 || length < 0 || start.toLong() + length > end) continue
-            for (local in 0 until length) {
-                val index = start + if (reverse) length - 1 - local else local
-                val hex = project.pixelColor(id, local)
-                rgb[index] = 0xff000000.toInt() or hex.substring(1).toInt(16)
-            }
-        }
-        return ExactLedFrame.fromProject(rgb)
-    }
-
     @Composable
     private fun EffectsPreview(t: Tone, effect: Int) {
         // Every segment represents exactly one real zero-based LED index.
         // No fabricated effect motion, fixed 28-dot count, or frame sampling.
         val revisionKey = revision.intValue
-        val frame = remember(revisionKey) { projectFrame() }
-        val total = frame.size()
+        val frame = remember(revisionKey) {
+            runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
+        }
+        val total = frame?.size() ?: 0
         val window = total.coerceAtMost(64)
         var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
         val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
         Caption("Exact local pixel map · " + total + " indexed design LEDs", t)
-        if (total == 0) {
+        if (frame == null) {
+            Caption("Pixel map exceeds preview capacity; check manual zone offsets.", t)
+        } else if (total == 0) {
             Caption("Add zones in Layout to inspect individual pixel addresses.", t)
         } else {
             Canvas(Modifier.fillMaxWidth().height(64.dp)
