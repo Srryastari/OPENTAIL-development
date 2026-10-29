@@ -510,6 +510,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_EXPLODING_FIREWORKS, "Fireworks 1D",
      "Fireworks 1D@Gravity,Firing side;!,!;!;12;pal=11,ix=128",
      true, true, true, true, true},
+    {OT_WLED_NOISE_PAL, "Noise Pal", "Noise Pal@!,Scale;;!",
+     false, false, true, true, true},
     {OT_WLED_ROCKTAVES, "Rocktaves", "Rocktaves@;!,!;!;01f;m12=1,si=0",
      true, true, false, false, false},
     {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
@@ -4619,6 +4621,61 @@ static bool exploding_fireworks_frame(const ot_wled_fx_config_t *cfg,
     }
     return true;
 }
+
+/* Source WLED FX.cpp mode_noisepal() uses two 48-byte CRGBPalette16
+ * buffers and 48 per-channel updates per render. Random colors are local
+ * to the zone; gamma8inv(128) is 186 for upstream default gamma 2.2. */
+static void noise_pal_blend(ot_wled_palette16_t *dst,
+                            const ot_wled_palette16_t *target) {
+    uint8_t *a=(uint8_t*)dst,*b=(uint8_t*)(uintptr_t)target;
+    unsigned changed=0u;
+    for(unsigned i=0;i<sizeof(*dst);i++){
+        if(a[i]==b[i])continue;
+        if(a[i]<b[i]){a[i]++;changed++;}
+        if(a[i]>b[i]){
+            a[i]--;changed++;
+            if(a[i]>b[i])a[i]--;
+        }
+        if(changed>=48u)break;
+    }
+}
+static bool noise_pal_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *st,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    ot_wled_palette16_t *pal=(ot_wled_palette16_t*)fx_zone_scratch(st,
+                                         2u*sizeof(ot_wled_palette16_t));
+    if(!pal)return false;
+    const uint32_t change=4000u+(uint32_t)cfg->speed*10u;
+    if(now-st->step>change) {
+        st->step=now;
+        const uint8_t base=fx_rand8(st,256u);
+        const uint8_t min_bri=186u;
+        uint8_t hsv[12]={
+           (uint8_t)(base+fx_rand8(st,64u)),255u,
+                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
+           (uint8_t)(base+128u),255u,
+                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
+           (uint8_t)(base+fx_rand8(st,92u)),192u,
+                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
+           (uint8_t)(base+fx_rand8(st,92u)),255u,
+                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri))};
+        if(!ot_wled_palette_from_hsv4(hsv,&pal[1]))return false;
+    }
+    noise_pal_blend(&pal[0],&pal[1]);
+    if(cfg->palette_id && !ot_wled_palette_build(cfg->palette_id,
+         cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},&pal[0]))
+        return false;
+    const uint16_t scale=(uint16_t)(15u+(cfg->intensity>>2u));
+    for(size_t i=0;i<count;i++){
+        const uint16_t x=(uint16_t)(i*(size_t)scale);
+        const uint16_t y=(uint16_t)(st->aux0+i*(size_t)scale);
+        const uint8_t index=fx_perlin8_2(x,y);
+        pixels[i]=scaled(ot_wled_palette_sample(&pal[0],index,255u,
+                             OT_WLED_PALETTE_LINEAR),cfg->brightness);
+    }
+    st->aux0=(uint16_t)(st->aux0+fx_beatsin8(10u,1u,4u,now));
+    return true;
+}
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0)
@@ -4638,7 +4695,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_DANCING_SHADOWS &&
             cfg->effect_id!=OT_WLED_FIRE_2012 &&
             cfg->effect_id!=OT_WLED_PACIFICA &&
-            cfg->effect_id!=OT_WLED_EXPLODING_FIREWORKS) ||
+            cfg->effect_id!=OT_WLED_EXPLODING_FIREWORKS &&
+            cfg->effect_id!=OT_WLED_NOISE_PAL) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4834,6 +4892,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
+    if(cfg->effect_id==OT_WLED_NOISE_PAL)
+        return noise_pal_frame(cfg,state,time_ms,pixels,count);
     if(cfg->effect_id==OT_WLED_EXPLODING_FIREWORKS)
         return exploding_fireworks_frame(cfg,state,pixels,count);
     if(cfg->effect_id==OT_WLED_ROCKTAVES)
