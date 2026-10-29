@@ -32,9 +32,15 @@ check("Android manifest and styles parse", manifest.tag == "manifest" and style.
 check("Android v0.2.0-alpha1 native release numbers", 
       "versionName '0.2.0-alpha1'" in gradle and "versionCode 31" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
-check("Manifest launches native MainActivity and has no web transport permission",
+check("Sole launcher is Kotlin Compose; Java fallback is internal and no web transport permission",
+      manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
+      'android:name=".ComposeMainActivity"' in manifest_xml and
       'android:name=".MainActivity"' in manifest_xml and
-      'android.permission.INTERNET' not in manifest_xml)
+      'android:exported="false"' in manifest_xml and
+      'android.permission.INTERNET' not in manifest_xml and
+      manifest_xml.index('android:name=".ComposeMainActivity"') <
+      manifest_xml.index('android.intent.category.LAUNCHER') <
+      manifest_xml.index('android:name=".MainActivity"'))
 check("No WebView or packaged Studio HTML runtime assets",
       "new WebView(" not in main and "loadUrl(" not in main and
       not (app / "assets/opentail.htm").exists() and
@@ -72,15 +78,17 @@ check("Native hardware output read/save and post-commit readback retained",
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
-# This is a build-tested migration candidate, NOT the launcher or a device pass.
-# Retain the earlier working Java launcher until Compose reaches functional parity.
+# Compose is the alpha launcher, not an on-device visual/BLE certification.
+# The earlier Java screen remains an internal debug-only comparison fallback.
 compose = (source / "ComposeMainActivity.kt").read_text()
 root_gradle = read("build.gradle")
-check("Compose migration is explicitly internal and only debug-reachable",
-      'android:name=".ComposeMainActivity" android:exported="false"' in manifest_xml
-      and "FLAG_DEBUGGABLE" in main
-      and "Preview Kotlin + Compose · Developer" in main
-      and "startActivity(new Intent(this,ComposeMainActivity.class))" in main)
+check("Compose is sole alpha launcher, Java fallback only available in debug",
+      'android:name=".ComposeMainActivity"' in manifest_xml and
+      'android:exported="true"' in manifest_xml and
+      'android:name=".MainActivity"' in manifest_xml and
+      'android:exported="false"' in manifest_xml and
+      'this@ComposeMainActivity, MainActivity::class.java' in compose and
+      'FLAG_DEBUGGABLE' in compose)
 check("Kotlin + Compose toolchain is present (not a WebView replacement)",
       "org.jetbrains.kotlin.android" in root_gradle and
       "org.jetbrains.kotlin.plugin.compose" in root_gradle and
@@ -95,6 +103,12 @@ check("Compose migration has approved six pages and top-only navigation",
           ("HomePage(", "ShowModesPage(", "LayoutPage(", "TriggersPage(",
            "AutoEventsPage(", "SettingsPage("))
       and "horizontalScroll(" in compose and "BottomNavigation" not in compose)
+check("Compose Material UI follows locked OLED/white colors",
+      all(t in compose for t in (
+          "MaterialTheme(colorScheme = scheme)", "lightColorScheme(", "darkColorScheme(",
+          "Color.White", "ConnectPill", "RoundedCornerShape(99.dp)",
+          'previewCurrentEffect(item.id)',
+          "Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())")))
 check("Compose authoring preserves zone offsets and separate BLE confirmation",
       all(k in compose for k in
           ("previewZoneOffsets(id, n)", "project.editZone(",
@@ -119,5 +133,5 @@ check("Native effect catalog and approved sequence toggles remain accessible",
 check("Universal live-edit contract and bounded transient CORE FX preview",
       subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
-print("Compose status: compilation candidate; still NOT launcher. No UI parity or device test claimed.")
+print("Compose status: only Android alpha launcher. Physical BLE and pixel-accurate visual parity are not certified by static checks.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
