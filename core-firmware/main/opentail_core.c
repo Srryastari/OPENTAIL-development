@@ -507,20 +507,35 @@ static esp_err_t tm_post(httpd_req_t *r){
 }
 static esp_err_t show_get(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
-    ot_show_t cfg;bool active;uint32_t remaining;bool ready;
+    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false;
     bool fx_active=false;uint16_t fx_effect_id=0;
     portENTER_CRITICAL(&state_lock);
     cfg=native_show;active=show_window(now);
-    if(active && ble_fx_enabled){fx_active=true;fx_effect_id=ble_fx_request.effect_id;}
-    remaining=active?(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS):0;
+    if(active && ble_fx_enabled){
+        fx_active=true;fx_effect_id=ble_fx_request.effect_id;
+        /* The FX bank, not the legacy show deadline, owns per-zone TTLs.
+         * Loaded standalone scenes do not expire after the preview TTL. */
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+            const ot_fx_zone_slot_t *slot=&fx_bank.zones[o][z];
+            if(!ot_fx_slot_active(slot,ms))continue;
+            if(slot->standalone){persistent=true;continue;}
+            const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
+            const uint32_t elapsed=ms-slot->started_ms;
+            if(duration-elapsed>remaining)remaining=duration-elapsed;
+        }
+        if(persistent)remaining=0;
+    }else if(active){
+        remaining=(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS);
+    }
     ready=native_outputs_ready;
     portEXIT_CRITICAL(&state_lock);
     ot_wled_fx_metadata_t meta;
     const char *active_name=fx_active&&ot_effects_1d_metadata(fx_effect_id,&meta)?
       meta.name:ot_show_name(cfg.mode);
     char buf[390];
-    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?active_name:"off",(unsigned long)remaining,
+    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
+      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
