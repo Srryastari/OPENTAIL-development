@@ -2719,7 +2719,7 @@ window.addEventListener('unhandledrejection',e=>diagEvent('unhandled-rejection',
 
 
 // v0.15 unified native-style UI; retains v0.14 WLED transport and diagnostics.
-const OT_VERSION='0.19.118';
+const OT_VERSION='0.19.119';
 let otSub='Effects',otPreviewExpanded=false,otPreviewPlay=true,otSelectedPreview=null,otOutputStopped=false;
 // WLED's built-in power limiter remains the actual current protection.
 // This user-adjustable, supply-aware planning cap is only an approximate bench precaution.
@@ -4030,7 +4030,7 @@ function otColorTestPanel(){const cap=otTestCeiling(),effective=otEffectiveTestB
 const otCoreOriginIsLocal = /^\/(?:studio\/?|studio\.htm)$/i.test(location.pathname);
 function otCoreStoredValue(key,defaultValue){try{return localStorage.getItem(key)||defaultValue}catch{return defaultValue}}
 function otCoreStoreValue(key,value){try{localStorage.setItem(key,value)}catch(e){console.warn('CORE setting not stored',e)}}
-let otControllerMode=otCoreOriginIsLocal?'core':otCoreStoredValue('ot-controller-mode-v1','wled');
+let otControllerMode=otCoreOriginIsLocal?'core':otCoreStoredValue('ot-controller-mode-v1','core');
 if(otControllerMode!=='core')otControllerMode='wled';
 let otCoreAddress=otCoreOriginIsLocal?location.origin:otCoreStoredValue('ot-core-address-v1','http://192.168.4.1');
 let otCoreConnected=false,otCorePending=false,otCoreCaps=null,otCoreStatus=null,otCoreMessage='Connect to OpenTail CORE Alpha for bench diagnostics.';
@@ -4432,7 +4432,14 @@ function otOutputManagerCard(){
   <p class="small muted">To save: stop Shows/demos and release all physical 12V inputs. Names permit letters, numbers, spaces, hyphens and basic punctuation. Settings are not a current limit. The full 12-output controller is a future hardware revision.</p>
  </section>`;
 }
-function otCoreDevice(){return otCoreControllerPicker()+`<div class="card"><h2>OpenTail CORE Alpha</h2><div class="ot-core-info">BENCH ONLY · No automotive power protection, backup controller, or hardware lighting fallback. Keep OEM road lights independent.</div><label class="field">CORE address<input type="text" value="${esc(otCoreAddress)}" placeholder="http://192.168.4.1" oninput="otCoreSetAddress(this.value)" aria-label="CORE address"></label><div class="btnrow"><button class="btn primary" ${otCorePending?'disabled':''} onclick="otCoreConnect()">${otCorePending?'Connecting…':'Connect CORE'}</button><button class="btn" onclick="otCoreDisconnect()">Disconnect</button></div><p class="ot-core-help">On CORE Wi-Fi, use <strong>http://192.168.4.1/studio</strong>. The old WLED-hosted URL at 10.0.0.13 is generally inaccessible while connected to CORE's separate access point.</p></div>${otCoreLiveCard()}<div class="card"><h2>Temporary bench tests</h2><h3>Simulated vehicle inputs</h3>${otCoreSignalActions()}<h3>Color demos</h3>${otCoreDemoActions()}${otCoreStopButton()}</div><div class="card"><h2>Project backup</h2><div class="btnrow">${button('Export project','exportProject()','primary')}<label class="btn">Import project<input type="file" accept="application/json" style="display:none" onchange="importProject(this.files[0])"></label></div><p class="ot-core-help">Projects are saved locally; they are not uploaded to CORE Alpha firmware.</p></div>`}
+/* Studio owns the design file. The controller's /dev dashboard owns all
+ * firmware diagnostics and hardware testing. This connection remains
+ * optional and does not upload project data or automatically start LEDs. */
+function otCoreDevice(){
+ return `<div class="card"><h2>Project backup</h2><p class="small muted">Edit effects, sequences, triggers and layouts offline. Save or restore the project JSON without rebuilding CORE.</p><div class="btnrow">${button('Export project','exportProject()','primary')}<label class="btn">Import project<input type="file" accept="application/json" style="display:none" onchange="importProject(this.files[0])"></label></div></div>
+ <div class="card"><h2>Controller connection · Optional</h2><p class="small muted">Connect to inspect CORE capability status. Design work does not require a controller connection. Deployment of an entire Studio sequence is not implemented yet.</p><label class="field">CORE address<input type="text" value="${esc(otCoreAddress)}" placeholder="http://192.168.4.1" oninput="otCoreSetAddress(this.value)" aria-label="CORE address"></label><div class="btnrow"><button class="btn primary" ${otCorePending?'disabled':''} onclick="otCoreConnect()">${otCorePending?'Connecting…':'Connect CORE'}</button><button class="btn" onclick="otCoreDisconnect()">Disconnect</button></div><p class="ot-core-help">Firmware diagnostics and LED testing: open <strong>http://192.168.4.1/dev</strong> while connected to the CORE bench Wi-Fi. Studio does not embed that dashboard.</p></div>`;
+}
+
 // In CORE mode, retain the existing Studio editor and workspace identity.
 // The editor's existing WLED-only actions remain unavailable until firmware capability exists.
 function otCoreWorkspaceBanner(section){
@@ -4441,8 +4448,12 @@ function otCoreWorkspaceBanner(section){
 }
 function otCoreQuickTest(){return `<div class="card ot-core-quicktests"><div class="line"><div><h2>CORE · Live bench tests</h2><p class="small muted">Controls send commands to CORE.</p></div><span class="ot-fo-badge">BENCH ONLY</span></div><h3>Simulate vehicle inputs</h3>${otCoreSignalActions()}<h3>Temporary color demos</h3>${otCoreDemoActions()}${otCoreStopButton()}</div>`;}
 function otCoreHome(){
- return otCoreWorkspaceBanner('Dashboard')+`<div class="ot-dash"><div class="card"><div class="line"><h2>${esc(state.projectName||'Untitled project')}</h2><span class="status-pill ${otCoreConnected?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${otCoreConnected?'CORE connected':'CORE offline'}</span></div><div class="statbar"><div class="stat"><strong>${state.layout.length}</strong><span>Project sections</span></div><div class="stat"><strong>${otCoreStatus?.leds_per_chain??'—'}</strong><span>CORE pixels per output</span></div><div class="stat"><strong>${otCoreStatus?.frames??'—'}</strong><span>CORE frames</span></div></div></div>${otPixelPreview()}</div>`+(state.layout.length===0?`<div class="card"><h2>Bring in your existing project</h2><p class="small muted">Import a project backup to continue. CORE and WLED projects are stored separately.</p><button class="btn primary" onclick="go('device')">Go to Project import</button></div>`:'')+otCoreQuickTest()+otCoreLiveCard();
+ const total=state.layout.reduce((sum,z)=>sum+Math.max(0,Number(z.length)||0),0);
+ return `<div class="ot-dash"><div class="card"><div class="line"><h2>${esc(state.projectName||'Untitled project')}</h2><span class="status-pill">${otCoreConnected?'CORE connected · optional':'Offline design ready'}</span></div>
+ <div class="statbar"><div class="stat"><strong>${state.layout.length}</strong><span>Design zones</span></div><div class="stat"><strong>${total}</strong><span>Designed pixels</span></div><div class="stat"><strong>${otSequence.length}</strong><span>Sequence steps</span></div><div class="stat"><strong>${(state.savedPresets||[]).length}</strong><span>Presets</span></div></div>
+ <p class="small muted">Build and preview your lighting design independently. CORE handles actual rendering, inputs, and hardware diagnostics.</p><div class="btnrow"><button class="btn primary" onclick="go('scenes')">Edit Show Modes</button><button class="btn" onclick="go('layout')">Edit Layout</button>${button('Export project','exportProject()')}</div></div>${otPixelPreview()}</div>`;
 }
+
 function otCoreUnsupported(label,description){return `<div class="card"><h2>${esc(label)}</h2><div class="ot-core-info">${esc(description)} OpenTail CORE Alpha does not yet run Studio's effects, custom palettes, saved triggers, or sequences.</div><p class="ot-core-help">Switch to WLED in Connect for the full editor. Existing Studio project settings have not been changed.</p><div class="btnrow">${button('Go to Connect',"go('device')",'primary')}</div></div>`}
 function otCoreShow(){return otCoreUnsupported('Show Modes · CORE Alpha','Only temporary built-in solid color demos are available on this firmware.')+`<div class="card"><h2>Temporary CORE colors</h2>${otCoreDemoActions()}${otCoreStopButton()}</div>`}
 function otCoreTriggers(){return otCoreUnsupported('Triggers · CORE Alpha','Temporary software-simulated input tests are available; uploaded trigger animations and automatic Startup/Shutdown are not.')+`<div class="card"><h2>Simulate one input (2 seconds)</h2>${otCoreSignalActions()}${otCoreStopButton()}</div>`}
@@ -4549,16 +4560,22 @@ function otChatAutomaticEvents(){
  </section>`;
 }
 
+/* CORE's default Studio routes are authoring-only. No firmware diagnostics,
+ * input simulation, output NVS editor or duplicate hardware controls are
+ * rendered inside Show Modes, Triggers, Layout or Home. */
 function otStudioRoute(tab){
  if(tab==='builder'&&otConceptActive==='events')return otChatAutomaticEvents();
- if(otControllerMode==='core')return ({
-  home:otCoreHome,
-  device:()=>`<div class="ot-settings-page">${otCoreDevice()}${otAppearanceCard()}</div>`,
-  scenes:()=>scenes()+`<details class="card ot-core-advanced"><summary>CORE connection and capability notes</summary>${otCoreWorkspaceBanner('Show Modes')}</details>`,
-  builder:()=>builder()+`<details class="card ot-core-advanced"><summary>CORE physical trigger input mapping · Advanced</summary>${otTriggerManagerCard()}${otCoreWorkspaceBanner('Triggers')}</details>`,
-  layout:()=>layout()+`<details class="card ot-core-advanced"><summary>CORE hardware output mapping · Advanced</summary>${otOutputManagerCard()}${otCoreWorkspaceBanner('Layout')}</details>`,
-  diagnostics:otCoreDiagnostics
- })[tab]();
+ if(otControllerMode==='core'){
+   const routes={
+     home:otCoreHome,
+     device:()=>`<div class="ot-settings-page">${otCoreDevice()}${otAppearanceCard()}</div>`,
+     scenes,
+     builder,
+     layout,
+     diagnostics:()=>`<div class="card"><h2>Developer tests are in CORE</h2><p class="small muted">Connect to the controller bench Wi-Fi and open http://192.168.4.1/dev for input simulation, output NVS configuration, RGB testing, FPS and logs. Your Studio project is unaffected.</p></div>`
+   };
+   return (routes[tab]||routes.home)();
+ }
  return ({home,scenes,builder,layout,device:()=>`<div class="ot-settings-page">${device()}${otAppearanceCard()}</div>`,diagnostics})[tab]();
 }
 
@@ -4574,7 +4591,7 @@ const OT_NAV_ICONS={
 };
 function otNavIcon(id){return '<svg class="ot-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(OT_NAV_ICONS[id]||OT_NAV_ICONS.home)+'</svg>'}
 const OT_PAGE_SUBS={home:'Your vehicle lighting, at a glance.',device:'Controllers, connections and safe bench testing.',scenes:'Create lighting effects, sequences and presets.',builder:'Configure lighting behaviors and vehicle events.',layout:'Organize sections and pixel output mapping.',diagnostics:'Health, logs and controller capabilities.'};
-function otPageIntro(){const tab=TABS.find(item=>item[0]===state.tab)||TABS[0];return `<section class="ot-page-intro"><div><div class="ot-eyebrow">${otControllerMode==='core'?'CORE WORKSPACE':'WLED WORKSPACE'} <span aria-hidden="true">/</span> ${esc(state.projectName||'Untitled project')}</div><h1>${esc(tab[2])}</h1><p>${OT_PAGE_SUBS[tab[0]]||''}</p></div><div class="ot-mode-tag">${otControllerMode==='core'?'CORE Alpha':'WLED'}</div></section>`;}
+function otPageIntro(){const tab=TABS.find(item=>item[0]===state.tab)||TABS[0];return `<section class="ot-page-intro"><div><div class="ot-eyebrow">${otControllerMode==='core'?'DESIGN WORKSPACE':'LEGACY WORKSPACE'} <span aria-hidden="true">/</span> ${esc(state.projectName||'Untitled project')}</div><h1>${esc(tab[2])}</h1><p>${OT_PAGE_SUBS[tab[0]]||''}</p></div><div class="ot-mode-tag">${otControllerMode==='core'?'Studio · Independent':'Legacy controller'}</div></section>`;}
 function render(){const advancedOpen=state.tab==='layout'&&!!document.querySelector('details.ot-core-advanced[open]');document.documentElement.dataset.otTheme=otTheme;document.querySelector('meta[name="theme-color"]')?.setAttribute('content',otTheme==='light'?'#ffffff':'#000000');document.getElementById('app').innerHTML=`<div class="shell"><header class="top"><div class="logo"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="23" height="23" fill="none"><path d="M14 2 17.6 10.4 26 14l-8.4 3.6L14 26l-3.6-8.4L2 14l8.4-3.6L14 2Z" fill="currentColor"/></svg></div><div><div class="brand">OpenTail <span>Studio</span></div><div class="sub">Automotive lighting studio</div></div></div><span id="ot-save-failure" class="ot-save-failure" role="alert" ${otSaveState==='failed'?'':'hidden'}>⚠ Save failed</span>${otThemeShortcut()}<span class="status-pill ${(otControllerMode==='core'?otCoreConnected:state.connected)?'is-connected':'is-disconnected'}"><i class="status-dot"></i>${(otControllerMode==='core'?otCoreConnected:state.connected)?'Online':'Offline'}</span></header>${otControllerMode==='wled'?otSequenceGlobalControl():''}<main>${otPageIntro()}${otConceptNav()}${otStudioRoute(state.tab)}</main><footer class="footer"><span>OpenTail Studio · Bench / design</span><button onclick="otAbout()" class="ot-version">v${OT_VERSION}</button></footer></div>${otUEMarkup()}`;if(advancedOpen&&state.tab==='layout'){const advanced=document.querySelector('details.ot-core-advanced');if(advanced)advanced.open=true;}otPaintAllRanges();otPeekPaint();if(otSim.active||otUE)otSimAnimate();if(state.tab==='builder')otPaintTurnPreview();if(otControllerMode==='core'&&state.tab==='diagnostics'){otCorePaintInputMonitor();otCorePaintArbitration()}}
 
 otMigrateLegacyDefaultTriggers();
