@@ -489,6 +489,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SLOW_TRANSITION, "Slow Transition", "Slow Transition@Time (min),,,,,,Sweep;!;!;1;pal=2,sx=0,ix=0",
      true, false, true, false, true},
     {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
+     false, false, true, true, true},
+    {OT_WLED_FIRE_2012, "Fire 2012", "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
      false, false, true, true, true}
 };
 
@@ -2815,6 +2817,58 @@ static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t,uint8_t);
 
 
 
+
+/* Source mode_fire_2012() 1D virtual strip and heat simulation.
+ * 2D blur is intentionally not applied to 1D zones. Custom3 defaults
+ * to 12 in the pinned host profile; expose source customization later. */
+static void fire_2012_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        for(size_t i=0;i<count;i++)pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    uint8_t *heat=fx_zone_scratch(state,count);
+    if(!heat)return;
+    ot_wled_palette16_t palette;
+    if(!ot_wled_palette_build(cfg->palette_id?cfg->palette_id:35u,
+                   cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},
+                   &palette))return;
+    const uint32_t it=now>>5;
+    const unsigned ignition=(count/10u)>3u?(unsigned)(count/10u):3u;
+    const bool advance=it!=state->step;
+    const uint32_t cool_bound=(((20u+(unsigned)cfg->speed/3u)*16u)/
+                               (uint32_t)count)+2u;
+    for(size_t i=0;i<count;i++) {
+        const uint8_t cool=fx_rand8(state,advance?cool_bound:4u);
+        const unsigned min_temp=i<ignition?(ignition-(unsigned)i)/4u+16u:0u;
+        const uint8_t temp=heat[i]>cool?(uint8_t)(heat[i]-cool):0u;
+        heat[i]=temp<min_temp?(uint8_t)min_temp:temp;
+    }
+    if(advance) {
+        for(size_t k=count-1u;k>1u;k--)
+            heat[k]=(uint8_t)((heat[k-1u]+((unsigned)heat[k-2u]<<1))/3u);
+        if(fx_rand8(state,256u)<=cfg->intensity) {
+            /* Preserve upstream RNG range; keep ignition in bounds for
+             * 2-pixel zones where source minimum ignition=3 exceeds SEGLEN. */
+            const unsigned y=fx_rand8(state,ignition);
+            const unsigned boost=(17u+12u)*(ignition-y/2u)/ignition;
+            const uint8_t value=(uint8_t)(96u+2u*boost+
+                fx_rand8(state,207u+boost-(96u+2u*boost)));
+            if(y<count) {
+                const unsigned sum=(unsigned)heat[y]+value;
+                heat[y]=(uint8_t)(sum>255u?255u:sum);
+            }
+        }
+    }
+    for(size_t j=0;j<count;j++) {
+        const uint8_t index=heat[j]>240u?240u:heat[j];
+        pixels[j]=scaled(ot_wled_palette_sample(&palette,index,255u,
+                                  OT_WLED_PALETTE_NOBLEND),cfg->brightness);
+    }
+    if(advance)state->step=it;
+}
+
 /* Pinned mode_dancing_shadows() and 1D Spotlight data, ESP32 max49
  * independent particles per zone. No shared flare renderer, no 2D mapper. */
 typedef struct {
@@ -4293,7 +4347,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_AURORA &&
             cfg->effect_id!=OT_WLED_COLORTWINKLE &&
             cfg->effect_id!=OT_WLED_SLOW_TRANSITION &&
-            cfg->effect_id!=OT_WLED_DANCING_SHADOWS) ||
+            cfg->effect_id!=OT_WLED_DANCING_SHADOWS &&
+            cfg->effect_id!=OT_WLED_FIRE_2012) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4487,6 +4542,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_FIRE_2012) {
+        fire_2012_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_DANCING_SHADOWS) {
