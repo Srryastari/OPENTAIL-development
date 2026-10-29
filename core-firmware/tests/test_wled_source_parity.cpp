@@ -538,6 +538,27 @@ static CRGBPalette16 ref_palette(uint8_t id,uint32_t primary,uint32_t secondary,
  return pal;
 }
 
+/* Direct pinned colors.h fast_color_scale / colors.cpp color_add with preserveCR. */
+static uint32_t source_fast_scale(uint32_t c,uint8_t scale) {
+  uint32_t rb=(((c&0x00ff00ffu)*scale)>>8)&0x00ff00ffu;
+  uint32_t wg=(((c>>8)&0x00ff00ffu)*scale)&~0x00ff00ffu;
+  return rb|wg;
+}
+static uint32_t source_color_add(uint32_t c1,uint32_t c2) {
+  if(c1==0u)return c2;if(c2==0u)return c1;
+  const uint32_t mask=0x00ff00ffu;
+  uint32_t rb=(c1&mask)+(c2&mask);
+  uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
+  if((rb|wg)&0x01000100u) {
+    uint32_t red=rb>>16, blue=rb&0xffffu, white=wg>>16, green=wg&0xffffu;
+    uint32_t top=red>green?(red>blue?red:blue):(green>blue?green:blue);
+    if(white>top)top=white;
+    uint32_t scale=(255u<<8)/top;
+    rb=((rb*scale)>>8)&mask;
+    wg=(wg*scale)&~mask;
+  } else wg<<=8;
+  return rb|wg;
+}
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
     uint32_t step=0u,call=0u;
@@ -571,6 +592,8 @@ struct PinnedSeg {
     void blur(uint8_t){std::abort();}
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
     void setPixelColorXY(unsigned x,unsigned y,uint8_t r,uint8_t g,uint8_t b) { (void)y;setPixelColor(x,r,g,b); }
+    void fadeToBlackBy(uint8_t fade) {for(auto& px:pixels)px=source_fast_scale(px,(uint8_t)(255u-fade));}
+    void addPixelColor(unsigned i,uint32_t color) {if(i<pixels.size())pixels[i]=source_color_add(pixels[i],color);}
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
@@ -3514,6 +3537,44 @@ void mode_exploding_fireworks(void)
 }
 #undef MAX_SPARKS
 
+/* PINNED WLED FX.cpp Rocktaves source body: audio provider is a host
+ * fixture, and the existing direct source beat function is used. */
+struct um_data_t {void* u_data[8]{};};
+static float source_audio_major=220.0f;
+static float source_audio_mag=1800.0f;
+static um_data_t* getAudioData() {
+  static um_data_t data{};
+  data.u_data[4]=&source_audio_major;data.u_data[5]=&source_audio_mag;
+  return &data;
+}
+void mode_rocktaves(void) {                 // Rocktaves. Same note from each octave is same colour.    By: Andrew Tuline
+  um_data_t *um_data = getAudioData();
+  float   FFT_MajorPeak = *(float*)  um_data->u_data[4];
+  float   my_magnitude  = *(float*)   um_data->u_data[5] / 16.0f;
+
+  SEGMENT.fadeToBlackBy(16);                              // Just in case something doesn't get faded.
+
+  float frTemp = FFT_MajorPeak;
+  uint8_t octCount = 0;                                   // Octave counter.
+  uint8_t volTemp = 0;
+
+  volTemp = 32.0f + my_magnitude * 1.5f;                  // brightness = volume (overflows are handled in next lines)
+  if (my_magnitude < 48) volTemp = 0;                     // We need to squelch out the background noise.
+  if (my_magnitude > 144) volTemp = 255;                  // everything above this is full brightness
+
+  while ( frTemp > 249 ) {
+    octCount++;                                           // This should go up to 5.
+    frTemp = frTemp/2;
+  }
+
+  frTemp -= 132.0f;                                       // This should give us a base musical note of C3
+  frTemp  = fabsf(frTemp * 2.1f);                         // Fudge factors to compress octave range starting at 0 and going to 255;
+
+  unsigned i = map(source_beatsin8(8+octCount*4, 0, 255, 0, octCount*8), 0, 255, 0, SEGLEN-1);
+  i = constrain(i, 0U, SEGLEN-1U);
+  SEGMENT.addPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette((uint8_t)frTemp, false, PALETTE_SOLID_WRAP, 0), volTemp));
+} // mode_rocktaves()
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3576,7 +3637,8 @@ static const RefCase refs[]={
     {112,mode_dancing_shadows,"Dancing Shadows"},
     {66,mode_fire_2012,"Fire 2012"},
     {101,source_pacifica,"Pacifica"},
-    {90,mode_exploding_fireworks,"Fireworks 1D"}
+    {90,mode_exploding_fireworks,"Fireworks 1D"},
+    {185,mode_rocktaves,"Rocktaves"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3693,7 +3755,7 @@ int main() {
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
@@ -3708,6 +3770,8 @@ int main() {
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
                     cfg.frame_time_ms=23;cfg.palette_id=pal;
+                    const ot_wled_audio_peak_t measured={220.0f,1800.0f};
+                    cfg.audio_peak=fx.id==185u?&measured:nullptr;
                     cfg.foreground={123,56,9};cfg.background={3,88,174};
                     ot_wled_fx_state_t state{};
                     std::vector<ot_wled_rgb_t> actual(count);
