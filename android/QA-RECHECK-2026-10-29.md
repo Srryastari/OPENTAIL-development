@@ -21,7 +21,7 @@
 7. Consolidated Layout and other editors onto a shared native **borderless soft-capsule Slider** (12dp track, rounded accent fill, subtle 22dp thumb glow), without replacing Material3 drag/keyboard/accessibility semantics. Corrected the color field's weighted row layout and gave action pills 48dp minimum height.
 8. Made action rows horizontally scroll on narrow phones, reset vertical scroll when switching top destinations, and added exact-address 8/16/32/64 LED inspection zoom. No pixel interpolation or animated-frame approximation was introduced.
 9. Added a local trigger-color swatch to Start/Stop instead of a misleading simulated animation; the test explicitly says CORE LEDs are unchanged.
-10. Added a confirmation before a local preset replaces the active project. Restored Settings **Preview Offline** beside the locked white Connect action; opening it clears any prior CORE frame and does not send BLE.
+10. Added a confirmation before a local preset replaces the active project. Restored Settings **Preview Offline** beside the locked white Connect action. This opens a local-only Show Modes session, clears old CORE frames, suppresses new effect/snapshot BLE commands, and issues STOP only when a previous temporary hardware preview was already armed. Leaving Show Modes restores normal authorized preview behavior.
 11. Expanded active Compose regression checks for unified slider, touch targets, screen-scroll reset, zoom, preview isolation, and destructive-action confirmation.
 
 ## Not yet accepted; do NOT label these complete
