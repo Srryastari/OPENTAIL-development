@@ -91,6 +91,19 @@ assert commit.index("const bool busy=raw_active") < commit.index("tm_save(next)"
 assert "if(!tm_save(next))code=4" in commit
 assert commit.index("if(!tm_save(next))code=4") < commit.index("tm_profile=*next;")
 assert "xSemaphoreGive(om_write_mutex)" in commit
+# Editing output zone roles during a pre-debounce asserted 12V input can
+# change which pixels will respond to that trigger. Both output-save APIs
+# must use the same instantaneous-pin admission gate as trigger mappings.
+output_http = core.split("static esp_err_t om_post(",1)[1].split(
+    "bool ot_ble_config_get(",1)[0]
+output_ble = core.split("int ot_ble_config_save(",1)[1].split(
+    "/* Normalized instantaneous GPIO levels",1)[0]
+for save_path in (output_http, output_ble):
+    assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save_path
+    assert "bool busy=raw_active || live_input_mask ||" in save_path
+    assert save_path.index("tm_gpio_input_mask()") < save_path.index(
+        "portENTER_CRITICAL(&state_lock)")
+    assert save_path.index("bool busy=raw_active") < save_path.index("om_save(")
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
 get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
