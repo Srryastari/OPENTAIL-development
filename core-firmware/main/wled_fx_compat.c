@@ -239,6 +239,23 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
     *out=next;
     return true;
 }
+/* WLED colors.cpp generateRandomPalette(): four independent CHSV colors
+ * form a CRGBPalette16 with stops at 0, 5, 10, 15. Source RNG and gradual
+ * palette transitions are intentionally not invented here. */
+static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value);
+bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
+                               ot_wled_palette16_t *out) {
+    if(!hsv||!out)return false;
+    ot_wled_rgb_t colors[4];
+    for(unsigned i=0;i<4u;i++)
+        colors[i]=fx_hsv_rgb(hsv[3u*i],hsv[3u*i+1u],hsv[3u*i+2u]);
+    ot_wled_palette16_t next={0};
+    palette_gradient(&next,0u,colors[0],5u,colors[1]);
+    palette_gradient(&next,5u,colors[1],10u,colors[2]);
+    palette_gradient(&next,10u,colors[2],15u,colors[3]);
+    *out=next;
+    return true;
+}
 ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *pal,
                                     uint8_t index,uint8_t brightness,
                                     ot_wled_palette_blend_t blend) {
