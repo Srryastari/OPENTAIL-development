@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -188,6 +190,18 @@ class ComposeMainActivity : ComponentActivity() {
         var page by rememberSaveable { mutableIntStateOf(0) }
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
+        val scheme = remember(light) {
+            if (light) lightColorScheme(
+                primary = t.accent, onPrimary = t.bg, background = t.bg,
+                onBackground = t.fg, surface = t.surface, onSurface = t.fg,
+                surfaceVariant = t.raised, onSurfaceVariant = t.fg, error = t.red
+            ) else darkColorScheme(
+                primary = t.accent, onPrimary = t.bg, background = t.bg,
+                onBackground = t.fg, surface = t.surface, onSurface = t.fg,
+                surfaceVariant = t.raised, onSurfaceVariant = t.fg, error = t.red
+            )
+        }
+        MaterialTheme(colorScheme = scheme) {
         Column(Modifier.fillMaxSize().background(t.bg).padding(top = 14.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("OpenTail", color = t.fg, fontSize = 23.sp, fontWeight = FontWeight.Bold,
@@ -221,6 +235,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Spacer(Modifier.height(24.dp))
             }
         }
+        }
     }
     @Composable
     private fun Pill(label: String, t: Tone, selected: Boolean = false, action: () -> Unit) {
@@ -230,6 +245,16 @@ class ComposeMainActivity : ComponentActivity() {
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                  color = if (selected) t.bg else t.fg, maxLines = 1)
+        }
+    }
+    /** Preserve the single white Connect action from the approved UI. */
+    @Composable
+    private fun ConnectPill(onClick: () -> Unit) {
+        Box(Modifier.clip(RoundedCornerShape(99.dp)).background(Color.White)
+            .clickable(onClick = onClick).padding(horizontal = 22.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center) {
+            Text("Connect", color = Color.Black, fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold)
         }
     }
     @Composable
@@ -420,7 +445,7 @@ class ComposeMainActivity : ComponentActivity() {
                             Pill(item.name, t, item.id == effect) {
                                 selectedEffect.intValue = item.id
                                 prefs.edit().putInt("effectId", item.id).apply()
-                                previewCurrentEffect(effect)
+                                previewCurrentEffect(item.id)
                             }
                         }
                     }
@@ -621,7 +646,8 @@ class ComposeMainActivity : ComponentActivity() {
                 AlertDialog(onDismissRequest = { editingId = null },
                     title = { Text("Edit zone") },
                     text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Caption("Live editing is always on. Changes appear immediately; " +
                                 "valid edits are auto-saved to the design. No controller NVS writes.", t)
                             Field(label, "Zone name", t) {
@@ -878,7 +904,7 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Text("Bluetooth · " + bleMessage.value, color = t.fg)
             Caption("Authorize only on a physically present CORE bench controller.", t)
-            Pill("Find CORE Bluetooth", t) {
+            ConnectPill {
                 foundDevices.clear()
                 ble.scanHeadless()
             }
@@ -944,6 +970,14 @@ class ComposeMainActivity : ComponentActivity() {
             Caption(outputMessage.value, t)
         }
         HardwareOutputEditor(t)
+        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            Panel(t) {
+                Caption("Developer comparison only. The Kotlin/Compose app remains the default.", t)
+                Pill("Open previous Java UI · Debug", t) {
+                    startActivity(Intent(this@ComposeMainActivity, MainActivity::class.java))
+                }
+            }
+        }
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
