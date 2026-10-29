@@ -37,7 +37,9 @@ if (-not $RunId) {
 $runText = & gh run view ([string]$RunId) --repo $repo --json conclusion,status,headBranch,headSha,jobs
 if ($LASTEXITCODE -ne 0) { throw "Could not verify GitHub run $RunId." }
 $run = $runText | ConvertFrom-Json
-if ($run.headBranch -ne $branch -or (!$VerifyOnly -and $run.status -ne 'completed')) {
+# Verification may inspect an explicitly selected PR run before its
+# physical release gate completes. Actual flashing remains target-branch-only.
+if (-not $VerifyOnly -and ($run.headBranch -ne $branch -or $run.status -ne 'completed')) {
     throw "GitHub run not a completed target branch run. Nothing was flashed."
 }
 # A software-verified bench candidate must be installable BEFORE its physical
