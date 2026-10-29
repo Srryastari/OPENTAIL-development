@@ -104,11 +104,12 @@ int main(void){
 
   /* Palette selection has to pass through the authoritative CORE dispatcher,
    * not just pass the standalone source renderer. Test full 522 pixel zones. */
-  for(unsigned variant=0u;variant<2u;variant++) {
+  for(unsigned variant=0u;variant<3u;variant++) {
     for(unsigned palette=2u;palette<=12u;palette+=5u) {
       ot_effects_1d_state_t actual={0};
       ot_wled_fx_state_t reference={0};
-      cfg.effect_id=variant?OT_WLED_FLOW_STRIPE:OT_WLED_COLOR_CLOUDS;
+      cfg.effect_id=variant==0u?OT_WLED_COLOR_CLOUDS:
+                    variant==1u?OT_WLED_FLOW_STRIPE:OT_WLED_GLITTER;
       cfg.palette_id=(uint8_t)palette;
       cfg.brightness=32u;cfg.speed=24u;cfg.intensity=32u;
       ot_wled_rgb_t output[522]={0},expected[522]={0};
