@@ -2954,6 +2954,7 @@ void mode_colortwinkle() {
 
 #define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
 #define W(color) (uint8_t)((uint32_t)(color)>>24)
+#define millis() strip.now
 // BEGIN PINNED FX.cpp Slow Transition original body.
 typedef struct SlowTransitionData {
   CRGBPalette16 startPalette;        // initial palette
@@ -3048,6 +3049,7 @@ void mode_slow_transition(void) {
 // END PINNED Slow Transition.
 #undef SEGPALETTE
 #undef W
+#undef millis
 
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
