@@ -152,6 +152,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_MULTI_COMET, "Multi Comet", "Multi Comet@!,Fade;!,!;!",
      true, true, true, true, false},
     {OT_WLED_CHUNCHUN, "Chunchun", "Chunchun@!,Spread;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_CANDLE, "Candle", "Candle@!,!;!,!;!",
      true, true, true, true, false}
 };
 
@@ -1573,6 +1575,50 @@ static void chunchun_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+/* Pinned FX.cpp candle(false): source candle luminance state and
+ * 23-ms update gate; no allocation for its single-segment variant. */
+static void candle_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    if(now-state->data_counter<23u)return;
+    state->data_counter=now;
+    const unsigned range=cfg->intensity,rand_val=range>>1;
+    const unsigned speed_factor=cfg->speed>252u?1u:
+       cfg->speed>99u?2u:cfg->speed>49u?3u:4u;
+    unsigned luminance=state->aux0;
+    unsigned target=state->aux1;
+    unsigned step=state->step;
+    if(step==0u) {
+        luminance=128u;
+        target=130u+fx_rand8(state,4u);
+        step=1u;
+    }
+    bool new_target=false;
+    if(target>luminance) {
+        luminance=luminance+step>255u?255u:luminance+step;
+        if(luminance>=target)new_target=true;
+    } else {
+        luminance=luminance>step?luminance-step:0u;
+        if(luminance<=target)new_target=true;
+    }
+    if(new_target) {
+        target=fx_rand8(state,rand_val)+fx_rand8(state,rand_val);
+        if(target<(rand_val>>1))
+            target=(rand_val>>1)+fx_rand8(state,rand_val);
+        target+=255u-range;
+        const unsigned difference=target>luminance?
+               target-luminance:luminance-target;
+        step=difference>>speed_factor;
+        if(step==0u)step=1u;
+    }
+    const ot_wled_rgb_t color=scaled(blend_colors(
+            cfg->background,cfg->foreground,(uint8_t)luminance),cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=color;
+    state->aux0=(uint16_t)luminance;
+    state->aux1=(uint16_t)target;
+    state->step=step;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1584,6 +1630,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_CANDLE) {
+        candle_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_TWINKLE) {
         twinkle_frame(cfg,state,time_ms,pixels,count);
         return true;
