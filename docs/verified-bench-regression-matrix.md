@@ -12,9 +12,10 @@ physical LEDs, supply behavior, status-LED colors, phone BLE, or redundancy.
   zone named `Zone 1`, one pixel, role `off`, on each *currently available*
   physical output. No automatic brake, park, turn or reverse assumptions.
 - The present board prototype has two RMT outputs on GPIO16/17 and currently
-  allocates up to 522 LEDs per output. The planned 12-pixel-output/10-switch
-  final hardware is not physically implemented. These are capability limits,
-  not default sections or chassis geometry.
+  uses a board-selected compile-time pixel-buffer budget per output, not a
+  522-pixel limit. The earlier 522/30 counts were physical bench examples.
+  The planned 12-pixel-output/10-switch final hardware is not implemented;
+  neither buffer capacity nor test counts define a vehicle layout.
 - Existing NVS v2 profiles and recognized v1 profiles remain authoritative.
   The firmware does **not** call `ot_om_defaults` over a valid restored
   profile. The v1 migration path remains available; no automatic write-back or
