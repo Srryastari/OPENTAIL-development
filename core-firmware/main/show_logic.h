@@ -10,7 +10,7 @@ typedef struct {
     ot_rgb_t color;
     uint8_t brightness;  /* capped by the caller to OT_MAX_BRIGHTNESS */
     uint8_t speed;       /* 0..100 */
-    uint8_t chain_mask;  /* bit 0=left, bit 1=right */
+    uint8_t chain_mask;  /* bit N selects physical output N; legacy field name */
     uint16_t section_mask; /* up to 8 user-defined zones; no vehicle semantics */
 } ot_show_t;
 
