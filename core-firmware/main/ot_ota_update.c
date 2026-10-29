@@ -128,6 +128,11 @@ bool ot_ota_confirm_boot(bool outputs_ready) {
     if(!outputs_ready)return false;
     const esp_partition_t *running=esp_ota_get_running_partition();
     if(!running)return false;
+    /* Factory or test images have no OTA pending state: do not query flash
+     * on every frame when no rollback confirmation is applicable. */
+    if(running->type!=ESP_PARTITION_TYPE_APP ||
+       running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+       running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
     if(esp_ota_get_state_partition(running,&state)!=ESP_OK)return false;
     if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;
