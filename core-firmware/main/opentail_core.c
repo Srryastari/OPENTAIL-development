@@ -1288,6 +1288,7 @@ static void led_task(void *p) {
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
+    bool boot_frame_verified=false;
     uint32_t previous_frame_ms=0;
     TaskHandle_t self=xTaskGetCurrentTaskHandle();
     esp_timer_handle_t frame_timer=NULL;
@@ -1472,6 +1473,13 @@ static void led_task(void *p) {
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
            const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
+           /* A created FreeRTOS task does not prove the image can render.
+            * Confirm OTA only after every configured RMT lane completes its
+            * first frame; startup faults must leave rollback available. */
+           if(full_frame && !boot_frame_verified){
+               ot_ota_confirm_boot(true);
+               boot_frame_verified=true;
+           }
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
@@ -1535,6 +1543,6 @@ void app_main(void) {
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
         if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
-        else ot_ota_confirm_boot(true);
+        /* OTA validation is deferred until led_task finishes its first full frame. */
     }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
 }
