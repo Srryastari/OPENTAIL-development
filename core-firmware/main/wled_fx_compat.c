@@ -18,7 +18,8 @@
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
  * Original: https://github.com/wled/WLED/blob/20e7a717664295eefc6ad77972cee1888d2da072/wled00/FX.cpp
  * This port omits WLED palette handling and uses direct foreground/background
- * for palette_id=0 only. No pixel I/O, allocations, Arduino or ESP-IDF dependencies.
+ * for direct colors and verified fixed palette IDs in enabled modes.
+ * No pixel I/O, Arduino or ESP-IDF dependencies.
  */
 #include "wled_fx_compat.h"
 #include <string.h>
