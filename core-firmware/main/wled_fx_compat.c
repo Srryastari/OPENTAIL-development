@@ -2639,11 +2639,12 @@ static void starburst_frame(const ot_wled_fx_config_t *cfg,
                 loc-=(loc-(float)stars[j].pos)*2.0f;
             const float start_float=loc-particle_size;
             const float end_float=loc+particle_size;
-            /* Source converts start/end to unsigned and does not draw
-             * when start wraps above the zone length. Never invoke UB. */
-            if(!(start_float>=0.0f && start_float<=(float)count))
+            /* Preserve pinned host-visible truncation for -1 < x < 0:
+             * that fractional edge still lights pixel zero. Values <= -1
+             * wrap out of range upstream; discard safely rather than UB. */
+            if(!(start_float>-1.0f && start_float<=(float)count))
                 continue;
-            unsigned start=(unsigned)start_float;
+            unsigned start=start_float<0.0f?0u:(unsigned)start_float;
             unsigned end=end_float>=0.0f?(unsigned)end_float:0u;
             if(start==end)end++;
             if(end>count)end=(unsigned)count;
