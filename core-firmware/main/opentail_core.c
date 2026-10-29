@@ -1,4 +1,4 @@
-/* OpenTail CORE Alpha — universal 623-pixel/lane temporary bench cap, not road firmware.
+/* OpenTail CORE Alpha — universal user-profile pixel counts, hardware-budgeted, not road firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
  * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
  */
@@ -42,7 +42,7 @@
 #include "esp_timer.h"
 
 #define OT_FW OT_FW_VERSION
-#define OT_TARGET_FPS 50u /* 623 WS2815 pixels require 18.69 ms on-wire; 53.5 FPS is ideal-only */
+#define OT_TARGET_FPS 50u /* Advisory target only; measured output FPS depends on configured strip lengths. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
 extern void ot_ble_start(void);
@@ -50,6 +50,7 @@ extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
 static led_strip_handle_t strip[OT_CHAIN_COUNT]={0};
+static uint16_t strip_capacity[OT_CHAIN_COUNT]={0}; /* Currently allocated/transmitted pixel count per lane. */
 static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGHTNESS};
 static ot_inputs_t inputs={0};
 
@@ -298,9 +299,11 @@ static esp_err_t om_get(httpd_req_t *r){
     cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
     cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
     cJSON_AddBoolToObject(obj,"bench_only",true);
-    cJSON_AddNumberToObject(obj,"physical_outputs",2);
+    cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT);
     cJSON_AddNumberToObject(obj,"future_outputs_target",12);
-    cJSON_AddNumberToObject(obj,"allocated_pixels_per_output",OT_CHAIN_PIXELS);
+    /* Hardware build budget, not an active pixel count or a test-derived maximum. */
+    cJSON_AddNumberToObject(obj,"pixel_buffer_budget_per_output",OT_CHAIN_PIXELS);
+    cJSON_AddNumberToObject(obj,"max_configurable_pixels_per_output",OT_OM_MAX_PIXELS_PER_OUTPUT);
     cJSON_AddNumberToObject(obj,"max_total_pixels",OT_OM_MAX_TOTAL_PIXELS);
     cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES);
     cJSON_AddBoolToObject(obj,"dynamic_zones",true);
@@ -357,7 +360,7 @@ static esp_err_t om_post(httpd_req_t *r){
     }
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
-    if(!valid)return respond_err(r,400,"invalid output mapping: 1-8 zones must sum to 1..623 active pixels");
+    if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
     TickType_t now=xTaskGetTickCount();
@@ -927,6 +930,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
     uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;ot_show_t show_cfg;
     uint32_t refresh0,refresh1,stop_requested,stop_rendered;
+    uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
     physical=live_input_mask;tm=tm_profile;
     sim_active=before_deadline(now,sim_deadline);
@@ -937,6 +941,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     show_active=show_window(now);
     show_cfg=native_show;
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
     portEXIT_CRITICAL(&state_lock);
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
@@ -958,9 +963,9 @@ static esp_err_t status_get(httpd_req_t *r) {
       ot_zone_mode_name(ot_arb_zone(&arb,1,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)));
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
     snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
-       OT_FW,OT_SMALL_BENCH_LAYOUT?"30-pixel-bench":"universal-1246-bench",
+       OT_FW,"user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
-       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)OT_TARGET_FPS,(unsigned)layout.chain_pixels,(unsigned)layout.brightness_cap,
+       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)OT_TARGET_FPS,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
@@ -1130,28 +1135,46 @@ static void input_init(void) {
         ESP_ERROR_CHECK(gpio_config(&cfg));
     }
 }
-static bool strip_init(void) {
-    for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
-        const led_strip_config_t cfg={
-            .strip_gpio_num=out_pin[ch],.max_leds=OT_CHAIN_PIXELS,
-            .led_model=LED_MODEL_WS2812, // WS2815 uses compatible nominal 800kHz data; scope verification required.
-            .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}}, // B-R-G
-            .flags={.invert_out=false}
-        };
-        const led_strip_rmt_config_t rmt={
-            .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
-            /* ESP32-S3 DMA uses this as its DMA buffer size. 64 symbols forced
-             * frequent refills on long pixel streams; 1024 is Espressif's
-             * documented example for lower CPU overhead and better throughput.
-             * Output 2 stays on its independently tested non-DMA setting. */
-            .mem_block_symbols=(ch==0?1024:64),
-            .flags={.with_dma=(ch==0)}
-        };
-        esp_err_t e=led_strip_new_rmt_device(&cfg,&rmt,&strip[ch]);
-        if(e==ESP_OK)e=led_strip_clear(strip[ch]);
-        if(e!=ESP_OK){ESP_LOGE(TAG,"RMT output %d failed: %s",ch,esp_err_to_name(e));
-            ot_st_set_fault("external pixel RMT initialization failed");return false;}
+/* RMT drivers are created to the SAVED output length, never the board-wide
+ * memory safety budget. Resizing is render-task-owned; old pixels are cleared
+ * before releasing the old bus so a shorter replacement cannot leave ghosts. */
+static bool strip_configure_channel(unsigned ch,unsigned pixels){
+    if(ch>=OT_CHAIN_COUNT||pixels<1u||pixels>OT_CHAIN_PIXELS)return false;
+    if(strip[ch]&&strip_capacity[ch]==pixels)return true;
+    if(strip[ch]){
+        (void)led_strip_clear(strip[ch]);
+        esp_err_t e=led_strip_del(strip[ch]);
+        strip[ch]=NULL;strip_capacity[ch]=0;
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"RMT output %u teardown failed: %s",ch,esp_err_to_name(e));
+            ot_st_set_fault("external pixel RMT teardown failed");return false;
+        }
     }
+    const led_strip_config_t cfg={
+        .strip_gpio_num=out_pin[ch],.max_leds=pixels,
+        .led_model=LED_MODEL_WS2812, // WS2815-compatible nominal 800 kHz; physical timing remains unverified.
+        .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}},
+        .flags={.invert_out=false}
+    };
+    const led_strip_rmt_config_t rmt={
+        .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
+        .mem_block_symbols=(ch==0?1024:64),
+        .flags={.with_dma=(ch==0)}
+    };
+    led_strip_handle_t next=NULL;
+    esp_err_t e=led_strip_new_rmt_device(&cfg,&rmt,&next);
+    if(e==ESP_OK)e=led_strip_clear(next);
+    if(e!=ESP_OK){
+        if(next)(void)led_strip_del(next);
+        ESP_LOGE(TAG,"RMT output %u resize to %u pixels failed: %s",ch,pixels,esp_err_to_name(e));
+        ot_st_set_fault("external pixel RMT initialization failed");return false;
+    }
+    strip[ch]=next;strip_capacity[ch]=(uint16_t)pixels;
+    return true;
+}
+static bool strip_init(void){
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+        if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
     return true;
 }
 static void led_task(void *p) {
@@ -1192,9 +1215,16 @@ static void led_task(void *p) {
        bool native_rendering=decision.show_requested;
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
+           bool frame_ready[OT_CHAIN_COUNT]={false};
+           /* Reconfigure only after the preceding frame's async RMT transfers
+            * have completed, and before starting ANY new lane transfer. */
+           for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+               frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+           }
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
            uint32_t elapsed=(uint32_t)(frame_ms-show_started);
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
+               if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
                ot_layout_t zone_layout;
                if(!ot_om_layout(output,&zone_layout)){
@@ -1203,7 +1233,7 @@ static void led_task(void *p) {
                /* Render each selected zone once, even if the native frame is indexed by
                 * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
                if(native_rendering && local_fx_enabled){
-                   memset(fx_frame[ch],0,sizeof(fx_frame[ch]));
+                   memset(fx_frame[ch],0,(size_t)output->active_pixels*sizeof(fx_frame[ch][0]));
                    unsigned offset=0;
                    for(int z=0;z<output->zone_count;z++){
                        unsigned len=output->zones[z].pixels;
@@ -1243,7 +1273,7 @@ static void led_task(void *p) {
                 * a full ot_om_valid() plus name checks for every LED.
                 * This keeps the mapping universal and reduces render latency. */
                ot_om_zone_cursor_t zone_cursor={0};
-               for(unsigned px=0;px<layout.chain_pixels;++px){
+               for(unsigned px=0;px<output->active_pixels;++px){
                    ot_rgb_t c={0,0,0};
                    int zone=ot_om_section_next(output,&zone_cursor,px);
                    if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
@@ -1283,7 +1313,7 @@ static void led_task(void *p) {
                    c=ot_om_swizzle(c,output->color_order);
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }
-               // Driver reserves 623 pixels per channel; unused pixels remain black.
+               // Hardware driver transmits only this output's configured active length.
                ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
@@ -1292,7 +1322,7 @@ static void led_task(void *p) {
            /* Start both output transfers before waiting, so RMT lanes overlap.
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++)
-               ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
+               if(frame_ready[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
            if(!native_rendering){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
