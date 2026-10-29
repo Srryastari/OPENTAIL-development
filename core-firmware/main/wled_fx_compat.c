@@ -507,6 +507,8 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, false, true, false, true},
     {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
      false, false, true, true, true},
+    {OT_WLED_FIRE_2012, "Fire 2012", "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
+     false, false, true, true, true},
     {OT_WLED_EXPLODING_FIREWORKS, "Fireworks 1D",
      "Fireworks 1D@Gravity,Firing side;!,!;!;12;pal=11,ix=128",
      true, true, true, true, true},
@@ -515,8 +517,6 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_ROCKTAVES, "Rocktaves", "Rocktaves@;!,!;!;01f;m12=1,si=0",
      true, true, false, false, false},
     {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
-     false, false, true, true, true},
-    {OT_WLED_FIRE_2012, "Fire 2012", "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
      false, false, true, true, true}
 };
 
