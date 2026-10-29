@@ -1,27 +1,29 @@
-# Android 1:1 LED preview — evidence and transport contract
+# Android / CORE exact-frame preview contract
 
-**Current status:** *Pixel addresses exact for local design; effect animation parity NOT verified / not currently available.*
+**Current status (development branch, not flashed):** Android now implements authenticated, optional CORE v1 post-render **single-frame** capture. The currently flashed bench firmware does not have this new characteristic. Until CORE firmware PR #19 is built, physically tested and approved, Android continues to show its exact *local project pixel map*, not a claimed animation.
 
-## What was audited
+## Sources of pixels
 
-- Former Compose Show Modes Canvas generated 28 synthetic bars, advancing on a 40ms timer with made-up chase logic. It was not CORE rendering.
-- Former Java `NativeLedPreview` generated 32 name-matched approximations. It also was not CORE rendering.
-- The currently flashed CORE BLE commands send FX IDs and parameters, but do **not** expose a readback of the pixels after the renderer and priority overlays. Android cannot truthfully claim a 1:1 animation from that data.
+- `ExactLedFrame.Origin.PROJECT`: exact zero-based local authored pixels (including manual gaps, direction reversal and paint). No fabricated FX/particle/spark animation.
+- `ExactLedFrame.Origin.CORE`: complete RGB888 frame received from authenticated CORE firmware, captured **after rendering, overlays and calibration, before driver color-order swizzle**. One display cell corresponds to one actual logical LED index. Core frame sequence and output channel are displayed.
+- A verified CORE frame is immutable and is invalidated on effect edits, project import and background. No interpolation, averaging, fallback swizzle, or copying approximations into `Origin.CORE`.
 
-## Implemented safe Android behavior
+## Wire compatibility
 
-- One canonical `ExactLedFrame` model preserves one RGB value per zero-based pixel address, with no color averaging, downsampling, interpolation, or fixed vehicle pixel counts.
-- `fromProjectModel` reflects all authored zones, their auto/manual starts, gaps, reversed indexing and individual painted pixels. These are **local design** colors, not optical / firmware output.
-- Both native Android previews now display a 64-pixel inspection window, where **each visual segment represents exactly one indexed LED**. Paging/slider accesses every index including long strips. A zero/black pixel stays black.
-- The effect picker retains the complete 140-ID catalog, but no fabricated WLED, particle, flare, spark, or proprietary animation appears as a "1:1" preview.
-- A future CORE snapshot must be explicitly marked `ExactLedFrame.Origin.CORE`, with validation of actual pixel count and RGB888 input.
+The optional, versioned BLE characteristics are implemented on firmware PR #19:
 
-## CORE frame snapshot required for effect 1:1
+- Command write `55a56022-4915-7a92-cf44-b8b7102eaf2a`
+- Snapshot reply read `55a56022-4915-7a92-cf44-b8b7102eaf2b`
 
-The firmware/protocol owner must expose capability-negotiated, authenticated and bounded **post-render** frame data. Capture after all native effects/particles/sparks/flares, per-zone mapping, overlays for physical inputs and brightness/color calibration, before WS2815 channel-order encoding. The capture must declare output channel/index, actual active pixel count, monotonically increasing sequence or timestamp, exact zero-based RGB888 bytes and fragmentation integrity. Treat partial/mixed/stale frames as unavailable, never as valid. No inferred colors, never swap RGB based on physical strip driver order, no hardcoded 522/623/1246 assumptions. Stream diagnostic frames only within BLE/Wi-Fi bandwidth and controller FPS budget; do not let UI telemetry reduce 53–120 FPS operation.
+See `docs/CORE-FRAME-SNAPSHOT-V1.md` on the CORE branch for exact binary format. Android only enables Capture when authenticated and both characteristics are discovered. Capture is on demand, not a continuous stream.
 
-**Do not invent a BLE opcode.** A plain FX command ack proves the controller *accepted a command*, not that the UI has received or validated its rendered pixels. A 1:1 frame may be confirmed only when its actual bytes come from CORE and its provenance is verified. Pixel-perfect **light output** additionally requires physical calibration and bench measurements.
+The Android client requires exact channel, frame sequence, zero-based chunk start/count, complete RGB888 bytes, and CRC-16/CCITT-FALSE integrity. Partial, stale, reordered, duplicated, or malformed frames fail closed. Android GATT operations are serialized with existing BLE FX, authorization and output configuration commands; STOP preempts unfinished diagnostic reads. No diagnostic read writes controller NVS or modifies vehicle trigger arbitration.
 
-## Tests and release gate
+## What the implementation does NOT prove
 
-`ExactLedFrameTest.java` checks all 1,246 indexes, 2 × 623 zone example, reverse addressing and manual gaps, RGB888 byte order, immutable snapshots and invalid frame rejection. These are **address/codec unit tests**, not upstream WLED parity certification. CI runs `app:testDebugUnitTest` before APK packaging. Actual optical timing, phone graphics and CORE frame-data acceptance remain open.
+- 120+ effects are not automatically 1:1 with pinned upstream WLED because the CORE compatibility renderer still has parity gaps. A valid snapshot proves Android displayed CORE's actual RGB for that **one moment**, not that CORE's renderer matches upstream WLED.
+- Captured RGB is logical data before physical WS2815 encoding. It is not measured LED brightness, color, current, PWM edge timing, or optical latency.
+- BLE cannot be assumed to stream thousands of RGB LEDs at 53–120 frames per second without hurting rendering or battery/connection reliability. Real-time fluid 1:1 playback requires a separate bounded high-bandwidth transport or a deterministic shared rendering engine and timestamp alignment; neither is certified here.
+- The v1 snapshot path must pass ESP-IDF compile, host tests, actual Android BLE chunk/MTU tests, trigger priority overlays and physical dual-output comparison before being called verified on hardware.
+
+**Release state:** PR #19 and #21 stay drafts. Neither a screenshot nor passing Gradle/host CI alone certifies optical or continuous animation parity.
