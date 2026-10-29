@@ -21,8 +21,12 @@ int main(void){
     c=ot_st_render(OT_ST_DISCONNECTED,40,100,true); CHECK(c.r==255&&c.g==0&&c.b==0);
     CHECK(!lit(ot_st_render(OT_ST_DISCONNECTED,250,100,true)));
     c=ot_st_render(OT_ST_DISCONNECTED,400,100,true); CHECK(c.r==255&&c.g==0&&c.b==0);
-    c=ot_st_render(OT_ST_BLE,40,100,true); CHECK(c.b==255&&c.r>0);
-    c=ot_st_render(OT_ST_BOTH,40,100,true); CHECK(c.g==255&&c.b==255&&c.r==0);
+    c=ot_st_render(OT_ST_BLE,40,100,true); CHECK(c.g==255&&c.r==0&&c.b==0);
+    c=ot_st_render(OT_ST_BOTH,40,100,true); CHECK(c.g==255&&c.r==0&&c.b==0);
+    CHECK(ot_st_connection_mode(false,true)==OT_ST_CONNECTED);
+    CHECK(ot_st_connection_mode(true,false)==OT_ST_CONNECTED);
+    CHECK(ot_st_connection_mode(true,true)==OT_ST_CONNECTED);
+    CHECK(ot_st_connection_mode(false,false)==OT_ST_DISCONNECTED);
     c=ot_st_render(OT_ST_SHOW,0,100,true); CHECK(c.r==255&&c.g==0&&c.b==0);
     c=ot_st_render(OT_ST_SHOW,467,100,true); CHECK(c.g==255&&c.r==0&&c.b==0);
     CHECK(ot_st_render(OT_ST_SHOW,0,100,true).r==ot_st_render(OT_ST_SHOW,1400,100,true).r);
