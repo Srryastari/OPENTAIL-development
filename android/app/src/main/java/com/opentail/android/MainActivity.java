@@ -70,6 +70,7 @@ public final class MainActivity extends Activity {
     private HapticController haptics;
     private NativeUi ui;
     private BleDiscovery ble;
+    private NativeOutputManager outputManager;
     private String bleMessage="Not connected";
     private int tab=0,showTab=0,autoIndex=0;
     private int effectId=0, foreground=0xffffffff, background=0xff000000,accentColor=0xffffffff;
@@ -122,6 +123,9 @@ public final class MainActivity extends Activity {
                 "Bluetooth · "+bleMessage+" · "+supportedBleEffects.size()+" verified effects");
         });
         ble.setPreferredListener(address->settings.edit().putString("preferred_ble_address",address).apply());
+        ble.setConfigListener(result->{
+            if(outputManager!=null)outputManager.onBleResult(result);
+        });
         IntentFilter filter=new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(bluetoothState,filter,Context.RECEIVER_EXPORTED);
         else registerReceiver(bluetoothState,filter);
@@ -869,6 +873,10 @@ public final class MainActivity extends Activity {
         rowButtons(b,"Find BLE",()->ble.scan(),"Authorize",()->ble.authorizeStored());
         rowButtons(b,"Pair with BOOT",()->ble.pairWithBoot(),
                 "Read capabilities",()->ble.readFxCapabilities());
+        action(b,"CORE Output Manager · Advanced",false,()->{
+            if(outputManager==null)outputManager=new NativeOutputManager(this,ble,ui);
+            outputManager.open(ui);
+        });
         action(b,"Test selected effect on CORE · 15 seconds",false,()->confirmBleTest());
         action(b,"Stop CORE show",false,()->{
             if(!ble.canControl()){toast("Authorize CORE first");return;}
