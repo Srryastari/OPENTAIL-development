@@ -10,12 +10,22 @@ led = core.split("static void led_task(void *p) {", 1)[1].split("void app_main(v
 startup = core.split("void app_main(void) {", 1)[1]
 done = "led_strip_refresh_async_done(strip[ch])"
 all_lanes = "const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)"
-gate = "if(full_frame && ble_startup_ready && !boot_frame_verified)"
+gate = "if(full_frame && ble_startup_ready && http_startup_ready && !boot_frame_verified)"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
+assert "http_startup_ready=http_start();" in startup
+assert "if(!http_startup_ready)ot_st_set_fault(" in startup
+assert startup.index("http_startup_ready=http_start();") < startup.index("xTaskCreate(led_task")
+# The diagnostic HTTP service must never take down physical lighting on
+# registration failure. OTA acceptance still requires service startup.
+http = core.split("static bool http_start(void) {",1)[1].split("static void wifi_ap_init(void)",1)[0]
+assert "ESP_ERROR_CHECK(httpd_start" not in http
+assert "ESP_ERROR_CHECK(httpd_register_uri_handler" not in http
+assert "httpd_stop(server);" in http
+assert "return false;" in http and "return true;" in http
 assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
 assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index("xTaskCreate(led_task")
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
