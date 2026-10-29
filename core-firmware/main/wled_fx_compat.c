@@ -2579,7 +2579,9 @@ static void tetrix_frame(const ot_wled_fx_config_t *cfg,
         int speed=cfg->speed?
                    (int)cfg->speed:1+(int)fx_rand8(state,254u);
         speed=(speed-1)*(250-5000)/(255-1)+5000;
-        drop->speed=((float)count*23.0f)/(float)speed;
+        /* FRAMETIME is 23ms in the pinned host profile; on CORE it
+         * follows the configured render cadence rather than hardcoding. */
+        drop->speed=((float)count*(float)cfg->frame_time_ms)/(float)speed;
         drop->pos=(float)count;
         drop->col=(uint8_t)(fx_rand8(state,15u)<<4);
         drop->step=1u;
