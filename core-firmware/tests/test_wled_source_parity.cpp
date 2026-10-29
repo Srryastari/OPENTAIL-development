@@ -245,6 +245,7 @@ static uint32_t gamma32inv(uint32_t color) { return color; }
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
     bool check2=false;
+    unsigned nrOfVStrips() const {return 1u;}
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
@@ -314,6 +315,10 @@ uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t hig
 #define SEGENV (*current_environment)
 #define SEGLEN (static_cast<unsigned>(current_segment->pixels.size()))
 #define SEGCOLOR(i) (current_segment->colors[(i)])
+#define NUM_COLORS 3u
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define indexToVStrip(i,strip) (i) /* 1D only, no virtual strip encoding */
+
 
 /* Fixed host RNG injection, identical for CORE and pinned WLED source.
  * This validates stochastic branch/state ordering, not device RNG sequence
@@ -327,6 +332,9 @@ static uint32_t ref_random32() {
 }
 static uint8_t hw_random8(uint32_t max=256u) {
     return max?(uint8_t)(ref_random32()%max):0u;
+}
+static uint8_t hw_random8(uint32_t min,uint32_t max) {
+    return max>min?(uint8_t)(min+(ref_random32()%(max-min))):(uint8_t)min;
 }
 
 // BEGIN UPSTREAM FX.cpp functions, unchanged source bodies.
@@ -1085,6 +1093,86 @@ void mode_fairytwinkle() {
 }
 #undef gamma8
 
+typedef struct Ball {
+  unsigned long lastBounceTime;
+  float impactVelocity;
+  float height;
+} ball;
+
+/*
+*  Bouncing Balls Effect
+*/
+
+void mode_bouncing_balls(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  //allocate segment data
+  const unsigned strips = SEGMENT.nrOfVStrips(); // adapt for 2D
+  const size_t maxNumBalls = 16;
+  unsigned dataSize = sizeof(ball) * maxNumBalls;
+  if (!SEGENV.allocateData(dataSize * strips)) FX_FALLBACK_STATIC; //allocation failed
+
+  Ball* balls = reinterpret_cast<Ball*>(SEGENV.data);
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(2) ? BLACK : SEGCOLOR(1));
+
+  // virtualStrip idea by @ewowi (Ewoud Wijma)
+  // requires virtual strip # to be embedded into upper 16 bits of index in setPixelColor()
+  // the following functions will not work on virtual strips: fill(), fade_out(), fadeToBlack(), blur()
+  struct virtualStrip {
+    static void runStrip(size_t stripNr, Ball* balls) {
+      // number of balls based on intensity setting to max of 7 (cycles colors)
+      // non-chosen color is a random color
+      unsigned numBalls = (SEGMENT.intensity * (maxNumBalls - 1)) / 255 + 1; // minimum 1 ball
+      const float gravity = -9.81f; // standard value of gravity
+      const bool hasCol2 = SEGCOLOR(2);
+      const unsigned long time = strip.now;
+
+      if (SEGENV.call == 0) {
+        for (size_t i = 0; i < maxNumBalls; i++) balls[i].lastBounceTime = time;
+      }
+
+      for (size_t i = 0; i < numBalls; i++) {
+        float timeSinceLastBounce = (time - balls[i].lastBounceTime)/((255-SEGMENT.speed)/64 +1);
+        float timeSec = timeSinceLastBounce/1000.0f;
+        balls[i].height = (0.5f * gravity * timeSec + balls[i].impactVelocity) * timeSec; // avoid use pow(x, 2) - its extremely slow !
+
+        if (balls[i].height <= 0.0f) {
+          balls[i].height = 0.0f;
+          //damping for better effect using multiple balls
+          float dampening = 0.9f - float(i)/float(numBalls * numBalls); // avoid use pow(x, 2) - its extremely slow !
+          balls[i].impactVelocity = dampening * balls[i].impactVelocity;
+          balls[i].lastBounceTime = time;
+
+          if (balls[i].impactVelocity < 0.015f) {
+            float impactVelocityStart = sqrtf(-2.0f * gravity) * hw_random8(5,11)/10.0f; // randomize impact velocity
+            balls[i].impactVelocity = impactVelocityStart;
+          }
+        } else if (balls[i].height > 1.0f) {
+          continue; // do not draw OOB ball
+        }
+
+        uint32_t color = SEGCOLOR(0);
+        if (SEGMENT.palette) {
+          color = SEGMENT.color_wheel(i*(256/MAX(numBalls, 8)));
+        } else if (hasCol2) {
+          color = SEGCOLOR(i % NUM_COLORS);
+        }
+
+        int pos = roundf(balls[i].height * (SEGLEN - 1));
+        #ifdef WLED_USE_AA_PIXELS
+        if (SEGLEN<32) SEGMENT.setPixelColor(indexToVStrip(pos, stripNr), color); // encode virtual strip into index
+        else           SEGMENT.setPixelColor(balls[i].height + (stripNr+1)*10.0f, color);
+        #else
+        SEGMENT.setPixelColor(indexToVStrip(pos, stripNr), color); // encode virtual strip into index
+        #endif
+      }
+    }
+  };
+
+  for (unsigned stripNr=0; stripNr<strips; stripNr++)
+    virtualStrip::runStrip(stripNr, &balls[stripNr * maxNumBalls]);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1125,7 +1213,8 @@ static const RefCase refs[]={
     {63,mode_pride_2015,"Pride 2015"},
     {67,mode_colorwaves,"Colorwaves"},
     {49,mode_fairy,"Fairy"},
-    {51,mode_fairytwinkle,"Fairytwinkle"}
+    {51,mode_fairytwinkle,"Fairytwinkle"},
+    {91,mode_bouncing_balls,"Bouncing Balls"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
