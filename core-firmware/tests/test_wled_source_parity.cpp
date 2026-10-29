@@ -554,6 +554,9 @@ struct PinnedSeg {
     void fade_out(uint8_t) { std::abort(); } // unsupported controls fail closed
     uint16_t offset=0u;
     unsigned nrOfVStrips() const {return 1u;}
+    bool is2D() const {return false;}
+    void blurCols(uint8_t){std::abort();}
+    void blur(uint8_t){std::abort();}
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
@@ -3192,6 +3195,71 @@ void mode_dancing_shadows(void)
 
 // END PINNED Dancing Shadows.
 
+static uint8_t qadd8(uint8_t a,uint8_t b) {
+    const unsigned sum=(unsigned)a+b;
+    return (uint8_t)(sum>255u?255u:sum);
+}
+#define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
+// BEGIN PINNED original WLED 1D mode_fire_2012.
+void mode_fire_2012() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const unsigned strips = SEGMENT.nrOfVStrips();
+  if (!SEGENV.allocateData(strips * SEGLEN)) FX_FALLBACK_STATIC; //allocation failed
+  byte* heat = SEGENV.data;
+
+  const uint32_t it = strip.now >> 5; //div 32
+
+  struct virtualStrip {
+    static void runStrip(uint16_t stripNr, byte* heat, uint32_t it) {
+
+      const uint8_t ignition = MAX(3,SEGLEN/10);  // ignition area: 10% of segment length or minimum 3 pixels
+
+      // Step 1.  Cool down every cell a little
+      for (unsigned i = 0; i < SEGLEN; i++) {
+        uint8_t cool = (it != SEGENV.step) ? hw_random8((((20 + SEGMENT.speed/3) * 16) / SEGLEN)+2) : hw_random8(4);
+        uint8_t minTemp = (i<ignition) ? (ignition-i)/4 + 16 : 0;  // should not become black in ignition area
+        uint8_t temp = qsub8(heat[i], cool);
+        heat[i] = temp<minTemp ? minTemp : temp;
+      }
+
+      if (it != SEGENV.step) {
+        // Step 2.  Heat from each cell drifts 'up' and diffuses a little
+        for (int k = SEGLEN -1; k > 1; k--) {
+          heat[k] = (heat[k - 1] + (heat[k - 2]<<1) ) / 3;  // heat[k-2] multiplied by 2
+        }
+
+        // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
+        if (hw_random8() <= SEGMENT.intensity) {
+          uint8_t y = hw_random8(ignition);
+          uint8_t boost = (17+SEGMENT.custom3) * (ignition - y/2) / ignition; // integer math!
+          heat[y] = qadd8(heat[y], hw_random8(96+2*boost,207+boost));
+        }
+      }
+
+      // Step 4.  Map from heat cells to LED colors
+      for (unsigned j = 0; j < SEGLEN; j++) {
+        SEGMENT.setPixelColor(indexToVStrip(j, stripNr), ColorFromPalette(SEGPALETTE, min(heat[j], byte(240)), 255, NOBLEND));
+      }
+    }
+  };
+
+  for (unsigned stripNr=0; stripNr<strips; stripNr++)
+    virtualStrip::runStrip(stripNr, &heat[stripNr * SEGLEN], it);
+
+  if (SEGMENT.is2D()) {
+    uint8_t blurAmount = SEGMENT.custom2 >> 2;
+    if (blurAmount > 48) blurAmount += blurAmount-48;             // extra blur when slider > 192  (bush burn)
+    if (blurAmount < 16) SEGMENT.blurCols(SEGMENT.custom2 >> 1);  // no side-burn when slider < 64 (faster)
+    else SEGMENT.blur(blurAmount);
+  }
+
+  if (it != SEGENV.step)
+    SEGENV.step = it;
+}
+
+// END PINNED 1D Fire 2012.
+#undef SEGPALETTE
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3251,7 +3319,8 @@ static const RefCase refs[]={
     {38,mode_aurora,"Aurora"},
     {74,mode_colortwinkle,"Colortwinkles"},
     {219,mode_slow_transition,"Slow Transition"},
-    {112,mode_dancing_shadows,"Dancing Shadows"}
+    {112,mode_dancing_shadows,"Dancing Shadows"},
+    {66,mode_fire_2012,"Fire 2012"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3293,12 +3362,13 @@ int main() {
             std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
             std::vector<unsigned>{2u,3u,7u,16u,31u};
         for(unsigned count: zone_lengths) {
-            if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
+            if(fx.id==82u && count<5u)continue;
+            if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
