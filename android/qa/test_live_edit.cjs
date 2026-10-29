@@ -89,6 +89,10 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
        hardwareBlock.includes('Save to CORE · verify readback'),
  'Persistent hardware mapping requires explicit validated commit and readback.');
+assert(ble.includes('frameCapture.cancel(); // GATT close may never produce a disconnect callback') &&
+       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       ble.includes('||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending'),
+       'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
  'Preview must reuse authenticated CORE FX/STOP commands.');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
