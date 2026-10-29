@@ -144,7 +144,15 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SINELON_DUAL, "Sinelon Dual", "Sinelon Dual@!,Trail;!,!;!",
      true, true, true, true, false},
     {OT_WLED_SINELON_RAINBOW, "Sinelon Rainbow", "Sinelon Rainbow@!,Trail;!,!;!",
-     false, true, true, true, false}
+     false, true, true, true, false},
+    {OT_WLED_TWINKLE, "Twinkle", "Twinkle@!,Density;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_CHASE_FLASH_RANDOM, "Chase Flash Rnd", "Chase Flash Rnd@!;!,!;!",
+     true, true, true, false, false},
+    {OT_WLED_MULTI_COMET, "Multi Comet", "Multi Comet@!,Fade;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_CHUNCHUN, "Chunchun", "Chunchun@!,Spread;!,!;!",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1471,6 +1479,100 @@ static void sinelon_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/* Pinned FX.cpp mode_twinkle(): original 16-bit LCG locations and
+ * 224-rate fade, preserving the previous active zone frame. */
+static void twinkle_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    fx_fade_previous(cfg,pixels,count,224u);
+    const uint32_t cycle=20u+5u*(255u-(uint32_t)cfg->speed);
+    const uint32_t it=now/cycle;
+    if(it!=state->step) {
+        const size_t max_on=1u+
+            ((uint32_t)cfg->intensity*((uint32_t)count-1u))/255u;
+        if(state->aux0>=max_on) {
+            state->aux0=0u;
+            state->aux1=(uint16_t)fx_prng(state);
+        }
+        state->aux0++;
+        state->step=it;
+    }
+    uint16_t seed=state->aux1;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(unsigned j=0;j<state->aux0;j++) {
+        seed=(uint16_t)((uint32_t)seed*2053u+13849u);
+        const size_t index=((uint32_t)count*(uint32_t)seed)>>16;
+        pixels[index]=fg;
+    }
+}
+/* Pinned FX.cpp mode_chase_flash_random() with its SEGENV.call freeze
+ * during the stepped flash delays, and retained adjacent flash pixels. */
+static void chase_flash_random_frame(const ot_wled_fx_config_t *cfg,
+                                      ot_wled_fx_state_t *state,uint32_t now,
+                                      ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const bool advance=now>=state->step;
+    if(!advance && state->call)state->call--;
+    const unsigned flash_step=state->call%9u;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t wheel=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
+    for(size_t i=0;i<state->aux1 && i<count;i++)pixels[i]=wheel;
+    uint32_t delay=1u+(10u*(255u-(uint32_t)cfg->speed))/(uint32_t)count;
+    if(flash_step<8u) {
+        const size_t n=state->aux1%count;
+        const size_t m=(n+1u)%count;
+        if(!(flash_step&1u)) {
+            pixels[n]=fg;pixels[m]=fg;delay=20u;
+        } else {
+            pixels[n]=wheel;pixels[m]=bg;delay=30u;
+        }
+    } else if(advance) {
+        state->aux1=(uint16_t)((state->aux1+1u)%count);
+        if(state->aux1==0u)state->aux0=fx_new_wheel(state,(uint8_t)state->aux0);
+    }
+    if(advance)state->step=now+delay;
+}
+/* Pinned FX.cpp mode_multi_comet(), eight per-zone fixed particles, and
+ * source fade_out rate (intensity/2+128). No heap, no WLED bus. */
+static void multi_comet_frame(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,uint32_t now,
+                              ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=10u+(255u-(uint32_t)cfg->speed);
+    const uint32_t it=now/cycle;
+    if(state->step==it)return;
+    fx_fade_previous(cfg,pixels,count,(uint8_t)(cfg->intensity/2u+128u));
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t j=0;j<8u;j++) {
+        if(state->comet_positions[j]<count) {
+            const size_t index=state->comet_positions[j];
+            pixels[index]=fg;
+            state->comet_positions[j]++;
+        } else if(fx_rand_index(state,count)==0u) {
+            state->comet_positions[j]=0u;
+        }
+    }
+    state->step=it;
+}
+/* Pinned FX.cpp mode_chunchun(): original integer sine positions for
+ * 2+len/8 'birds', no matrix or output-specific indexing assumptions. */
+static void chunchun_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    fx_fade_previous(cfg,pixels,count,254u);
+    uint32_t counter=now*(6u+((uint32_t)cfg->speed>>4));
+    const uint32_t num_birds=2u+((uint32_t)count>>3);
+    const uint32_t span=((uint32_t)cfg->intensity<<8)/num_birds;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(uint32_t i=0;i<num_birds;i++) {
+        counter-=span;
+        const uint32_t wave=(uint32_t)((int32_t)wled_sin16((uint16_t)counter)+32768);
+        uint32_t index=(wave*(uint32_t)count)>>16;
+        if(index>=count)index=(uint32_t)count-1u;
+        pixels[index]=fg;
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1482,6 +1584,22 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_TWINKLE) {
+        twinkle_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_CHASE_FLASH_RANDOM) {
+        chase_flash_random_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_MULTI_COMET) {
+        multi_comet_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_CHUNCHUN) {
+        chunchun_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_SCANNER ||
        cfg->effect_id==OT_WLED_SCANNER_DUAL) {
         scanner_frame(cfg,state,time_ms,pixels,count,
