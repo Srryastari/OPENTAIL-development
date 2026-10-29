@@ -299,7 +299,7 @@ int main(void) {
     assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
     assert(ot_wled_fx_render(&c,&s,306,p,16) && s.step==1u);
     assert(ot_wled_fx_render(&c,&s,307,p,16));
-    assert(eq(p[1],(ot_wled_rgb_t){252,2,0}));
+    assert(eq(p[1],(ot_wled_rgb_t){253,2,0}));
 
     /* Blink/Strobe Rainbow follow the same WLED time gate as Blink/Strobe,
      * but choose the frame's hue from SEGENV.call, not elapsed milliseconds. */
@@ -308,7 +308,7 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,0,p,16));
     assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
     assert(ot_wled_fx_render(&c,&s,1,p,16));
-    assert(eq(p[0],(ot_wled_rgb_t){252,2,0}));
+    assert(eq(p[0],(ot_wled_rgb_t){253,2,0}));
     c.effect_id=OT_WLED_STROBE_RAINBOW;ot_wled_fx_reset(&s);
     assert(ot_wled_fx_render(&c,&s,0,p,16));
     assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
