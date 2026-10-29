@@ -56,6 +56,7 @@ const settings=src.slice(settingsStart,settingsEnd);
 assert(settings.includes('exportProject()')&&settings.includes('importProject(this.files[0])'),'Local project backups must work');
 assert(!settings.includes('otCoreConnect()')&&!settings.includes('otCoreDisconnect()'),'Studio Settings must not require a hardware connection');
 assert(settings.includes('192.168.4.1/dev'),'Hardware testing must remain separate in CORE dashboard');
+assert(!src.slice(src.indexOf('function otCoreDevice(){'),src.indexOf('// In CORE mode, retain the existing Studio editor')).includes('Connect CORE'),'No controller connection card in Studio Settings');
 for(const forbidden of ['otCoreControllerPicker()','otCoreSignalActions()','otCoreDemoActions()','otCoreLiveCard()','otOutputManagerCard()']){
   assert(!settings.includes(forbidden),'CORE hardware tools were duplicated in Studio Settings: '+forbidden);
 }
