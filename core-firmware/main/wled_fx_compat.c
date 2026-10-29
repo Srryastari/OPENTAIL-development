@@ -131,7 +131,19 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_PLASMA, "Plasma", "Plasma@!,!;;!",
      true, false, true, true, false},
     {OT_WLED_OSCILLATE, "Oscillate", "Oscillate",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_SCANNER, "Scanner", "Scanner@!,Trail,Delay,,,Dual,Bi-delay;!,!,!;!;;m12=0,c1=0",
+     true, true, true, true, false},
+    {OT_WLED_LIGHTHOUSE, "Lighthouse", "Lighthouse@!,Trail;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_SCANNER_DUAL, "Scanner Dual", "Scanner Dual@!,Trail,Delay,,,Dual,Bi-delay;!,!,!;!;;m12=0,c1=0",
+     true, true, true, true, false},
+    {OT_WLED_SINELON, "Sinelon", "Sinelon@!,Trail;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_SINELON_DUAL, "Sinelon Dual", "Sinelon Dual@!,Trail;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_SINELON_RAINBOW, "Sinelon Rainbow", "Sinelon Rainbow@!,Trail;!,!;!",
+     false, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1341,6 +1353,123 @@ static void oscillate_frame(const ot_wled_fx_config_t *cfg,
     state->step=iteration;
 }
 
+/*
+ * Pinned WLED FX_fcn.cpp Segment::fade_out(), RGB three-channel adaptation.
+ * The controller now retains each active zone's previous frame in CORE.
+ * WLED brightness caps remain a separate full-parity release requirement.
+ */
+static void fx_fade_previous(const ot_wled_fx_config_t *cfg,
+                             ot_wled_rgb_t *pixels,size_t count,uint8_t rate) {
+    const unsigned fade_rate=(256u-(unsigned)rate)>>1;
+    const int mapped=(int)(256u/(fade_rate+1u));
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++) {
+        uint8_t *r=&pixels[i].r,*g=&pixels[i].g,*b=&pixels[i].b;
+        uint8_t *lanes[3]={r,g,b};
+        const uint8_t dst[3]={bg.r,bg.g,bg.b};
+        for(unsigned k=0;k<3u;k++) {
+            const int before=*lanes[k],target=dst[k];
+            if(before==target)continue;
+            int delta=(target-before)*mapped/256;
+            if(delta==0)delta=target>before?1:-1;
+            *lanes[k]=(uint8_t)(before+delta);
+        }
+    }
+}
+/* Source FX.cpp mode_larson_scanner() and dual variant with native
+ * per-zone retained trail. No WLED pixel bus ownership. */
+static void scanner_frame(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count,bool dual) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const unsigned rate=(unsigned)cfg->frame_time_ms*
+                (96u-(94u*(unsigned)cfg->speed)/255u);
+    const size_t advance=count/(rate?rate:1u);
+    fx_fade_previous(cfg,pixels,count,(uint8_t)(255u-cfg->intensity));
+    if(state->step>now)return;
+    size_t index=(size_t)state->aux1+advance;
+    if(advance==0u) {
+        const unsigned frames=rate/(unsigned)count;
+        if(state->step++<frames)return;
+        state->step=0u;index++;
+    }
+    if(index>count) {
+        state->aux0=(uint16_t)!state->aux0;
+        state->aux1=0u;
+        /* FX.cpp custom1 is zero by default; pause becomes immediate. */
+        state->step=0u;
+    } else {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=state->aux1;i<index;i++) {
+            const size_t j=state->aux0?i:count-1u-i;
+            pixels[j]=fg;
+            if(dual)pixels[count-1u-j]=fg;
+        }
+        state->aux1=(uint16_t)index;
+    }
+}
+/* Source FX.cpp mode_comet() fades retained previous frames, then paints
+ * every intermediate index when frame pacing skips an expected LED. */
+static void lighthouse_frame(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,uint32_t now,
+                              uint32_t old_call,ot_wled_rgb_t *pixels,
+                              size_t count) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const uint16_t phase=(uint16_t)(now*((uint32_t)(cfg->speed>>2)+1u));
+    const size_t index=((uint32_t)phase*(uint32_t)count)>>16;
+    if(old_call==0u)state->aux0=(uint16_t)index;
+    fx_fade_previous(cfg,pixels,count,cfg->intensity);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    pixels[index]=fg;
+    if(index>state->aux0) {
+        for(size_t i=state->aux0;i<index;i++)pixels[i]=fg;
+    } else if(index<state->aux0 && index<10u) {
+        for(size_t i=0;i<index;i++)pixels[i]=fg;
+    }
+    state->aux0=(uint16_t)index;
+}
+/* Pinned util.cpp beatsin16_t(), scale16, wled_math.cpp sin16_t. */
+static uint16_t fx_beatsin16(uint16_t bpm,uint16_t max,
+                             uint32_t now) {
+    const uint16_t q88=(uint16_t)(bpm<256u?bpm<<8:bpm);
+    const uint16_t beat=(uint16_t)(
+         ((uint32_t)(now*(uint32_t)q88*280u))>>16);
+    const uint16_t sine=(uint16_t)((int32_t)wled_sin16(beat)+32768);
+    return (uint16_t)(((uint32_t)sine*(1u+(uint32_t)max))>>16);
+}
+/* Source FX.cpp sinelon_base() and wrappers. The prior color trail is
+ * retained per zone and uses WLED's exact fade_out target computation. */
+static void sinelon_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          uint32_t old_call,ot_wled_rgb_t *pixels,
+                          size_t count,bool dual,bool rainbow) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    fx_fade_previous(cfg,pixels,count,cfg->intensity);
+    const size_t pos=fx_beatsin16((uint16_t)(cfg->speed/10u),
+                          (uint16_t)(count-1u),now);
+    if(old_call==0u)state->aux0=(uint16_t)pos;
+    const ot_wled_rgb_t col=scaled(rainbow?
+           wheel_rgb((uint8_t)((pos&7u)*32u)):cfg->foreground,cfg->brightness);
+    pixels[pos]=col;
+    if(dual)pixels[count-1u-pos]=col;
+    if(state->aux0!=pos) {
+        if(state->aux0<pos) {
+            for(size_t i=state->aux0;i<pos;i++) {
+                pixels[i]=col;
+                if(dual)pixels[count-1u-i]=col;
+            }
+        } else {
+            for(size_t i=state->aux0;i>pos;i--) {
+                if(i<count) {
+                    pixels[i]=col;
+                    if(dual)pixels[count-1u-i]=col;
+                }
+            }
+        }
+        state->aux0=(uint16_t)pos;
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1352,6 +1481,24 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_SCANNER ||
+       cfg->effect_id==OT_WLED_SCANNER_DUAL) {
+        scanner_frame(cfg,state,time_ms,pixels,count,
+                      cfg->effect_id==OT_WLED_SCANNER_DUAL);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_LIGHTHOUSE) {
+        lighthouse_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SINELON ||
+       cfg->effect_id==OT_WLED_SINELON_DUAL ||
+       cfg->effect_id==OT_WLED_SINELON_RAINBOW) {
+        sinelon_frame(cfg,state,time_ms,call,pixels,count,
+             cfg->effect_id==OT_WLED_SINELON_DUAL,
+             cfg->effect_id==OT_WLED_SINELON_RAINBOW);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_PLASMA) {
         plasma_frame(cfg,state,time_ms,call,pixels,count);
         return true;
