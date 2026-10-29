@@ -167,6 +167,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_CANDLE_MULTI, "Candle Multi", "Candle Multi@!,!;!,!;!",
      true, true, true, true, false},
     {OT_WLED_METEOR, "Meteor", "Meteor@!,Trail;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_TWINKLEUP, "Twinkleup", "Twinkleup@!,Intensity;!,!;!;;m12=0",
      true, true, true, true, false}
 };
 
@@ -1821,6 +1823,25 @@ static bool meteor_frame(const ot_wled_fx_config_t *cfg,
     return true;
 }
 
+/* Pinned FX.cpp mode_twinkleup() and prng.h: a fixed local seed 535 is
+ * replayed per frame; all three random draws per LED must be consumed even
+ * when the palette=0 source index is ignored by color_from_palette(). */
+static void twinkleup_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    uint16_t prng=535u;
+    const uint32_t period=256u-(uint32_t)cfg->speed;
+    const uint32_t phase=(16u*now)/period;
+    for(size_t i=0;i<count;i++) {
+        const uint8_t start=stream2_random8(&prng);
+        uint8_t brightness=wled_sin8((uint8_t)((uint32_t)start+phase));
+        if(stream2_random8(&prng)>cfg->intensity)brightness=0u;
+        (void)stream2_random8(&prng); /* upstream palette-index draw */
+        const ot_wled_rgb_t c=blend_colors(cfg->background,cfg->foreground,
+                                            brightness);
+        pixels[i]=scaled(c,cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1840,6 +1861,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_TWINKLEUP) {
+        twinkleup_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_CANDLE_MULTI)
         return candle_multi_frame(cfg,state,time_ms,pixels,count);
     if(cfg->effect_id==OT_WLED_METEOR)
