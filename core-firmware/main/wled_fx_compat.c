@@ -93,7 +93,23 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SINEWAVE, "Sine", "Sine@!,Scale;;!",
      true, true, true, true, false},
     {OT_WLED_ANDROID, "Android", "Android@!,Width;!,!;!;;m12=1",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_WIPE_RANDOM, "Wipe Random", "Wipe Random@!;;!",
+     false, false, true, true, false},
+    {OT_WLED_RANDOM_COLORS, "Random Colors", "Random Colors@!,Fade time;;!;01",
+     false, false, true, true, false},
+    {OT_WLED_SPARKLE, "Sparkle", "Sparkle@!,,,,,,Overlay;!,!;!;;m12=0",
+     true, true, true, false, false},
+    {OT_WLED_SPARKLE_DARK, "Sparkle Dark", "Sparkle Dark@!,!,,,,,Overlay;Bg,Fx;!;;m12=0",
+     true, true, true, true, false},
+    {OT_WLED_SPARKLE_PLUS, "Sparkle+", "Sparkle+@!,!,,,,,Overlay;Bg,Fx;!;;m12=0",
+     true, true, true, true, false},
+    {OT_WLED_TRAFFIC_LIGHT, "Traffic Light", "Traffic Light@!,US style;,!;!",
+     false, true, true, true, false},
+    {OT_WLED_SWEEP_RANDOM, "Sweep Random", "Sweep Random@!;;!",
+     false, false, true, true, false},
+    {OT_WLED_SOLID_GLITTER, "Solid Glitter", "Solid Glitter@,!;Bg,,Glitter color;;;m12=0",
+     true, true, false, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -112,7 +128,8 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
     if (state) { state->step=0; state->aux0=0; state->aux1=0;
-                 state->call=0; state->data_counter=0; }
+                 state->call=0; state->data_counter=0;
+                 state->rng_state=0x73A11C5Du; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -770,6 +787,189 @@ static void android_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/*
+ * Randomized WLED FX ports. The effect maths and update order below are
+ * adapted from pinned FX.cpp; the hardware RNG is represented by a per-zone
+ * reproducible software stream until the full RNG injection API is ported.
+ * This is SOURCE-DERIVED behavior, not yet a random-sequence parity claim.
+ */
+static uint32_t fx_prng(ot_wled_fx_state_t *s) {
+    uint32_t x=s->rng_state;
+    if(!x)x=0x73a11c5du;
+    x^=x<<13;x^=x>>17;x^=x<<5;
+    s->rng_state=x;
+    return x;
+}
+static uint8_t fx_rand8(ot_wled_fx_state_t *s,uint32_t bound) {
+    if(bound==0u)return 0u;
+    return (uint8_t)(fx_prng(s)%bound);
+}
+static size_t fx_rand_index(ot_wled_fx_state_t *s,size_t count) {
+    return (size_t)(fx_prng(s)%(uint32_t)count);
+}
+static uint8_t fx_new_wheel(ot_wled_fx_state_t *s,uint8_t prev) {
+    /* Pinned util.cpp get_random_wheel_index: minimum circular distance 42. */
+    for(unsigned attempts=0;attempts<256u;attempts++) {
+        const uint8_t next=fx_rand8(s,256u);
+        const unsigned delta=next>prev?(unsigned)(next-prev):(unsigned)(prev-next);
+        if((delta<256u-delta?delta:256u-delta)>=42u)return next;
+    }
+    return (uint8_t)(prev+128u);
+}
+static void fx_random_wipe(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,uint32_t ms,
+                           uint32_t old_call,ot_wled_rgb_t *pixels,
+                           size_t count,bool reverse) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const uint32_t cycle=750u+(255u-(uint32_t)cfg->speed)*150u;
+    const uint32_t progress=(uint32_t)(((uint64_t)(ms%cycle)*65535u)/cycle);
+    const bool back=progress>32767u;
+    const uint32_t prog=back?progress-32767u:progress;
+    if(back) {
+        if(state->step==0u)state->step=1u;
+    } else {
+        if(state->step==2u)state->step=3u;
+    }
+    if(old_call==0u) {
+        state->aux0=fx_rand8(state,256u);
+        state->step=3u;
+    }
+    if(state->step==1u) {
+        state->aux1=fx_new_wheel(state,(uint8_t)state->aux0);
+        state->step=2u;
+    }
+    if(state->step==3u) {
+        state->aux0=fx_new_wheel(state,(uint8_t)state->aux1);
+        state->step=0u;
+    }
+    const size_t led_index=(size_t)(((uint64_t)prog*count)>>15);
+    const uint16_t r16=(uint16_t)((uint64_t)prog*count*2u);
+    uint32_t rem=(uint32_t)r16/((uint32_t)cfg->intensity+1u);
+    if(rem>255u)rem=255u;
+    const ot_wled_rgb_t c1=wheel_rgb((uint8_t)state->aux1);
+    const ot_wled_rgb_t c0=wheel_rgb((uint8_t)state->aux0);
+    for(size_t i=0;i<count;i++) {
+        const size_t idx=(reverse&&back)?count-i-1u:i;
+        ot_wled_rgb_t col;
+        if(i<led_index)col=back?c1:c0;
+        else {
+            col=back?c0:c1;
+            if(i==led_index)
+                col=blend_colors(back?c0:c1,back?c1:c0,(uint8_t)rem);
+        }
+        pixels[idx]=scaled(col,cfg->brightness);
+    }
+}
+static void fx_random_colors(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,uint32_t now,
+                              uint32_t old_call,ot_wled_rgb_t *pixels,
+                              size_t count) {
+    const uint32_t cycle=200u+(255u-(uint32_t)cfg->speed)*50u;
+    const uint32_t it=now/cycle, rem=now%cycle;
+    const uint32_t fade_duration=(cycle*(uint32_t)cfg->intensity)>>8;
+    uint32_t fade=255u;
+    if(fade_duration) {
+        fade=(rem*255u)/fade_duration;
+        if(fade>255u)fade=255u;
+    }
+    if(old_call==0u) {
+        state->aux0=fx_rand8(state,256u);
+        state->step=2u;
+    }
+    if(it!=state->step) {
+        state->aux1=state->aux0;
+        state->aux0=fx_new_wheel(state,(uint8_t)state->aux0);
+        state->step=it;
+    }
+    const ot_wled_rgb_t c=scaled(blend_colors(
+        wheel_rgb((uint8_t)state->aux1),
+        wheel_rgb((uint8_t)state->aux0),(uint8_t)fade),cfg->brightness);
+    for(size_t i=0;i<count;i++) pixels[i]=c;
+}
+static void fx_sparkle(const ot_wled_fx_config_t *cfg,
+                        ot_wled_fx_state_t *state,uint32_t now,
+                        ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=10u+(255u-(uint32_t)cfg->speed)*2u;
+    const uint32_t it=now/cycle;
+    if(it!=state->step) {
+        state->aux0=(uint16_t)fx_rand_index(state,count);
+        state->step=it;
+    }
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    pixels[state->aux0%count]=fg;
+}
+static void fx_flash_sparkle(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,uint32_t now,
+                              ot_wled_rgb_t *pixels,size_t count,
+                              bool multiple) {
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=fg;
+    if(now-(uint32_t)state->aux0>state->step) {
+        if(fx_rand8(state,(255u-(uint32_t)cfg->intensity)>>4)==0u) {
+            const size_t length=multiple?(count/3u?count/3u:1u):1u;
+            for(size_t i=0;i<length;i++)pixels[fx_rand_index(state,count)]=bg;
+        }
+        state->step=now;
+        state->aux0=(uint16_t)(255u-(uint32_t)cfg->speed);
+    }
+}
+static void fx_traffic_light(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,uint32_t now,
+                              ot_wled_rgb_t *pixels,size_t count) {
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    uint32_t delay=500u;
+    for(size_t i=0;i+2u<count;i+=3u) {
+        switch(state->aux0) {
+            case 0:
+                pixels[i]=scaled((ot_wled_rgb_t){255,0,0},cfg->brightness);
+                delay=150u+100u*(255u-(uint32_t)cfg->speed);
+                break;
+            case 1:
+                pixels[i]=scaled((ot_wled_rgb_t){255,0,0},cfg->brightness);
+                pixels[i+1u]=scaled((ot_wled_rgb_t){238,204,0},cfg->brightness);
+                delay=150u+20u*(255u-(uint32_t)cfg->speed);
+                break;
+            case 2:
+                pixels[i+2u]=scaled((ot_wled_rgb_t){0,255,0},cfg->brightness);
+                delay=150u+100u*(255u-(uint32_t)cfg->speed);
+                break;
+            default:
+                /* Pinned stage 3 calls gamma32inv on Amber. Gamma LUT integration
+                 * is still pending; uncorrected amber is the direct-RGB baseline. */
+                pixels[i+1u]=scaled((ot_wled_rgb_t){238,204,0},cfg->brightness);
+                delay=150u+20u*(255u-(uint32_t)cfg->speed);
+                break;
+        }
+    }
+    if(now-state->step>delay) {
+        state->aux0++;
+        if(state->aux0==1u&&cfg->intensity>140u)state->aux0=2u;
+        if(state->aux0>3u)state->aux0=0u;
+        state->step=now;
+    }
+}
+static void fx_solid_glitter(const ot_wled_fx_config_t *cfg,
+                              ot_wled_fx_state_t *state,
+                              ot_wled_rgb_t *pixels,size_t count) {
+    const ot_wled_rgb_t bg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t glitter=scaled((ot_wled_rgb_t){255,255,255},cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    /* FX.cpp glitter_base(): strict intensity > hw_random8 comparison. */
+    if(cfg->intensity>fx_rand8(state,256u))
+        pixels[fx_rand_index(state,count)]=glitter;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -781,6 +981,34 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_WIPE_RANDOM ||
+       cfg->effect_id==OT_WLED_SWEEP_RANDOM) {
+        fx_random_wipe(cfg,state,time_ms,call,pixels,count,
+                       cfg->effect_id==OT_WLED_SWEEP_RANDOM);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_RANDOM_COLORS) {
+        fx_random_colors(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SPARKLE) {
+        fx_sparkle(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SPARKLE_DARK ||
+       cfg->effect_id==OT_WLED_SPARKLE_PLUS) {
+        fx_flash_sparkle(cfg,state,time_ms,pixels,count,
+                         cfg->effect_id==OT_WLED_SPARKLE_PLUS);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_TRAFFIC_LIGHT) {
+        fx_traffic_light(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SOLID_GLITTER) {
+        fx_solid_glitter(cfg,state,pixels,count);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
         return true;
