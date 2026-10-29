@@ -80,6 +80,20 @@ class ComposeMainActivity : ComponentActivity() {
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
     private val captureOutput = mutableIntStateOf(0)
+    // A verified snapshot is valid only for the UI state and output at the
+    // time its capture began. Old asynchronous GATT replies cannot resurrect
+    // pixels after an edit, disconnect, or switch into offline preview.
+    private var frameRevision = 0L
+    private var pendingFrameRevision = -1L
+    private var pendingFrameOutput = -1
+
+    private fun invalidateCoreFrame() {
+        frameRevision++
+        pendingFrameRevision = -1L
+        pendingFrameOutput = -1
+        coreFrame.value = null
+        captureMessage.value = "CORE frame not captured"
+    }
 
     private fun enterOfflinePreview() {
         if (liveArmed.value) {
@@ -87,14 +101,14 @@ class ComposeMainActivity : ComponentActivity() {
             liveArmed.value = false
         }
         offlinePreview.value = true
-        coreFrame.value = null
+        invalidateCoreFrame()
     }
 
     // A single gesture updates the on-screen design immediately. When the
     // owner has explicitly armed a physical bench preview, the same gesture
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
     private fun previewCurrentEffect(effectOverride: Int? = null) {
-        coreFrame.value = null // any parameter change invalidates the frozen CORE frame
+        invalidateCoreFrame() // any parameter change invalidates the frozen CORE frame
         if (offlinePreview.value) return // Settings Preview Offline cannot send BLE edits
         // Live editing is the DEFAULT. Offline rendering always updates;
         // if owner-authorized BLE can preview this effect, stream the gesture
@@ -121,7 +135,6 @@ class ComposeMainActivity : ComponentActivity() {
             try {
                 val data = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
-                coreFrame.value = null
                 refresh()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
         }
@@ -152,8 +165,7 @@ class ComposeMainActivity : ComponentActivity() {
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilities()
             if (!ble.canControl()) {
-                coreFrame.value = null
-                captureMessage.value = "CORE frame not captured"
+                invalidateCoreFrame()
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
             }
             if (!ble.canControl() && liveArmed.value) {
@@ -166,6 +178,11 @@ class ComposeMainActivity : ComponentActivity() {
         }
         ble.setFrameListener { output, sequence, rgb, error ->
             runOnUiThread {
+                if (pendingFrameRevision != frameRevision ||
+                    pendingFrameOutput != output || offlinePreview.value ||
+                    !ble.canCaptureFrame()) return@runOnUiThread
+                pendingFrameRevision = -1L
+                pendingFrameOutput = -1
                 if (error != null || rgb == null) {
                     coreFrame.value = null
                     captureMessage.value = error ?: "No CORE frame returned"
@@ -212,7 +229,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     override fun onStop() {
         ble.cancelFrameCapture()
-        coreFrame.value = null
+        invalidateCoreFrame()
         if (liveArmed.value) {
             livePreview.stop()
             liveArmed.value = false
@@ -227,7 +244,7 @@ class ComposeMainActivity : ComponentActivity() {
         super.onDestroy()
     }
     private fun refresh() {
-        coreFrame.value = null // local design changes invalidate an older CORE snapshot
+        invalidateCoreFrame() // local design changes invalidate an older CORE snapshot
         revision.intValue++
     }
 
@@ -670,15 +687,20 @@ class ComposeMainActivity : ComponentActivity() {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Pill("OUT 1", t, captureOutput.intValue == 0) {
-                        captureOutput.intValue = 0; coreFrame.value = null
+                        captureOutput.intValue = 0; invalidateCoreFrame()
                     }
                     Pill("OUT 2", t, captureOutput.intValue == 1) {
-                        captureOutput.intValue = 1; coreFrame.value = null
+                        captureOutput.intValue = 1; invalidateCoreFrame()
                     }
                     Pill("Capture actual CORE frame", t, true) {
-                        coreFrame.value = null
-                        captureMessage.value = "Capturing next completed CORE RGB frame..."
-                        ble.captureFrame(captureOutput.intValue)
+                        invalidateCoreFrame()
+                        if (ble.captureFrame(captureOutput.intValue)) {
+                            pendingFrameRevision = frameRevision
+                            pendingFrameOutput = captureOutput.intValue
+                            captureMessage.value = "Capturing next completed CORE RGB frame..."
+                        } else {
+                            captureMessage.value = "CORE frame unavailable or BLE busy; retry"
+                        }
                     }
                 }
                 Caption(captureMessage.value, t)
@@ -700,7 +722,7 @@ class ComposeMainActivity : ComponentActivity() {
                     PalettePicker("Palette", paletteId, t) { id ->
                         paletteId = id
                         prefs.edit().putInt("paletteId", id).apply()
-                        coreFrame.value = null // palette is NOT in the current BLE FX payload
+                        invalidateCoreFrame() // palette is NOT in the current BLE FX payload
                     }
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
