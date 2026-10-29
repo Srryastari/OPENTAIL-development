@@ -28,7 +28,12 @@ enum {
     OT_WLED_SPOTS = 85,        /* WLED FX_MODE_SPOTS */
     OT_WLED_SPOTS_FADE = 86,   /* WLED FX_MODE_SPOTS_FADE */
     OT_WLED_PERCENT = 98,      /* WLED FX_MODE_PERCENT */
-    OT_WLED_HEARTBEAT = 100     /* WLED FX_MODE_HEARTBEAT */
+    OT_WLED_HEARTBEAT = 100,    /* WLED FX_MODE_HEARTBEAT */
+    OT_WLED_COLORLOOP = 8,     /* WLED FX_MODE_RAINBOW */
+    OT_WLED_RAINBOW = 9,       /* WLED FX_MODE_RAINBOW_CYCLE */
+    OT_WLED_THEATER_RAINBOW = 14,
+    OT_WLED_STROBE_RAINBOW = 24,
+    OT_WLED_BLINK_RAINBOW = 26
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -54,6 +59,7 @@ typedef struct {
     uint32_t step;          /* Upstream per-segment SEGENV.step */
     uint16_t aux0;          /* Upstream per-segment SEGENV.aux0 */
     uint16_t aux1;          /* Upstream per-segment SEGENV.aux1 (Heartbeat/Percent) */
+    uint32_t call;          /* Upstream SEGENV.call, once per rendered frame */
 } ot_wled_fx_state_t;
 
 typedef struct {
@@ -72,7 +78,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
  * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
- * Sweep, Scan, Dual Scan, Fade, Theater, Strobe, Solid Pattern and
+ * Sweep, Scan, Dual Scan, Fade, Theater, Strobe, Colorloop, Rainbow,
+ * Theater Rainbow, Blink Rainbow, Strobe Rainbow, Solid Pattern and
  * Heartbeat, Spots, Spots Fade, Percent, Chase Flash and Running Color,
  * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
