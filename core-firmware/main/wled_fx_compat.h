@@ -41,6 +41,14 @@ typedef struct {
     uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
     ot_wled_rgb_t foreground;
     ot_wled_rgb_t background;
+    /* Optional OpenTail one-shot spark customization. Zeroed configuration
+     * retains the legacy defaults; the BLE wire format is unchanged.
+     * spark_style: 0=original, 1=bright shades, 2=rainbow+white, 3=custom.
+     * spark_peak: 0=legacy automatic cap; otherwise 1..32 bench-only.
+     * These fields have no effect on strobes, trigger overlays or WLED modes. */
+    uint8_t spark_style;
+    uint8_t spark_peak;
+    ot_wled_rgb_t spark_color;
 } ot_wled_fx_config_t;
 typedef struct {
     uint32_t step;          /* Upstream per-segment SEGENV.step */
