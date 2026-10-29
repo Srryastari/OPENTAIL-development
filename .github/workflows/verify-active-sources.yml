@@ -8,6 +8,8 @@ on:
       - 'wled-native/**'
       - 'android/**'
       - 'web-studio/**'
+      - 'docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md'
+      - 'docs/verified-bench-regression-matrix.md'
       - '.github/workflows/verify-active-sources.yml'
   workflow_dispatch:
 permissions:
@@ -23,6 +25,22 @@ jobs:
         working-directory: core-firmware
     steps:
       - uses: actions/checkout@v4
+      - name: Enforce locked release contract and evidence separation
+        working-directory: .
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          contract=Path('docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md').read_text()
+          matrix=Path('docs/verified-bench-regression-matrix.md').read_text()
+          required=['Universal', 'v0.1.25', 'v0.1.26', 'WLED-native', 'bench-only', 'flasher_args.json', 'status LED']
+          for term in required:
+              assert term.lower() in contract.lower(), f'Locked release contract missing: {term}'
+          assert 'Not repeated' in matrix or 'Not yet' in matrix, 'Physical verification must be distinguished from software checks'
+          files=[Path('web-studio/opentail.htm'),Path('web-studio/opentail-v0.19.118.htm'),Path('android/app/src/main/assets/opentail.htm')]
+          assert all(f.is_file() for f in files), 'Missing Studio source'
+          assert len({f.read_bytes() for f in files})==1, 'Approved Studio sources diverged'
+          print('Locked contract, physical-evidence separation and Studio source parity verified')
+          PY
       - name: Run native firmware logic tests
         run: bash tests/run-host-tests.sh
       - name: Run Studio UI and interaction regression suite
