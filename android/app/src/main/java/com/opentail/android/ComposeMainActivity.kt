@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -222,6 +223,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
         var page by rememberSaveable { mutableIntStateOf(0) }
+        val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
         val scheme = remember(light) {
@@ -252,7 +254,7 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill(title, t, page == i) { page = i }
                 }
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Column(Modifier.fillMaxSize().verticalScroll(pageScroll)
                 .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (page) {
@@ -456,7 +458,8 @@ class ComposeMainActivity : ComponentActivity() {
         val frame = coreFrame.value ?: localFrame
         val isCore = frame?.origin == ExactLedFrame.Origin.CORE
         val total = frame?.size() ?: 0
-        val window = total.coerceAtMost(64)
+        var visiblePixels by rememberSaveable { mutableIntStateOf(32) }
+        val window = total.coerceAtMost(visiblePixels)
         var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
         val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
         Caption((if (isCore) "Verified CORE-rendered RGB888 frame · output " +
@@ -467,6 +470,13 @@ class ComposeMainActivity : ComponentActivity() {
         } else if (total == 0) {
             Caption("Add zones in Layout to inspect individual pixel addresses.", t)
         } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Zoom", color = t.muted, fontSize = 12.sp)
+                listOf(8, 16, 32, 64).forEach { pixels ->
+                    Pill(pixels.toString(), t, visiblePixels == pixels) { visiblePixels = pixels }
+                }
+            }
             Canvas(Modifier.fillMaxWidth().height(64.dp)
                 .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
                 val pitch = size.width / window.toFloat()
