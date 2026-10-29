@@ -94,6 +94,7 @@ static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
+static ot_tm_pending_t tm_deferred; /* NVS saved; apply after physical release. */
 static bool tm_persistent=false;
 static uint16_t tm_revision=1u; /* runtime config revision; NVS schema remains v1 */
 typedef struct {
@@ -464,7 +465,7 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     const bool raw_active=tm_gpio_input_mask()!=0;
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    const bool busy=raw_active || live_input_mask!=0 ||
+    const bool busy=tm_deferred.pending || raw_active || live_input_mask!=0 ||
         (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
         show_window(now);
@@ -474,8 +475,12 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     if(!code){
         if(!tm_save(next))code=4;
         else {
+            /* NVS is durable, but an input may have asserted while it was
+             * writing. Preserve its OLD mapping until fully released. */
+            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            tm_profile=*next;
+            (void)ot_tm_saved_apply(&tm_profile,&tm_deferred,next,
+                                    pins_after,live_input_mask);
             tm_persistent=true;
             tm_revision++;
             portEXIT_CRITICAL(&state_lock);
@@ -494,7 +499,7 @@ bool ot_ble_trigger_get(ot_tm_profile_t *out,uint16_t *revision,
     *raw=live_input_mask;
     *effective=(uint8_t)(ot_tm_resolve(out,*raw)|
         (before_deadline(now,sim_deadline)?sim_mask:0u));
-    *persistent=tm_persistent;
+    *persistent=tm_persistent && !tm_deferred.pending;
     portEXIT_CRITICAL(&state_lock);
     return true;
 }
@@ -506,16 +511,18 @@ int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved;uint8_t physical,sim;uint16_t config_revision;
+    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    cfg=tm_profile;saved=tm_persistent;physical=live_input_mask;config_revision=tm_revision;
+    cfg=tm_profile;pending=tm_deferred.pending;saved=tm_persistent&&!pending;
+    physical=live_input_mask;config_revision=tm_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION);
     cJSON_AddNumberToObject(root,"config_revision",config_revision);
     cJSON_AddBoolToObject(root,"saved_on_device",saved);
+    cJSON_AddBoolToObject(root,"config_apply_pending",pending);
     cJSON_AddBoolToObject(root,"bench_only",true);
     cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
     cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0);
@@ -1328,14 +1335,20 @@ static void input_sampler_task(void *arg){
     if(!period)period=1u;
     for(;;){
         bool levels[OT_IN_COUNT];
+        uint8_t instantaneous=0;
         for(unsigned i=0;i<OT_IN_COUNT;i++){
             const int level=gpio_get_level(input_pin[i]);
             levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+        /* This is the only deferred activation point. Do not swap mappings
+         * while either a raw pin or its settled level is asserted. */
+        if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
+                                   instantaneous,physical))target=render_task_handle;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
