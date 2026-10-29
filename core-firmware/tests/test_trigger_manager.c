@@ -153,11 +153,53 @@ static void test_prior_wipe_and_simulation_scenarios(void){
     assert(ot_arbitrate(combined,false,true).hazards);
     assert(!ot_arbitrate(real,false,true).hazards);
 }
+/* Authenticated BLE consumers read a single 15-byte snapshot after every
+ * mapping write. Verify the full byte contract for all revision boundaries,
+ * all possible physical masks, and a deliberately non-identity mapping.
+ * These are serialization tests only, not Bluetooth radio tests. */
+static void test_ble_snapshot_matrix(void){
+    ot_tm_profile_t mapping={0};
+    const uint8_t reassigned[OT_IN_COUNT]={
+        OT_TM_BRAKE,OT_TM_DISABLED,OT_TM_RIGHT,OT_TM_LEFT,
+        OT_TM_AUX3,OT_TM_AUX2,OT_TM_AUX1,OT_TM_REVERSE
+    };
+    memcpy(mapping.function,reassigned,sizeof(reassigned));
+    assert(ot_tm_valid(&mapping));
+    const uint16_t revisions[]={0u,1u,0x00FFu,0x0100u,0x7FFFu,0xFFFFu};
+    for(unsigned r=0;r<sizeof(revisions)/sizeof(revisions[0]);r++){
+        const uint16_t revision=revisions[r];
+        for(unsigned raw=0;raw<256u;raw++){
+            const uint8_t input=(uint8_t)raw;
+            const uint8_t effective=(uint8_t)(ot_tm_resolve(&mapping,input)|OT_SIG_PARK);
+            for(unsigned saved=0;saved<2u;saved++){
+                uint8_t response[OT_TM_BLE_READ_BYTES]={0};
+                const uint8_t status=(uint8_t)((raw+r+saved)%5u);
+                assert(ot_tm_ble_encode(&mapping,revision,input,effective,saved!=0,
+                                        status,response));
+                assert(response[0]==OT_TM_BLE_VERSION);
+                assert(response[1]==status);
+                assert(response[2]==(uint8_t)revision);
+                assert(response[3]==(uint8_t)(revision>>8));
+                assert(response[4]==input);
+                assert(response[5]==effective);
+                assert(response[6]==saved);
+                assert(!memcmp(response+7,mapping.function,OT_IN_COUNT));
+            }
+        }
+    }
+    /* Encode never silently publishes a malformed saved profile. */
+    mapping.function[7]=255u;
+    uint8_t rejected[OT_TM_BLE_READ_BYTES];
+    memset(rejected,0xA5,sizeof(rejected));
+    assert(!ot_tm_ble_encode(&mapping,1u,0u,0u,false,0u,rejected));
+    for(unsigned i=0;i<sizeof(rejected);i++)assert(rejected[i]==0xA5u);
+}
 int main(void){
     test_sampler_transitions();
     test_prior_individual_input_sequences();
     test_previous_combination_transitions();
     test_prior_wipe_and_simulation_scenarios();
+    test_ble_snapshot_matrix();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
