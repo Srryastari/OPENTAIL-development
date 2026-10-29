@@ -67,4 +67,55 @@ const nav=src.slice(src.indexOf('function otConceptNav(){'),src.indexOf('functio
 const labels=[...nav.matchAll(/\['(?:home|scenes|layout|builder|events|device)','([^']+)'/g)].map(x=>x[1]);
 assert.deepEqual(labels,['Home','Show Modes','Layout','Triggers','Auto Events','Settings']);
 assert(src.includes('id="ot-approved-chat-01956"')&&src.includes('id="ot-approved-chat-trigger-01956"'));
+// An offline project must browse all 120 known 1D effects plus six original
+// OpenTail effects without contacting CORE or linking firmware binaries.
+const manifestStart='const OT_STUDIO_DESIGN_EFFECTS=Object.freeze(';
+const manifestAt=src.indexOf(manifestStart);
+const manifestEnd=src.indexOf(');',manifestAt);
+assert(manifestAt>0&&manifestEnd>manifestAt,'Offline CORE effect manifest missing');
+const manifests=JSON.parse(src.slice(manifestAt+manifestStart.length,manifestEnd));
+const originalsStart='const OT_STUDIO_ORIGINAL_EFFECTS=Object.freeze(';
+const originalAt=src.indexOf(originalsStart),originalEnd=src.indexOf(');',originalAt);
+const originals=JSON.parse(src.slice(originalAt+originalsStart.length,originalEnd));
+assert.equal(manifests.length,120);
+assert.equal(new Set(manifests.map(x=>x[0])).size,120);
+assert.equal(Object.keys(originals).length,6);
+assert.equal(originals[32769],'Materialize Sparks');
+assert.equal(originals[32773],'Smooth Fade Out');
+const upstream=fs.readFileSync('core-firmware/main/wled_1d.c','utf8');
+const coreModes=[...upstream.matchAll(/\{(\d+),"[^"]+","([^"]+)",\d+\}/g)].map(m=>[Number(m[1]),m[2]]);
+assert.deepEqual(manifests,coreModes,'Studio must derive names/IDs from CORE, without duplicating the renderer');
+const choicesStart=src.indexOf('function otCompatibleEffectChoices(){');
+const choicesEnd=src.indexOf('function otCanonicalEffect(',choicesStart);
+const choose=new Function('otBleFxMode','otBleEffectNames','otControllerMode',
+  'otStudioEnsureDesignCatalog','OT_STUDIO_DESIGN_EFFECTS','OT_STUDIO_ORIGINAL_EFFECTS',
+  'state','otEffectCompatible',src.slice(choicesStart,choicesEnd)+';return otCompatibleEffectChoices;')(
+    ()=>false,()=>[], 'core',()=>{},manifests,originals,{wledEffects:[]},()=>true);
+const catalog=choose();
+assert.equal(catalog.length,126);
+assert(catalog.some(x=>x.id===219&&x.name==='Slow Transition'));
+assert(catalog.some(x=>x.id===32768&&x.name==='Embers'));
+assert(catalog.some(x=>x.id===32770&&x.name==='Random Materialize'));
+const selectStart=src.indexOf('async function applyWledEffect(id){');
+const selectEnd=src.indexOf('// Bench tests are color overrides',selectStart);
+assert(selectStart>0&&selectEnd>selectStart,'Standalone effect selection source missing');
+let selected=null,preview='',persisted=0,rendered=0;
+const editingState={wledEdit:null,status:'',runningFx:null,runningSectionFx:null};
+const selectFn=new Function('otBleFxMode','otBleApplyEffect','otControllerMode',
+ 'otStudioFxName','state','persist','render','otSimPreviewEffect','otChosenEffectId',
+ src.slice(selectStart,selectEnd)+';return {apply:applyWledEffect,selected:()=>otChosenEffectId,preview:()=>otSimPreviewEffect};')(
+ ()=>false,()=>{throw Error('BLE command must never be invoked in offline Studio')},
+ 'core',id=>originals[id]||manifests.find(x=>x[0]===id)?.[1]||null,editingState,
+ ()=>{persisted++},()=>{rendered++},preview,selected);
+(async()=>{
+ assert.equal(await selectFn.apply(32770),true);
+ assert.equal(selectFn.selected(),32770);
+ assert.equal(selectFn.preview(),'Random Materialize');
+ assert.equal(editingState.runningFx,null,'Offline selection cannot claim active hardware output');
+ assert(editingState.status.includes('Not sent to CORE.'));
+ assert.equal(await selectFn.apply(9999),false,'Unknown effects must be rejected without device access');
+ assert(persisted>0&&rendered>0,'Offline editor state must visibly update and save');
+ console.log('Offline 126-mode data catalog and source-level non-device effect selection passed.');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+
 console.log('Studio v0.19.119: design-only CORE routes, preserved authoring, offline events, project backup, old-device fallback and approved UI passed.');
