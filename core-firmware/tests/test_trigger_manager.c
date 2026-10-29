@@ -108,6 +108,16 @@ static void test_prior_wipe_and_simulation_scenarios(void){
      * GPIOs nor clears a physical signal when simulation stops. */
     const uint8_t simulated=ot_tm_signal_mask_of("right");
     assert(simulated==OT_SIG_RIGHT);
+    /* Previously observed simulated_mask sequence: Right -> Hazards ->
+     * Reverse, with one TTL at a time. Keep names bound to logical masks. */
+    const uint8_t simulation_replay[]={
+        ot_tm_signal_mask_of("right"),
+        (uint8_t)(ot_tm_signal_mask_of("left")|ot_tm_signal_mask_of("right")),
+        ot_tm_signal_mask_of("reverse")
+    };
+    assert(simulation_replay[0]==8u);
+    assert(simulation_replay[1]==12u);
+    assert(simulation_replay[2]==16u);
     const uint8_t real=ot_tm_resolve(&mapping,OT_SIG_LEFT|OT_SIG_BRAKE);
     const uint8_t combined=(uint8_t)(real|simulated);
     assert(real==(OT_SIG_LEFT|OT_SIG_BRAKE));
