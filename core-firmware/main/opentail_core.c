@@ -23,6 +23,7 @@
 #include "led_strip.h"
 #include "led_strip_rmt.h"
 #include "board_config.h"
+#include "ot_version.h"
 #include "status_led.h"
 #include "show_logic.h"
 #include "ble_command.h"
@@ -38,7 +39,7 @@
 #include "nvs.h"
 #include "esp_timer.h"
 
-#define OT_FW "0.1.27-alpha"
+#define OT_FW OT_FW_VERSION
 #define OT_TARGET_FPS 62u
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
