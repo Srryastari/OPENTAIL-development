@@ -4490,9 +4490,10 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
     float pitch=cfg->audio_peak->major_peak_hz;
     const float magnitude=cfg->audio_peak->magnitude/16.0f;
-    uint8_t volume=(uint8_t)(32.0f+magnitude*1.5f);
-    if(magnitude<48.0f)volume=0u;
-    if(magnitude>144.0f)volume=255u;
+    /* Check thresholds before converting to uint8: large float-to-byte
+     * conversions would otherwise be undefined in C. */
+    uint8_t volume=magnitude<48.0f?0u:
+        magnitude>144.0f?255u:(uint8_t)(32.0f+magnitude*1.5f);
     uint8_t octave=0u;
     while(pitch>249.0f && octave<32u) {octave++;pitch/=2.0f;}
     pitch=fabsf((pitch-132.0f)*2.1f);
@@ -4526,7 +4527,15 @@ static bool exploding_fireworks_frame(const ot_wled_fx_config_t *cfg,
         pixels[0]=scaled(cfg->foreground,cfg->brightness);
         return true;
     }
-    const unsigned max_sparks=640u/sizeof(ot_firework_spark_t);
+    /* Source FX.h ESP32-S3/PSRAM FAIR_DATA_PER_SEG=64KiB/64=1024.
+     * Active/max segment counts control source's x1/x2/x4 fair-share. */
+    const unsigned active=cfg->active_segments?cfg->active_segments:1u;
+    const unsigned maximum=cfg->max_segments?cfg->max_segments:64u;
+    if(active>maximum)return false;
+    unsigned max_data=1024u;
+    if(active<=maximum/2u)max_data*=2u;
+    if(active<=maximum/4u)max_data*=2u;
+    const unsigned max_sparks=max_data/sizeof(ot_firework_spark_t);
     const unsigned calculated=5u+(unsigned)(count>>1u);
     const unsigned num=calculated<max_sparks?calculated:max_sparks;
     const size_t data_bytes=(size_t)num*sizeof(ot_firework_spark_t);
