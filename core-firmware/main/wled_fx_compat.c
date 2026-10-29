@@ -2886,6 +2886,19 @@ static uint8_t fx_cubic_wave8(uint8_t x) {
     const uint32_t factor=768u-2u*(uint32_t)x;
     return (uint8_t)((ii*factor)>>16);
 }
+/* Pinned WLED colors.cpp RGB packed SIMD blend. Unlike per-channel
+ * interpolation, its packed carry behavior affects exact RGB LSBs. */
+static ot_wled_rgb_t shadows_source_blend(ot_wled_rgb_t a,
+                                         ot_wled_rgb_t b,uint8_t blend) {
+    const uint32_t c1=((uint32_t)a.r<<16)|((uint32_t)a.g<<8)|a.b;
+    const uint32_t c2=((uint32_t)b.r<<16)|((uint32_t)b.g<<8)|b.b;
+    const uint32_t mask=0x00ff00ffu;
+    const uint32_t rb1=c1&mask, wg1=(c1>>8)&mask;
+    const uint32_t rb2=c2&mask, wg2=(c2>>8)&mask;
+    const uint32_t rb3=((((rb1<<8)|rb2)+(rb2*blend)-(rb1*blend))>>8)&mask;
+    const uint32_t wg3=((((wg1<<8)|wg2)+(wg2*blend)-(wg1*blend)))&~mask;
+    return palette_unpack(rb3|wg3);
+}
 static void dancing_shadows_frame(const ot_wled_fx_config_t *cfg,
                                   ot_wled_fx_state_t *state,uint32_t now,
                                   ot_wled_rgb_t *pixels,size_t count) {
@@ -2948,7 +2961,7 @@ static void dancing_shadows_frame(const ot_wled_fx_config_t *cfg,
             else if(width>1&&spot->type==2u)
                 amount=fx_cubic_wave8((uint8_t)((unsigned)j*510u/
                                                     (unsigned)(width-1)));
-            pixels[index]=blend_colors(pixels[index],color,(uint8_t)amount);
+            pixels[index]=shadows_source_blend(pixels[index],color,(uint8_t)amount);
         }
     }
     for(size_t i=0;i<count;i++)pixels[i]=scaled(pixels[i],cfg->brightness);
