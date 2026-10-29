@@ -25,11 +25,15 @@ final class NativeProject {
     };
     private final SharedPreferences prefs;
     private JSONObject data;
+    // Last successfully committed project, not merely the last in-memory edit.
+    // All editors share this rollback point when persistent storage fails.
+    private String committedJson;
 
     NativeProject(Context context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         try { data = validated(new JSONObject(prefs.getString(KEY, "{}"))); }
         catch (Exception ignored) { data = empty(); }
+        committedJson = data.toString();
     }
 
     private static JSONObject empty() {
@@ -172,7 +176,20 @@ final class NativeProject {
     }
 
     synchronized boolean save() {
-        return prefs.edit().putString(KEY, data.toString()).commit();
+        String next = data.toString();
+        boolean persisted;
+        try { persisted = prefs.edit().putString(KEY, next).commit(); }
+        catch (RuntimeException ex) { persisted = false; }
+        if (persisted) {
+            committedJson = next;
+            return true;
+        }
+        // Pixel, layout, trigger and event editors mutate nested JSON before
+        // calling save(). A failed commit must restore ALL those shared fields,
+        // not leave a false in-memory success that leaks into exports/presets.
+        try { data = new JSONObject(committedJson); }
+        catch (JSONException impossible) { throw new IllegalStateException("Corrupt committed project snapshot", impossible); }
+        return false;
     }
 
     synchronized String name() { return data.optString("projectName", "Untitled project"); }
