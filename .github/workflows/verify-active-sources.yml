@@ -8,7 +8,9 @@ permissions:
   contents: read
 concurrency:
   group: verify-active-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR 19 is integrating CORE + source effects concurrently; let its running
+  # ESP-IDF compile finish. GitHub still retains only one pending run per group.
+  cancel-in-progress: ${{ github.event_name != 'pull_request' || github.event.pull_request.number != 19 }}
 jobs:
   change-impact-audit:
     runs-on: ubuntu-latest
