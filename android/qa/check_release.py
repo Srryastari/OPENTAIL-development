@@ -62,8 +62,8 @@ check("Controller writing is separate from authoring, requires confirmation",
       'setTitle("Bench test on CORE?")' in main and
       "supportedBleEffects.contains(effectId)" in main and
       "Math.min(32," in main)
-check("Native effects manifest is explicitly 126 IDs",
-      len(re.findall(r'new Effect\(\d+, "', effect)) == 126)
+check("Native effects manifest is explicitly 140 IDs",
+      len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Native hardware output read/save and post-commit readback retained",
       "new NativeOutputManager(this,ble,ui)" in main and
       "NativeOutputManager.java" in str(source / "NativeOutputManager.java") and
