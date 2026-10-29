@@ -9,7 +9,8 @@
  * mode_rainbow_cycle(), mode_theater_chase_rainbow(),
  * mode_blink_rainbow(), mode_strobe_rainbow(), mode_multi_strobe(),
  * chase(), mode_two_dots(), tricolor_chase(), mode_tricolor_wipe(),
- * and mode_tricolor_fade().
+ * mode_tricolor_fade(), mode_breath(), running_base(),
+ * and mode_tri_static_pattern(), plus pinned wled_math.cpp sine helpers.
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -70,7 +71,17 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TRICOLOR_WIPE, "Tri Wipe", "Tri Wipe@!;1,2,3;!",
      true, true, true, false, false},
     {OT_WLED_TRICOLOR_FADE, "Tri Fade", "Tri Fade@!;1,2,3;!",
-     true, true, true, false, false}
+     true, true, true, false, false},
+    {OT_WLED_BREATHE, "Breathe", "Breathe@!;!,!;!;01",
+     true, true, true, false, false},
+    {OT_WLED_RUNNING_LIGHTS, "Running", "Running@!,Wave width;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_SAW, "Saw", "Saw@!,Width;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_RUNNING_DUAL, "Running Dual", "Running Dual@!,Wave width;L,!,R;!",
+     true, true, true, true, false},
+    {OT_WLED_SOLID_PATTERN_TRI, "Solid Pattern Tri", "Solid Pattern Tri@,Size;1,2,3;;;pal=0",
+     true, true, false, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -519,6 +530,95 @@ static void tricolor_fade_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     for(size_t i=0;i<count;i++)pixels[i]=c;
 }
 
+/*
+ * Pinned WLED wled_math.cpp sin16_t/sin8_t: Bhaskara-I integer math,
+ * not a platform sine approximation. Never use floating-point per pixel.
+ */
+static int16_t wled_sin16(uint16_t theta) {
+    int sign=1;
+    if(theta>0x7fffu) {
+        theta=(uint16_t)(0xffffu-theta);
+        sign=-1;
+    }
+    const uint32_t precal=(uint32_t)theta*(0x7fffu-(uint32_t)theta);
+    const uint64_t num=(uint64_t)precal*(4u*0x7fffu);
+    const uint32_t denom=1342095361u-precal;
+    const int16_t sine=(int16_t)(num/denom);
+    return (int16_t)(sign*(int32_t)sine);
+}
+static uint8_t wled_sin8(uint8_t theta) {
+    int32_t v=(int32_t)wled_sin16((uint16_t)theta*257u)+0x7fff+128;
+    if(v>0xffff)v=0xffff;
+    return (uint8_t)((uint32_t)v>>8);
+}
+static uint8_t wled_sin_gap(uint16_t angle) {
+    if(angle&0x100u)return 0;
+    return wled_sin8((uint8_t)(angle+192u));
+}
+
+/* Pinned FX.cpp mode_breath(): exactly the integer counter, mirror and
+ * var/103 brightness ramp. Palette=0 uses foreground/background colors.
+ */
+static void breathe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    uint32_t v=0;
+    uint32_t counter=(now*((uint32_t)(cfg->speed>>3)+10u))&0xffffu;
+    counter=(counter>>2)+(counter>>4);
+    if(counter<16384u) {
+        if(counter>8192u)counter=8192u-(counter-8192u);
+        v=(uint32_t)wled_sin16((uint16_t)counter)/103u;
+    }
+    const uint8_t lum=(uint8_t)(30u+v);
+    const ot_wled_rgb_t c=scaled(blend_colors(cfg->background,
+                                              cfg->foreground,lum),
+                                 cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=c;
+}
+
+/*
+ * Pinned FX.cpp running_base(saw,dual), palette=0 with the third RGB slot
+ * at default black. WLED uses unsigned phase wrapping and signed map()
+ * interpolation in Saw; emulate both with explicit integer widths.
+ */
+static void running_sine_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count,
+                               bool saw,bool dual) {
+    const uint32_t x_scale=(uint32_t)cfg->intensity>>2;
+    const uint32_t counter=(now*(uint32_t)cfg->speed)>>9;
+    const ot_wled_rgb_t black={0,0,0};
+    for(size_t i=0;i<count;i++) {
+        uint32_t a=(uint32_t)i*x_scale-counter;
+        if(saw) {
+            a&=0xffu;
+            if(a<16u) a=192u+a*8u;
+            else a=64u+((a-16u)*128u)/239u;
+            a=255u-a;
+        }
+        const uint8_t wave=dual?wled_sin_gap((uint16_t)a):
+                                wled_sin8((uint8_t)a);
+        ot_wled_rgb_t c=blend_colors(cfg->background,cfg->foreground,wave);
+        if(dual) {
+            const uint32_t b=((uint32_t)count-1u-(uint32_t)i)*x_scale-counter;
+            const uint8_t r=wled_sin_gap((uint16_t)b);
+            const ot_wled_rgb_t other=blend_colors(cfg->background,black,r);
+            c=blend_colors(c,other,127u);
+        }
+        pixels[i]=scaled(c,cfg->brightness);
+    }
+}
+
+/* Pinned FX.cpp mode_tri_static_pattern(), third RGB slot default black. */
+static void tri_pattern_frame(const ot_wled_fx_config_t *cfg,
+                              ot_wled_rgb_t *pixels,size_t count) {
+    const size_t width=((size_t)cfg->intensity>>5)+1u;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++) {
+        const size_t phase=(i/width)%3u;
+        pixels[i]=phase==0u?fg:(phase==1u?bg:(ot_wled_rgb_t){0,0,0});
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -530,6 +630,22 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_BREATHE) {
+        breathe_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_RUNNING_LIGHTS ||
+        cfg->effect_id==OT_WLED_SAW ||
+        cfg->effect_id==OT_WLED_RUNNING_DUAL) {
+        running_sine_frame(cfg,time_ms,pixels,count,
+                           cfg->effect_id==OT_WLED_SAW,
+                           cfg->effect_id==OT_WLED_RUNNING_DUAL);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_SOLID_PATTERN_TRI) {
+        tri_pattern_frame(cfg,pixels,count);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_MULTI_STROBE) {
         multi_strobe_frame(cfg,state,time_ms,pixels,count);
         return true;
