@@ -33,7 +33,12 @@ assert resize.index('if(e!=ESP_OK){') < resize.index('e=led_strip_del(strip[ch])
 assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NULL;strip_capacity[ch]=0;')
 
 assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
-assert "if(frame_submitted[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]))" in core
+assert "if(!frame_submitted[ch])continue;" in core
+# Completion telemetry is incremented only AFTER the driver confirms its transfer.
+done_idx = core.index("ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));")
+refresh_idx = core.index("output_refreshes[ch]++;")
+assert done_idx < refresh_idx
+assert "output_refreshes[ch]++" not in core.split("ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));",1)[1].split("ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));",1)[0]
 assert "ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)" in core
 assert "if(!native_rendering && full_frame)" in core
 assert "if(full_frame)frame_window_frames++" in core
