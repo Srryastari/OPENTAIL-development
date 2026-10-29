@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[68]={0};
-    assert(ot_wled_fx_supported_ids(ids,68)==68);
+    uint16_t ids[69]={0};
+    assert(ot_wled_fx_supported_ids(ids,69)==69);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -32,7 +32,8 @@ int main(void) {
            ids[54]==68 && ids[55]==75 && ids[56]==97 && ids[57]==62 &&
            ids[58]==40 && ids[59]==41 && ids[60]==60 &&
            ids[61]==92 && ids[62]==93 && ids[63]==94 &&
-           ids[64]==17 && ids[65]==32 && ids[66]==59 && ids[67]==111);
+           ids[64]==17 && ids[65]==32 && ids[66]==59 && ids[67]==111 &&
+           ids[68]==88);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -620,16 +621,27 @@ int main(void) {
         memset(p,0,sizeof(p));
         assert(ot_wled_fx_render(&c,&s,0,p,31));
     }
+    /* Candle retains source-defined luminance until its 23-ms update gate. */
+    c.effect_id=OT_WLED_CANDLE;c.brightness=255;
+    c.speed=120;c.intensity=140;
+    ot_wled_fx_reset(&s);
+    memset(p,0,sizeof(p));
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    assert(eq(p[0],(ot_wled_rgb_t){0,0,0}));
+    assert(ot_wled_fx_render(&c,&s,23,p,31));
+    ot_wled_rgb_t candle_col=p[0];
+    assert(ot_wled_fx_render(&c,&s,30,p,31));
+    assert(eq(p[0],candle_col));
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<68;k++) {
+    for(size_t k=0;k<69;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 68 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 69 modes, timing, zone limits and validation passed.");
     return 0;
 }
