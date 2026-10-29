@@ -10,7 +10,8 @@
  * mode_blink_rainbow(), mode_strobe_rainbow(), mode_multi_strobe(),
  * chase(), mode_two_dots(), tricolor_chase(), mode_tricolor_wipe(),
  * mode_tricolor_fade(), mode_breath(), running_base(),
- * and mode_tri_static_pattern(), plus pinned wled_math.cpp sine helpers.
+ * mode_tri_static_pattern(), mode_colorful(), and gradient_base(),
+ * plus pinned wled_math.cpp sine helpers.
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -81,7 +82,13 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_RUNNING_DUAL, "Running Dual", "Running Dual@!,Wave width;L,!,R;!",
      true, true, true, true, false},
     {OT_WLED_SOLID_PATTERN_TRI, "Solid Pattern Tri", "Solid Pattern Tri@,Size;1,2,3;;;pal=0",
-     true, true, false, true, false}
+     true, true, false, true, false},
+    {OT_WLED_COLORFUL, "Colorful", "Colorful@!,Saturation;1,2,3;!",
+     true, true, true, true, false},
+    {OT_WLED_GRADIENT, "Gradient", "Gradient@!,Spread;!,!;!;;ix=16",
+     true, true, true, true, false},
+    {OT_WLED_LOADING, "Loading", "Loading@!,Fade;!,!;!;;ix=16",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -619,6 +626,76 @@ static void tri_pattern_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/* Pinned FX.cpp mode_colorful(), default palette=0. The high-intensity
+ * WLED third RGB color is black in current CORE's two-color profile.
+ * Rotate the source four/pastel/three-color arrays once per cycle. */
+static void colorful_frame(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    size_t colors=4u;
+    ot_wled_rgb_t choices[4]={
+        {255,0,0},{238,187,0},{0,238,0},{0,119,204}
+    };
+    if(cfg->intensity>160u) {
+        colors=3u;
+        choices[0]=cfg->foreground;
+        choices[1]=cfg->background;
+        choices[2]=(ot_wled_rgb_t){0,0,0};
+    } else if(cfg->intensity<80u) {
+        choices[0]=(ot_wled_rgb_t){255,128,64};
+        choices[1]=(ot_wled_rgb_t){229,210,65};
+        choices[2]=(ot_wled_rgb_t){119,255,119};
+        choices[3]=(ot_wled_rgb_t){119,240,240};
+    }
+    const uint32_t cycle=50u+8u*(255u-(uint32_t)cfg->speed);
+    const uint32_t iteration=now/cycle;
+    if(iteration!=state->step) {
+        if(cfg->speed>0u)state->aux0++;
+        if(state->aux0>=colors)state->aux0=0;
+        state->step=iteration;
+    }
+    for(size_t i=0;i<count;i++)
+        pixels[i]=scaled(choices[(state->aux0+(i%colors))%colors],
+                         cfg->brightness);
+}
+
+/* Pinned FX.cpp gradient_base(loading). In the pinned source,
+ * '1 + loading ? intensity/2 : intensity/4' always takes intensity/2
+ * because of operator precedence. Preserve it for source frame fidelity.
+ */
+static void gradient_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                           uint32_t call,ot_wled_rgb_t *pixels,size_t count,
+                           bool loading) {
+    if(count<=1u){
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const uint16_t counter=(uint16_t)(now*
+                          ((uint32_t)(cfg->speed>>2)+1u));
+    const int32_t pp=call==0u?0:
+        (int32_t)(((uint32_t)counter*(uint32_t)count)>>16);
+    const int32_t brd=(int32_t)cfg->intensity/2;
+    const int32_t p1=pp-(int32_t)count,p2=pp+(int32_t)count;
+    for(size_t i=0;i<count;i++) {
+        const int32_t pos=(int32_t)i;
+        int32_t d;
+        if(loading) {
+            const int32_t target=(pos>pp)?p2:pp;
+            d=target>pos?target-pos:pos-target;
+        } else {
+            const int32_t a=pp>pos?pp-pos:pos-pp;
+            const int32_t b=p1>pos?p1-pos:pos-p1;
+            const int32_t c=p2>pos?p2-pos:pos-p2;
+            d=a<b?a:b;
+            if(c<d)d=c;
+        }
+        const uint8_t blend=(uint8_t)(brd>d?(d*255)/brd:255);
+        pixels[i]=scaled(blend_colors(cfg->foreground,
+                                      cfg->background,blend),
+                         cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -630,6 +707,16 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_COLORFUL) {
+        colorful_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_GRADIENT ||
+        cfg->effect_id==OT_WLED_LOADING) {
+        gradient_frame(cfg,time_ms,call,pixels,count,
+                       cfg->effect_id==OT_WLED_LOADING);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_BREATHE) {
         breathe_frame(cfg,time_ms,pixels,count);
         return true;
