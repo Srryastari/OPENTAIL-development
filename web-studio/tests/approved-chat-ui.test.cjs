@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const html=fs.readFileSync('web-studio/opentail.htm','utf8');
-const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
+const native=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
 const layoutStart=html.indexOf('function otBaseArrangementLayout()');
 const layoutEnd=html.indexOf('function triggerEditor()',layoutStart);
 const layout=html.slice(layoutStart,layoutEnd);
@@ -60,27 +60,19 @@ assert(!event.includes('getJson(')&&!event.includes('queueDevice(')&&!event.incl
 assert(event.includes('Startup')&&event.includes('Shutdown')&&event.includes('SIM only.'),'Event editor must support both startup and shutdown with honest simulation labels');
 assert(html.includes('id="ot-approved-chat-01956"'),'Layout style tokens are pinned');
 assert(html.includes('id="ot-approved-chat-trigger-01956"'),'Trigger style tokens are pinned');
-assert(shell.includes('UI baseline v1: lock Android wrapper to neutral OLED'),'Android cannot inject an alternate green theme');
+assert(native.includes('private void buildNavigation()')&&!native.includes('new WebView('),'Native Android must present one approved six-page UI directly');
 console.log('Protected in-chat OLED UI geometry, multi-trigger editing, local event animation and controller isolation contracts passed');
 
 
 
-// Approved Android six-tab nav: the native wrapper owns exactly one global nav.
-const navStart=shell.indexOf('const destinations = [');
-const navEnd=shell.indexOf('];',navStart);
-assert(navStart>0&&navEnd>navStart,'Android canonical navigation list missing');
-const androidNav=shell.slice(navStart,navEnd);
-const navLabels=[...androidNav.matchAll(/\['(?:home|scenes|layout|builder|events|settings)','([^']+)'/g)].map(m=>m[1]);
-assert.deepEqual(navLabels,['Home','Show Modes','Layout','Triggers','Auto Events','Settings'],'Approved Android six-tab order must be exact');
-assert(shell.includes('document.body.insertBefore(nav, header.nextSibling)'),'Canonical navigation belongs below header, not at page bottom');
-assert(shell.includes('position:sticky!important;top:0!important'),'Native pill navigation must be at the top');
-assert(shell.includes('#app .ot-chat-nav{display:none!important}'),'Hide duplicate Studio concept tabs inside Android');
-assert(shell.includes('autoEventsOpen=target===\'events\''),'Auto Events must have its own top-level nav identity');
-assert(shell.includes("window.otConceptNavigate(target)"),'Route Auto Events through existing offline-safe concept handler');
-assert(shell.includes('body:not(.ot-home-active) .ot-connection-grid{display:none!important}'),'Connection actions belong on Home');
-assert(!androidNav.includes("'Shows'"),'Use approved full Show Modes label');
-console.log('Approved Android six-tab nav placement/order and duplicate-tab suppression checks passed');
-
+// Android now renders its own native, single six-destination navigation.
+const nativeNav=native.slice(native.indexOf('private static final String[] TABS='),native.indexOf('private static final String[] DEFAULT_EVENTS='));
+const nativeLabels=[...nativeNav.matchAll(/"([^"]+)"/g)].map(m=>m[1]);
+assert.deepEqual(nativeLabels,['Home','Show Modes','Layout','Triggers','Auto Events','Settings']);
+assert(native.includes('HorizontalScrollView scroller=new HorizontalScrollView(this)'));
+assert(native.includes('private void buildHeader()'));
+assert(!native.includes('WebViewAssetLoader')&&!native.includes('new WebView('));
+console.log('Approved native Android navigation order and placement protected');
 
 // Approved Show Modes hierarchy: tabs, then bounded preview, then one editing workspace.
 const scenesStart=html.indexOf('function scenes(){');
@@ -92,21 +84,11 @@ const previewAt=sceneSource.indexOf('otPixelPreview()');
 const editorAt=sceneSource.indexOf("otSub==='Effects'");
 assert(tabsAt>=0&&previewAt>tabsAt&&editorAt>previewAt,
   'Show Modes hierarchy must be tabs → Live Lighting Preview → editor');
-// Settings is one expandable workspace, with no duplicated primary connection actions.
-const settingsStart=shell.indexOf('settings.innerHTML =');
-const settingsEnd=shell.indexOf("const nav = document.createElement('nav')",settingsStart);
-const settingsSource=shell.slice(settingsStart,settingsEnd);
-for(const label of ['App Preferences','Diagnostics','Project Backup','About'])
-  assert(settingsSource.includes(label),'Settings section missing: '+label);
-assert.equal((settingsSource.match(/class="ot-settings-group"/g)||[]).length,4,
-  'Settings sections belong to one expandable workspace');
-assert(!settingsSource.includes('data-ot-native="scan"')&&!settingsSource.includes('data-ot-native="connect"'),
-  'Home owns primary connection actions');
-assert(shell.includes("window.confirm('Import this project?"),
-  'Import must confirm before replacing the local working project');
-console.log('Show Modes ordering, Settings groups, and project import confirmation protected');
-
-
+// Native Android retains functional Settings as Android Views, never JS HTML.
+assert(native.includes('private void settings()') && native.includes('private void exportDocument()'));
+assert(native.includes('private void importDocument()')&&native.includes('private void setWhiteMode(boolean on)'));
+assert(native.includes('private void confirmBleTest()'),'Optional controller testing stays explicitly guarded');
+console.log('Web Shows hierarchy and native Settings/project import/export protected');
 
 // Custom triggers alone get a row-level trash icon with inline confirmation.
 const builderCode=html.slice(html.indexOf('function builder(){'),html.indexOf('let otPresetEditorId=',html.indexOf('function builder(){'))>0?html.indexOf('function otTurnModel(',html.indexOf('function builder(){')):html.indexOf('function otTriggerColor(',html.indexOf('function builder(){')));
@@ -124,5 +106,5 @@ assert.deepEqual(labels,['Home','Show Modes','Layout','Triggers','Auto Events','
 assert(!html.includes('<nav class="bottomnav">'),'Legacy bottom nav must not render');
 assert(html.includes('#app nav.tabs,#app nav.bottomnav{display:none!important}'),'Hidden legacy route mirror must stay hidden');
 assert(html.includes('scroll-snap-type:x proximity'),'Small screens use the same scrollable top segmented nav');
-assert(shell.includes('#app .ot-chat-nav{display:none!important}'),'Android native navigation must suppress bundled duplicate');
+assert(!native.includes('new WebView('),'Android native app must not embed duplicate browser navigation');
 console.log('OpenTail single-navigation regression checks passed');
