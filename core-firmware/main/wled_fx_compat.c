@@ -211,6 +211,8 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, true, true, true, false},
     {OT_WLED_FAIRYTWINKLE, "Fairytwinkle", "Fairytwinkle@!,!;!,!;!;;m12=0",
      true, true, true, true, false},
+    {OT_WLED_ROLLING_BALLS, "Rolling Balls", "Rolling Balls@!,# of balls,,,,Collide,Overlay,Trails;!,!,!;!;1;m12=1",
+     true, true, true, true, false},
     {OT_WLED_BOUNCING_BALLS, "Bouncing Balls", "Bouncing Balls@Gravity,# of balls,,,,,Overlay;!,!,!;!;1;m12=1",
      true, true, true, true, false},
     {OT_WLED_HALLOWEEN_EYES, "Halloween Eyes", "Halloween Eyes@Eye off time,Eye on time,,,,,Overlay;!,!;!;12",
@@ -2328,6 +2330,70 @@ static void bouncing_balls_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+
+/* Direct pinned FX.cpp mode_rolling_balls() 1D default options port.
+ * 16 zone-local balls, identical source random draw order and bounded
+ * collision-free motion. check1/collide, check2/overlay, check3/trails and
+ * nonzero palette are not exposed by this CORE config: never claim parity
+ * for those unsupported controls. No vehicle geometry or global state. */
+typedef struct {
+    uint32_t last_bounce_update; /* ESP32 upstream unsigned long is uint32_t */
+    float mass;
+    float velocity;
+    float height;
+} ot_rolling_ball_t;
+_Static_assert(sizeof(ot_rolling_ball_t)==16u,"Pinned rolling ball state layout");
+
+static void rolling_balls_frame(const ot_wled_fx_config_t *cfg,
+                                ot_wled_fx_state_t *state,uint32_t now,
+                                uint32_t old_call,ot_wled_rgb_t *pixels,
+                                size_t count) {
+    ot_rolling_ball_t *balls=(ot_rolling_ball_t*)fx_zone_scratch(
+        state,16u*sizeof(ot_rolling_ball_t));
+    if(!balls) {
+        /* WLED FX_FALLBACK_STATIC on segment data allocation failure. */
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    if(old_call==0u) {
+        for(unsigned i=0u;i<16u;i++) {
+            balls[i].last_bounce_update=now;
+            balls[i].velocity=20.0f*(float)(1000u+fx_prng(state)%9000u)/10000.0f;
+            if(fx_rand8(state,256u)<128u)balls[i].velocity=-balls[i].velocity;
+            balls[i].height=(float)(fx_prng(state)%10000u)/10000.0f;
+            balls[i].mass=(float)(1000u+fx_prng(state)%9000u)/10000.0f;
+        }
+    }
+    /* Pinned FastLED scale8(8, 255-speed) before source float multiplier. */
+    const uint32_t scale=(8u*(256u-(uint32_t)cfg->speed))>>8;
+    const float cfac=(float)(scale+1u)*20000.0f;
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    const unsigned num_balls=(unsigned)cfg->intensity/16u+1u;
+    for(unsigned i=0u;i<num_balls;i++) {
+        const float delta=(float)(now-balls[i].last_bounce_update)/cfac;
+        float height=balls[i].height+balls[i].velocity*delta;
+        if(height< -0.5f || height>1.5f) {
+            height=balls[i].height=(float)(fx_prng(state)%10000u)/10000.0f;
+            balls[i].last_bounce_update=now;
+        }
+        if((height<=0.0f && balls[i].velocity<0.0f) ||
+           (height>=1.0f && balls[i].velocity>0.0f)) {
+            balls[i].velocity=-balls[i].velocity;
+            balls[i].last_bounce_update=now;
+            balls[i].height=height;
+        }
+        if(height<0.0f)height=0.0f;
+        if(height>1.0f)height=1.0f;
+        const size_t pos=(size_t)(height*(float)(count-1u)+0.5f);
+        if(pos<count)pixels[pos]=fg;
+        balls[i].last_bounce_update=now;
+        balls[i].height=height;
+    }
+}
+
 /* FX.cpp mode_halloween_eyes(): source 1D eye positions, fade, blink,
  * and on/off transitions. The RGB profile uses palette=0 (primary eye
  * color), no matrix or overlay options. Eye state belongs to the zone's
@@ -3100,6 +3166,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_ROLLING_BALLS) {
+        rolling_balls_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_BOUNCING_BALLS) {
