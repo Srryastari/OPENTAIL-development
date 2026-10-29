@@ -21,6 +21,7 @@ int main(void){
     ot_frame_snapshot_complete(true);
     assert(ot_frame_snapshot_info(&i) && i.ready && !i.pending);
     assert(i.output==0 && i.count==3 && i.sequence==23);
+    assert(i.crc==0xcef8u); /* independent CRC-16/CCITT-FALSE RGB888 vector */
     assert(i.crc==52984u); /* Independent CRC-16/CCITT-FALSE RGB888 vector */
     assert(ot_frame_snapshot_chunk(0,23,0,3,data));
     const uint8_t expected[]={255,0,7,0,0,0,4,5,6};
@@ -40,6 +41,7 @@ int main(void){
     assert(ot_frame_snapshot_begin(1,1,25));
     ot_frame_snapshot_pixel(0,8,9,10);
     ot_frame_snapshot_reset();  /* disconnect while rendering */
+    ot_frame_snapshot_pixel(0,11,12,13); /* old renderer owns its length */
     ot_frame_snapshot_complete(true);
     assert(ot_frame_snapshot_info(&i) && !i.ready);
     assert(!ot_frame_snapshot_chunk(1,25,0,1,data));
