@@ -3079,6 +3079,10 @@ typedef struct Spotlight {
  *
  * By Steve Pomeroy @xxv
  */
+/* Upstream uses unsigned size_t j: start+j>=0 is tautological on host.
+ * Keep source body intact; confine the known warning suppression to it. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
 void mode_dancing_shadows(void)
 {
   if (SEGLEN <= 1) FX_FALLBACK_STATIC;
@@ -3194,6 +3198,7 @@ void mode_dancing_shadows(void)
 }
 
 // END PINNED Dancing Shadows.
+#pragma GCC diagnostic pop
 
 static uint8_t qadd8(uint8_t a,uint8_t b) {
     const unsigned sum=(unsigned)a+b;
