@@ -74,6 +74,17 @@ assert(compose.includes('if (offlinePreview.value) return') &&
        compose.includes('CORE capture is disabled in offline preview mode.') &&
        compose.includes('Offline mode: edits update only this local design; no CORE LED commands.'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
+assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
+         compose.includes('private fun NavigationGlyph(index: Int, color: Color)') &&
+         compose.includes('1 -> { // Show Modes: sparkle') &&
+         compose.includes('2 -> { // Layout: four squares') &&
+         compose.includes('3 -> { // Triggers: lightning') &&
+         compose.includes('4 -> { // Auto Events: sun'),
+         'Native navigation icons must preserve locked meanings without emoji or WebView');
+assert(bleSource.includes('frameCapture.cancel(); // GATT close may never produce a disconnect callback') &&
+       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|frameCapture.busy\(\)\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
+       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller'),
+       'Clear stale CORE output UI and prevent conflicting GATT operations');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
