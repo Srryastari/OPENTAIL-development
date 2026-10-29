@@ -672,8 +672,7 @@ public final class MainActivity extends Activity {
         EditText count=ui.field(String.valueOf(z.optInt("length",30)),"Exact pixel count");
         count.setInputType(InputType.TYPE_CLASS_NUMBER);
         panel.addView(ui.caption("Pixel count (1–10,000)"));panel.addView(count,ui.lp(6,7));
-        TextView metrics=ui.caption("Start "+z.optInt("start")+" · Next zone starts "+
-                (z.optInt("start")+z.optInt("length",30)));
+        TextView metrics=ui.caption(project.previewZoneOffsets(id,z.optInt("length",30)));
         panel.addView(metrics,ui.lp(5,3));
         SeekBar range=ui.slider(Math.max(250,Math.min(10000,z.optInt("length",30)*2+50)),
                 z.optInt("length",30));
@@ -681,13 +680,26 @@ public final class MainActivity extends Activity {
         range.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             @Override public void onProgressChanged(SeekBar bar,int n,boolean from){
                 if(!from)return;
-                int length=Math.max(1,n);
-                count.setText(String.valueOf(length));
-                metrics.setText("Start "+z.optInt("start")+" · Next zone starts "+
-                        (z.optInt("start")+length));
+                count.setText(String.valueOf(Math.max(1,n)));
             }
             @Override public void onStartTrackingTouch(SeekBar bar){}
-            @Override public void onStopTrackingTouch(SeekBar bar){}
+            @Override public void onStopTrackingTouch(SeekBar bar){haptics.tap(bar,"slider");}
+        });
+        // Editable exact count and contextual slider stay synchronized.
+        // Downstream offsets update visually while dragging or typing, prior
+        // to Save, with no BLE command and no change to the persisted layout.
+        count.addTextChangedListener(new TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence v,int a,int n,int after){}
+            @Override public void onTextChanged(CharSequence value,int a,int before,int n){
+                int length=number(value.toString(),-1);
+                metrics.setText(project.previewZoneOffsets(id,length));
+                if(length>=1&&length<=10000){
+                    if(length>range.getMax())
+                        range.setMax(Math.min(10000,Math.max(length,length*2)));
+                    if(range.getProgress()!=length)range.setProgress(length);
+                }
+            }
+            @Override public void afterTextChanged(Editable value){}
         });
         CheckBox reverse=new CheckBox(this);reverse.setText("Reverse pixel direction");
         reverse.setTextColor(ui.text);reverse.setChecked(z.optBoolean("reverse"));
