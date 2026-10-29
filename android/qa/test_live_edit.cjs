@@ -74,6 +74,10 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('fun adjustOutput(') &&
        hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
        hardwareBlock.includes('next.put("pixels", total)') &&
+       hardwareBlock.includes('it.put("pixels", remaining)') &&
+       hardwareBlock.includes('structureVersion++') &&
+       hardwareBlock.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+       !hardwareBlock.includes('623') &&
        hardwareBlock.includes('PixelStrip(t,'),
        'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
 assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
