@@ -1234,9 +1234,14 @@ static void led_task(void *p) {
                        offset+=len;
                    }
                }
+               /* ot_om_layout() above validated zone totals and ordering.
+                * Visit each contiguous zone only once rather than performing
+                * a full ot_om_valid() plus name checks for every LED.
+                * This keeps the mapping universal and reduces render latency. */
+               ot_om_zone_cursor_t zone_cursor={0};
                for(unsigned px=0;px<layout.chain_pixels;++px){
                    ot_rgb_t c={0,0,0};
-                   int zone=ot_om_section(output,px);
+                   int zone=ot_om_section_next(output,&zone_cursor,px);
                    if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
                        const uint8_t role=output->zones[zone].role;
                        const bool fx_here=native_rendering&&local_fx_enabled&&
