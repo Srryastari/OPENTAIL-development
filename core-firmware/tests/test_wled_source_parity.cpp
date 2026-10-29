@@ -2365,7 +2365,7 @@ int main() {
             }
         }
     }
-    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (palette=0, RGB, no gamma; Fairy/Fairytwinkle use synchronized test RNG and default gamma=2.2)\n",
+    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (RGB with default/explicit fixed palettes where enabled, gamma-off except Fairy/Fairytwinkle; synchronized test RNG)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
     return 0;
 }
