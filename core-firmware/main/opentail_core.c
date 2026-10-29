@@ -208,6 +208,8 @@ static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
 }
 
 #define OT_SHOW_MAX_MS 60000u
+/* Prior bench simulation used a 15s TTL; keep this distinct from demo limits. */
+#define OT_SIM_MAX_MS 15000u
 
 
 static bool before_deadline(TickType_t now,TickType_t deadline) {
@@ -1145,7 +1147,7 @@ static esp_err_t simulate_post(httpd_req_t *r) {
        }
        mask|=ot_tm_signal_mask_of(v->valuestring);
     }
-    unsigned ttl=bounded_int(obj,"ttl_ms",2000,100,OT_DEMO_MAX_MS);
+    unsigned ttl=bounded_int(obj,"ttl_ms",2000,100,OT_SIM_MAX_MS);
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     sim_mask=mask;
