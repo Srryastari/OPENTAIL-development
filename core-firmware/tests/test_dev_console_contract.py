@@ -51,6 +51,29 @@ assert "confirm('Save IN1" in page
 for function in ("aux1","aux2","aux3"):
     assert f'value="{function}"' in page, f"Missing {function} simulation control"
 assert "expected_config_revision:triggerSnapshot.config_revision" in page
+# Preserve the user's earlier successful 15-second trigger simulation. The
+# demo endpoint keeps its separate 10-second policy; no physical input is
+# cleared by a simulated-input expiry, Stop, or BLE disconnect.
+assert "#define OT_SIM_MAX_MS 15000u" in core
+simulate = core.split("static esp_err_t simulate_post(httpd_req_t *r) {",1)[1].split(
+    "static esp_err_t stop_post(",1)[0]
+assert 'bounded_int(obj,"ttl_ms",2000,100,OT_SIM_MAX_MS)' in simulate
+assert 'ot_tm_signal_mask_of(v->valuestring)' in simulate
+assert 'sim_mask=mask;' in simulate and 'sim_deadline=mask?' in simulate
+assert 'live_input_mask=' not in simulate
+assert 'id="simTtl" type="number" min="100" max="15000"' in page
+assert "integer('simTtl',100,15000)" in page
+demo = core.split("static esp_err_t demo_post(httpd_req_t *r) {",1)[1].split(
+    "static esp_err_t simulate_post(",1)[0]
+assert 'bounded_int(obj,"ttl_ms",3000,100,OT_DEMO_MAX_MS)' in demo
+stop = core.split("static esp_err_t stop_post(httpd_req_t *r) {",1)[1].split(
+    "extern const uint8_t ot_dev_console_start[]",1)[0]
+assert 'sim_mask=0' in stop and 'live_input_mask=0' not in stop
+disconnect = core.split("void ot_ble_disconnect_show(void){",1)[1].split(
+    "static esp_err_t status_get(",1)[0]
+assert 'live_input_mask=0' not in disconnect
+assert 'input_sampler_task' in core and 'vTaskDelayUntil(&last_wake,period)' in core
+
 assert 'cJSON_AddNumberToObject(root,"config_revision",config_revision)' in core
 assert 'tm_commit(&next,(uint16_t)expected_config_revision,require_revision)' in core
 assert "ot_tm_signal_mask_of(v->valuestring)" in core
