@@ -54,6 +54,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val revision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
     private val supportedIds = mutableStateOf(setOf<Int>())
+    private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
@@ -88,6 +89,9 @@ class ComposeMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         project = NativeProject(this)
         ble = BleDiscovery(this) { status -> runOnUiThread { bleMessage.value = status } }
+        ble.setScanResultListener { address, label ->
+            runOnUiThread { foundDevices[address] = label }
+        }
         ble.setFxCapabilitiesListener { data ->
             try {
                 val list = JSONArray(data)
@@ -680,7 +684,13 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Text("Bluetooth · " + bleMessage.value, color = t.fg)
             Caption("Authorize only on a physically present CORE bench controller.", t)
-            Pill("Find CORE Bluetooth", t) { ble.scan() }
+            Pill("Find CORE Bluetooth", t) {
+                foundDevices.clear()
+                ble.scanHeadless()
+            }
+            foundDevices.forEach { (address, label) ->
+                Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
+            }
             Pill("Pair / BOOT", t) { ble.pairWithBoot() }
             Pill("Authorize saved key", t) { ble.authorizeStored() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
