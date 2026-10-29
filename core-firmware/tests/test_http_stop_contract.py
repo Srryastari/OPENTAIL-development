@@ -47,6 +47,6 @@ assert caps["hardware_failover"] is False and caps["bench_only"] is True
 assert 'studio_gz_start' not in core, "CORE must not embed independent Studio"
 assert '"/dev"' in core and 'dev_get' in core
 assert 'fx_catalog_get' in core and 'fx_preview_post' in core
-assert caps["ble_effect_id_count"] == 126, "CORE catalog must report native Startup/Shutdown effects"
+assert caps["ble_effect_id_count"] == 140, "CORE catalog must report native Startup/Shutdown effects"
 assert caps["studio_embedded"] is False and caps["developer_console"] is True
 print("CORE Stop, bench console routing, capabilities and independent Studio contract passed")
