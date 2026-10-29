@@ -194,12 +194,78 @@ static void test_ble_snapshot_matrix(void){
     assert(!ot_tm_ble_encode(&mapping,1u,0u,0u,false,0u,rejected));
     for(unsigned i=0;i<sizeof(rejected);i++)assert(rejected[i]==0xA5u);
 }
+/* Every invalid GATT mapping packet must leave BOTH caller outputs
+ * untouched. Validate all 8 function offsets, protocol versions, lengths
+ * (including >11), and revision byte ordering. No heap or BLE runtime. */
+static void test_ble_rejected_write_matrix(void){
+    uint8_t packet[OT_TM_BLE_WRITE_BYTES+2u]={0};
+    const ot_tm_profile_t sentinel={{OT_TM_AUX3,OT_TM_AUX2,
+        OT_TM_AUX1,OT_TM_REVERSE,OT_TM_RIGHT,OT_TM_LEFT,
+        OT_TM_BRAKE,OT_TM_PARK}};
+    packet[0]=OT_TM_BLE_VERSION;
+    packet[1]=0xFEu;
+    packet[2]=0xCAu;
+    for(unsigned i=0;i<OT_IN_COUNT;i++)
+        packet[3u+i]=(uint8_t)(i+1u);
+    for(size_t n=0;n<sizeof(packet);n++){
+        if(n==OT_TM_BLE_WRITE_BYTES)continue;
+        ot_tm_profile_t observed=sentinel;
+        uint16_t revision=0xA55Au;
+        assert(!ot_tm_ble_decode(packet,n,&revision,&observed));
+        assert(revision==0xA55Au);
+        assert(!memcmp(&observed,&sentinel,sizeof(observed)));
+    }
+    for(unsigned version=0;version<=255u;version++){
+        if(version==OT_TM_BLE_VERSION)continue;
+        packet[0]=(uint8_t)version;
+        ot_tm_profile_t observed=sentinel;
+        uint16_t revision=0xA55Au;
+        assert(!ot_tm_ble_decode(packet,OT_TM_BLE_WRITE_BYTES,
+                                  &revision,&observed));
+        assert(revision==0xA55Au);
+        assert(!memcmp(&observed,&sentinel,sizeof(observed)));
+    }
+    packet[0]=OT_TM_BLE_VERSION;
+    for(unsigned pin=0;pin<OT_IN_COUNT;pin++){
+        const uint8_t old=packet[pin+3u];
+        const uint8_t invalid[]={9u,127u,255u};
+        for(unsigned j=0;j<sizeof(invalid);j++){
+            packet[pin+3u]=invalid[j];
+            ot_tm_profile_t observed=sentinel;
+            uint16_t revision=0xA55Au;
+            assert(!ot_tm_ble_decode(packet,OT_TM_BLE_WRITE_BYTES,
+                                      &revision,&observed));
+            assert(revision==0xA55Au);
+            assert(!memcmp(&observed,&sentinel,sizeof(observed)));
+        }
+        packet[pin+3u]=old;
+    }
+    /* All-disabled, all-one-function, and repeated functions are explicitly
+     * supported and remain round-trip safe at both revision boundaries. */
+    const uint16_t revisions[]={0u,0x00FFu,0x0100u,0xFFFFu};
+    for(unsigned function=OT_TM_DISABLED;function<=OT_TM_AUX3;function++){
+        for(unsigned i=0;i<OT_IN_COUNT;i++)packet[3u+i]=(uint8_t)function;
+        for(unsigned r=0;r<sizeof(revisions)/sizeof(revisions[0]);r++){
+            const uint16_t expected=revisions[r];
+            packet[1]=(uint8_t)expected;
+            packet[2]=(uint8_t)(expected>>8);
+            ot_tm_profile_t decoded=sentinel;
+            uint16_t revision=0xA55Au;
+            assert(ot_tm_ble_decode(packet,OT_TM_BLE_WRITE_BYTES,
+                                    &revision,&decoded));
+            assert(revision==expected);
+            for(unsigned i=0;i<OT_IN_COUNT;i++)
+                assert(decoded.function[i]==function);
+        }
+    }
+}
 int main(void){
     test_sampler_transitions();
     test_prior_individual_input_sequences();
     test_previous_combination_transitions();
     test_prior_wipe_and_simulation_scenarios();
     test_ble_snapshot_matrix();
+    test_ble_rejected_write_matrix();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
