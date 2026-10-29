@@ -21,8 +21,10 @@ static uint16_t crc16(const uint8_t *data,size_t length){
     uint16_t crc=0xffffu;
     for(size_t i=0;i<length;i++){
         crc^=(uint16_t)data[i]<<8;
-        for(unsigned bit=0;bit<8;bit++)
-            crc=(uint16_t)((crc&0x8000u)?((crc<<1)^0x1021u):(crc<<1));
+        for(unsigned bit=0;bit<8;bit++){
+            const uint16_t high=(uint16_t)(crc&0x8000u);
+            crc=(uint16_t)((uint16_t)(crc<<1)^(high?0x1021u:0u));
+        }
     }
     return crc;
 }
