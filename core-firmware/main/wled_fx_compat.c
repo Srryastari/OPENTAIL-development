@@ -22,6 +22,7 @@
  */
 #include "wled_fx_compat.h"
 #include <string.h>
+#include <stdlib.h>
 
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
@@ -171,11 +172,34 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
     return count;
 }
 
+#define OT_FX_SCRATCH_MAGIC 0x0FA117EDu
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
     if (state) {
+        /* Only own/free allocations carrying our initialized magic. */
+        if(state->scratch_magic==OT_FX_SCRATCH_MAGIC)free(state->scratch);
         memset(state,0,sizeof(*state));
         state->rng_state=0x73A11C5Du;
+        state->scratch_magic=OT_FX_SCRATCH_MAGIC;
     }
+}
+/* Each zone owns its source data. Resize only on effect replacement or
+ * LED-count change; no allocation occurs on steady-state render frames. */
+static uint8_t *fx_zone_scratch(ot_wled_fx_state_t *state,size_t required) {
+    if(!required)return NULL;
+    if(state->scratch_magic!=OT_FX_SCRATCH_MAGIC) {
+        state->scratch=NULL;state->scratch_bytes=0u;
+        state->scratch_magic=OT_FX_SCRATCH_MAGIC;
+    }
+    if(state->scratch && state->scratch_bytes>=required)return state->scratch;
+    uint8_t *next=(uint8_t*)calloc(required,1u);
+    if(!next)return NULL;
+    if(state->scratch) {
+        memcpy(next,state->scratch,state->scratch_bytes);
+        free(state->scratch);
+    }
+    state->scratch=next;
+    state->scratch_bytes=required;
+    return next;
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
