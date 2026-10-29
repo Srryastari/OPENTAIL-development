@@ -1245,13 +1245,19 @@ static bool wifi_ap_init(void) {
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
     return true;
 }
-static void input_init(void) {
+static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
         gpio_config_t cfg={.pin_bit_mask=1ULL<<input_pin[i],.mode=GPIO_MODE_INPUT,
                            .pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,
                            .intr_type=GPIO_INTR_DISABLE};
-        ESP_ERROR_CHECK(gpio_config(&cfg));
+        const esp_err_t e=gpio_config(&cfg);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"Trigger input IN%u GPIO setup failed: %s",
+                     (unsigned)(i+1),esp_err_to_name(e));
+            return false;
+        }
     }
+    return true;
 }
 /* RMT drivers are created to the SAVED output length, never the board-wide
  * memory safety budget. Resizing is render-task-owned; old pixels are cleared
@@ -1638,9 +1644,11 @@ void app_main(void) {
     tm_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
-    input_init();
-    const bool sampler_ready=xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
-    if(!sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    const bool inputs_ready=input_init();
+    if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
+    const bool sampler_ready=inputs_ready &&
+        xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
+    if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
     bool outputs_ready=sampler_ready&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
     const bool wifi_started=wifi_ap_init();
