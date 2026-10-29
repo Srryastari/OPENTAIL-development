@@ -94,6 +94,7 @@ static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
 static bool tm_persistent=false;
+static uint16_t tm_revision=1u; /* runtime config revision; NVS schema remains v1 */
 typedef struct {
     uint32_t magic, version;
     ot_tm_profile_t profile;
@@ -432,6 +433,54 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     return result;
 }
 
+/* Serialize authenticated BLE and bench-HTTP trigger edits with the existing
+ * configuration mutex. Commit to NVS before exposing new logical routing.
+ * Codes: 0 OK, 1 invalid, 2 busy/active inputs, 3 stale, 4 NVS failure.
+ * Physical input sampling never takes this mutex and remains BLE-independent. */
+static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_revision){
+    if(!ot_tm_valid(next))return 1;
+    if(!om_write_mutex ||
+       xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool busy=live_input_mask!=0 ||
+        (before_deadline(now,sim_deadline)&&sim_mask) ||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
+        show_window(now);
+    const bool stale=require_revision&&tm_revision!=expected;
+    portEXIT_CRITICAL(&state_lock);
+    int code=busy?2:stale?3:0;
+    if(!code){
+        if(!tm_save(next))code=4;
+        else {
+            portENTER_CRITICAL(&state_lock);
+            tm_profile=*next;
+            tm_persistent=true;
+            tm_revision++;
+            portEXIT_CRITICAL(&state_lock);
+        }
+    }
+    xSemaphoreGive(om_write_mutex);
+    return code;
+}
+bool ot_ble_trigger_get(ot_tm_profile_t *out,uint16_t *revision,
+                        uint8_t *raw,uint8_t *effective,bool *persistent){
+    if(!out||!revision||!raw||!effective||!persistent)return false;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    *out=tm_profile;
+    *revision=tm_revision;
+    *raw=live_input_mask;
+    *effective=(uint8_t)(ot_tm_resolve(out,*raw)|
+        (before_deadline(now,sim_deadline)?sim_mask:0u));
+    *persistent=tm_persistent;
+    portEXIT_CRITICAL(&state_lock);
+    return true;
+}
+int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
+    return tm_commit(next,revision,true);
+}
+
 /* Universal Trigger Manager v1: independent physical-input-to-function profile.
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
@@ -484,17 +533,12 @@ static esp_err_t tm_post(httpd_req_t *r){
     }
     cJSON_Delete(root);
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
-    TickType_t now=xTaskGetTickCount();
-    portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask!=0 || (before_deadline(now,sim_deadline)&&sim_mask) ||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    portEXIT_CRITICAL(&state_lock);
-    if(busy)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
-    /* Commit first; previous profile is unchanged on error. */
-    if(!tm_save(&next))return respond_err(r,500,"failed to save trigger mapping in flash");
-    portENTER_CRITICAL(&state_lock);
-    tm_profile=next;tm_persistent=true;
-    portEXIT_CRITICAL(&state_lock);
+    /* Same transaction and busy policy as authenticated BLE. The HTTP
+     * 'revision' field is a schema version, not the BLE edit revision. */
+    const int result=tm_commit(&next,0u,false);
+    if(result==2)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
+    if(result==4)return respond_err(r,500,"failed to save trigger mapping in flash");
+    if(result!=0)return respond_err(r,400,"invalid trigger mapping");
     return tm_get(r);
 }
 static esp_err_t show_get(httpd_req_t *r){
