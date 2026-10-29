@@ -2407,7 +2407,7 @@ static void halloween_eyes_frame(const ot_wled_fx_config_t *cfg,
         data->duration=(uint16_t)duration;
         data->state=4u;
       }
-      /* fall through */
+      __attribute__((fallthrough)); /* Intentional source-equivalent transition to off. */
       case 4u: { /* off */
         const unsigned limit=(unsigned)cfg->speed*256u;
         if(duration>limit)duration=limit;
