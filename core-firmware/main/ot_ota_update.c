@@ -124,18 +124,16 @@ esp_err_t ot_ota_upload_post(httpd_req_t *r) {
     esp_restart();
     return sent;
 }
-void ot_ota_confirm_boot(bool outputs_ready) {
+bool ot_ota_confirm_boot(bool outputs_ready) {
+    if(!outputs_ready)return false;
     const esp_partition_t *running=esp_ota_get_running_partition();
-    if(!running)return;
+    if(!running)return false;
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
-    if(esp_ota_get_state_partition(running,&state)!=ESP_OK ||
-       state!=ESP_OTA_IMG_PENDING_VERIFY)return;
-    /* Confirm only after NVS, physical output initialization, Wi-Fi,
-     * HTTP diagnostics, BLE and renderer task setup have succeeded. */
-    if(outputs_ready){
-        esp_err_t e=esp_ota_mark_app_valid_cancel_rollback();
-        ESP_LOGW(TAG,"OTA candidate boot validation: %s",esp_err_to_name(e));
-    }else{
-        ESP_LOGE(TAG,"OTA candidate not confirmed: output startup failed. Previous slot remains rollback candidate.");
-    }
+    if(esp_ota_get_state_partition(running,&state)!=ESP_OK)return false;
+    if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;
+    /* Keep rollback available until the RMT renderer has completed a frame
+     * AND ESP-IDF actually accepts the new candidate. Retry if flash fails. */
+    const esp_err_t e=esp_ota_mark_app_valid_cancel_rollback();
+    ESP_LOGW(TAG,"OTA candidate boot validation: %s",esp_err_to_name(e));
+    return e==ESP_OK;
 }
