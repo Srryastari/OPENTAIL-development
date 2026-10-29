@@ -35,6 +35,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effect
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
 
 python3 tests/test_wled_catalog.py
+# Inventory audit is separate from release certification (which remains blocked
+# until all source-derived parity and physical evidence gates pass).
+python3 tests/check_effects_release.py --audit
 python3 tests/test_version_identity.py
 python3 tests/test_http_stop_contract.py
 python3 tests/test_dev_console_contract.py
