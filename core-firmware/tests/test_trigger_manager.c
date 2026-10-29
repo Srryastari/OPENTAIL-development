@@ -1,6 +1,7 @@
 #include "trigger_manager.h"
 #include "output_manager.h"
 #include "arbitration_logic.h"
+#include "show_logic.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,8 +30,95 @@ static void test_sampler_transitions(void){
     assert(ot_debounce(&debounce,levels,4u)==0u);
 }
 
+/* Replay the earlier physically observed 0 -> one input -> 0 cases for
+ * every optocoupler channel, with no cross-talk after stable transitions.
+ * Host tests cover the logical sampler, not 12V voltage or input polarity. */
+static void test_prior_individual_input_sequences(void){
+    for(unsigned bit=0;bit<OT_IN_COUNT;bit++){
+        ot_inputs_t sampler={0};
+        bool levels[OT_IN_COUNT]={0};
+        const uint8_t mask=(uint8_t)(1u<<bit);
+        levels[bit]=true;
+        for(unsigned n=0;n<3;n++)assert(ot_debounce(&sampler,levels,4u)==0u);
+        assert(ot_debounce(&sampler,levels,4u)==mask);
+        levels[bit]=false;
+        for(unsigned n=0;n<3;n++)assert(ot_debounce(&sampler,levels,4u)==mask);
+        assert(ot_debounce(&sampler,levels,4u)==0u);
+    }
+}
+/* Earlier bench: IN3/Left interrupted a Bluetooth Wipe and Wipe resumed
+ * after release; Brake, Hazards and Reverse overlaid their assigned zones.
+ * Use the existing legacy show renderer rather than a fake local timeline.
+ * This checks deterministic compositing/phase progression, not RMT timing. */
+static void test_prior_wipe_and_simulation_scenarios(void){
+    ot_layout_t layout={0};
+    layout.chain_pixels=40;
+    layout.brightness_cap=32;
+    layout.sections[0]=20;
+    layout.sections[1]=20;
+    ot_show_t wipe={.mode=OT_SHOW_WIPE,.color={255,0,0},.brightness=24,
+                    .speed=40,.chain_mask=3,.section_mask=3};
+    assert(ot_show_valid(&wipe,&layout));
+    const ot_rgb_t dark=ot_show_pixel(&wipe,&layout,0,10,100u);
+    const ot_rgb_t lit=ot_show_pixel(&wipe,&layout,0,10,700u);
+    assert(dark.r==0 && dark.g==0 && dark.b==0);
+    assert(lit.r!=0 && lit.g==0 && lit.b==0);
+    ot_rgb_t displayed=dark;
+    assert(ot_om_trigger_overlay(OT_OM_LEFT,OT_SIG_LEFT,true,32,&displayed));
+    assert(displayed.r==32 && displayed.g==19 && displayed.b==0);
+    /* At trigger release, the effect uses wall-clock phase 700, not
+     * the old (100 ms) frame or the trigger's amber RGB. */
+    displayed=lit;
+    assert(!ot_om_trigger_overlay(OT_OM_LEFT,0,true,32,&displayed));
+    assert(memcmp(&displayed,&lit,sizeof(lit))==0);
+    /* Prior combinations, through the actual role compositor. No car-specific
+     * location or 522/30 output geometry is required. */
+    const uint8_t sequence[]={0,1,3,6,10,12,14,15,18,30,31,224,255,0};
+    const uint8_t roles[]={OT_OM_PARK_BRAKE,OT_OM_LEFT,OT_OM_RIGHT,
+                           OT_OM_REVERSE,OT_OM_AUX1,OT_OM_AUX2,OT_OM_AUX3};
+    const uint8_t relevant[]={OT_SIG_BRAKE,OT_SIG_LEFT,OT_SIG_RIGHT,
+                              OT_SIG_REVERSE,1u<<5,1u<<6,1u<<7};
+    ot_tm_profile_t mapping;
+    ot_tm_defaults(&mapping);
+    for(unsigned i=0;i<sizeof(sequence);i++){
+        const uint8_t physical=sequence[i];
+        const uint8_t logical=ot_tm_resolve(&mapping,physical);
+        assert(logical==physical);
+        const uint32_t elapsed=100u+i*197u;
+        for(unsigned z=0;z<sizeof(roles);z++){
+            const ot_rgb_t background=ot_show_pixel(&wipe,&layout,0,10,elapsed);
+            ot_rgb_t pixel=background;
+            const bool hit=ot_om_trigger_overlay(roles[z],logical,true,32,&pixel);
+            assert(hit==((logical&relevant[z])!=0));
+            if(hit){
+                const ot_rgb_t target=ot_om_trigger_color(roles[z],logical,32);
+                assert(memcmp(&pixel,&target,sizeof(pixel))==0);
+            }else assert(memcmp(&pixel,&background,sizeof(pixel))==0);
+        }
+    }
+    /* Stop must not disable an active physical Brake: only the show layer
+     * disappears, and the brake remains driven until the input is released. */
+    ot_rgb_t pixel={0,0,0};
+    assert(ot_om_trigger_overlay(OT_OM_BRAKE,OT_SIG_BRAKE,false,32,&pixel));
+    assert(pixel.r==32 && pixel.g==0 && pixel.b==0);
+    assert(!ot_om_trigger_overlay(OT_OM_BRAKE,0,false,32,&pixel));
+
+    /* Previously verified bench /simulate right TTL 15000: logical masks
+     * combine with real inputs while the TTL is active; neither remaps
+     * GPIOs nor clears a physical signal when simulation stops. */
+    const uint8_t simulated=ot_tm_signal_mask_of("right");
+    assert(simulated==OT_SIG_RIGHT);
+    const uint8_t real=ot_tm_resolve(&mapping,OT_SIG_LEFT|OT_SIG_BRAKE);
+    const uint8_t combined=(uint8_t)(real|simulated);
+    assert(real==(OT_SIG_LEFT|OT_SIG_BRAKE));
+    assert(combined==(OT_SIG_LEFT|OT_SIG_RIGHT|OT_SIG_BRAKE));
+    assert(ot_arbitrate(combined,false,true).hazards);
+    assert(!ot_arbitrate(real,false,true).hazards);
+}
 int main(void){
     test_sampler_transitions();
+    test_prior_individual_input_sequences();
+    test_prior_wipe_and_simulation_scenarios();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
