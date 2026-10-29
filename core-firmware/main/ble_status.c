@@ -221,7 +221,9 @@ static void cfg_reset(void){
 static int cfg_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    if(conn!=active_conn)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    /* A failed/revoked HMAC authorization must not expose a cached response
+     * from an earlier authorized command on the same connection. */
+    if(conn!=active_conn || !authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;
     return os_mbuf_append(ctx->om,cfg_response,cfg_response_len)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int cfg_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
