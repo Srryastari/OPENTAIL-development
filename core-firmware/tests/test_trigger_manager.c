@@ -259,6 +259,67 @@ static void test_ble_rejected_write_matrix(void){
         }
     }
 }
+/* Reproduce a pin asserting WHILE NVS is writing: persistence succeeds,
+ * but switching the active role is deferred until BOTH physical views are
+ * idle. These helpers are called by the real CORE commit and sampler paths. */
+static void test_mapping_save_deferred_until_release(void){
+    ot_tm_profile_t previous={0},candidate={0};
+    ot_tm_defaults(&previous);
+    candidate=previous;
+    candidate.function[0]=OT_TM_REVERSE;
+    candidate.function[1]=OT_TM_LEFT;
+    candidate.function[7]=OT_TM_BRAKE;
+    assert(ot_tm_valid(&candidate));
+    ot_tm_pending_t pending={0};
+    ot_tm_profile_t live=previous;
+
+    /* Normal idle commit applies immediately with no pending record. */
+    assert(ot_tm_saved_apply(&live,&pending,&candidate,0u,0u));
+    assert(!pending.pending);
+    assert(!memcmp(&live,&candidate,sizeof(live)));
+    assert(!ot_tm_apply_if_released(&live,&pending,0u,0u));
+
+    /* A raw, predebounce rising edge during commit holds old routing. */
+    live=previous;
+    assert(!ot_tm_saved_apply(&live,&pending,&candidate,2u,0u));
+    assert(pending.pending && !memcmp(&live,&previous,sizeof(live)));
+    assert(ot_tm_resolve(&live,2u)==OT_SIG_BRAKE);
+    assert(!ot_tm_apply_if_released(&live,&pending,2u,0u));
+    assert(!ot_tm_apply_if_released(&live,&pending,2u,2u));
+    /* Falling GPIO alone does not suffice: debounce must also release. */
+    assert(!ot_tm_apply_if_released(&live,&pending,0u,2u));
+    assert(ot_tm_resolve(&live,2u)==OT_SIG_BRAKE);
+    assert(ot_tm_apply_if_released(&live,&pending,0u,0u));
+    assert(!pending.pending && !memcmp(&live,&candidate,sizeof(live)));
+    assert(ot_tm_resolve(&live,2u)==OT_SIG_LEFT);
+
+    /* When debounce already asserted during NVS, raw release alone cannot
+     * make the old Brake role disappear in the middle of a held input. */
+    live=previous;
+    assert(!ot_tm_saved_apply(&live,&pending,&candidate,0u,2u));
+    assert(pending.pending);
+    assert(!ot_tm_apply_if_released(&live,&pending,0u,2u));
+    assert(ot_tm_apply_if_released(&live,&pending,0u,0u));
+
+    /* Every possible asserted pin mask vetoes early activation. */
+    for(unsigned mask=1;mask<256u;mask++){
+        live=previous;pending=(ot_tm_pending_t){0};
+        assert(!ot_tm_saved_apply(&live,&pending,&candidate,(uint8_t)mask,0u));
+        assert(pending.pending && !memcmp(&live,&previous,sizeof(live)));
+        assert(!ot_tm_apply_if_released(&live,&pending,(uint8_t)mask,0u));
+        assert(!ot_tm_apply_if_released(&live,&pending,0u,(uint8_t)mask));
+        assert(ot_tm_apply_if_released(&live,&pending,0u,0u));
+        assert(!pending.pending && !memcmp(&live,&candidate,sizeof(live)));
+    }
+    /* A malformed candidate may never be staged or mutate live routing. */
+    live=previous;
+    pending=(ot_tm_pending_t){0};
+    candidate.function[0]=255u;
+    assert(!ot_tm_saved_apply(&live,&pending,&candidate,1u,0u));
+    assert(!pending.pending && !memcmp(&live,&previous,sizeof(live)));
+    assert(!ot_tm_saved_apply(NULL,&pending,&previous,0u,0u));
+    assert(!ot_tm_apply_if_released(NULL,&pending,0u,0u));
+}
 int main(void){
     test_sampler_transitions();
     test_prior_individual_input_sequences();
@@ -266,6 +327,7 @@ int main(void){
     test_prior_wipe_and_simulation_scenarios();
     test_ble_snapshot_matrix();
     test_ble_rejected_write_matrix();
+    test_mapping_save_deferred_until_release();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
