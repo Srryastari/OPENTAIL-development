@@ -64,7 +64,10 @@ assert "(unsigned long)measured_fps" not in status
 assert "outputs_ready=native_outputs_ready;" in status
 assert r'\"ble_ready\":%s' in status
 assert r'\"outputs_ready\":%s' in status
-assert 'OT_FW,ble_startup_ready?"true":"false",outputs_ready?"true":"false"' in status
+assert 'OT_FW,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
+assert 'outputs_ready?"true":"false","user-configured"' in status
+assert r'\"ble_radio_ready\":%s' in status
+assert "const bool ble_radio_ready=ot_ble_radio_ever_ready();" in status
 assert "measured_fps=fps;" in core
 assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n               portEXIT_CRITICAL(&state_lock);" in core
 # A BLE client whose HMAC authorization was lost must not read a cached
