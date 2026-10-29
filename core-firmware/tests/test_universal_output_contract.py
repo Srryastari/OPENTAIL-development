@@ -66,6 +66,10 @@ assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n    
 # two-lane mask literal. Actual 12-output hardware/protocol support is future work.
 assert "(req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0" in core
 assert "req->chain_mask>3" not in core
+# All output revisions, including future board variants, start at v1.
+assert "static uint16_t om_revision[OT_OM_OUTPUTS];" in core
+assert "for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;" in core
+assert "om_revision[OT_OM_OUTPUTS]={1,1}" not in core
 assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target FPS"
 assert 'fps_policy' in core and 'adaptive_load_53_to_120' in core
 assert 'ot_fps_pacer_observe(&pacer,work_us,longest_pixels)' in core
