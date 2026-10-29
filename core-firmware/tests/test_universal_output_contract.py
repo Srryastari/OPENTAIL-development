@@ -41,6 +41,7 @@ assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NUL
 
 assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
 assert "if(!frame_submitted[ch])continue;" in core
+status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split("static esp_err_t caps_get(",1)[0]
 # A single RMT lane fault must not reboot the whole controller or be counted
 # as a completed multi-lane frame. It must invalidate any pending snapshot.
 render = core.split("static void led_task(void *p) {",1)[1].split("void app_main(void) {",1)[0]
@@ -77,7 +78,6 @@ assert "configured_output_zones" in core
 assert 'active_pixels_per_output' in core
 # FPS diagnostics are written by render and read by the HTTP task.
 # Reuse the existing critical section for the 32-bit telemetry snapshot.
-status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split("static esp_err_t caps_get(",1)[0]
 assert "observed_fps=measured_fps;" in status.split("portEXIT_CRITICAL(&state_lock);",1)[0]
 assert "(unsigned long)observed_fps" in status
 assert "(unsigned long)measured_fps" not in status
