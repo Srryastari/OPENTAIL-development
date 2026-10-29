@@ -9,7 +9,7 @@ idf_component_register(
          "fx_preset_record.c" "palette_1d.c" "fx_zone_bank.c"
          "status_logic.c" "status_led.c" "ble_status.c"
          "ble_command.c" "ble_config.c" "ot_ota_update.c"
-         "ot_fps_pacer.c"
+         "ot_fps_pacer.c" "ot_frame_snapshot.c"
     INCLUDE_DIRS "."
     EMBED_TXTFILES "assets/dev_console.htm"
     REQUIRES esp_wifi esp_netif esp_event esp_http_server esp_driver_spi
