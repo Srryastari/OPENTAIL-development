@@ -36,6 +36,18 @@ The write is acknowledged at ATT level; clients must **read back** the character
 
 `GET /api/v1/triggers` still reports `revision: 1` as the **storage/schema version**. It now also returns `config_revision`, the live edit revision shared with BLE. For clients that read then edit the mapping, include `expected_config_revision` with that value in the existing JSON POST body. An intervening successful HTTP or BLE edit returns HTTP 409 and never overwrites the newer mapping. The CORE `/dev` trigger editor now supplies this field automatically. Legacy HTTP requests without `expected_config_revision` retain the existing version-1 request shape; their saves are serialized but do not have stale-draft detection.
 
+## Physical input readback and cross-system save admission
+
+The CORE bench HTTP `GET /api/v1/triggers` endpoint now distinguishes three values without changing its established schema:
+
+- `raw_input_mask`: the **debounced** physical IN1–IN8 mask (legacy field, unchanged), also returned as the BLE trigger characteristic's physical mask.
+- `gpio_input_mask`: the **instantaneous normalized** IN1–IN8 GPIO mask, sampled directly from pins using the configured active-low polarity. This is a diagnostic readback, not an interrupt capture or calibrated measurement.
+- `effective_mask`: the mapped debounced physical mask OR active temporary simulated logical signals. The separate `physical_function_mask` excludes simulations.
+
+Before persisting either the trigger mapping **or** user-defined output zones, CORE checks both the instantaneous and debounced physical masks, plus the existing simulation/demo/show busy conditions. This admission policy is shared by authenticated BLE and developer HTTP saves. It closes the pre-debounce idle-window inconsistency without pausing the 10ms sampler or touching effects/rendering. HTTP and BLE retain their existing error/status behaviors.
+
+**Unresolved concurrency limit:** the pin can assert *after* the admission sample, including during NVS commit. The sampler still renders physical inputs, but the active mapping may change after the write. Neither an atomic no-input interval nor flash-commit rollback is established; do not represent this check as a physical safety certification. On the current custom-only lighting bench, re-test any persistent mapping change with input assertion/release during saving before approval.
+
 ## Arbitration and persistence
 
 - CORE alone samples physical inputs; a BLE disconnect must not disable any physical trigger.
