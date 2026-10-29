@@ -74,11 +74,27 @@ static ot_wled_rgb_t wheel(uint8_t v){
       default:return (ot_wled_rgb_t){255,0,(uint8_t)(255u-k)};
     }
 }
-static uint8_t smoothstep(uint32_t p){
-    /* smoothstep, with exact 0/255 endpoints and no floating-point state. */
-    if(p>=255u)return 255u;
-    uint32_t q=p*p*(765u-2u*p);
-    return (uint8_t)((q+32512u)/65025u);
+/* Native original fades use a Q16 interpolation curve. Earlier versions
+ * quantized smoothstep to eight bits before applying an eight-bit brightness
+ * limit, producing conspicuous stepping in low-brightness shutdown previews.
+ * Never apply this easing to the vehicle-trigger or strobe path. */
+static uint16_t smoothstep16(uint32_t elapsed,uint32_t duration){
+    if(!duration || elapsed>=duration)return 65535u;
+    const uint64_t t=((uint64_t)elapsed*65535u)/duration;
+    const uint64_t d=(uint64_t)65535u*65535u;
+    return (uint16_t)((t*t*(3u*65535u-2u*t)+d/2u)/d);
+}
+static uint8_t fade_channel(uint8_t from,uint8_t to,uint16_t k,uint8_t brightness){
+    const uint64_t n=((uint64_t)from*(65535u-k)+(uint64_t)to*k)*brightness;
+    const uint64_t d=(uint64_t)65535u*255u;
+    return (uint8_t)((n+d/2u)/d);
+}
+static ot_wled_rgb_t fade_color(ot_wled_rgb_t from,ot_wled_rgb_t to,
+                                uint16_t k,uint8_t brightness){
+    return (ot_wled_rgb_t){
+        fade_channel(from.r,to.r,k,brightness),
+        fade_channel(from.g,to.g,k,brightness),
+        fade_channel(from.b,to.b,k,brightness)};
 }
 bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
                        uint32_t ms,ot_wled_rgb_t *pixels,size_t count){
@@ -92,10 +108,10 @@ bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
     const ot_wled_rgb_t fg=cfg->foreground,bg=cfg->background;
     if(cfg->effect_id==OT_FX_SMOOTH_FADE ||
        cfg->effect_id==OT_FX_SMOOTH_FADE_OUT){
-        const uint8_t k=smoothstep(phase);
+        const uint16_t k=smoothstep16(elapsed,duration);
         const ot_wled_rgb_t from=cfg->effect_id==OT_FX_SMOOTH_FADE?bg:fg;
         const ot_wled_rgb_t to=cfg->effect_id==OT_FX_SMOOTH_FADE?fg:bg;
-        const ot_wled_rgb_t out=scale(blend(from,to,k),cfg->brightness);
+        const ot_wled_rgb_t out=fade_color(from,to,k,cfg->brightness);
         for(size_t i=0;i<count;i++)pixels[i]=out;
         return true;
     }
