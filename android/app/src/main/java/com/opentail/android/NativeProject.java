@@ -378,14 +378,27 @@ final class NativeProject {
     }
 
     synchronized boolean assign(String trigger, String zoneId, boolean enabled) {
-        if (indexOfZone(zoneId) < 0) return false;
+        return assignMany(java.util.Collections.singleton(trigger), zoneId, enabled);
+    }
+
+    /** One durable transaction for a multi-selected trigger assignment. */
+    synchronized boolean assignMany(Set<String> triggers, String zoneId, boolean enabled) {
+        if (indexOfZone(zoneId) < 0 || triggers == null || triggers.isEmpty()) return false;
+        for (String name : triggers)
+            if (name == null || profiles().optJSONObject(name) == null) return false;
         try {
-            JSONObject p = trigger(trigger);
-            JSONArray old = p.optJSONArray("zones"), next = new JSONArray();
-            if (old != null) for (int i = 0; i < old.length(); i++)
-                if (!zoneId.equals(old.getString(i))) next.put(old.getString(i));
-            if (enabled) next.put(zoneId);
-            p.put("zones", next); return save();
+            JSONObject draft = new JSONObject(data.toString());
+            JSONObject all = draft.getJSONObject("profiles");
+            for (String name : triggers) {
+                JSONObject p = all.getJSONObject(name);
+                JSONArray old = p.optJSONArray("zones"), next = new JSONArray();
+                if (old != null) for (int i = 0; i < old.length(); i++)
+                    if (!zoneId.equals(old.getString(i))) next.put(old.getString(i));
+                if (enabled) next.put(zoneId);
+                p.put("zones", next);
+            }
+            data = draft;
+            return save();
         } catch (JSONException e) { return false; }
     }
 
