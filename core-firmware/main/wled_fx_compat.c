@@ -312,7 +312,7 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TV_SIMULATOR, "TV Simulator", "TV Simulator@!,!;;!;01",
      false, false, true, true, false},
     {OT_WLED_COLOR_CLOUDS, "Color Clouds", "Color Clouds@!,!,Clouds,Colors,Distance,,,Cozy;;!;;sx=24,ix=32,c1=48,c2=64,c3=12,pal=0",
-     false, false, true, true, false},
+     false, false, true, true, true},
     {OT_WLED_STARBURST, "Fireworks Starburst", "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
      false, true, true, true, false},
     {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11,m12=1",
@@ -3463,6 +3463,11 @@ static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
     const uint32_t hue_t=now*hue_speed/8u;
     const uint8_t hue_offset=(uint8_t)(
         (uint16_t)((now*64u*280u)>>16)>>8);
+    ot_wled_palette16_t palette={0};
+    const bool use_palette=cfg->palette_id!=0u;
+    if(use_palette && !ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                                             cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return; /* prevalidated by renderer, defensive only */
     for(size_t i=0;i<count;i++) {
         const uint32_t vol_x=(uint32_t)i*vol_squeeze*64u;
         int32_t vol=(int32_t)fx_perlin16_2(vol_x0+vol_x,vol_t);
@@ -3472,7 +3477,10 @@ static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
         const uint32_t hue_x=(uint32_t)i*hue_squeeze*8u;
         uint8_t hue=(uint8_t)(fx_perlin16_2(hue_x0+hue_x,hue_t)>>7);
         hue=(uint8_t)(hue+hue_offset0+hue_offset);
-        ot_wled_rgb_t rgb=fx_hsv_rgb(hue,255u,(uint8_t)vol);
+        ot_wled_rgb_t rgb=use_palette ?
+            ot_wled_palette_sample(&palette,hue,(uint8_t)vol,
+                                  OT_WLED_PALETTE_LINEAR) :
+            fx_hsv_rgb(hue,255u,(uint8_t)vol);
         if((int)rgb.r+(int)rgb.g+(int)rgb.b<=2)
             rgb=(ot_wled_rgb_t){0,0,0};
         pixels[i]=scaled(rgb,cfg->brightness);
@@ -3542,8 +3550,15 @@ static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
 
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
-    if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
+    if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0)
         return false;
+    if(cfg->palette_id!=0u) {
+        /* Do not claim palette support for other source ports yet. */
+        if(cfg->effect_id!=OT_WLED_COLOR_CLOUDS ||
+           (cfg->palette_id!=2u && cfg->palette_id!=3u &&
+            cfg->palette_id!=4u && cfg->palette_id!=5u &&
+            cfg->palette_id!=6u))return false;
+    }
     ot_wled_fx_metadata_t meta;
     if (!ot_wled_fx_metadata(cfg->effect_id, &meta)) return false;
 
