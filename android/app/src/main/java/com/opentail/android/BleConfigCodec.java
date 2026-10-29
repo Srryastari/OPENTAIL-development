@@ -7,6 +7,8 @@ import org.json.JSONArray;
 
 /** Cross-platform fixed-size, independently validated BLE output configuration encoding. */
 final class BleConfigCodec {
+    // Temporary current CORE output allocation, not a vehicle-specific limit.
+    static final int MAX_LEDS_PER_OUTPUT = 623;
     static final int LENGTH = 261;
     static final String[] ORDERS = {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR"};
     static final String[] ROLES = {"off", "park_brake", "parking", "brake", "left_turn", "right_turn", "reverse", "aux1", "aux2", "aux3", "decorative"};
@@ -38,7 +40,7 @@ final class BleConfigCodec {
         int pixelCount=json.getInt("pixels");
         int order=index(ORDERS,json.getString("color_order"));
         JSONArray zones=json.getJSONArray("zones");
-        if(pixelCount<1||pixelCount>522||order<0||zones.length()<1||zones.length()>8)
+        if(pixelCount<1||pixelCount>MAX_LEDS_PER_OUTPUT||order<0||zones.length()<1||zones.length()>8)
             throw new IllegalArgumentException("Invalid output pixel count / color order / zone count");
         bytes[0]=1;bytes[1]=(byte)pixelCount;bytes[2]=(byte)(pixelCount>>8);
         bytes[3]=(byte)order;bytes[4]=(byte)zones.length();
@@ -57,7 +59,7 @@ final class BleConfigCodec {
         for(int z=0;z<zones.length();z++){
             JSONObject zone=zones.getJSONObject(z);int length=zone.getInt("pixels");
             int role=index(ROLES,zone.getString("role"));
-            if(length<0||length>522||role<0)throw new IllegalArgumentException("Invalid zone length or role");
+            if(length<0||length>MAX_LEDS_PER_OUTPUT||role<0)throw new IllegalArgumentException("Invalid zone length or role");
             int start=37+z*28;
             name(bytes,start,zone.getString("name"));
             bytes[start+25]=(byte)length;bytes[start+26]=(byte)(length>>8);
@@ -69,7 +71,7 @@ final class BleConfigCodec {
     static JSONObject decode(byte[] bytes,int index) throws Exception {
         if(bytes.length!=LENGTH||bytes[0]!=1)throw new Exception("Unsupported BLE output format");
         int pixels=(bytes[1]&255)|((bytes[2]&255)<<8),order=bytes[3]&255,count=bytes[4]&255;
-        if(pixels<1||pixels>522||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
+        if(pixels<1||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
         JSONObject result=new JSONObject();
         result.put("index",index);result.put("pin",index==0?16:17);
         result.put("pixels",pixels);result.put("name",readName(bytes,5));
@@ -82,7 +84,7 @@ final class BleConfigCodec {
         JSONArray zones=new JSONArray();int sum=0;
         for(int z=0;z<count;z++){
             int at=37+z*28, size=(bytes[at+25]&255)|((bytes[at+26]&255)<<8),role=bytes[at+27]&255;
-            if(role>=ROLES.length||size>522)throw new Exception("Invalid zone data");
+            if(role>=ROLES.length||size>MAX_LEDS_PER_OUTPUT)throw new Exception("Invalid zone data");
             JSONObject zone=new JSONObject();zone.put("name",readName(bytes,at));
             zone.put("pixels",size);zone.put("role",ROLES[role]);zones.put(zone);sum+=size;
         }
