@@ -33,12 +33,14 @@ internal object NativePaletteEngine {
         val stops = ArrayList<Pair<Float, Color>>(raw.length())
         for (i in 0 until raw.length()) {
             val entry = raw.optJSONArray(i) ?: return NativePalette(id, name, null)
-            if (entry.length() < 4) return NativePalette(id, name, null)
+            if (entry.length() != 4) return NativePalette(id, name, null)
             val parts = (0..3).map { index ->
                 val value = entry.opt(index)
-                if (value !is Number || value.toDouble() != value.toDouble() ||
-                    value.toDouble() < 0.0 || value.toDouble() > 255.0) return NativePalette(id, name, null)
-                value.toInt()
+                val number = (value as? Number)?.toDouble()
+                    ?: return NativePalette(id, name, null)
+                if (number !in 0.0..255.0 || number % 1.0 != 0.0)
+                    return NativePalette(id, name, null)
+                number.toInt()
             }
             stops.add(parts[0] / 255f to Color(
                 0xff000000.toInt() or (parts[1] shl 16) or (parts[2] shl 8) or parts[3]
