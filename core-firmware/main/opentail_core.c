@@ -138,44 +138,60 @@ typedef struct {
 _Static_assert(sizeof(ot_om_output_v1_t)==sizeof(char[25])+3+150+2,"v1 NVS ABI changed");
 static void om_load(void){
     ot_om_defaults(om_outputs);
+    om_persistent=false;
     nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READONLY,&h)!=ESP_OK){om_persistent=false;return;}
-    size_t n=0;
-    /* Keep legacy v1 key untouched so rollback to v0.1.16 remains possible. */
-    const char *key="profile_v2";
-    esp_err_t e=nvs_get_blob(h,key,NULL,&n);
-    if(e==ESP_ERR_NVS_NOT_FOUND){key="profile";e=nvs_get_blob(h,key,NULL,&n);}
-    if(e!=ESP_OK){nvs_close(h);om_persistent=false;return;}
-    if(n==sizeof(ot_om_store_t)){
-        ot_om_store_t stored={0};
-        e=nvs_get_blob(h,key,&stored,&n);
-        if(e==ESP_OK&&stored.magic==OT_OM_STORAGE_MAGIC&&stored.version==OT_OM_VERSION&&
-           ot_om_valid(&stored.outputs[0])&&ot_om_valid(&stored.outputs[1])){
-            memcpy(om_outputs,stored.outputs,sizeof(om_outputs));om_persistent=true;
-        }
-    }else if(n==sizeof(ot_om_store_v1_t)){
-        ot_om_store_v1_t old={0};
-        e=nvs_get_blob(h,key,&old,&n);
-        if(e==ESP_OK&&old.magic==OT_OM_STORAGE_MAGIC&&old.version==1){
-            bool ok=true;
-            for(int i=0;i<OT_OM_OUTPUTS;i++){
-                ot_om_output_t *dst=&om_outputs[i];const ot_om_output_v1_t *src=&old.outputs[i];
-                memcpy(dst->name,src->name,OT_OM_NAME_LEN);
-                dst->active_pixels=src->active_pixels;dst->color_order=src->color_order;
-                dst->zone_count=5;
-                for(int j=0;j<5;j++){
-                    memcpy(dst->zones[j].name,src->zones[j].name,OT_OM_NAME_LEN);
-                    dst->zones[j].pixels=src->zones[j].pixels;dst->zones[j].role=src->zones[j].role;
-                }
-                for(int k=0;k<3;k++){dst->rgb_gain[k]=255;dst->white_gain[k]=255;}
-                dst->gamma_enabled=false;
-                if(!ot_om_valid(dst))ok=false;
+    if(nvs_open("ot_output_cfg",NVS_READONLY,&h)!=ESP_OK)return;
+    /* A corrupt newer record must not mask the older, previously tested
+     * profile. Never erase or rewrite either key during boot migration. */
+    const char *const keys[]={"profile_v2","profile"};
+    for(unsigned attempt=0;attempt<sizeof(keys)/sizeof(keys[0])&&!om_persistent;attempt++){
+        const char *key=keys[attempt];
+        size_t n=0;
+        esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+        if(e!=ESP_OK)continue;
+        if(n==sizeof(ot_om_store_t)){
+            ot_om_store_t stored={0};
+            e=nvs_get_blob(h,key,&stored,&n);
+            bool valid=e==ESP_OK&&stored.magic==OT_OM_STORAGE_MAGIC&&
+                       stored.version==OT_OM_VERSION;
+            for(unsigned i=0;valid&&i<OT_OM_OUTPUTS;i++)
+                valid=ot_om_valid(&stored.outputs[i]);
+            if(valid){
+                memcpy(om_outputs,stored.outputs,sizeof(om_outputs));
+                om_persistent=true;
             }
-            if(ok){om_persistent=true;ESP_LOGI(TAG,"Migrated v1 output mapping into RAM; will upgrade NVS schema on next save");}
+        }else if(n==sizeof(ot_om_store_v1_t)){
+            ot_om_store_v1_t old={0};
+            e=nvs_get_blob(h,key,&old,&n);
+            if(e==ESP_OK&&old.magic==OT_OM_STORAGE_MAGIC&&old.version==1){
+                bool ok=true;
+                for(int i=0;i<OT_OM_OUTPUTS;i++){
+                    ot_om_output_t *dst=&om_outputs[i];const ot_om_output_v1_t *src=&old.outputs[i];
+                    memcpy(dst->name,src->name,OT_OM_NAME_LEN);
+                    dst->active_pixels=src->active_pixels;dst->color_order=src->color_order;
+                    dst->zone_count=5;
+                    for(int j=0;j<5;j++){
+                        memcpy(dst->zones[j].name,src->zones[j].name,OT_OM_NAME_LEN);
+                        dst->zones[j].pixels=src->zones[j].pixels;dst->zones[j].role=src->zones[j].role;
+                    }
+                    for(int k=0;k<3;k++){dst->rgb_gain[k]=255;dst->white_gain[k]=255;}
+                    dst->gamma_enabled=false;
+                    if(!ot_om_valid(dst))ok=false;
+                }
+                if(ok){
+                    om_persistent=true;
+                    ESP_LOGI(TAG,"Migrated v1 output mapping into RAM; will upgrade NVS schema on next save");
+                }
+            }
         }
+        if(!om_persistent)
+            ESP_LOGW(TAG,"Stored output mapping %s unavailable or invalid; checking prior profile",key);
     }
     nvs_close(h);
-    if(!om_persistent){ot_om_defaults(om_outputs);ESP_LOGW(TAG,"Output settings invalid; restored neutral bench defaults");}
+    if(!om_persistent){
+        ot_om_defaults(om_outputs);
+        ESP_LOGW(TAG,"No valid output profile; restored neutral unconfigured mapping");
+    }
 }
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
