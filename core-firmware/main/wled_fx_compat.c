@@ -36,6 +36,21 @@ static const uint32_t ot_party_colors[16]={
     0xD59B00u,0xEF6600u,0xF90044u,0xE10086u,
     0xC400B0u,0xA300CFu,0x7600E8u,0x0032FCu
 };
+
+/* Pinned palettes.cpp RainbowColors_gc22 and RainbowStripeColors_gc22. */
+static const uint32_t ot_rainbow_colors[16]={
+    0xFF0000u,0xEB7000u,0xD59B00u,0xD5BA00u,
+    0xD5D500u,0x9CEB00u,0x00FF00u,0x00EB70u,
+    0x00D59Bu,0x009CD4u,0x0000FFu,0x7000EBu,
+    0x9B00D5u,0xBA00BBu,0xD5009Bu,0xEB0072u
+};
+static const uint32_t ot_rainbow_bands[16]={
+    0xFF0000u,0x000000u,0xD59B00u,0x000000u,
+    0xD5D500u,0x000000u,0x00FF00u,0x000000u,
+    0x00D59Bu,0x000000u,0x0000FFu,0x000000u,
+    0x9B00D5u,0x000000u,0xD5009Bu,0x000000u
+};
+
 static ot_wled_rgb_t palette_unpack(uint32_t color) {
     return (ot_wled_rgb_t){(uint8_t)(color>>16),
                             (uint8_t)(color>>8),(uint8_t)color};
@@ -61,6 +76,9 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
     if(id==0u || id==6u) {
         for(unsigned i=0;i<16u;i++)
             next.entries[i]=palette_unpack(ot_party_colors[i]);
+    } else if(id==11u || id==12u) {
+        const uint32_t *colors=id==11u?ot_rainbow_colors:ot_rainbow_bands;
+        for(unsigned i=0;i<16u;i++)next.entries[i]=palette_unpack(colors[i]);
     } else if(id==2u) {
         for(unsigned i=0;i<16u;i++)next.entries[i]=primary;
     } else if(id==3u) {
@@ -2644,7 +2662,8 @@ static void flow_stripe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         return;
     }
     ot_wled_palette16_t palette;
-    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    const uint8_t palette_id=cfg->palette_id?cfg->palette_id:11u;
+    if(!ot_wled_palette_build(palette_id,cfg->foreground,
                               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return;
     const int hl=(int)(count*10u/13u);
@@ -3589,7 +3608,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_FLOW_STRIPE) ||
            (cfg->palette_id!=2u && cfg->palette_id!=3u &&
             cfg->palette_id!=4u && cfg->palette_id!=5u &&
-            cfg->palette_id!=6u))return false;
+            cfg->palette_id!=6u && cfg->palette_id!=11u &&
+            cfg->palette_id!=12u))return false;
     }
     ot_wled_fx_metadata_t meta;
     if (!ot_wled_fx_metadata(cfg->effect_id, &meta)) return false;
