@@ -2807,6 +2807,7 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 static const uint8_t ot_inv_gamma22[256];
+static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t,uint8_t);
 
 /* Pinned mode_colortwinkle() 1D source, bit-per-pixel fade direction
  * and retained RGB frame. The source operates at FRAMETIME_FIXED=23ms
@@ -2815,8 +2816,11 @@ static const uint8_t ot_inv_gamma22[256];
 static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
                                ot_wled_fx_state_t *state,uint32_t now,
                                ot_wled_rgb_t *pixels,size_t count) {
-    uint8_t *bits=fx_zone_scratch(state,(count+7u)/8u);
+    const size_t flags_size=(count+7u)/8u;
+    uint8_t *bits=fx_zone_scratch(state,flags_size+count*sizeof(ot_wled_rgb_t));
     if(!bits)return;
+    /* Source renderer retains full-brightness RGB across frames. */
+    ot_wled_rgb_t *raw=(ot_wled_rgb_t*)(bits+flags_size);
     if(now-state->step<23u)return;
     state->step=now;
     ot_wled_palette16_t pal;
@@ -2825,7 +2829,7 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
     const uint8_t rise=(uint8_t)(8u+(cfg->speed>>2));
     const uint8_t fall=(uint8_t)(8u+(cfg->speed>>3));
     for(size_t i=0;i<count;i++) {
-        const ot_wled_rgb_t old=pixels[i];
+        const ot_wled_rgb_t old=raw[i];
         const unsigned slot=i>>3;
         const uint8_t mask=(uint8_t)(1u<<(i&7u));
         if((bits[slot]&mask)!=0u) {
@@ -2842,10 +2846,10 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
                 out.g=(uint8_t)((unsigned)out.g*2u>255u?255u:(unsigned)out.g*2u);
                 out.b=(uint8_t)((unsigned)out.b*2u>255u?255u:(unsigned)out.b*2u);
             }
-            pixels[i]=out;
+            raw[i]=out;
         } else {
             const unsigned scale=256u-(unsigned)fall;
-            pixels[i]=(ot_wled_rgb_t){
+            raw[i]=(ot_wled_rgb_t){
                 (uint8_t)(((unsigned)old.r*scale)>>8),
                 (uint8_t)(((unsigned)old.g*scale)>>8),
                 (uint8_t)(((unsigned)old.b*scale)>>8)
@@ -2856,9 +2860,9 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
         if(fx_rand8(state,256u)<=cfg->intensity) {
             for(unsigned attempt=0;attempt<5u;attempt++) {
                 const size_t i=fx_rand_index(state,count);
-                if((pixels[i].r|pixels[i].g|pixels[i].b)==0u) {
+                if((raw[i].r|raw[i].g|raw[i].b)==0u) {
                     bits[i>>3]|=(uint8_t)(1u<<(i&7u));
-                    pixels[i]=ot_wled_palette_sample(&pal,fx_rand8(state,256u),
+                    raw[i]=ot_wled_palette_sample(&pal,fx_rand8(state,256u),
                                   ot_inv_gamma22[64u],OT_WLED_PALETTE_NOBLEND);
                     break;
                 }
@@ -2866,7 +2870,7 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
         }
     }
     for(size_t i=0;i<count;i++)
-        pixels[i]=scaled(pixels[i],cfg->brightness);
+        pixels[i]=scaled(raw[i],cfg->brightness);
 }
 
 /* AuroraWave source fields, per-zone scratch; fixed-point AW_SHIFT=16.
