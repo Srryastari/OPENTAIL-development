@@ -107,6 +107,9 @@ jobs:
           retention-days: 14
 
   github-flash-package-check:
+    # Installer accepts only designated release branches. Preserve that guard;
+    # engine feature branches validate the actual ESP-IDF build independently.
+    if: ${{ !startsWith(github.ref, 'refs/heads/effects/') && !startsWith(github.head_ref, 'effects/') }}
     # Validate the actual downloaded GitHub artifact on Windows, not just the
     # files left in the Linux build workspace. Do not access a serial port.
     needs: [core-espidf-build]
@@ -126,7 +129,7 @@ jobs:
   release-evidence-gate:
     # Intentionally BLOCKS release until actual physical evidence is supplied
     # for the exact commit. A green host build is NOT hardware approval.
-    if: always()
+    if: ${{ always() && !startsWith(github.ref, 'refs/heads/effects/') && !startsWith(github.head_ref, 'effects/') }}
     needs:
       - change-impact-audit
       - core-host-tests
