@@ -48,6 +48,10 @@ final class NativeProject {
             p.put("effectFavorites", new JSONArray());
             p.put("hardwareProfile", new JSONObject().put("chip", "Addressable")
                     .put("order", "RGB"));
+            JSONObject profiles = p.getJSONObject("profiles");
+            for (String trigger : MAIN_TRIGGERS) profiles.put(trigger, defaultTrigger(trigger));
+            for (String event : new String[]{"Startup", "Shutdown"})
+                profiles.put(event, defaultTrigger(event));
         } catch (JSONException ignored) { }
         return p;
     }
@@ -231,12 +235,12 @@ final class NativeProject {
 
     synchronized boolean moveZone(int from, int to) {
         if (from < 0 || to < 0 || from >= zoneCount() || to >= zoneCount()) return false;
+        java.util.ArrayList<JSONObject> reordered = new java.util.ArrayList<>();
+        for (int k = 0; k < zoneCount(); k++) reordered.add(zone(k));
+        JSONObject selected = reordered.remove(from);
+        reordered.add(to, selected);
         JSONArray changed = new JSONArray();
-        JSONObject selected = zone(from);
-        for (int k = 0; k < zoneCount(); k++) {
-            if (k == to) changed.put(selected);
-            if (k != from) changed.put(zone(k));
-        }
+        for (JSONObject zone : reordered) changed.put(zone);
         try { data.put("layout", changed); reindex();return save(); }
         catch (JSONException e) { return false; }
     }
