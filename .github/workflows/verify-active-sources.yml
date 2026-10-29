@@ -98,6 +98,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  github-flash-package-check:
+    # Validate the actual downloaded GitHub artifact on Windows, not just the
+    # files left in the Linux build workspace. Do not access a serial port.
+    needs: [core-espidf-build]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify GitHub-to-device installer with released artifact (no flash)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          & ./scripts/flash-from-github.ps1 -RunId ${{ github.run_id }} -Version '0.1.29-alpha' -VerifyOnly
+
   android-debug-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 35
