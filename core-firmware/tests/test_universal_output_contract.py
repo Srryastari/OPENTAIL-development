@@ -49,6 +49,12 @@ assert "ESP_ERROR_CHECK(led_strip_set_pixel" not in render
 assert "ESP_ERROR_CHECK(led_strip_refresh_async(" not in render
 assert "ESP_ERROR_CHECK(led_strip_refresh_async_done(" not in render
 assert "bool output_failed[OT_CHAIN_COUNT]={false};" in render
+# RMT resizing is asynchronous to profile Save. A failed new driver must not
+# claim the output bank is ready, while intact lanes continue rendering.
+assert "const bool all_configured=ot_frame_all_submitted(frame_ready,OT_CHAIN_COUNT);" in render
+assert "native_outputs_ready=all_configured && output_runtime_fault_mask==0u;" in render
+assert render.index("frame_ready[ch]=strip_configure_channel") < render.index("const bool all_configured=")
+assert render.index("native_outputs_ready=all_configured") < render.index("const uint32_t frame_ms=")
 assert "if(!output_failed[ch])" in render
 assert 'output_runtime_fault((unsigned)ch,"pixel write",e)' in render
 assert 'output_runtime_fault((unsigned)ch,"transfer submit",e)' in render
