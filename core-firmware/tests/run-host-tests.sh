@@ -19,6 +19,8 @@ c++ -std=c++17 -Wall -Wextra -Werror -Wno-parentheses -Imain tests/test_wled_sou
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_1d.c tests/test_wled_1d.c -o /tmp/ot-wled-1d-tests && /tmp/ot-wled-1d-tests
 
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_command.c tests/test_ble_command.c -o /tmp/ot-ble-show-tests && /tmp/ot-ble-show-tests
+
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests -lm && /tmp/ot-ble-fx-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_auto_effects.c -o /tmp/ot-auto-effects-tests -lm && /tmp/ot-auto-effects-tests
