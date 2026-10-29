@@ -41,6 +41,7 @@
 #include "nvs.h"
 #include "esp_timer.h"
 #include "ot_fps_pacer.h"
+#include "ot_frame_contract.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -68,6 +69,8 @@ static uint16_t adaptive_target_fps=OT_FPS_PREFERRED_HIGH;
 static uint32_t frame_window_start_ms=0,frame_window_frames=0;
 /* Software-side evidence only: successful driver refresh != observed pixel state. */
 static uint32_t output_refreshes[OT_CHAIN_COUNT]={0};
+/* Render iterations that did not complete every configured lane. */
+static uint32_t incomplete_frames=0;
 static uint32_t stop_request_generation=0,stop_render_generation=0;
 /* Single render-task owner of physical outputs; HTTP handlers only modify copied state. */
 static ot_show_t native_show={0};
@@ -945,7 +948,7 @@ void ot_ble_disconnect_show(void){
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
     uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;uint16_t target_fps;
-    uint32_t refresh0,refresh1,stop_requested,stop_rendered;
+    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames;
     uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
     physical=live_input_mask;tm=tm_profile;
@@ -960,6 +963,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
     for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
+    partial_frames=incomplete_frames;
     portEXIT_CRITICAL(&state_lock);
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
@@ -988,11 +992,12 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used++]=']';
     active_pixels_json[used]=0;
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,"user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)measured_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
-       (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
+       (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
+       (unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
@@ -1291,6 +1296,7 @@ static void led_task(void *p) {
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
            bool frame_ready[OT_CHAIN_COUNT]={false};
+           bool frame_submitted[OT_CHAIN_COUNT]={false};
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
@@ -1307,7 +1313,9 @@ static void led_task(void *p) {
                const ot_om_output_t *output=&local_outputs[ch];
                ot_layout_t zone_layout;
                if(!ot_om_layout(output,&zone_layout)){
-                   ot_st_set_fault("invalid output mapping");break;
+                   ot_st_set_fault("invalid output mapping");
+                   frame_ready[ch]=false;
+                   continue; /* No async transfer was submitted. */
                }
                /* Render each selected zone once, even if the native frame is indexed by
                 * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
@@ -1413,6 +1421,7 @@ static void led_task(void *p) {
                }
                // Hardware driver transmits only this output's configured active length.
                ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
+               frame_submitted[ch]=true;
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
@@ -1420,8 +1429,11 @@ static void led_task(void *p) {
            /* Start both output transfers before waiting, so RMT lanes overlap.
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++)
-               if(frame_ready[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
-           if(!native_rendering){
+               if(frame_submitted[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
+           /* Acknowledged Stop and FPS must represent complete multi-output
+            * refreshes, not only whichever lane happened to succeed. */
+           const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
+           if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
                 * observed. This cannot establish the actual light state. */
@@ -1430,7 +1442,12 @@ static void led_task(void *p) {
                portEXIT_CRITICAL(&state_lock);
            }
            uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
-           frame_window_frames++;
+           if(full_frame)frame_window_frames++;
+           else{
+               portENTER_CRITICAL(&state_lock);
+               incomplete_frames++;
+               portEXIT_CRITICAL(&state_lock);
+           }
            if(frame_window_start_ms==0)frame_window_start_ms=ms;
            uint32_t span=ms-frame_window_start_ms;
            if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
