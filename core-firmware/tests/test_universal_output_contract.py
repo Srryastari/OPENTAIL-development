@@ -73,6 +73,16 @@ ble = (root / "ble_status.c").read_text(encoding="utf-8")
 cfg_read = ble.split("static int cfg_read(",1)[1].split("static int cfg_write(",1)[0]
 assert "if(conn!=active_conn || !authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;" in cfg_read
 
+# All BLE and persisted effect boundaries use the same board contract.
+# Keep the wire representation unchanged until physical output expansion is designed.
+ble_show = (root / "ble_command.c").read_text(encoding="utf-8")
+ble_fx = (root / "ble_fx_command.c").read_text(encoding="utf-8")
+fx_presets = (root / "fx_preset_record.c").read_text(encoding="utf-8")
+for adapter in (ble_show, ble_fx, fx_presets):
+    assert "#include \"board_config.h\"" in adapter
+    assert "(1u<<OT_OM_OUTPUTS)-1u" in adapter
+    assert "OT_MAX_BRIGHTNESS" in adapter
+
 # BLE FX validation must follow the physical output count, not a vehicle or
 # two-lane mask literal. Actual 12-output hardware/protocol support is future work.
 assert "(req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0" in core
