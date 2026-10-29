@@ -76,6 +76,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_fps_pacer.c tests/tes
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_config.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c main/show_logic.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
+# Replay previously reported two-output zone arbitration and exercise every
+# IN1..IN8 -> logical function reassignment with all raw input combinations.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_prior_trigger_profiles.c -o /tmp/ot-prior-trigger-profiles && /tmp/ot-prior-trigger-profiles
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_transition.c -o /tmp/ot-transition-tests && /tmp/ot-transition-tests
 
