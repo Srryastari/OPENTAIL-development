@@ -793,7 +793,14 @@ class ComposeMainActivity : ComponentActivity() {
         for (i in 0 until steps.length()) {
             val item = steps.optJSONObject(i) ?: continue
             Panel(t) {
+                val storedPalette = item.optJSONObject("settings")?.optInt("pal", 0) ?: 0
+                val effectivePalette = NativePaletteEngine.effectiveStepPalette(
+                    storedPalette, opts.optBoolean("sharedPaletteEnabled", false),
+                    opts.optInt("sharedPaletteId", 0))
                 Text(item.optString("fx") + " · " + item.optInt("ms", 1500) + " ms", color = t.fg)
+                Caption("Palette preference · " +
+                    NativePaletteEngine.lookup(project.raw(), effectivePalette).name +
+                    " (#" + effectivePalette + ") · applies to palette-compatible effects", t)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Pill("↑", t) { moveSequence(i, -1) }
