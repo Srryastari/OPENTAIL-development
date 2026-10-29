@@ -507,6 +507,8 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, false, true, false, true},
     {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
      false, false, true, true, true},
+    {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
+     false, false, true, true, true},
     {OT_WLED_FIRE_2012, "Fire 2012", "Fire 2012@Cooling,Spark rate,,2D Blur,Boost;;!;1;pal=35,sx=64,ix=160,m12=1,c2=128",
      false, false, true, true, true}
 };
@@ -4363,6 +4365,106 @@ static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+
+/* Pinned WLED FX.cpp Pacifica 1D: three literal RGB palettes, four layered
+ * oscillators and whitecaps. All four counters are stored in upstream's
+ * SEGENV.step/aux0/aux1; no heap or global strip state is used. */
+static const uint32_t pacifica_colors[3][16]={
+ {0x002229u,0x001E2Fu,0x001934u,0x001938u,0x00143Fu,0x001443u,0x00B047u,0x00B04Cu,
+  0x00004Fu,0x000054u,0x000062u,0x00006Fu,0x00007Au,0x000085u,0x47938Au,0x64D08Eu},
+ {0x002229u,0x001E2Fu,0x001934u,0x001938u,0x00143Fu,0x001443u,0x00B047u,0x00B04Cu,
+  0x00004Fu,0x000054u,0x000062u,0x00006Fu,0x00007Au,0x000085u,0x369B90u,0x4FDC9Bu},
+ {0x00142Cu,0x00193Bu,0x002247u,0x002551u,0x002C5Au,0x002F63u,0x00346Bu,0x003671u,
+  0x003B78u,0x003F7Fu,0x00478Eu,0x004D9Cu,0x0054A9u,0x005AB4u,0x3F7FDCu,0x5A9CFFu}
+};
+static uint16_t pacifica_beat(uint16_t bpm,uint32_t now) {
+    const uint16_t q88=(uint16_t)(bpm<256u?bpm<<8:bpm);
+    return (uint16_t)((uint32_t)(now*(uint32_t)q88*280u)>>16);
+}
+static uint16_t pacifica_sin16(uint16_t bpm,uint16_t lo,uint16_t hi,uint32_t now) {
+    const uint16_t wave=(uint16_t)((int32_t)wled_sin16(pacifica_beat(bpm,now))+32768);
+    return (uint16_t)(lo+(((uint32_t)wave*(1u+(uint32_t)(hi-lo)))>>16));
+}
+static uint8_t pacifica_sin8(uint16_t bpm,uint8_t lo,uint8_t hi,uint32_t now) {
+    const uint8_t phase=(uint8_t)(pacifica_beat(bpm,now)>>8);
+    return (uint8_t)(lo+(((uint16_t)wled_sin8(phase)*(1u+(unsigned)(hi-lo)))>>8));
+}
+static ot_wled_rgb_t pacifica_layer(unsigned i,const ot_wled_palette16_t *p,
+                                    uint16_t start,uint16_t scale,uint8_t bri,
+                                    uint16_t offset,uint8_t intensity) {
+    const uint16_t angle=(uint16_t)(offset+(uint16_t)((120u+(unsigned)intensity)*i));
+    const uint16_t half=(uint16_t)((scale>>1)+20u);
+    const uint16_t cs=(uint16_t)((((uint32_t)((int32_t)wled_sin16(angle)+32768)*
+                                      (1u+(uint32_t)half))>>16)+half);
+    const uint16_t ci=(uint16_t)(start+(uint16_t)((uint32_t)cs*i));
+    const uint16_t sine=(uint16_t)((int32_t)wled_sin16(ci)+32768);
+    const uint8_t index=(uint8_t)(((uint32_t)sine*241u)>>16);
+    return ot_wled_palette_sample(p,index,bri,OT_WLED_PALETTE_LINEAR);
+}
+static uint8_t pacifica_add(uint8_t a,uint8_t b) {
+    const unsigned sum=(unsigned)a+b;return (uint8_t)(sum>255u?255u:sum);
+}
+static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st,
+                           uint32_t now,ot_wled_rgb_t *px,size_t count) {
+    ot_wled_palette16_t pal[3]={0};
+    if(cfg->palette_id) {
+        for(unsigned j=0;j<3u;j++)
+            ot_wled_palette_build(cfg->palette_id,cfg->foreground,cfg->background,
+                                  (ot_wled_rgb_t){0,0,0},&pal[j]);
+    } else {
+        for(unsigned j=0;j<3u;j++)
+            for(unsigned k=0;k<16u;k++)pal[j].entries[k]=palette_unpack(pacifica_colors[j][k]);
+    }
+    uint16_t c1=st->aux0,c2=st->aux1,c3=(uint16_t)st->step,c4=(uint16_t)(st->step>>16);
+    const uint32_t frame=(uint32_t)cfg->frame_time_ms;
+    const uint32_t delta=(frame>>2)+((frame*(uint32_t)cfg->speed)>>7);
+    const uint32_t shifted=(uint32_t)((now>>2)+(((uint64_t)now*(uint32_t)cfg->speed)>>7));
+    const uint32_t d1=(delta*pacifica_sin16(3u,179u,269u,shifted))/256u;
+    const uint32_t d2=(delta*pacifica_sin16(4u,179u,269u,shifted))/256u;
+    const uint32_t d21=(d1+d2)/2u;
+    c1=(uint16_t)(c1+d1*pacifica_sin16(1011u,10u,13u,shifted));
+    c2=(uint16_t)(c2-d21*pacifica_sin16(777u,8u,11u,shifted));
+    c3=(uint16_t)(c3-d1*pacifica_sin16(501u,5u,7u,shifted));
+    c4=(uint16_t)(c4-d2*pacifica_sin16(257u,4u,6u,shifted));
+    st->aux0=c1;st->aux1=c2;st->step=((uint32_t)c4<<16)|c3;
+    const unsigned base=pacifica_sin8(9u,55u,65u,shifted);
+    uint8_t wave=(uint8_t)(pacifica_beat(7u,shifted)>>8);
+    const uint16_t wscale1=pacifica_sin16(3u,2816u,3584u,shifted);
+    const uint16_t wscale2=pacifica_sin16(4u,1536u,2304u,shifted);
+    const uint8_t b1=pacifica_sin8(10u,70u,130u,shifted);
+    const uint8_t b2=pacifica_sin8(17u,40u,80u,shifted);
+    const uint8_t b3=pacifica_sin8(9u,10u,38u,shifted);
+    const uint8_t b4=pacifica_sin8(8u,10u,28u,shifted);
+    const uint16_t off1=(uint16_t)(0u-pacifica_beat(301u,shifted));
+    const uint16_t off2=pacifica_beat(401u,shifted);
+    const uint16_t off3=(uint16_t)(0u-pacifica_beat(503u,shifted));
+    const uint16_t off4=pacifica_beat(601u,shifted);
+    for(size_t i=0;i<count;i++) {
+        ot_wled_rgb_t color={2u,6u,10u};
+        const ot_wled_rgb_t layers[4]={
+            pacifica_layer((unsigned)i,&pal[0],c1,wscale1,b1,off1,cfg->intensity),
+            pacifica_layer((unsigned)i,&pal[1],c2,wscale2,b2,off2,cfg->intensity),
+            pacifica_layer((unsigned)i,&pal[2],c3,1536u,b3,off3,cfg->intensity),
+            pacifica_layer((unsigned)i,&pal[2],c4,1280u,b4,off4,cfg->intensity)};
+        for(unsigned j=0;j<4u;j++) {
+            color.r=pacifica_add(color.r,layers[j].r);
+            color.g=pacifica_add(color.g,layers[j].g);
+            color.b=pacifica_add(color.b,layers[j].b);
+        }
+        const uint8_t threshold=(uint8_t)((((unsigned)wled_sin8(wave)*21u)>>8)+base);
+        wave=(uint8_t)(wave+7u);
+        const unsigned light=((unsigned)color.r+(unsigned)color.g+(unsigned)color.b)/3u;
+        if(light>threshold) {
+            const uint8_t over=(uint8_t)(light-threshold);
+            const uint8_t twice=pacifica_add(over,over);
+            color.r=pacifica_add(color.r,over);
+            color.g=pacifica_add(color.g,twice);
+            color.b=pacifica_add(color.b,pacifica_add(twice,twice));
+        }
+        px[i]=scaled(color,cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0)
@@ -4380,7 +4482,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_COLORTWINKLE &&
             cfg->effect_id!=OT_WLED_SLOW_TRANSITION &&
             cfg->effect_id!=OT_WLED_DANCING_SHADOWS &&
-            cfg->effect_id!=OT_WLED_FIRE_2012) ||
+            cfg->effect_id!=OT_WLED_FIRE_2012 &&
+            cfg->effect_id!=OT_WLED_PACIFICA) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4574,6 +4677,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_PACIFICA) {
+        pacifica_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_FIRE_2012) {
