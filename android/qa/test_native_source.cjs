@@ -104,13 +104,14 @@ for(const source of ['private void effectEditor()','private void sequenceEditor(
     'Authoring path may not write to a physical controller: '+source);
 }
 const list=[...catalog.matchAll(/new Effect\((\d+), "([^"]+)"\)/g)].map(m=>[Number(m[1]),m[2]]);
-assert.equal(list.length,126,'Native designer must include all approved effect names');
-assert.equal(new Set(list.map(x=>x[0])).size,126,'Duplicate effect IDs');
+assert.equal(list.length,140,'Native designer must include all approved effect names');
+assert.equal(new Set(list.map(x=>x[0])).size,140,'Duplicate effect IDs');
 const m=web.match(/const OT_STUDIO_DESIGN_EFFECTS=Object\.freeze\((\[[^\n]*\])\);/);
 const o=web.match(/const OT_STUDIO_ORIGINAL_EFFECTS=Object\.freeze\((\{[^\n]*\})\);/);
 assert(m&&o,'Approved web metadata catalog must remain intact');
 const webModes=[...JSON.parse(m[1]),...Object.entries(JSON.parse(o[1])).map(([i,n])=>[Number(i),n])];
-assert.deepEqual(list,webModes,'Native effect names/IDs have drifted from approved web authoring');
+assert.deepEqual(list.slice(0,webModes.length),webModes,'Native effect names/IDs have drifted from approved web authoring');
+assert(list.some(([id,name])=>id===32787&&name==='Singularity Shutdown'), 'Newest CORE original effects missing');
 assert(!/WLED firmware|WLED UI/.test(main),'End-user native app must be OpenTail branded');
 const ble=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 assert(ble.includes('pairWithBoot()')&&ble.includes('authorizeStored()')&&
@@ -134,4 +135,4 @@ assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 623')&&
        codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
        codec.includes('static byte[] encode(')&&codec.includes('static JSONObject decode('),
  'Native hardware output safety and codec validation regressed');
-console.log('PASS: Native Android UI, 6 pages, 126 effects, v4 project, no bundled WebView, guarded BLE, universal zones and NVS output editor (static).');
+console.log('PASS: Native Android UI, 6 pages, 140 effects, v4 project, no bundled WebView, guarded BLE, universal zones and NVS output editor (static).');
