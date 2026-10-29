@@ -11,11 +11,11 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[10]={0};
-    assert(ot_wled_fx_supported_ids(ids,10)==9);
+    uint16_t ids[12]={0};
+    assert(ot_wled_fx_supported_ids(ids,12)==11);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
-           ids[7]==13 && ids[8]==23);
+           ids[7]==13 && ids[8]==23 && ids[9]==83 && ids[10]==100);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -135,6 +135,33 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,0,p,7));
     assert(eq(p[6],(ot_wled_rgb_t){127,0,0}));
     assert(eq(p[0],(ot_wled_rgb_t){0,0,127}));
+
+    /* Upstream mode_static_pattern: speed+1 lit, intensity+1 unlit.
+     * No dependence on GS400 wiring or absolute pixel offsets. */
+    c.effect_id=OT_WLED_SOLID_PATTERN;c.speed=1;c.intensity=0;
+    c.brightness=255;
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.foreground));
+    assert(eq(p[2],c.background) && eq(p[3],c.foreground));
+    assert(eq(p[5],c.background) && eq(p[6],c.foreground));
+    c.speed=255;c.intensity=255;
+    assert(ot_wled_fx_render(&c,&s,999,p,7));
+    for(int k=0;k<7;k++)assert(eq(p[k],c.foreground));
+
+    /* Upstream mode_heartbeat: 40 BPM at speed zero, second beat after
+     * 500 ms and a new first beat after 1500 ms. Effects remain stateful. */
+    c.effect_id=OT_WLED_HEARTBEAT;c.speed=0;c.intensity=128;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[0],c.background) && s.aux1==0);
+    assert(ot_wled_fx_render(&c,&s,501,p,7));
+    assert(s.aux0==1 && s.aux1==UINT16_MAX && p[0].r>250);
+    assert(ot_wled_fx_render(&c,&s,502,p,7));
+    assert(s.aux0==1 && s.aux1<UINT16_MAX);
+    assert(ot_wled_fx_render(&c,&s,1501,p,7));
+    assert(s.aux0==0 && s.aux1==UINT16_MAX && s.step==1501);
+    ot_wled_fx_reset(&s);
+    assert(s.step==0 && s.aux0==0 && s.aux1==0);
 
     c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
