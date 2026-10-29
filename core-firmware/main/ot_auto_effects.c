@@ -124,13 +124,27 @@ bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
                 const uint32_t sparkle_ms=120u;
                 color=fg;
                 if(age<sparkle_ms && cfg->intensity){
+                    /* The body remains at the user-selected brightness, while
+                     * the short-lived spark may use spare BENCH headroom up to
+                     * 32/255. At low brightness a same-hue spark would otherwise
+                     * be invisible because it is blended with an already
+                     * saturated foreground color. Never light a zero-brightness
+                     * request, and never exceed either 32 or a higher explicit
+                     * renderer cap. This does not alter vehicle trigger colors. */
+                    const uint32_t peak_cap=cfg->brightness==0u?0u:
+                        (cfg->brightness<32u?32u:cfg->brightness);
+                    const uint32_t peak=cfg->brightness+
+                        ((peak_cap-cfg->brightness)*cfg->intensity+127u)/255u;
                     const uint8_t fade=(uint8_t)(((sparkle_ms-age)*cfg->intensity)/sparkle_ms);
                     ot_wled_rgb_t spark=fg;
                     if(cfg->effect_id==OT_FX_RANDOM_MATERIALIZE){
                         spark=(h>>24)>239u?(ot_wled_rgb_t){255,255,255}:
                              wheel((uint8_t)(h>>8));
                     }
-                    color=blend(fg,spark,fade);
+                    const ot_wled_rgb_t base=scale(fg,cfg->brightness);
+                    const ot_wled_rgb_t highlight=scale(spark,(uint8_t)peak);
+                    pixels[i]=blend(base,highlight,fade);
+                    continue;
                 }
             }
         }
