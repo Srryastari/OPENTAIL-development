@@ -1234,11 +1234,42 @@ int main(void) {
     ot_wled_fx_reset(&glit);
     c.palette_id=0u;
 
+
+    /* New 1D ports: deterministic state, zero out-of-zone writes, and caps. */
+    const ot_wled_audio_peak_t measured={220.0f,1800.0f};
+    c.audio_peak=NULL;c.brightness=32u;c.speed=127u;c.intensity=192u;
+    c.palette_id=0u;c.effect_id=OT_WLED_ROCKTAVES;
+    ot_wled_fx_reset(&s);
+    assert(!ot_wled_fx_render(&c,&s,0,p,31)); /* require real peak data */
+    c.audio_peak=&measured;
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    c.audio_peak=NULL;
+    for(unsigned variant=0u;variant<3u;variant++){
+        c.effect_id=variant==0u?OT_WLED_PACIFICA:
+                    variant==1u?OT_WLED_NOISE_PAL:OT_WLED_EXPLODING_FIREWORKS;
+        c.palette_id=0u;c.brightness=32u;
+        ot_wled_fx_state_t first={0},second={0};
+        ot_wled_rgb_t a[524]={0},b[524]={0};
+        a[0]=a[523]=b[0]=b[523]=(ot_wled_rgb_t){99u,88u,77u};
+        for(unsigned frame=0;frame<96u;frame++){
+            uint32_t ms=frame*137u;
+            assert(ot_wled_fx_render(&c,&first,ms,&a[1],522u));
+            assert(ot_wled_fx_render(&c,&second,ms,&b[1],522u));
+            assert(memcmp(a,b,sizeof(a))==0);
+            assert(eq(a[0],(ot_wled_rgb_t){99u,88u,77u}));
+            assert(eq(a[523],(ot_wled_rgb_t){99u,88u,77u}));
+            for(size_t px=1;px<=522u;px++)
+                assert(a[px].r<=32u&&a[px].g<=32u&&a[px].b<=32u);
+        }
+        ot_wled_fx_reset(&first);ot_wled_fx_reset(&second);
+    }
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
     for(size_t k=0;k<count;k++) {
         c.effect_id=ids[k];
+        c.audio_peak=c.effect_id==OT_WLED_ROCKTAVES?&measured:NULL;
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
