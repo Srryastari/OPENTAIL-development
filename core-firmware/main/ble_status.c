@@ -32,6 +32,11 @@ extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revisi
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
 static uint8_t token[OT_BLE_TOKEN_BYTES];
 static bool token_ready=false;
+/* Latched only after NimBLE accepts the first advertising request. */
+static bool ble_radio_ever_ready=false;
+bool ot_ble_radio_ever_ready(void){
+    return __atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE);
+}
 void ot_ble_session_hex(char out[33]){
     if(!out)return;
     out[0]='\0';
@@ -399,6 +404,7 @@ static void advertise(void){
     struct ble_gap_adv_params p={0};p.conn_mode=BLE_GAP_CONN_MODE_UND;p.disc_mode=BLE_GAP_DISC_MODE_GEN;
     rc=ble_gap_adv_start(addr_type,NULL,BLE_HS_FOREVER,&p,gap_event,NULL);
     if(rc)ESP_LOGE(TAG,"Advertising failed: %d",rc);
+    else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
 }
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
@@ -419,6 +425,7 @@ static void on_sync(void){
 }
 static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freertos_deinit();}
 bool ot_ble_start(void){
+    __atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);
     owner_valid=owner_load();
     gpio_config_t boot={0};boot.pin_bit_mask=(1ULL<<0);boot.mode=GPIO_MODE_INPUT;boot.pull_up_en=GPIO_PULLUP_ENABLE;
     gpio_config(&boot);
