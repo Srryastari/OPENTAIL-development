@@ -243,14 +243,6 @@ static esp_err_t respond_err(httpd_req_t *r,int status,const char *reason) {
     char buf[120];snprintf(buf,sizeof(buf),"{\"error\":\"%s\"}",reason);
     return send_json(r,buf);
 }
-static uint8_t signal_mask_of(const char *name) {
-    if(!strcmp(name,"park")) return OT_SIG_PARK;
-    if(!strcmp(name,"brake")) return OT_SIG_BRAKE;
-    if(!strcmp(name,"left")) return OT_SIG_LEFT;
-    if(!strcmp(name,"right")) return OT_SIG_RIGHT;
-    if(!strcmp(name,"reverse")) return OT_SIG_REVERSE;
-    return 0;
-}
 static bool show_window(TickType_t now){
     if(ble_fx_enabled)return ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
     return native_show.mode!=OT_SHOW_OFF && before_deadline(now,native_show_deadline);
@@ -1098,10 +1090,10 @@ static esp_err_t simulate_post(httpd_req_t *r) {
     uint8_t mask=0;
     cJSON *v=NULL;
     cJSON_ArrayForEach(v,arr){
-       if(!cJSON_IsString(v)||!signal_mask_of(v->valuestring)){
+       if(!cJSON_IsString(v)||!ot_tm_signal_mask_of(v->valuestring)){
           cJSON_Delete(obj);return respond_err(r,400,"unrecognized signal");
        }
-       mask|=signal_mask_of(v->valuestring);
+       mask|=ot_tm_signal_mask_of(v->valuestring);
     }
     unsigned ttl=bounded_int(obj,"ttl_ms",2000,100,OT_DEMO_MAX_MS);
     TickType_t now=xTaskGetTickCount();
