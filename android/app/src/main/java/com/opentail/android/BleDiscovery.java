@@ -83,6 +83,7 @@ final class BleDiscovery {
     });
     void setFrameListener(CoreFrameCapture.Listener cb) { frameListener=cb; }
     boolean canCaptureFrame() {return canControl() && frameCapture.supported();}
+    void cancelFrameCapture() { frameCapture.abortForStop(); }
     void captureFrame(int output) {
         if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return;}
         if(frameCapture.busy() || cfgBusy || writePending || readReplyPending || fxCapsBusy ||
