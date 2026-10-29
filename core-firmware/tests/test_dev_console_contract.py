@@ -74,6 +74,22 @@ disconnect = core.split("void ot_ble_disconnect_show(void){",1)[1].split(
 assert 'live_input_mask=0' not in disconnect
 assert 'input_sampler_task' in core and 'vTaskDelayUntil(&last_wake,period)' in core
 
+# Raw optocoupler assertion must veto edits even before the four 10ms
+# debounce samples settle. This is only a pre-save guard, not an atomic
+# promise about new pin edges during a flash write.
+raw = core.split("static bool tm_raw_input_active(void){",1)[1].split(
+    "/* Serialize authenticated BLE",1)[0]
+assert "gpio_get_level(input_pin[i])" in raw
+assert "OT_INPUT_ACTIVE_LOW?!high:high" in raw
+commit = core.split("static int tm_commit(",1)[1].split(
+    "bool ot_ble_trigger_get(",1)[0]
+assert "const bool raw_active=tm_raw_input_active();" in commit
+assert "const bool busy=raw_active || live_input_mask!=0" in commit
+assert commit.index("tm_raw_input_active()") < commit.index("portENTER_CRITICAL(&state_lock)")
+assert commit.index("const bool busy=raw_active") < commit.index("tm_save(next)")
+assert "if(!tm_save(next))code=4" in commit
+assert commit.index("if(!tm_save(next))code=4") < commit.index("tm_profile=*next;")
+assert "xSemaphoreGive(om_write_mutex)" in commit
 assert 'cJSON_AddNumberToObject(root,"config_revision",config_revision)' in core
 assert 'tm_commit(&next,(uint16_t)expected_config_revision,require_revision)' in core
 assert "ot_tm_signal_mask_of(v->valuestring)" in core
