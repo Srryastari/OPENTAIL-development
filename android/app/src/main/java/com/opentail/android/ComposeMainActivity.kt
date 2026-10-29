@@ -297,6 +297,34 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun PixelStrip(t: Tone, segments: List<Pair<Int, Color>>) {
+        val length = segments.sumOf { it.first.coerceAtLeast(0) }.coerceAtLeast(1)
+        Canvas(Modifier.fillMaxWidth().height(28.dp).clip(RoundedCornerShape(12.dp))
+            .background(t.raised)) {
+            var used = 0f
+            segments.forEach { (pixels, color) ->
+                val width = size.width * pixels.coerceAtLeast(0) / length
+                if (width > 0f) {
+                    drawLine(color,
+                        Offset(used + 1f, size.height * 0.5f),
+                        Offset((used + width - 1f).coerceAtLeast(used + 1f),
+                            size.height * 0.5f),
+                        strokeWidth = size.height * 0.75f)
+                }
+                used += width
+            }
+        }
+    }
+    private fun rolePixelColor(role: String): Color = when(role) {
+        "park_brake", "parking", "brake" -> Color(0xFFEE3939)
+        "left_turn", "right_turn" -> Color(0xFFFFB300)
+        "reverse" -> Color.White
+        "aux1", "aux2", "aux3" -> Color(0xFFB083F5)
+        "decorative" -> Color(0xFF71DFA0)
+        else -> Color(0xFF333333)
+    }
+
+    @Composable
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
         Title("Home", t)
         Panel(t) {
@@ -537,6 +565,12 @@ class ComposeMainActivity : ComponentActivity() {
             }
             Caption("Project name saves as you type. No separate edit mode.", t)
             Caption(project.zoneCount().toString() + " zones · " + project.pixelCount() + " design pixels", t)
+            PixelStrip(t, (0 until project.zoneCount()).map { i ->
+                val zone = project.zone(i)
+                (zone?.optInt("length", 0) ?: 0) to
+                    (if (i % 2 == 0) t.accent else t.fg)
+            })
+            Caption("Live layout strip · changes follow zone offsets immediately", t)
             if (project.zoneCount() == 0) Pill("+ Add zone", t, true) { addZoneAfter(-1) }
         }
         for (i in 0 until project.zoneCount()) {
@@ -855,6 +889,20 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                 }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill("All zones", t, liveZoneMask.intValue == 255) {
+                        liveZoneMask.intValue = 255
+                        previewCurrentEffect()
+                    }
+                    (0 until 8).forEach { zone ->
+                        val mask = 1 shl zone
+                        Pill("Zone " + (zone + 1), t, liveZoneMask.intValue == mask) {
+                            liveZoneMask.intValue = mask
+                            previewCurrentEffect()
+                        }
+                    }
+                }
             } else Caption("Offline design updates instantly. Connect and authorize CORE to preview supported effects on LEDs.", t)
             Caption("Changing zone boundaries and individual pixels on hardware requires a firmware volatile-preview command; Android does not flash NVS on each edit.", t)
         }
@@ -983,6 +1031,11 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Caption("Assigned " + assigned + " of " + pixelCount + " pixels · " +
                 (pixelCount - assigned) + " remaining. Zone offsets are zero-based and automatically contiguous.", t)
+            PixelStrip(t, (0 until zones.length()).map { j ->
+                val part = zones.optJSONObject(j)
+                (part?.optInt("pixels", 0) ?: 0) to rolePixelColor(part?.optString("role", "off") ?: "off")
+            })
+            Caption("Immediate draft preview. Physical boundaries change only after confirmed NVS Save.", t)
             if (zones.length() < 8) Pill("+ Add zone", t) {
                 edit {
                     it.getJSONArray("zones").put(JSONObject()
