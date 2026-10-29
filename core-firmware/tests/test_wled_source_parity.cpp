@@ -193,6 +193,10 @@ uint16_t triwave16(uint16_t in) {
   return 0xFFFF - (in - 0x8000)*2;
 }
 
+/* Pinned upstream color_fade() declares a white-channel scratch byte that
+ * is unused in the RGB-only reference; keep its source body unmodified. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
 uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
   if (c1 == BLACK) return 0;           // fast path early exit
   if (amount == 255) return c1;        // no change
@@ -220,6 +224,8 @@ uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
   uint32_t wg_scaled = ((wg * (amount + 1)) & ~TWO_CHANNEL_MASK);     // scale white and green
   return (rb_scaled | wg_scaled);
 }
+
+#pragma GCC diagnostic pop
 
 // END UPSTREAM math/color functions.
 // Only this minimal adapter code is OpenTail-specific.
