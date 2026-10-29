@@ -214,14 +214,14 @@ final class NativeProject {
             long start=manual?Math.max(end,zone.optLong("start",end)):end;
             if(start+len>1000000)return "Pixel index ceiling exceeded";
             if(i>=selected&&i<selected+5){
-                if(summary.length()>0)summary.append("\\n");
+                if(summary.length()>0)summary.append("\n");
                 summary.append(zone.optString("name","Zone "+(i+1)))
                        .append(": ").append(start).append("–")
                        .append(start+len-1).append(" · next ").append(start+len);
             }
             end=start+len;
         }
-        if(zoneCount()>selected+5)summary.append("\\n…additional zones reindex on Save");
+        if(zoneCount()>selected+5)summary.append("\n…additional zones reindex on Save");
         return summary.toString();
     }
 
