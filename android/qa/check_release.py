@@ -107,7 +107,7 @@ check("Compose Material UI follows locked OLED/white colors",
 check("Compose authoring preserves zone offsets and separate BLE confirmation",
       all(k in compose for k in
           ("previewZoneOffsets(id, n)", "project.editZone(",
-           "project.assign(", "project.setSequence(", "project.importJson(",
+           "project.assignMany(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
            "ble.showFx(", "BleConfigCodec.encode(JSONObject(draftText))",
            "ble.saveOutput(", "draftText = updated.toString()",
