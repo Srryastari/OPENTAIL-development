@@ -199,6 +199,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_NOISE_4, "Noise 4", "Noise 4@!,Scale;;!",
      true, false, true, true, false},
     {OT_WLED_PHASED, "Phased", "Phased@!,!;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_PHASED_NOISE, "Phased Noise", "Phased Noise@!,!;!,!;!",
      true, true, true, true, false}
 };
 
@@ -853,9 +855,11 @@ static uint8_t wled_cubicwave8(uint8_t phase) {
  * SEGCOLOR(0)/SEGCOLOR(1) path. Preserve the source float phase in
  * SEGENV.step bits; memcpy avoids strict-aliasing undefined behavior.
  * Phased Noise is not routed here; it requires original 1D Perlin. */
+static uint8_t fx_perlin8_1(uint16_t x);
 static void phased_frame(const ot_wled_fx_config_t *cfg,
                          ot_wled_fx_state_t *state,
-                         ot_wled_rgb_t *pixels,size_t count) {
+                         ot_wled_rgb_t *pixels,size_t count,
+                         bool use_noise) {
     float phase;
     memcpy(&phase,&state->step,sizeof(phase));
     phase += (float)cfg->speed/32.0f;
@@ -865,8 +869,11 @@ static void phased_frame(const ot_wled_fx_config_t *cfg,
     const ot_wled_rgb_t bg=cfg->background;
     const ot_wled_rgb_t fg=cfg->foreground;
     for(size_t i=0;i<count;i++) {
+        unsigned mod_val=5u;
+        if(use_noise)mod_val=fx_perlin8_1((uint16_t)((unsigned)i*20u))/16u;
+        if(!mod_val)mod_val=1u;
         unsigned val=((unsigned)i+1u)*16u;
-        val+=(unsigned)(phase*(float)(((unsigned)i%5u)+1u)/2.0f);
+        val+=(unsigned)(phase*(float)(((unsigned)i%mod_val)+1u)/2.0f);
         unsigned b=wled_cubicwave8((uint8_t)val);
         b=(b>cutoff)?b-cutoff:0u;
         pixels[i]=scaled(blend_colors(bg,fg,(uint8_t)b),cfg->brightness);
@@ -2294,6 +2301,28 @@ static inline int32_t lerpPerlin(int32_t a, int32_t b, int32_t t) {
 
 
 
+/* Pinned WLED util.cpp perlin1D_raw() and perlin8(uint16_t).
+ * Reuse the existing hash, smoothstep and interpolation functions.
+ * Phased Noise is a true 1D field; the 2D substitute is incorrect. */
+static inline int32_t fx_gradient1D(uint32_t x0,int32_t dx) {
+    uint32_t h=x0*0x27D4EB2Du;
+    h^=h>>15;h*=0x92C3412Bu;h^=h>>13;h^=h>>7;
+    return (hashToGradient(h)*dx)>>PERLIN_SHIFT;
+}
+static int32_t fx_perlin1D_raw(uint32_t x,bool is16bit) {
+    int32_t x0=(int32_t)(x>>16);
+    int32_t x1=x0+1;
+    if(is16bit)x1&=0xff;
+    int32_t dx0=(int32_t)(x&0xffffu),dx1=dx0-0x10000;
+    const int32_t g0=fx_gradient1D((uint32_t)x0,dx0);
+    const int32_t g1=fx_gradient1D((uint32_t)x1,dx1);
+    return lerpPerlin(g0,g1,(int32_t)smoothstep((uint32_t)dx0));
+}
+static uint8_t fx_perlin8_1(uint16_t x) {
+    return (uint8_t)((((fx_perlin1D_raw((uint32_t)x<<8,true)*1353)>>10)
+                       +32769)>>8);
+}
+
 static int32_t fx_perlin2D_raw(uint32_t x, uint32_t y, bool is16bit) {
   int32_t x0 = x >> 16;
   int32_t y0 = y >> 16;
@@ -2637,8 +2666,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         android_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
-    if(cfg->effect_id==OT_WLED_PHASED) {
-        phased_frame(cfg,state,pixels,count);
+    if(cfg->effect_id==OT_WLED_PHASED ||
+       cfg->effect_id==OT_WLED_PHASED_NOISE) {
+        phased_frame(cfg,state,pixels,count,
+                     cfg->effect_id==OT_WLED_PHASED_NOISE);
         return true;
     }
     if (cfg->effect_id==OT_WLED_SINEWAVE) {
