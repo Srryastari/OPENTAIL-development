@@ -80,7 +80,8 @@ enum {
     OT_WLED_TWINKLE = 17,
     OT_WLED_CHASE_FLASH_RANDOM = 32,
     OT_WLED_MULTI_COMET = 59,
-    OT_WLED_CHUNCHUN = 111
+    OT_WLED_CHUNCHUN = 111,
+    OT_WLED_CANDLE = 88
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
