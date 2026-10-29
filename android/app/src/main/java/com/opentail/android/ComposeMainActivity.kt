@@ -68,6 +68,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
+    private val offlinePreview = mutableStateOf(false)
     private val selectedEffect = mutableIntStateOf(0)
     private val liveChainMask = mutableIntStateOf(3)
     private val liveZoneMask = mutableIntStateOf(255)
@@ -80,6 +81,7 @@ class ComposeMainActivity : ComponentActivity() {
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
     private fun previewCurrentEffect(effectOverride: Int? = null) {
         coreFrame.value = null // any parameter change invalidates the frozen CORE frame
+        if (offlinePreview.value) return // Settings Preview Offline cannot send BLE edits
         // Live editing is the DEFAULT. Offline rendering always updates;
         // if owner-authorized BLE can preview this effect, stream the gesture
         // automatically without an extra "Live Edit Mode" switch.
@@ -251,7 +253,10 @@ class ComposeMainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 pages.forEachIndexed { i, title ->
-                    Pill(title, t, page == i) { page = i }
+                    Pill(title, t, page == i) {
+                        if (i != 1) offlinePreview.value = false
+                        page = i
+                    }
                 }
             }
             Column(Modifier.fillMaxSize().verticalScroll(pageScroll)
@@ -515,7 +520,9 @@ class ComposeMainActivity : ComponentActivity() {
         var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
         var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
         Panel(t) {
-            Caption("Pixel-exact design inspection · effects require CORE rendered frames", t)
+            Caption(if (offlinePreview.value)
+                "Offline preview · design changes stay local until you leave Show Modes."
+            else "Pixel-exact design inspection · effects require CORE rendered frames", t)
             EffectsPreview(t, effect)
             if (ble.canCaptureFrame()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -1057,6 +1064,11 @@ class ComposeMainActivity : ComponentActivity() {
                     ble.scanHeadless()
                 }
                 Pill("Preview Offline", t) {
+                    if (liveArmed.value) {
+                        livePreview.stop()
+                        liveArmed.value = false
+                    }
+                    offlinePreview.value = true
                     coreFrame.value = null
                     changePage(1)
                 }
