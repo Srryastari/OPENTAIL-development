@@ -31,7 +31,7 @@ assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx
   'Authoring layout must never directly write a physical output mapping.');
 
 for(const required of [
-  'fun applyTriggerStyle()','applyTriggerStyle()','project.assign(',
+  'fun applyTriggerStyle()','applyTriggerStyle()','project.assignMany(',
   'project.save()', 'confirmButton = { Pill("Done"',
 ]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
 assert(!triggerBlock.includes('ble.saveOutput('),
@@ -41,6 +41,10 @@ for(const required of [
   'EffectsPreview(', 'previewCurrentEffect(effect)',
   'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
 ]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
+
+assert(triggerBlock.includes('project.assignMany(selections, zoneId, !checked)') &&
+       !triggerBlock.includes('selections.forEach { project.assign('),
+       'Multi-select assignments must commit once, not partially save per trigger');
 
 for(const required of [
   'selectedPixels','pixelColor(String id,int pixel)',
