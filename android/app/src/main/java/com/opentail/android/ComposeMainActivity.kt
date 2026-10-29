@@ -80,6 +80,15 @@ class ComposeMainActivity : ComponentActivity() {
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
     private val captureOutput = mutableIntStateOf(0)
 
+    private fun enterOfflinePreview() {
+        if (liveArmed.value) {
+            livePreview.stop()
+            liveArmed.value = false
+        }
+        offlinePreview.value = true
+        coreFrame.value = null
+    }
+
     // A single gesture updates the on-screen design immediately. When the
     // owner has explicitly armed a physical bench preview, the same gesture
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
@@ -277,6 +286,7 @@ class ComposeMainActivity : ComponentActivity() {
                     4 -> AutoEventsPage(t) { effectId ->
                         selectedEffect.intValue = effectId
                         prefs.edit().putInt("effectId", effectId).apply()
+                        enterOfflinePreview()
                         page = 1
                     }
                     5 -> SettingsPage(t) { page = it }
@@ -1099,6 +1109,7 @@ class ComposeMainActivity : ComponentActivity() {
                     val selected = NativeEffectCatalog.byName(event.optString("eventFx", "Solid"))
                     previewEffect(selected.id)
                 }
+                Caption("Offline preview inspects exact design pixels; CORE provides animation.", t)
             }
         }
         choosing?.let { key ->
@@ -1137,12 +1148,7 @@ class ComposeMainActivity : ComponentActivity() {
                     ble.scanHeadless()
                 }
                 Pill("Preview Offline", t) {
-                    if (liveArmed.value) {
-                        livePreview.stop()
-                        liveArmed.value = false
-                    }
-                    offlinePreview.value = true
-                    coreFrame.value = null
+                    enterOfflinePreview()
                     changePage(1)
                 }
             }
