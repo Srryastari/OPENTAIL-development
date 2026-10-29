@@ -2677,7 +2677,6 @@ void mode_twinklefox()
 {
   twinklefox_base(false);
 }
-static const char _data_FX_MODE_TWINKLEFOX[] PROGMEM = "Twinklefox@!,Twinkle rate,,,,Cool;!,!;!";
 
 
 void mode_twinklecat()
