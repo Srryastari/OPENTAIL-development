@@ -55,6 +55,9 @@ for(const required of [
   'frame.brightness.coerceIn(0, 24)', '0, 5', 'ble.showFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
+assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
+       compose.includes('Caption(bleMessage.value, t)'),
+       'Connection status and transient diagnostics must remain separate');
 assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
        compose.includes('frame.colorAt(first + i)') &&
        compose.includes('First visible pixel') &&
