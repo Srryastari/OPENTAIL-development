@@ -135,8 +135,11 @@ final class NativeProject {
         try {
             if (input.length() > 2000000) return false;
             JSONObject candidate = validated(new JSONObject(input));
+            JSONObject previous = data;
             data = candidate;
-            return save();
+            if (save()) return true;
+            data = previous; // a failed disk commit must not replace the current project
+            return false;
         } catch (Exception ex) { return false; }
     }
 
@@ -180,7 +183,8 @@ final class NativeProject {
         }catch(JSONException e){return false;}
     }
     synchronized boolean clearPixelColor(String id,int pixel) {
-        if(indexOfZone(id)<0||pixel<0)return false;
+        int zoneIndex=indexOfZone(id);
+        if(zoneIndex<0 || pixel<0 || pixel>=zone(zoneIndex).optInt("length",0)) return false;
         JSONObject all=data.optJSONObject("selectedPixels");
         JSONObject entries=all==null?null:all.optJSONObject(id);
         if(entries==null)return true;
