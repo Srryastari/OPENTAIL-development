@@ -2450,6 +2450,35 @@ static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
 }
 int main() {
+
+    /* Exhaustively compare all 60 pinned gradient tables against source
+     * loadDynamicGradientPalette and verbatim ColorFromPalette sampling. */
+    unsigned gradient_samples=0u;
+    for(unsigned id=13u;id<=72u;id++) {
+      const CRGBPalette16 original=upstream_gradient_palette((uint8_t)id);
+      ot_wled_palette16_t built{};
+      if(!ot_wled_palette_build((uint8_t)id,{123u,56u,9u},
+                                  {3u,88u,174u},{0u,0u,0u},&built))
+          std::abort();
+      for(unsigned ix=0u;ix<256u;ix++) {
+        for(unsigned bt:{0u,1u,32u,128u,255u}) {
+          for(unsigned blend=0u;blend<=2u;blend++) {
+            const uint32_t expected=ColorFromPalette(original,ix,(uint8_t)bt,
+                                                     (TBlendType)blend)&0xffffffu;
+            const uint32_t actual=pack(ot_wled_palette_sample(&built,(uint8_t)ix,
+                        (uint8_t)bt,(ot_wled_palette_blend_t)blend));
+            if(actual!=expected) {
+              std::fprintf(stderr,"Palette mismatch id=%u index=%u brightness=%u blend=%u upstream=%06X CORE=%06X\n",
+                            id,ix,bt,blend,(unsigned)expected,(unsigned)actual);
+              return 1;
+            }
+            gradient_samples++;
+          }
+        }
+      }
+    }
+    std::printf("WLED gradient catalog reference comparison passed: %u RGB samples across 60 palettes (13-72).\n",gradient_samples);
+
     unsigned checked=0;
     for(const RefCase& fx:refs) {
         const std::vector<unsigned> zone_lengths=
