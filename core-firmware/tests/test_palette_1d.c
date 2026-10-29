@@ -13,6 +13,7 @@ int main(void){
  for(uint8_t palette=2u;palette<=12u;palette++){
    assert(ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,palette));
    assert(ot_palette_1d_supported(OT_WLED_FLOW_STRIPE,palette));
+   assert(ot_palette_1d_supported(OT_WLED_GLITTER,palette));
    assert(!ot_palette_1d_supported(OT_WLED_WIPE,palette));
  }
  assert(!ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,1u));
