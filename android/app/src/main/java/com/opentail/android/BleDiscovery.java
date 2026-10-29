@@ -266,6 +266,12 @@ final class BleDiscovery {
     void onAdapterEnabled() { notifyStatus("Bluetooth on · ready to scan or reconnect"); }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
+    /** One UI action: use the stored owner key or enroll with physical BOOT once. */
+    void authorizeOrPair() {
+        if (!connected) { notifyStatus("Connect to CORE over Bluetooth first"); return; }
+        if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
+        else authorizeStored();
+    }
     /** Physical BOOT/GPIO0 button must be held after CORE starts, until read completes. */
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
