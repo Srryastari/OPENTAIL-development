@@ -109,7 +109,13 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SWEEP_RANDOM, "Sweep Random", "Sweep Random@!;;!",
      false, false, true, true, false},
     {OT_WLED_SOLID_GLITTER, "Solid Glitter", "Solid Glitter@,!;Bg,,Glitter color;;;m12=0",
-     true, true, false, true, false}
+     true, true, false, true, false},
+    {OT_WLED_CHASE_RANDOM, "Chase Random", "Chase Random@!,Width;!,,!;!",
+     true, true, true, true, false},
+    {OT_WLED_STREAM, "Stream", "Stream@!,Width;;!",
+     false, false, true, true, false},
+    {OT_WLED_STREAM2, "Stream 2", "Stream 2@!,Width;;!",
+     false, false, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -970,6 +976,107 @@ static void fx_solid_glitter(const ot_wled_fx_config_t *cfg,
         pixels[fx_rand_index(state,count)]=glitter;
 }
 
+/*
+ * Pinned FX.cpp mode_chase_random(): use the same chase geometry, but
+ * choose distinct circular wheel indices at each wrap-around.
+ */
+static void chase_random_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    const uint16_t counter=(uint16_t)(now*((uint32_t)(cfg->speed>>2)+1u));
+    const size_t a=((uint32_t)counter*(uint32_t)count)>>16;
+    if(a<state->step) {
+        state->aux1=state->aux0;
+        state->aux0=fx_new_wheel(state,(uint8_t)state->aux0);
+    }
+    state->step=(uint32_t)a;
+    const size_t width=1u+(((uint32_t)cfg->intensity*(uint32_t)count)>>10);
+    const ot_wled_rgb_t base=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
+    const ot_wled_rgb_t old=scaled(wheel_rgb((uint8_t)state->aux1),cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=i>=a?old:base;
+    for(size_t i=0;i<width;i++)pixels[(a+i)%count]=fg;
+    for(size_t i=0;i<width;i++)pixels[(a+width+i)%count]=fg;
+}
+
+/* Pinned FX.cpp mode_running_random() and its original 16-bit LCG.
+ * The initial hw_random seed is represented by CORE's zone-local RNG. */
+static void stream_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         uint32_t old_call,ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=25u+3u*(255u-(uint32_t)cfg->speed);
+    const uint32_t it=now/cycle;
+    if(old_call==0u)state->aux0=(uint16_t)fx_prng(state);
+    const unsigned size=((255u-(unsigned)cfg->intensity)>>4)+1u;
+    uint16_t seed=state->aux0;
+    unsigned z=it%size;
+    bool new_zone=(z==0u && (it&65535u)!=state->aux1);
+    for(size_t rev=count;rev>0;rev--) {
+        const size_t i=rev-1u;
+        if(new_zone || z>=size) {
+            const unsigned last=seed>>8;
+            int diff=0;
+            unsigned attempts=0u;
+            do {
+                seed=(uint16_t)((uint32_t)seed*2053u+13849u);
+                diff=(int)(seed>>8)-(int)last;
+            } while(diff<42 && diff>-42 && ++attempts<65536u);
+            if(new_zone) {
+                state->aux0=seed;
+                new_zone=false;
+            }
+            z=0;
+        }
+        pixels[i]=scaled(wheel_rgb((uint8_t)(seed>>8)),cfg->brightness);
+        z++;
+    }
+    state->aux1=(uint16_t)it;
+}
+/* Pinned prng.h random16(): seed = seed*3001+31683; seed ^= seed>>7.
+ * mode_random_chase() installs a local seed for repeatable strip patterns. */
+static uint16_t stream2_next(uint16_t *seed) {
+    uint16_t n=(uint16_t)((uint32_t)(*seed)*3001u+31683u);
+    n^=(uint16_t)(n>>7);
+    *seed=n;
+    return n;
+}
+static uint8_t stream2_random8(uint16_t *seed) {
+    return (uint8_t)stream2_next(seed);
+}
+static uint8_t stream2_bounded(uint16_t *seed,uint8_t bound) {
+    return (uint8_t)(((uint16_t)stream2_random8(seed)*bound)>>8);
+}
+static void stream2_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          uint32_t old_call,ot_wled_rgb_t *pixels,
+                          size_t count) {
+    if(old_call==0u) {
+        const uint8_t r=fx_rand8(state,256),g=fx_rand8(state,256),
+                      b=fx_rand8(state,256);
+        state->step=((uint32_t)r<<16)|((uint32_t)g<<8)|b;
+        state->aux0=(uint16_t)fx_prng(state);
+    }
+    const uint32_t it=now/(25u+3u*(255u-(uint32_t)cfg->speed));
+    uint32_t color=state->step;
+    uint16_t seed=state->aux0;
+    for(size_t rev=count;rev>0u;rev--) {
+        const size_t i=rev-1u;
+        const uint8_t r=stream2_bounded(&seed,6u)!=0u?
+             (uint8_t)(color>>16):stream2_random8(&seed);
+        const uint8_t g=stream2_bounded(&seed,6u)!=0u?
+             (uint8_t)(color>>8):stream2_random8(&seed);
+        const uint8_t b=stream2_bounded(&seed,6u)!=0u?
+             (uint8_t)color:stream2_random8(&seed);
+        color=((uint32_t)r<<16)|((uint32_t)g<<8)|b;
+        pixels[i]=scaled((ot_wled_rgb_t){r,g,b},cfg->brightness);
+        if(i==count-1u&&state->aux1!=(uint16_t)it) {
+            state->step=color;
+            state->aux0=seed;
+        }
+    }
+    state->aux1=(uint16_t)it;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -981,6 +1088,18 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_CHASE_RANDOM) {
+        chase_random_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_STREAM) {
+        stream_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_STREAM2) {
+        stream2_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_WIPE_RANDOM ||
        cfg->effect_id==OT_WLED_SWEEP_RANDOM) {
         fx_random_wipe(cfg,state,time_ms,call,pixels,count,
