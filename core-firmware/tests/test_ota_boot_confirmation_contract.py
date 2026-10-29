@@ -59,6 +59,16 @@ assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index("xTask
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
 assert "bool ot_ble_start(void)" in ble
 assert "bool ot_ble_radio_ever_ready(void)" in ble
+# Physical enrollment must not read GPIO0 if its input configuration failed.
+# Preserve existing-owner HMAC connectivity; only new key disclosure fails closed.
+assert "static bool boot_enrollment_ready=false;" in ble
+enroll=ble.split("static int owner_enroll_read(",1)[1].split("static int owner_challenge_read(",1)[0]
+assert "conn!=active_conn||!boot_enrollment_ready||gpio_get_level(GPIO_NUM_0)!=0" in enroll
+start_ble=ble.split("bool ot_ble_start(void){",1)[1].split("#else",1)[0]
+assert "const esp_err_t boot_err=gpio_config(&boot);" in start_ble
+assert "boot_enrollment_ready=boot_err==ESP_OK;" in start_ble
+assert 'ot_st_set_fault("BLE BOOT enrollment button unavailable");' in start_ble
+assert 'boot_enrollment_ready?"available":"disabled"' in start_ble
 assert "__atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE)" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&ble_radio_ever_ready,true")
