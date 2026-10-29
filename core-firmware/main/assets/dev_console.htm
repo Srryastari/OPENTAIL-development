@@ -26,7 +26,7 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <div class="bar"><button class="primary" id="refresh" onclick="refreshAll()">Refresh controller</button><button class="danger" id="stop" onclick="stopAll()">Stop ALL tests</button><span id="connection" class="status" role="status">Connecting…</span></div>
 </header>
 <nav aria-label="Developer tools">
-<a href="#overview">Overview</a><a href="#events">Startup / Shutdown</a><a href="#effects">Effects</a><a href="#inputs">Triggers</a><a href="#outputs">Outputs</a><a href="#statusled">Status LED</a><a href="#api">API / Diagnostics</a>
+<a href="#overview">Overview</a><a href="#lighting">Lighting Tests</a><a href="#events">Startup / Shutdown</a><a href="#effects">Effects</a><a href="#inputs">Triggers</a><a href="#outputs">Outputs</a><a href="#statusled">Status LED</a><a href="#api">API / Diagnostics</a>
 </nav>
 <main>
 <section id="overview">
@@ -37,7 +37,7 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <div class="metric"><span>Physical input mask</span><b id="mask">—</b></div>
 <div class="metric"><span>Show running</span><b id="show">—</b></div>
 <div class="metric"><span>Outputs ready</span><b id="ready">—</b></div>
-<div class="metric"><span>Free memory</span><b id="memory">—</b></div>
+<div class="metric"><span>Output refreshes</span><b id="refreshes">—</b></div>
 </div>
 <div class="grid" style="margin-top:14px">
 <div class="card"><h3>Live status</h3><pre id="statusJson">No data yet</pre></div>
@@ -45,6 +45,35 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 </div>
 </section>
 
+<section id="lighting">
+<h2>Native lighting &amp; short demos</h2>
+<div class="grid">
+<div class="card"><h3>Native Show</h3>
+<small>Exercises the CORE five-mode bench show engine, not the effect-ID catalog. Physical triggers still override their own zones.</small>
+<div class="fields">
+<label>Mode<select id="showMode"><option value="solid">Solid</option><option value="chase">Chase</option><option value="breathe">Breathe</option><option value="wipe">Wipe</option><option value="rainbow">Rainbow</option></select></label>
+<label>Output<select id="showChain"><option value="both">Both</option><option value="left">Output 1</option><option value="right">Output 2</option></select></label>
+<label>Color<input id="showColor" type="color" value="#ff0000"></label>
+<label>Brightness<input id="showBri" type="number" min="0" max="32" value="16"></label>
+<label>Speed (0–100)<input id="showSpeed" type="range" min="0" max="100" value="50"></label>
+<label>TTL (ms)<input id="showTtl" type="number" min="1000" max="60000" value="15000"></label>
+</div>
+<div class="bar"><button class="primary" onclick="nativeShow()">Start native show</button><button onclick="stopShow()">Stop show</button></div>
+<pre id="nativeResult">No show requested</pre>
+</div>
+<div class="card"><h3>Pixel demo</h3>
+<small>Legacy short bench demo, bounded to ten seconds. No persistent changes.</small>
+<div class="fields">
+<label>Mode<select id="demoMode"><option value="solid">Solid</option><option value="chase">Chase</option><option value="off">Off</option></select></label>
+<label>Color<input type="color" id="demoColor" value="#00ff40"></label>
+<label>Brightness<input type="number" id="demoBri" min="0" max="32" value="12"></label>
+<label>TTL (ms)<input id="demoTtl" type="number" min="100" max="10000" value="2000"></label>
+</div>
+<div class="bar"><button onclick="demo()">Run demo</button><button class="danger" onclick="stopAll()">Stop ALL</button></div>
+<pre id="demoResult">No demo requested</pre>
+</div>
+</div>
+</section>
 <section id="events">
 <h2>Startup &amp; Shutdown</h2>
 <div class="grid">
@@ -116,6 +145,8 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <small>Tests the onboard indicator only; does not issue a real vehicle fault or change external pixels. Test automatically expires after five seconds.</small>
 <div class="bar"><button class="primary" onclick="statusRgb('rainbow')">Rainbow · 5 seconds</button><button onclick="statusRgb('stop')">Stop / Restore</button></div>
 <pre id="ledResult">Ready</pre>
+<h3>Indicator session simulation</h3><small>Developer-only. Forces Connected/Disconnected status indication, without altering actual BLE authorization. Real BLE connection events may override it.</small>
+<div class="bar"><button onclick="sessionLed(true)">Show connected</button><button onclick="sessionLed(false)">Show disconnected</button></div>
 </div><div class="card"><h3>Status LED telemetry</h3><pre id="ledJson">—</pre><button onclick="readLed()">Refresh indicator</button></div></div>
 </section>
 
@@ -149,12 +180,12 @@ async function request(path,method='GET',body){
 }
 async function act(out,path,body){$(out).textContent='Sending…';try{const data=await request(path,'POST',body);$(out).textContent=pretty(data);return data}catch(e){$(out).textContent='Error: '+e.message;return null}}
 async function readApi(path){$('apiResult').textContent='Reading…';try{$('apiResult').textContent=pretty(await request(path))}catch(e){$('apiResult').textContent=e.message}}
-function measure(status){$('fw').textContent=status.firmware||status.firmware_version||status.version||'CORE';$('fps').textContent=status.measured_fps??'—';$('mask').textContent=status.input_mask??status.physical_mask??'—';$('ready').textContent=status.outputs_ready===undefined?'—':String(status.outputs_ready);$('show').textContent=status.native_show_active??status.show_active??'—';$('memory').textContent=status.free_heap_bytes??status.free_heap??'—'}
+function measure(status,show){$('fw').textContent=status.version||'CORE';$('fps').textContent=status.measured_fps??'—';$('mask').textContent=status.input_mask??'—';$('ready').textContent=show.outputs_ready===undefined?'—':String(show.outputs_ready);$('show').textContent=status.native_show_active??'—';$('refreshes').textContent=Array.isArray(status.output_refreshes)?status.output_refreshes.join(' / '):'—'}
 async function refreshStatus(){
  try{
  const [status,show,led]=await Promise.all([
  request('/api/v1/status'),request('/api/v1/show'),request('/api/v1/status-led')]);
- measure(status);$('statusJson').textContent=pretty(status);
+ measure(status,show);$('statusJson').textContent=pretty(status);
  $('showJson').textContent=pretty(show);$('ledJson').textContent=pretty(led);
  $('connection').textContent='CORE responding · bench AP';return status
  }catch(e){$('connection').textContent='Connection error: '+e.message;return null}
@@ -168,7 +199,7 @@ async function loadCatalog(){const node=$('fxId');try{
  $('fxResult').textContent='Firmware reports '+catalog.length+' modes; original and compatibility effects are distinguished.'
  }catch(e){$('fxResult').textContent='Catalog error: '+e.message}}
 let outputsSnapshot=null,triggerSnapshot=null;
-async function loadOutputs(){try{outputsSnapshot=await request('/api/v1/outputs');$('outputSummary').textContent=pretty(outputsSnapshot);chooseOutput();}catch(e){$('outputResult').textContent=e.message}}
+async function loadOutputs(){try{outputsSnapshot=await request('/api/v1/outputs');$('outputSummary').textContent=pretty(outputsSnapshot);$('summary').textContent=outputsSnapshot.outputs.map(o=>'Output '+(o.index+1)+': '+o.name+' · '+o.pixels+' pixels · '+o.color_order+' · '+o.zone_count+' zones').join('\n');chooseOutput();}catch(e){$('outputResult').textContent=e.message}}
 function chooseOutput(){if(!outputsSnapshot?.outputs?.length)return;const i=integer('outputIndex',0,1);const v=outputsSnapshot.outputs[i];if(!v)return;
  const edit={index:v.index,name:v.name,pixels:v.pixels,color_order:v.color_order,calibration:v.calibration,
  zones:v.zones.map(z=>({name:z.name,pixels:z.pixels,role:z.role}))};
@@ -187,6 +218,9 @@ const ok=await act('triggerResult','/api/v1/triggers',obj);
 if(ok){await loadTriggers();$('triggerResult').textContent='Saved. Controller map read back.'}
 }
 async function refreshAll(){await Promise.all([refreshStatus(),loadOutputs(),loadTriggers(),loadCatalog()])}
+async function nativeShow(){try{const [r,g,b]=rgb('showColor');const body={effect:$('showMode').value,chain:$('showChain').value,r,g,b,brightness:integer('showBri',0,32),speed:integer('showSpeed',0,100),ttl_ms:integer('showTtl',1000,60000)};await act('nativeResult','/api/v1/show/start',body);await refreshStatus()}catch(e){$('nativeResult').textContent=e.message}}
+async function demo(){try{const [r,g,b]=rgb('demoColor');const body={mode:$('demoMode').value,r,g,b,brightness:integer('demoBri',0,32),ttl_ms:integer('demoTtl',100,10000)};await act('demoResult','/api/v1/demo',body);await refreshStatus()}catch(e){$('demoResult').textContent=e.message}}
+async function sessionLed(connected){await act('ledResult','/api/v1/status-led/session',{connected});await readLed()}
 async function stopAll(){const x=await act('simResult','/api/v1/stop',{});if(x){$('eventResult').textContent='Global Stop accepted; physical triggers still take precedence.';$('fxResult').textContent='Global Stop accepted.';await refreshStatus()}}
 async function stopShow(){await act('fxResult','/api/v1/show/stop',{});await refreshStatus()}
 async function previewEvent(effect){try{
