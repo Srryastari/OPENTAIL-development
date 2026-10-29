@@ -42,6 +42,14 @@ assert "pixel_buffer_budget_per_output" in core
 assert "max_configurable_pixels_per_output" in core
 assert "configured_output_zones" in core
 assert 'active_pixels_per_output' in core
+# FPS diagnostics are written by render and read by the HTTP task.
+# Reuse the existing critical section for the 32-bit telemetry snapshot.
+status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split("static esp_err_t caps_get(",1)[0]
+assert "observed_fps=measured_fps;" in status.split("portEXIT_CRITICAL(&state_lock);",1)[0]
+assert "(unsigned long)observed_fps" in status
+assert "(unsigned long)measured_fps" not in status
+assert "measured_fps=fps;" in core
+assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n               portEXIT_CRITICAL(&state_lock);" in core
 assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target FPS"
 assert 'fps_policy' in core and 'adaptive_load_53_to_120' in core
 assert 'ot_fps_pacer_observe(&pacer,work_us,longest_pixels)' in core
