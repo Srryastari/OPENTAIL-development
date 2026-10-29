@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
@@ -476,6 +477,65 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
     }
+    // Pure native designer control. Uses the same neutral pills, search field,
+    // and OLED/white colors as the locked interface. Never invent CORE pixels.
+    @Composable
+    private fun PalettePicker(label: String, value: Int, t: Tone, onSelect: (Int) -> Unit) {
+        var browsing by rememberSaveable(label) { mutableStateOf(false) }
+        var search by rememberSaveable(label) { mutableStateOf("") }
+        val chosen = NativePaletteEngine.lookup(project.raw(), value)
+        Caption(label + " · " + chosen.name + " (#" + chosen.id + ")", t)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PaletteSwatch(chosen, t)
+            Pill(if (browsing) "Close palettes" else "Browse palettes", t) {
+                browsing = !browsing
+            }
+        }
+        if (browsing) {
+            Field(search, "Search palette name or ID", t) { search = it.take(64) }
+            val matching = remember(search, revision.intValue) {
+                (0..NativePaletteEngine.MAX_ID).filter { id ->
+                    val name = NativePaletteEngine.lookup(project.raw(), id).name
+                    name.contains(search.trim(), ignoreCase = true) ||
+                        id.toString() == search.trim()
+                }
+            }
+            LazyColumn(Modifier.fillMaxWidth().height(228.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                items(matching, key = { it }) { id ->
+                    val palette = NativePaletteEngine.lookup(project.raw(), id)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(palette.name + " · " + id, color = t.fg, fontSize = 13.sp,
+                            maxLines = 1, modifier = Modifier.weight(1f))
+                        PaletteSwatch(palette, t)
+                        Pill(if (value == id) "Selected" else "Select", t, value == id) {
+                            onSelect(id)
+                            browsing = false
+                        }
+                    }
+                }
+            }
+        }
+        Caption("Only palettes with supplied fixed RGB stops show a gradient. " +
+            "Unknown or dynamic palettes show Preview unavailable; the LED strip " +
+            "still requires an actual CORE render frame.", t)
+    }
+    @Composable
+    private fun PaletteSwatch(palette: NativePalette, t: Tone) {
+        val stops = palette.stops
+        if (stops == null) {
+            Text("Preview unavailable", color = t.muted, fontSize = 11.sp,
+                maxLines = 1)
+        } else {
+            Canvas(Modifier.width(92.dp).height(27.dp)
+                .clip(RoundedCornerShape(12.dp)).background(t.raised)) {
+                drawRect(brush = Brush.horizontalGradient(*stops.toTypedArray()))
+            }
+        }
+    }
+
     @Composable
     private fun PixelStrip(t: Tone, segments: List<Pair<Int, Color>>) {
         val length = segments.sumOf { it.first.coerceAtLeast(0) }.coerceAtLeast(1)
@@ -598,6 +658,9 @@ class ComposeMainActivity : ComponentActivity() {
         var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
         var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
         var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
+        var paletteId by rememberSaveable {
+            mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
+        }
         Panel(t) {
             Caption(if (offlinePreview.value)
                 "Offline preview · design changes stay local until you leave Show Modes."
@@ -634,6 +697,11 @@ class ComposeMainActivity : ComponentActivity() {
                 Panel(t) {
                     Field(query, "Search effects", t) { query = it }
                     Caption("Selected: " + NativeEffectCatalog.byId(effect).name, t)
+                    PalettePicker("Palette", paletteId, t) { id ->
+                        paletteId = id
+                        prefs.edit().putInt("paletteId", id).apply()
+                        coreFrame.value = null // palette is NOT in the current BLE FX payload
+                    }
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply(); previewCurrentEffect(effect) }
@@ -648,8 +716,10 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                     Caption(if (offlinePreview.value)
                         "Offline mode: edits update only this local design; no CORE LED commands."
-                    else "Edits update the design and authorized CORE effect immediately. " +
-                        "Exact animation preview requires a CORE frame snapshot capability.", t)
+                    else "Supported color/speed/intensity edits preview over authorized BLE. " +
+                        "Palette selection is currently local-only until CORE advertises " +
+                        "a palette-capable edit protocol; exact animation still requires " +
+                        "a CORE frame snapshot.", t)
                 }
                 // Only compose visible effect rows; never eagerly render 140
                 // cards inside the parent scroll (expensive on entry devices).
@@ -681,6 +751,7 @@ class ComposeMainActivity : ComponentActivity() {
         val opts = project.sequenceOptions()
         var editingStep by remember { mutableIntStateOf(-1) }
         var editedDuration by remember { mutableStateOf("") }
+        var editingPaletteStep by remember { mutableIntStateOf(-1) }
         Panel(t) {
             Caption("Playback settings are saved in the v4 design; they never command CORE.", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -696,11 +767,14 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if (opts.optBoolean("sharedPaletteEnabled", false)) {
-                ValueSlider("Shared palette", opts.optInt("sharedPaletteId", 0), 255, t) { n ->
-                    opts.put("sharedPaletteId", n)
+                PalettePicker("Shared sequence palette",
+                    opts.optInt("sharedPaletteId", 0), t) { id ->
+                    opts.put("sharedPaletteId", id)
                     project.save()
                     refresh()
                 }
+                Caption("Shared palette applies to compatible steps when the sequence is " +
+                    "deployed. Disabling it restores each step's saved palette.", t)
             }
         }
         Panel(t) {
@@ -709,7 +783,9 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("+ Add selected effect", t, true) {
                 if (steps.length() < NativeProject.MAX_SEQUENCE) {
                     steps.put(JSONObject().put("fx", NativeEffectCatalog.byId(selectedEffect).name)
-                        .put("ms", 1500))
+                        .put("ms", 1500)
+                        .put("settings", JSONObject()
+                            .put("pal", prefs.getInt("paletteId", 0).coerceIn(0, 255))))
                     project.setSequence(steps); refresh()
                 }
             }
@@ -727,7 +803,24 @@ class ComposeMainActivity : ComponentActivity() {
                         editingStep = i
                         editedDuration = item.optInt("ms", 1500).toString()
                     }
+                    Pill("Palette", t) {
+                        editingPaletteStep = if (editingPaletteStep == i) -1 else i
+                    }
                     Pill("Remove", t) { removeSequence(i) }
+                }
+                if (editingPaletteStep == i) {
+                    val configured = item.optJSONObject("settings")?.optInt("pal", 0) ?: 0
+                    PalettePicker("Step " + (i + 1) + " palette", configured, t) { id ->
+                        val edited = sequenceList()
+                        val settings = edited[i].optJSONObject("settings")
+                            ?: JSONObject().also { edited[i].put("settings", it) }
+                        settings.put("pal", id)
+                        updateSequence(edited)
+                    }
+                    if (opts.optBoolean("sharedPaletteEnabled", false)) {
+                        Caption("Shared palette is active; step palette remains saved " +
+                            "and returns when the shared option is off.", t)
+                    }
                 }
             }
         }
