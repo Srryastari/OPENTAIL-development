@@ -79,6 +79,7 @@ static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
 static bool ble_startup_ready=false; /* Set once before render task creation. */
+static bool http_startup_ready=false; /* Diagnostics are required to confirm a new OTA image. */
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
@@ -1155,10 +1156,14 @@ static esp_err_t legacy_dev_redirect(httpd_req_t *r){
     httpd_resp_set_hdr(r,"Location","/dev");
     return httpd_resp_sendstr(r,"Controller tools have moved to /dev. OpenTail Studio is a separate design app.");
 }
-static void http_start(void) {
+static bool http_start(void) {
     httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;cfg.recv_wait_timeout=30;
     httpd_handle_t server=NULL;
-    ESP_ERROR_CHECK(httpd_start(&server,&cfg));
+    esp_err_t e=httpd_start(&server,&cfg);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE HTTP server startup failed: %s",esp_err_to_name(e));
+        return false;
+    }
     const httpd_uri_t routes[]={
         {.uri="/",.method=HTTP_GET,.handler=dev_get},
         {.uri="/dev",.method=HTTP_GET,.handler=dev_get},
@@ -1187,7 +1192,15 @@ static void http_start(void) {
         {.uri="/api/v1/triggers",.method=HTTP_POST,.handler=tm_post},
         {.uri="/api/v1/outputs",.method=HTTP_POST,.handler=om_post}
     };
-    for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);++i) ESP_ERROR_CHECK(httpd_register_uri_handler(server,&routes[i]));
+    for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);++i){
+        e=httpd_register_uri_handler(server,&routes[i]);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"CORE HTTP route %s failed: %s",routes[i].uri,esp_err_to_name(e));
+            (void)httpd_stop(server);
+            return false;
+        }
+    }
+    return true;
 }
 static void wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
@@ -1509,7 +1522,7 @@ static void led_task(void *p) {
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && ble_startup_ready && !boot_frame_verified)
+           if(full_frame && ble_startup_ready && http_startup_ready && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
@@ -1578,7 +1591,8 @@ void app_main(void) {
     if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
-    http_start();
+    http_startup_ready=http_start();
+    if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
         if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
