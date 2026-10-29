@@ -273,7 +273,11 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,211,p,1));
     assert(eq(p[0],c.foreground));
 
-    c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
+    /* Fireworks (ID 42) has since been implemented: reject an actually
+     * unknown ID instead of treating a supported source effect as invalid. */
+    c.effect_id=OT_WLED_FIREWORKS;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    c.effect_id=UINT16_MAX;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
     assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.palette_id=0;c.frame_time_ms=0;assert(!ot_wled_fx_render(&c,&s,0,p,31));
