@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[29]={0};
-    assert(ot_wled_fx_supported_ids(ids,29)==29);
+    uint16_t ids[34]={0};
+    assert(ot_wled_fx_supported_ids(ids,34)==34);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -20,7 +20,9 @@ int main(void) {
            ids[16]==8 && ids[17]==9 && ids[18]==14 &&
            ids[19]==24 && ids[20]==26 &&
            ids[21]==25 && ids[22]==28 && ids[23]==30 && ids[24]==33 &&
-           ids[25]==50 && ids[26]==54 && ids[27]==55 && ids[28]==56);
+           ids[25]==50 && ids[26]==54 && ids[27]==55 && ids[28]==56 &&
+           ids[29]==2 && ids[30]==15 && ids[31]==16 &&
+           ids[32]==52 && ids[33]==84);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -376,16 +378,46 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,0,p,16));
     assert(eq(p[0],c.foreground) && eq(p[15],c.foreground));
 
+    /* Breathe: 30/255 base luminance from source, with the pinned integer
+     * Bhaskara sine curve increasing the blend at one-quarter cycle. */
+    c.effect_id=OT_WLED_BREATHE;
+    c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    c.brightness=255;c.speed=0;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){30,0,225}));
+    assert(ot_wled_fx_render(&c,&s,2621,p,16));
+    assert(p[0].r>230 && p[0].b<25);
+
+    /* Running + Saw preserve WLED's integer sine and saw-phase choices.
+     * Speed zero freezes the wave, independent of output length. */
+    c.effect_id=OT_WLED_RUNNING_LIGHTS;c.speed=0;c.intensity=0;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],p[15]));
+    c.effect_id=OT_WLED_SAW;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(p[0].r>230 && p[0].b<25);
+    c.effect_id=OT_WLED_RUNNING_DUAL;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],p[15]));
+    c.effect_id=OT_WLED_SOLID_PATTERN_TRI;
+    c.intensity=32;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.foreground));
+    assert(eq(p[2],c.background) && eq(p[3],c.background));
+    assert(eq(p[4],(ot_wled_rgb_t){0,0,0}));
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<29;k++) {
+    for(size_t k=0;k<34;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 29 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 34 modes, timing, zone limits and validation passed.");
     return 0;
 }
