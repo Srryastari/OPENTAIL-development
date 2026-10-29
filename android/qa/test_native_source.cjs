@@ -84,7 +84,8 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          'Native navigation icons must preserve locked meanings without emoji or WebView');
 assert(bleSource.includes('frameCapture.cancel(); // GATT close may never produce a disconnect callback') &&
        (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|frameCapture.busy\(\)\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
-       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller'),
+       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       compose.includes('captureMessage.value = "CORE frame not captured"'),
        'Clear stale CORE output UI and prevent conflicting GATT operations');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
