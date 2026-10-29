@@ -49,8 +49,8 @@ import org.json.JSONObject
  * BLE GATT transport and codec stay available without conversion or WebView.
  * Strictly local authoring; only explicit, confirmed Settings controls send BLE.
  *
- * This class is intentionally NOT the launcher until all functional parity
- * checks and on-phone visual acceptance pass. Old MainActivity stays runnable.
+ * Sole Android launcher. On-phone visual and BLE acceptance are release gates,
+ * not reasons to ship a second, divergent UI implementation.
  */
 class ComposeMainActivity : ComponentActivity() {
     private val pages = listOf("Home", "Show Modes", "Layout", "Triggers", "Auto Events", "Settings")
@@ -995,14 +995,6 @@ class ComposeMainActivity : ComponentActivity() {
             Caption(outputMessage.value, t)
         }
         HardwareOutputEditor(t)
-        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-            Panel(t) {
-                Caption("Developer comparison only. The Kotlin/Compose app remains the default.", t)
-                Pill("Open previous Java UI · Debug", t) {
-                    startActivity(Intent(this@ComposeMainActivity, MainActivity::class.java))
-                }
-            }
-        }
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
