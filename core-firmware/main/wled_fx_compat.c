@@ -201,7 +201,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_PHASED, "Phased", "Phased@!,!;!,!;!",
      true, true, true, true, false},
     {OT_WLED_PHASED_NOISE, "Phased Noise", "Phased Noise@!,!;!,!;!",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_PRIDE_2015, "Pride 2015", "Pride 2015@!;;",
+     false, false, true, false, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2217,6 +2219,67 @@ static uint16_t fx_beatsin88(uint16_t bpm88,uint16_t upper,uint32_t now) {
     const uint16_t sine=(uint16_t)((int32_t)wled_sin16(phase)+32768);
     return (uint16_t)(((uint32_t)sine*(1u+(uint32_t)upper))>>16);
 }
+/* Pinned fastled_slim.cpp hsv2rgb_rainbow() saturation / value path
+ * reuses the existing exact hue wheel; hue is provided at (hue8<<8).
+ * gamma32inv is identity when gammaCorrectCol is disabled, as it is in
+ * CORE's current gamma-off RGB path. */
+static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value) {
+    ot_wled_rgb_t c=wheel_rgb(hue);
+    if(sat!=255u) {
+        if(sat==0u) {
+            c=(ot_wled_rgb_t){255u,255u,255u};
+        } else {
+            uint32_t desat=(uint32_t)(255u-sat);
+            desat=desat*desat;
+            const uint8_t floor=(uint8_t)(desat>>8);
+            const uint32_t factor=0xffffu-desat;
+            c.r=(uint8_t)(((c.r?((uint32_t)c.r*factor)>>16:0u)+floor));
+            c.g=(uint8_t)(((c.g?((uint32_t)c.g*factor)>>16:0u)+floor));
+            c.b=(uint8_t)(((c.b?((uint32_t)c.b*factor)>>16:0u)+floor));
+        }
+    }
+    if(value!=255u) {
+        if(value==0u) c=(ot_wled_rgb_t){0u,0u,0u};
+        else {
+            const uint32_t v=(uint32_t)value*value+512u;
+            c.r=(uint8_t)(c.r?(((uint32_t)c.r*v)>>16)+1u:0u);
+            c.g=(uint8_t)(c.g?(((uint32_t)c.g*v)>>16)+1u:0u);
+            c.b=(uint8_t)(c.b?(((uint32_t)c.b*v)>>16)+1u:0u);
+        }
+    }
+    return c;
+}
+
+/* FX.cpp mode_colorwaves_pride_base(true), no palette path, RGB gamma-off.
+ * Existing state->step/aux0 preserve WLED's per-zone pseudotime and hue.
+ * No random seed, buffers or external controller engine is introduced. */
+static void pride2015_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t duration=10u+(uint32_t)cfg->speed;
+    const uint8_t sat=(uint8_t)(220u+fx_beatsin88(87u,30u,now));
+    const unsigned depth=96u+fx_beatsin88(341u,128u,now);
+    const unsigned theta_inc=25u*256u+fx_beatsin88(203u,15u*256u,now);
+    const unsigned multiplier=23u+fx_beatsin88(147u,37u,now);
+    unsigned hue=state->aux0;
+    const unsigned hue_inc=1u+fx_beatsin88(113u,2999u,now);
+    uint32_t pseudo=state->step+duration*multiplier;
+    state->aux0=(uint16_t)((uint32_t)state->aux0+
+                           duration*(5u+fx_beatsin88(400u,4u,now)));
+    unsigned theta=pseudo;
+    for(size_t i=0;i<count;i++) {
+        hue+=hue_inc;
+        theta+=theta_inc;
+        const uint32_t sine=(uint32_t)((int32_t)wled_sin16((uint16_t)theta)+32768);
+        const uint32_t bright16=(sine*sine)>>16;
+        uint8_t bri=(uint8_t)((bright16*(uint32_t)depth)>>16);
+        bri=(uint8_t)(bri+255u-depth);
+        const ot_wled_rgb_t next=fx_hsv_rgb((uint8_t)(hue>>8),sat,bri);
+        pixels[i]=scaled(blend_colors(pixels[i],next,64u),cfg->brightness);
+    }
+    state->step=pseudo;
+}
+
 static ot_wled_rgb_t fx_hsv220(uint8_t hue) {
     ot_wled_rgb_t c=wheel_rgb(hue);
     const uint32_t desat=(255u-220u)*(255u-220u);
@@ -2664,6 +2727,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_PRIDE_2015) {
+        pride2015_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_PHASED ||
