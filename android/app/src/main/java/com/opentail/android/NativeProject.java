@@ -359,8 +359,34 @@ final class NativeProject {
     synchronized JSONObject sequenceOptions() { return data.optJSONObject("sequenceOptions"); }
     synchronized boolean setSequence(JSONArray steps) {
         if (steps.length() > MAX_SEQUENCE) return false;
-        try { data.put("sequence", steps);return save(); }
-        catch (JSONException e) { return false; }
+        JSONArray previous = data.optJSONArray("sequence");
+        try {
+            data.put("sequence", new JSONArray(steps.toString()));
+            if (save()) return true;
+        } catch (JSONException ignored) { }
+        // Failed writes must not leave an unsaved sequence in the live model.
+        try { data.put("sequence", previous == null ? new JSONArray() : previous); }
+        catch (JSONException ignored) { }
+        return false;
+    }
+    synchronized boolean updateSequenceOption(String key, Object value) {
+        boolean palette = "sharedPaletteId".equals(key);
+        if (palette) {
+            if (!(value instanceof Integer) || (Integer)value < 0 || (Integer)value > 255)
+                return false;
+        } else if (!("shuffleLoop".equals(key) || "repeat".equals(key) ||
+                     "favoritesOnly".equals(key) || "sharedPaletteEnabled".equals(key)) ||
+                   !(value instanceof Boolean)) return false;
+        JSONObject previous = data.optJSONObject("sequenceOptions");
+        try {
+            JSONObject next = previous == null ? new JSONObject() : new JSONObject(previous.toString());
+            next.put(key, value);
+            data.put("sequenceOptions", next);
+            if (save()) return true;
+        } catch (JSONException ignored) { }
+        try { data.put("sequenceOptions", previous == null ? new JSONObject() : previous); }
+        catch (JSONException ignored) { }
+        return false;
     }
     synchronized JSONArray presets() { return data.optJSONArray("savedPresets"); }
     synchronized boolean setPresets(JSONArray presets) {
