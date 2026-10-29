@@ -16,7 +16,7 @@ def section(start, end):
     assert start in core and end in core, f"Missing endpoint: {start}"
     return core.split(start, 1)[1].split(end, 1)[0]
 
-stop = section("static esp_err_t stop_post(httpd_req_t *r){", "static const char page[]=")
+stop = section("static esp_err_t stop_post(httpd_req_t *r) {", "static const char page[]=")
 for required in (
     "demo.mode=OT_DEMO_OFF",
     "sim_mask=0",
