@@ -161,7 +161,10 @@ class ComposeMainActivity : ComponentActivity() {
                     1 -> ShowModesPage(t)
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
-                    4 -> AutoEventsPage(t)
+                    4 -> AutoEventsPage(t) { effectId ->
+                        prefs.edit().putInt("effectId", effectId).apply()
+                        page = 1
+                    }
                     5 -> SettingsPage(t)
                 }
                 Spacer(Modifier.height(24.dp))
@@ -653,29 +656,64 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun AutoEventsPage(t: Tone) {
+    private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {
         Title("Auto Events", t)
-        Caption("Optional startup/shutdown events; preview and configuration are local.", t)
+        Caption("Startup and shutdown are optional offline designs. CORE alone controls real ignition transitions.", t)
+        var choosing by remember { mutableStateOf<String?>(null) }
+        var search by remember { mutableStateOf("") }
         listOf("Startup", "Shutdown").forEach { key ->
-            val trigger = project.trigger(key)
+            val event = project.trigger(key)
             Panel(t) {
                 Text(key, color = t.fg, fontWeight = FontWeight.Bold)
-                val enabled = trigger.optBoolean("enabled", false)
+                val enabled = event.optBoolean("eventUiEnabled", false)
                 Pill(if (enabled) "Enabled ✓" else "Disabled", t, enabled) {
-                    trigger.put("enabled", !enabled);project.save();refresh()
+                    event.put("eventUiEnabled", !enabled)
+                    project.save()
+                    refresh()
                 }
-                val currentSpeed = trigger.optInt("speed", 60)
-                ValueSlider("Transition speed", currentSpeed, 255, t) {
-                    trigger.put("speed", it);project.save();refresh()
+                Caption("Animation · " + event.optString("eventFx", "Solid"), t)
+                Pill("Choose " + key + " animation", t) {
+                    choosing = key
+                    search = ""
                 }
-                Caption("Current animation: " + trigger.optString("pattern", "Solid"), t)
-                Pill("Materialize", t) {
-                    trigger.put("pattern", "Materialize Sparks");project.save();refresh()
+                val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
+                ValueSlider("Transition fade (ms)", fade, 5000, t) {
+                    event.put("eventUiFadeMs", it)
+                    project.save()
+                    refresh()
                 }
-                Pill("Smooth Fade", t) {
-                    trigger.put("pattern", "Smooth Fade");project.save();refresh()
+                val tenths = (event.optDouble("eventDuration", 2.0) * 10.0).toInt().coerceIn(2, 300)
+                ValueSlider("Duration (tenths of sec)", tenths, 300, t) {
+                    event.put("eventDuration", it.coerceAtLeast(2) / 10.0)
+                    project.save()
+                    refresh()
+                }
+                Pill("Preview offline", t) {
+                    val selected = NativeEffectCatalog.byName(event.optString("eventFx", "Solid"))
+                    previewEffect(selected.id)
                 }
             }
+        }
+        choosing?.let { key ->
+            AlertDialog(onDismissRequest = { choosing = null },
+                title = { Text("Select " + key + " animation") },
+                text = {
+                    Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Field(search, "Search effects", t) { search = it }
+                        NativeEffectCatalog.all()
+                            .filter { it.name.contains(search, ignoreCase = true) }
+                            .take(15).forEach { item ->
+                                Pill(item.name, t) {
+                                    project.trigger(key).put("eventFx", item.name)
+                                    project.save()
+                                    refresh()
+                                    choosing = null
+                                }
+                            }
+                    }
+                },
+                confirmButton = { Pill("Done", t, true) { choosing = null } })
         }
     }
     @Composable
