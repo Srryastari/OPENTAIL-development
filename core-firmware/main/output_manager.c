@@ -1,4 +1,5 @@
 #include "output_manager.h"
+#include "board_config.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -60,7 +61,7 @@ int ot_om_section(const ot_om_output_t *o,unsigned pixel){
 }
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout){
     if(!ot_om_valid(o)||!layout)return false;
-    *layout=(ot_layout_t){.chain_pixels=o->active_pixels,.brightness_cap=32u};
+    *layout=(ot_layout_t){.chain_pixels=o->active_pixels,.brightness_cap=OT_MAX_BRIGHTNESS};
     for(int i=0;i<o->zone_count;i++)layout->sections[i]=o->zones[i].pixels;
     return ot_layout_valid(layout);
 }
@@ -68,7 +69,7 @@ static ot_rgb_t scaled(unsigned r,unsigned g,unsigned b,unsigned v){
     return (ot_rgb_t){(uint8_t)((r*v+127)/255),(uint8_t)((g*v+127)/255),(uint8_t)((b*v+127)/255)};
 }
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness){
-    if(brightness>32u)brightness=32u;
+    if(brightness>OT_MAX_BRIGHTNESS)brightness=OT_MAX_BRIGHTNESS;
     switch(role){
         case OT_OM_PARK_BRAKE:
             if(mask&OT_SIG_BRAKE)return scaled(255,0,0,brightness);
@@ -127,8 +128,8 @@ ot_rgb_t ot_om_calibrate(ot_rgb_t c,const ot_om_output_t *cfg){
         unsigned n=(v[i]*cfg->rgb_gain[i]+127u)/255u;
         if(neutral)n=(n*cfg->white_gain[i]+127u)/255u;
         if(cfg->gamma_enabled){ /* mild gamma approximation, bounded and monotonic */
-            n=(n*n+16u)/32u;
-            if(n>32u)n=32u;
+            n=(n*n+OT_MAX_BRIGHTNESS/2u)/OT_MAX_BRIGHTNESS;
+            if(n>OT_MAX_BRIGHTNESS)n=OT_MAX_BRIGHTNESS;
         }
         v[i]=(uint8_t)n;
     }
