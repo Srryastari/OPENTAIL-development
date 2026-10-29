@@ -1307,6 +1307,7 @@ static void led_task(void *p) {
     }
     portENTER_CRITICAL(&state_lock);
     render_task_handle=self;
+    native_outputs_ready=true; /* RMT and frame timer initialized; ready to render. */
     portEXIT_CRITICAL(&state_lock);
     while(1){
        const int64_t frame_started_us=esp_timer_get_time();
@@ -1541,7 +1542,7 @@ void app_main(void) {
     const bool sampler_ready=xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
     if(!sampler_ready)ot_st_set_fault("physical input sampler could not start");
     bool outputs_ready=sampler_ready&&strip_init();
-    portENTER_CRITICAL(&state_lock);native_outputs_ready=outputs_ready;portEXIT_CRITICAL(&state_lock);
+    /* Do not advertise renderer readiness until led_task initializes its timer. */
     wifi_ap_init();
     om_write_mutex=xSemaphoreCreateMutex();
     if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
