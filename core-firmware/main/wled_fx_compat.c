@@ -1160,7 +1160,7 @@ static void icu_frame(const ot_wled_fx_config_t *cfg,
                     next=(uint16_t)(t+200u);
                     break;
                 }
-                /* Fall through exactly as upstream ICU when no blink. */
+                /* fall through */ /* ICU intentionally enters stage 1 when no blink. */
             case 1u:
                 next=(uint16_t)(t+500u+fx_rand_index(state,1000u));
                 stage++;
