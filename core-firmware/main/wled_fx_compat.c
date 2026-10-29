@@ -3,7 +3,8 @@
  * mode_static(), blink(), mode_blink(), mode_strobe(),
  * color_wipe(), mode_color_wipe(), mode_color_sweep(), mode_fade(),
  * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase(),
- * mode_static_pattern(), and mode_heartbeat().
+ * mode_static_pattern(), mode_heartbeat(), spots_base(),
+ * mode_spots(), mode_spots_fade(), and mode_percent().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -24,6 +25,12 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_THEATER, "Theater", "Theater@!,Gap size;!,!;!", true, true, true, true, false},
     {OT_WLED_STROBE, "Strobe", "Strobe@!;!,!;!;01",            true, true, true, false, false},
     {OT_WLED_SOLID_PATTERN, "Solid Pattern", "Solid Pattern@Fg size,Bg size;Fg,!;!;;pal=0",
+     true, true, true, true, false},
+    {OT_WLED_SPOTS, "Spots", "Spots@Spread,Width,,,,,Overlay;!,!;!", 
+     true, true, true, true, false},
+    {OT_WLED_SPOTS_FADE, "Spots Fade", "Spots Fade@Spread,Width,,,,,Overlay;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_PERCENT, "Percent", "Percent@!,% of fill,,,,One color;!,!;!",
      true, true, true, true, false},
     {OT_WLED_HEARTBEAT, "Heartbeat", "Heartbeat@!,!;!,!;!;01;m12=1",
      true, true, true, true, false}
@@ -183,6 +190,68 @@ static void heartbeat_frame(const ot_wled_fx_config_t *cfg,
     for (size_t i=0;i<count;i++)pixels[i]=c;
 }
 
+/*
+ * Pinned FX.cpp spots_base(), mode_spots(), mode_spots_fade().
+ * Uses source triangle-wave, per-zone positioning and 8-bit color_blend.
+ * Only the upstream default overlay=false and palette=0 are available.
+ */
+static void spots_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                        ot_wled_rgb_t *pixels,size_t count,bool fade) {
+    if (count==1u) { pixels[0]=scaled(cfg->foreground,cfg->brightness); return; }
+    const ot_wled_rgb_t fg=cfg->foreground,bg=cfg->background;
+    uint32_t threshold=(255u-(uint32_t)cfg->speed)<<8;
+    if (fade) {
+        const uint32_t counter=now*((uint32_t)(cfg->speed>>2)+8u);
+        const uint32_t triangle=wave16((uint16_t)counter);
+        threshold=(triangle>>1)+(triangle>>2);
+    }
+    const uint32_t max_zones=(uint32_t)count>>2;
+    const uint32_t zones=1u+(((uint32_t)cfg->intensity*max_zones)>>8);
+    const uint32_t zone_len=(uint32_t)count/zones;
+    const uint32_t offset=((uint32_t)count-zones*zone_len)>>1;
+    const ot_wled_rgb_t back=scaled(bg,cfg->brightness);
+    for (size_t i=0;i<count;i++) pixels[i]=back;
+    for (uint32_t z=0;z<zones;z++) {
+        const uint32_t pos=offset+z*zone_len;
+        for (uint32_t i=0;i<zone_len;i++) {
+            const uint16_t counter=(uint16_t)(((uint64_t)i*65535u)/zone_len);
+            const uint32_t wave=wave16(counter);
+            if (wave>threshold) {
+                const uint32_t index=pos+i;
+                const uint32_t amount=((wave-threshold)*255u)/(65535u-threshold);
+                pixels[index]=scaled(blend_colors(fg,bg,(uint8_t)(255u-amount)),
+                                     cfg->brightness);
+            }
+        }
+    }
+}
+
+/*
+ * Pinned FX.cpp mode_percent() with default "One color" option disabled.
+ * Upstream displays previous SEGENV.aux1 fill then advances toward the target.
+ * CORE keeps aux1 per output/zone; no physical output or mask is hardcoded.
+ */
+static void percent_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *state,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t percent=cfg->intensity>200u?200u:cfg->intensity;
+    const uint32_t fraction=percent<100u?percent:200u-percent;
+    const uint32_t active=(uint32_t)(((uint64_t)count*fraction+50u)/100u);
+    uint32_t rate=1u+(((uint32_t)cfg->speed*(uint32_t)count)>>11);
+    if (cfg->speed==255u) rate=255u;
+    const uint32_t filled=state->aux1>count?(uint32_t)count:state->aux1;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for (size_t i=0;i<count;i++)
+        pixels[i]=(percent<=100u ? i<filled : i>=count-filled)?fg:bg;
+    if (active>filled) {
+        const uint32_t next=filled+rate;
+        state->aux1=(uint16_t)(next>active?active:next);
+    } else if (active<filled) {
+        const uint32_t next=filled>rate?filled-rate:0u;
+        state->aux1=(uint16_t)(next<active?active:next);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -205,6 +274,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_SOLID_PATTERN) {
         solid_pattern_frame(cfg,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_SPOTS || cfg->effect_id==OT_WLED_SPOTS_FADE) {
+        spots_frame(cfg,time_ms,pixels,count,cfg->effect_id==OT_WLED_SPOTS_FADE);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_PERCENT) {
+        percent_frame(cfg,state,pixels,count);
         return true;
     }
     if (cfg->effect_id==OT_WLED_HEARTBEAT) {
