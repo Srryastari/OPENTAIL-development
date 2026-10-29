@@ -132,6 +132,7 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilities()
+            if (!ble.canControl()) coreFrame.value = null
             if (!ble.canControl() && liveArmed.value) {
                 livePreview.stop()
                 liveArmed.value = false
@@ -187,6 +188,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble.handlePermissions(requestCode, grantResults)
     }
     override fun onStop() {
+        ble.cancelFrameCapture()
         coreFrame.value = null
         if (liveArmed.value) {
             livePreview.stop()
