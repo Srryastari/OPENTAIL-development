@@ -83,7 +83,8 @@ static uint8_t smoothstep(uint32_t p){
 bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
                        uint32_t ms,ot_wled_rgb_t *pixels,size_t count){
     if(!cfg||!pixels||!ot_auto_fx_id(cfg->effect_id)||count==0||
-       count>65535u||cfg->frame_time_ms==0u||cfg->palette_id!=0u)
+       count>65535u||cfg->frame_time_ms==0u||cfg->palette_id!=0u||
+       cfg->spark_style>3u||cfg->spark_peak>32u)
         return false;
     const uint32_t duration=ot_auto_fx_duration_ms(cfg->speed);
     const uint32_t elapsed=ms>=duration?duration:ms;
@@ -131,15 +132,29 @@ bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
                      * saturated foreground color. Never light a zero-brightness
                      * request, and never exceed either 32 or a higher explicit
                      * renderer cap. This does not alter vehicle trigger colors. */
-                    const uint32_t peak_cap=cfg->brightness==0u?0u:
-                        (cfg->brightness<32u?32u:cfg->brightness);
-                    const uint32_t peak=cfg->brightness+
-                        ((peak_cap-cfg->brightness)*cfg->intensity+127u)/255u;
+                    /* Bench peak is independently adjustable, never above
+                     * 32/255; legacy callers passing zero keep auto=32.
+                     * Base brightness 0 always stays off. */
+                    const uint8_t requested_peak=cfg->spark_peak?cfg->spark_peak:32u;
+                    const uint32_t peak_cap=cfg->brightness==0u?0u:requested_peak;
+                    const uint32_t peak=peak_cap;
                     const uint8_t fade=(uint8_t)(((sparkle_ms-age)*cfg->intensity)/sparkle_ms);
                     ot_wled_rgb_t spark=fg;
-                    if(cfg->effect_id==OT_FX_RANDOM_MATERIALIZE){
-                        spark=(h>>24)>239u?(ot_wled_rgb_t){255,255,255}:
-                             wheel((uint8_t)(h>>8));
+                    const ot_wled_rgb_t white={255u,255u,255u};
+                    switch(cfg->spark_style){
+                      case 1: /* randomized bright shades of the selected color */
+                        spark=blend(fg,white,(uint8_t)(70u+((h>>16)&127u)));
+                        break;
+                      case 2: /* rainbow particles plus occasional white accents */
+                        spark=(h>>24)>239u?white:wheel((uint8_t)(h>>8));
+                        break;
+                      case 3: /* independently selected spark color */
+                        spark=cfg->spark_color;
+                        break;
+                      default: /* keep existing original animation behavior */
+                        if(cfg->effect_id==OT_FX_RANDOM_MATERIALIZE)
+                            spark=(h>>24)>239u?white:wheel((uint8_t)(h>>8));
+                        break;
                     }
                     const ot_wled_rgb_t base=scale(fg,cfg->brightness);
                     const ot_wled_rgb_t highlight=scale(spark,(uint8_t)peak);
