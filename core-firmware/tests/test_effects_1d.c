@@ -101,6 +101,29 @@ int main(void){
   }
   printf("CORE unified dispatch: %zu source-derived effects match direct renderer.\\n",source_total);
 
+
+  /* Palette selection has to pass through the authoritative CORE dispatcher,
+   * not just pass the standalone source renderer. Test full 522 pixel zones. */
+  for(unsigned variant=0u;variant<2u;variant++) {
+    for(unsigned palette=2u;palette<=12u;palette+=5u) {
+      ot_effects_1d_state_t actual={0};
+      ot_wled_fx_state_t reference={0};
+      cfg.effect_id=variant?OT_WLED_FLOW_STRIPE:OT_WLED_COLOR_CLOUDS;
+      cfg.palette_id=(uint8_t)palette;
+      cfg.brightness=32u;cfg.speed=24u;cfg.intensity=32u;
+      ot_wled_rgb_t output[522]={0},expected[522]={0};
+      for(unsigned k=0u;k<8u;k++) {
+        const uint32_t ms=k*223u;
+        assert(ot_effects_1d_render(&cfg,&actual,ms,output,522u));
+        assert(ot_wled_fx_render(&cfg,&reference,ms,expected,522u));
+        assert(memcmp(output,expected,sizeof(output))==0);
+      }
+      ot_effects_1d_reset(&actual,1u);
+      ot_wled_fx_reset(&reference);
+    }
+  }
+  cfg.palette_id=0u;
+
   /* Theater's phase is per-zone and is never shared across outputs. */
   ot_effects_1d_state_t zone_a,zone_b;
   ot_effects_1d_reset(&zone_a,1u);
