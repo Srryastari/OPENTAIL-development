@@ -485,7 +485,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_AURORA, "Aurora", "Aurora@!,!;1,2,3;!;;sx=24,pal=50",
      true, true, true, true, true},
     {OT_WLED_COLORTWINKLE, "Colortwinkles", "Colortwinkles@Fade speed,Spawn speed;;!;;m12=0",
-     false, true, true, true, true}
+     false, true, true, true, true},
+    {OT_WLED_SLOW_TRANSITION, "Slow Transition", "Slow Transition@Time (min),,,,,,Sweep;!;!;1;pal=2,sx=0,ix=0",
+     true, false, true, false, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2809,6 +2811,62 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 static const uint8_t ot_inv_gamma22[256];
 static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t,uint8_t);
 
+
+/* Pinned slow_transition_data RGB subset. Source CCT/white are zero for
+ * WS2815 RGB zones, and check2 Sweep is disabled per source metadata.
+ * A changed palette or speed starts a new per-zone transition. */
+typedef struct {
+    ot_wled_palette16_t start,current,end;
+    uint8_t start_white,current_white,end_white;
+    uint8_t start_cct,current_cct,end_cct;
+} ot_fx_slow_palette_t;
+static bool fx_palette_same(const ot_wled_palette16_t *a,
+                             const ot_wled_palette16_t *b) {
+    return memcmp(a,b,sizeof(*a))==0;
+}
+static void slow_transition_frame(const ot_wled_fx_config_t *cfg,
+                                   ot_wled_fx_state_t *state,uint32_t now,
+                                   uint32_t call,ot_wled_rgb_t *pixels,size_t count) {
+    ot_fx_slow_palette_t *data=(ot_fx_slow_palette_t*)fx_zone_scratch(
+                                state,sizeof(ot_fx_slow_palette_t));
+    if(!data)return;
+    ot_wled_palette16_t target;
+    if(!ot_wled_palette_build(cfg->palette_id?cfg->palette_id:2u,
+                 cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},
+                 &target))return;
+    const bool changed=!fx_palette_same(&data->end,&target)||
+                       state->aux1!=cfg->speed;
+    if(changed||call==0u) {
+        if(call==0u) {
+            data->start=data->current=data->end=target;
+            state->aux0=65535u;
+        }else {
+            data->start=data->current;
+            data->end=target;
+            state->aux0=0u;
+        }
+        state->aux1=cfg->speed;
+        state->step=now;
+    }
+    const uint32_t duration=cfg->speed==0u?10000u:
+                            (uint32_t)cfg->speed*60000u;
+    uint32_t expected=(uint32_t)((uint64_t)(now-state->step)*255u/duration);
+    if(expected>255u)expected=255u;
+    if(state->aux0>expected)state->aux0=(uint16_t)expected;
+    if(state->aux0<expected) {
+        state->aux0=(uint16_t)expected;
+        for(unsigned i=0;i<16u;i++)
+            data->current.entries[i]=blend_colors(data->start.entries[i],
+                                    data->end.entries[i],(uint8_t)expected);
+        if(expected>=255u)data->current=data->end;
+    }
+    for(size_t i=0;i<count;i++) {
+        const uint8_t index=(uint8_t)((uint32_t)i*255u/(uint32_t)count);
+        pixels[i]=scaled(ot_wled_palette_sample(&data->current,index,255u,
+                                     OT_WLED_PALETTE_NOWRAP),cfg->brightness);
+    }
+}
+
 /* Pinned mode_colortwinkle() 1D source, bit-per-pixel fade direction
  * and retained RGB frame. The source operates at FRAMETIME_FIXED=23ms
  * on the pinned target profile; global bus brightness is 255 in this
@@ -4145,7 +4203,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_TWINKLEFOX &&
             cfg->effect_id!=OT_WLED_TWINKLECAT &&
             cfg->effect_id!=OT_WLED_AURORA &&
-            cfg->effect_id!=OT_WLED_COLORTWINKLE) ||
+            cfg->effect_id!=OT_WLED_COLORTWINKLE &&
+            cfg->effect_id!=OT_WLED_SLOW_TRANSITION) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4339,6 +4398,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SLOW_TRANSITION) {
+        slow_transition_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_COLORTWINKLE) {
