@@ -24,6 +24,14 @@ assert "OT_LAYOUT_SECTIONS {6,6,6,6,6" not in board
 assert ".max_leds=pixels" in core
 assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
 assert "strip_configure_channel(ch,local_outputs[ch].active_pixels)" in core
+# Resize must not delete a live RMT output when blackout fails.
+resize = core.split("static bool strip_configure_channel(",1)[1].split("static bool strip_init(",1)[0]
+assert "(void)led_strip_clear(strip[ch]);" not in resize
+assert "esp_err_t e=led_strip_clear(strip[ch]);" in resize
+assert 'ot_st_set_fault("external pixel RMT clear failed");return false;' in resize
+assert resize.index('if(e!=ESP_OK){') < resize.index('e=led_strip_del(strip[ch]);')
+assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NULL;strip_capacity[ch]=0;')
+
 assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
 assert "if(frame_submitted[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]))" in core
 assert "ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)" in core
