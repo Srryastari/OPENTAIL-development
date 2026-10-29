@@ -507,6 +507,7 @@ struct PinnedSeg {
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
     uint32_t color_wheel(uint8_t pos) const {
+        if(palette!=0u)return ColorFromPalette(ref_palette(palette,colors[0],colors[1],colors[2]),pos,255u,LINEARBLEND);
         uint8_t bgrw[4]={0,0,0,0};
         hsv2rgb_rainbow((uint16_t)pos<<8,255,255,bgrw,true);
         return ((uint32_t)bgrw[2]<<16)|((uint32_t)bgrw[1]<<8)|bgrw[0];
@@ -2442,6 +2443,113 @@ void mode_blends(void) {
 
 // END original pinned Blends.
 
+
+/* Reference pin: original ESP32 branch uses float sin_t/cos_t. */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#define M_TWOPI 6.28318530717958647692
+static float sin_t(float x){return std::sin(x);}
+static float cos_t(float x){return std::cos(x);}
+// BEGIN PINNED FX.cpp mode_palette(), unchanged source body.
+void mode_palette() {
+  // Set up some compile time constants so that we can handle integer and float based modes using the same code base.
+#ifdef ESP8266
+  using mathType = int32_t;
+  using wideMathType = int64_t;
+  using angleType = unsigned;
+  constexpr mathType sInt16Scale             = 0x7FFF;
+  constexpr mathType maxAngle                = 0x8000;
+  constexpr mathType staticRotationScale     = 256;
+  constexpr mathType animatedRotationScale   = 1;
+  constexpr int16_t (*sinFunction)(uint16_t) = &sin16_t;
+  constexpr int16_t (*cosFunction)(uint16_t) = &cos16_t;
+#else
+  using mathType = float;
+  using wideMathType = float;
+  using angleType = float;
+  constexpr mathType sInt16Scale           = 1.0f;
+  constexpr mathType maxAngle              = M_PI / 256.0;
+  constexpr mathType staticRotationScale   = 1.0f;
+  constexpr mathType animatedRotationScale = M_TWOPI / double(0xFFFF);
+  constexpr float (*sinFunction)(float)    = &sin_t;
+  constexpr float (*cosFunction)(float)    = &cos_t;
+#endif
+  const bool isMatrix = strip.isMatrix;
+  const int cols = SEG_W;
+  const int rows = isMatrix ? SEG_H : strip.getActiveSegmentsNum();
+
+  const int  inputShift           = SEGMENT.speed;
+  const int  inputSize            = SEGMENT.intensity;
+  const int  inputRotation        = SEGMENT.custom1;
+  const bool inputAnimateShift    = SEGMENT.check1;
+  const bool inputAnimateRotation = SEGMENT.check2;
+  const bool inputAssumeSquare    = SEGMENT.check3;
+
+  const angleType theta = (!inputAnimateRotation) ? ((inputRotation + 128) * maxAngle / staticRotationScale) : (((strip.now * ((inputRotation >> 4) +1)) & 0xFFFF) * animatedRotationScale);
+  const mathType sinTheta = sinFunction(theta);
+  const mathType cosTheta = cosFunction(theta);
+
+  const mathType maxX    = std::max(1, cols-1);
+  const mathType maxY    = std::max(1, rows-1);
+  // Set up some parameters according to inputAssumeSquare, so that we can handle anamorphic mode using the same code base.
+  const mathType maxXIn  =  inputAssumeSquare ? maxX : mathType(1);
+  const mathType maxYIn  =  inputAssumeSquare ? maxY : mathType(1);
+  const mathType maxXOut = !inputAssumeSquare ? maxX : mathType(1);
+  const mathType maxYOut = !inputAssumeSquare ? maxY : mathType(1);
+  const mathType centerX = sInt16Scale * maxXOut / mathType(2);
+  const mathType centerY = sInt16Scale * maxYOut / mathType(2);
+  // The basic idea for this effect is to rotate a rectangle that is filled with the palette along one axis, then map our
+  // display to it, to find what color a pixel should have.
+  // However, we want a) no areas of solid color (in front of or behind the palette), and b) we want to make use of the full palette.
+  // So the rectangle needs to have exactly the right size. That size depends on the rotation.
+  // This scale computation here only considers one dimension. You can think of it like the rectangle is always scaled so that
+  // the left and right most points always match the left and right side of the display.
+  const mathType scale = std::abs(sinTheta) + (std::abs(cosTheta) * maxYOut / maxXOut);
+  // 2D simulation:
+  // If we are dealing with a 1D setup, we assume that each segment represents one line on a 2-dimensional display.
+  // The function is called once per segments, so we need to handle one line at a time.
+  const int yFrom = isMatrix ? 0 : strip.getCurrSegmentId();
+  const int yTo   = isMatrix ? maxY : yFrom;
+  for (int y = yFrom; y <= yTo; ++y) {
+    // translate, scale, rotate
+    const mathType ytCosTheta = mathType((wideMathType(cosTheta) * wideMathType(y * sInt16Scale - centerY * maxYIn))/wideMathType(maxYIn * scale));
+    for (int x = 0; x < cols; ++x) {
+      // translate, scale, rotate
+      const mathType xtSinTheta = mathType((wideMathType(sinTheta) * wideMathType(x * sInt16Scale - centerX * maxXIn))/wideMathType(maxXIn * scale));
+      // Map the pixel coordinate to an imaginary-rectangle-coordinate.
+      // The y coordinate doesn't actually matter, as our imaginary rectangle is filled with the palette from left to right,
+      // so all points at a given x-coordinate have the same color.
+      const mathType sourceX = xtSinTheta + ytCosTheta + centerX;
+      // The computation was scaled just right so that the result should always be in range [0, maxXOut], but enforce this anyway
+      // to account for imprecision. Then scale it so that the range is [0, 255], which we can use with the palette.
+      int colorIndex = (std::min(std::max(sourceX, mathType(0)), maxXOut * sInt16Scale) * wideMathType(255)) / (sInt16Scale * maxXOut);
+      // inputSize determines by how much we want to scale the palette:
+      // values < 128 display a fraction of a palette,
+      // values > 128 display multiple palettes.
+      if (inputSize <= 128) {
+        colorIndex = (colorIndex * inputSize) / 128;
+      } else {
+        // Linear function that maps colorIndex 128=>1, 256=>9.
+        // With this function every full palette repetition is exactly 16 configuration steps wide.
+        // That allows displaying exactly 2 repetitions for example.
+        colorIndex = ((inputSize - 112) * colorIndex) / 16;
+      }
+      // Finally, shift the palette a bit.
+      const int paletteOffset = (!inputAnimateShift) ? (inputShift) : (((strip.now * ((inputShift >> 3) +1)) & 0xFFFF) >> 8);
+      colorIndex -= paletteOffset;
+      const uint32_t color = SEGMENT.color_wheel((uint8_t)colorIndex);
+      if (isMatrix) {
+        SEGMENT.setPixelColorXY(x, y, color);
+      } else {
+        SEGMENT.setPixelColor(x, color);
+      }
+    }
+  }
+}
+
+// END PINNED Palette source.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2494,7 +2602,8 @@ static const RefCase refs[]={
     {44,mode_tetrix,"Tetrix"},
     {179,mode_FlowStripe,"Flow Stripe"},
     {87,mode_glitter,"Glitter"},
-    {115,mode_blends,"Blends"}
+    {115,mode_blends,"Blends"},
+    {65,mode_palette,"Palette"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2539,9 +2648,10 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:pal;
+                    if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
                     seg.colors[0]=0x007B3809u; // configured primary 123,56,9
