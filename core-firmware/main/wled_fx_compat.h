@@ -81,7 +81,11 @@ enum {
     OT_WLED_CHASE_FLASH_RANDOM = 32,
     OT_WLED_MULTI_COMET = 59,
     OT_WLED_CHUNCHUN = 111,
-    OT_WLED_CANDLE = 88
+    OT_WLED_CANDLE = 88,
+    OT_WLED_DYNAMIC = 7,
+    OT_WLED_DYNAMIC_SMOOTH = 117,
+    OT_WLED_DISSOLVE = 18,
+    OT_WLED_DISSOLVE_RANDOM = 19
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -119,6 +123,9 @@ typedef struct {
     uint32_t held_rng_seed; /* Reproduce Fire Flicker frame between WLED updates */
     ot_wled_oscillator_t oscillators[3]; /* 3 source-owned bars, per zone */
     uint16_t comet_positions[8];  /* WLED MAX_COMETS 1D source-owned */
+    uint8_t *scratch;        /* optional source data allocated per zone, not per frame */
+    size_t scratch_bytes;
+    uint32_t scratch_magic; /* guards reset/release for newly initialized structs */
 } ot_wled_fx_state_t;
 
 typedef struct {
