@@ -551,13 +551,26 @@ struct PinnedSeg {
     }
     uint8_t custom1=48u,custom2=64u,custom3=12u;
     bool check1=false,check2=false,check3=false;
-    void fade_out(uint8_t) { std::abort(); } // unsupported controls fail closed
+    void fade_out(uint8_t amount) {
+        const unsigned rate=(256u-amount)>>1;
+        const int mapped=(int)(256u/(rate+1u));
+        for(auto& px:pixels) {
+            if(px==colors[1])continue;
+            for(unsigned shift=0;shift<32u;shift+=8u) {
+                const int c1=(px>>shift)&255u,c2=(colors[1]>>shift)&255u;
+                int delta=(c2-c1)*mapped/256;
+                if(delta==0)delta=c2>c1?1:c2<c1?-1:0;
+                px=(px&~(0xffu<<shift))|((uint32_t)((c1+delta)&255)<<shift);
+            }
+        }
+    }
     uint16_t offset=0u;
     unsigned nrOfVStrips() const {return 1u;}
     bool is2D() const {return false;}
     void blurCols(uint8_t){std::abort();}
     void blur(uint8_t){std::abort();}
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
+    void setPixelColorXY(unsigned x,unsigned y,uint8_t r,uint8_t g,uint8_t b) { (void)y;setPixelColor(x,r,g,b); }
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
@@ -3365,6 +3378,142 @@ static void source_pacifica() {
     strip.now=old;
 }
 
+/* PINNED FX.cpp mode_exploding_fireworks(), verbatim except source Arduino
+ * floating-point constrain() is shimmed explicitly to avoid host unsigned
+ * constrain overload. Source FAIR_DATA_PER_SEG is 1024 bytes (ESP32-S3). */
+static float source_clamp_float(float value,float lo,float hi) {
+    return value<lo?lo:value>hi?hi:value;
+}
+void mode_exploding_fireworks(void)
+{
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const int cols = SEGMENT.is2D() ? SEG_W : 1;
+  const int rows = SEGMENT.is2D() ? SEG_H : SEGLEN;
+
+  //allocate segment data
+  unsigned maxData = FAIR_DATA_PER_SEG; //ESP8266: 256 ESP32: 640
+  unsigned segs = strip.getActiveSegmentsNum();
+  if (segs <= (strip.getMaxSegments() /2)) maxData *= 2; //ESP8266: 512 if <= 8 segs ESP32: 1280 if <= 16 segs
+  if (segs <= (strip.getMaxSegments() /4)) maxData *= 2; //ESP8266: 1024 if <= 4 segs ESP32: 2560 if <= 8 segs
+  int maxSparks = maxData / sizeof(spark); //ESP8266: max. 21/42/85 sparks/seg, ESP32: max. 53/106/213 sparks/seg
+
+  unsigned numSparks = min(5 + ((rows*cols) >> 1), maxSparks);
+  unsigned dataSize = sizeof(spark) * numSparks;
+  if (!SEGENV.allocateData(dataSize + sizeof(float))) FX_FALLBACK_STATIC; //allocation failed
+  float *dying_gravity = reinterpret_cast<float*>(SEGENV.data + dataSize);
+
+  if (dataSize != SEGENV.aux1) { //reset to flare if sparks were reallocated (it may be good idea to reset segment if bounds change)
+    *dying_gravity = 0.0f;
+    SEGENV.aux0 = 0;
+    SEGENV.aux1 = dataSize;
+  }
+
+  SEGMENT.fade_out(252);
+
+  Spark* sparks = reinterpret_cast<Spark*>(SEGENV.data);
+  Spark* flare = sparks; //first spark is flare data
+
+  float gravity = -0.0004f - (SEGMENT.speed/800000.0f); // m/s/s
+  gravity *= rows;
+
+  if (SEGENV.aux0 < 2) { //FLARE
+    if (SEGENV.aux0 == 0) { //init flare
+      flare->pos = 0;
+      flare->posX = SEGMENT.is2D() ? hw_random16(2,cols-3) : (SEGMENT.intensity > hw_random8()); // will enable random firing side on 1D
+      unsigned peakHeight = 75 + hw_random8(180); //0-255
+      peakHeight = (peakHeight * (rows -1)) >> 8;
+      flare->vel = sqrtf(-2.0f * gravity * peakHeight);
+      flare->velX = SEGMENT.is2D() ? (hw_random8(9)-4)/64.0f : 0; // no X velocity on 1D
+      flare->col = 255; //brightness
+      SEGENV.aux0 = 1;
+    }
+
+    // launch
+    if (flare->vel > 12 * gravity) {
+      // flare
+      if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(unsigned(flare->posX), rows - uint16_t(flare->pos) - 1, flare->col, flare->col, flare->col);
+      else                SEGMENT.setPixelColor((flare->posX > 0.0f) ? rows - int(flare->pos) - 1 : int(flare->pos), flare->col, flare->col, flare->col);
+      flare->pos  += flare->vel;
+      flare->pos  = source_clamp_float(flare->pos, 0.0f, (float)rows-1.0f);
+      if (SEGMENT.is2D()) {
+        flare->posX += flare->velX;
+        flare->posX = source_clamp_float(flare->posX, 0.0f, (float)cols-1.0f);
+      }
+      flare->vel  += gravity;
+      flare->col  -= 2;
+    } else {
+      SEGENV.aux0 = 2;  // ready to explode
+    }
+  } else if (SEGENV.aux0 < 4) {
+    /*
+     * Explode!
+     *
+     * Explosion happens where the flare ended.
+     * Size is proportional to the height.
+     */
+    unsigned nSparks = flare->pos + hw_random8(4);
+    nSparks = std::max(nSparks, 4U);  // This is not a standard constrain; numSparks is not guaranteed to be at least 4
+    nSparks = std::min(nSparks, numSparks);
+
+    // initialize sparks
+    if (SEGENV.aux0 == 2) {
+      for (unsigned i = 1; i < nSparks; i++) {
+        sparks[i].pos  = flare->pos;
+        sparks[i].posX = flare->posX;
+        sparks[i].vel  = (float(hw_random16(20001)) / 10000.0f) - 0.9f; // from -0.9 to 1.1
+        sparks[i].vel *= rows<32 ? 0.5f : 1; // reduce velocity for smaller strips
+        sparks[i].velX = SEGMENT.is2D() ? (float(hw_random16(20001)) / 10000.0f) - 1.0f : 0; // from -1 to 1
+        sparks[i].col  = 345;//abs(sparks[i].vel * 750.0); // set colors before scaling velocity to keep them bright
+        //sparks[i].col = constrain(sparks[i].col, 0, 345);
+        sparks[i].colIndex = hw_random8();
+        sparks[i].vel  *= flare->pos/rows; // proportional to height
+        sparks[i].velX *= SEGMENT.is2D() ? flare->posX/cols : 0; // proportional to width
+        sparks[i].vel  *= -gravity *50;
+      }
+      //sparks[1].col = 345; // this will be our known spark
+      *dying_gravity = gravity/2;
+      SEGENV.aux0 = 3;
+    }
+
+    if (sparks[1].col > 4) {//&& sparks[1].pos > 0) { // as long as our known spark is lit, work with all the sparks
+      for (unsigned i = 1; i < nSparks; i++) {
+        sparks[i].pos  += sparks[i].vel;
+        sparks[i].posX += sparks[i].velX;
+        sparks[i].vel  += *dying_gravity;
+        sparks[i].velX += SEGMENT.is2D() ? *dying_gravity : 0;
+        if (sparks[i].col > 3) sparks[i].col -= 4;
+
+        if (sparks[i].pos > 0 && sparks[i].pos < rows) {
+          if (SEGMENT.is2D() && !(sparks[i].posX >= 0 && sparks[i].posX < cols)) continue;
+          unsigned prog = sparks[i].col;
+          uint32_t spColor = (SEGMENT.palette) ? SEGMENT.color_wheel(sparks[i].colIndex) : SEGCOLOR(0);
+          CRGBW c = BLACK; //HeatColor(sparks[i].col);
+          if (prog > 300) { //fade from white to spark color
+            c = color_blend(spColor, WHITE, uint8_t((prog - 300)*5));
+          } else if (prog > 45) { //fade from spark color to black
+            c = color_blend(BLACK, spColor, uint8_t(prog - 45));
+            unsigned cooling = (300 - prog) >> 5;
+            c.g = qsub8(c.g, cooling);
+            c.b = qsub8(c.b, cooling * 2);
+          }
+          if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(int(sparks[i].posX), rows - int(sparks[i].pos) - 1, c);
+          else                SEGMENT.setPixelColor(int(sparks[i].posX) ? rows - int(sparks[i].pos) - 1 : int(sparks[i].pos), c);
+        }
+      }
+      if (SEGMENT.check3) SEGMENT.blur(16);
+      *dying_gravity *= .8f; // as sparks burn out they fall slower
+    } else {
+      SEGENV.aux0 = 6 + hw_random8(10); //wait for this many frames
+    }
+  } else {
+    SEGENV.aux0--;
+    if (SEGENV.aux0 < 4) {
+      SEGENV.aux0 = 0; //back to flare
+    }
+  }
+}
+#undef MAX_SPARKS
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3426,7 +3575,8 @@ static const RefCase refs[]={
     {219,mode_slow_transition,"Slow Transition"},
     {112,mode_dancing_shadows,"Dancing Shadows"},
     {66,mode_fire_2012,"Fire 2012"},
-    {101,source_pacifica,"Pacifica"}
+    {101,source_pacifica,"Pacifica"},
+    {90,mode_exploding_fireworks,"Fireworks 1D"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3535,7 +3685,7 @@ int main() {
     unsigned checked=0;
     for(const RefCase& fx:refs) {
         const std::vector<unsigned> zone_lengths=
-            (fx.id==89u || fx.id==44u) ?
+            (fx.id==89u || fx.id==44u || fx.id==90u) ?
             std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
             std::vector<unsigned>{2u,3u,7u,16u,31u};
         for(unsigned count: zone_lengths) {
@@ -3543,7 +3693,7 @@ int main() {
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
@@ -3563,7 +3713,8 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==44u ?
+                    const std::vector<uint32_t> frames=fx.id==90u ?
+                        []{std::vector<uint32_t> v;for(unsigned f=0;f<90u;f++)v.push_back(f*23u);return v;}():fx.id==44u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,2024u,
                           2050u,2073u,2200u,2400u,2600u,3000u,5000u,10000u} :
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u};
