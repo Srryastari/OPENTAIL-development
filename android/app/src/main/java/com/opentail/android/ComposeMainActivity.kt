@@ -773,8 +773,12 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun SequencePage(t: Tone, selectedEffect: Int) {
-        val steps = project.sequence()
-        val opts = project.sequenceOptions()
+        // NativeProject contains plain JSON, not Compose State: read the
+        // revision here so toggles and per-step palette saves redraw this
+        // editor even when its stable parameters have not changed.
+        val modelRevision = revision.intValue
+        val steps = remember(modelRevision) { project.sequence() }
+        val opts = remember(modelRevision) { project.sequenceOptions() }
         var editingStep by remember { mutableIntStateOf(-1) }
         var editedDuration by remember { mutableStateOf("") }
         var editingPaletteStep by remember { mutableIntStateOf(-1) }
