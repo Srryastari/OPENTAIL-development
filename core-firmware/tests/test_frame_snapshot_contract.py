@@ -16,6 +16,9 @@ assert per_pixel.index("ot_frame_snapshot_pixel(") < per_pixel.index("ot_om_swiz
 assert per_pixel.index("ot_om_swizzle(") < per_pixel.index("led_strip_set_pixel(")
 assert core.index("led_strip_refresh_async_done(strip[ch])") < core.index("ot_frame_snapshot_complete(true)")
 assert "frame_captured[ch]=ot_frame_snapshot_begin(" in core
+assert core.count("ot_frame_snapshot_unavailable((uint8_t)ch)") == 2
+assert "record.pending && !recording && record.output==output" in module
+assert "void ot_frame_snapshot_unavailable(uint8_t output)" in module
 assert "ot_frame_snapshot.c" in cmake
 assert "portENTER_CRITICAL(&snap_mux)" in module
 assert "if(recording){UNLOCK();return false;}" in module
