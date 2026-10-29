@@ -220,7 +220,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_POPCORN, "Popcorn", "Popcorn@!,!,,,,,Overlay;!,!,!;!;;m12=1",
      true, true, true, true, false},
     {OT_WLED_DRIP, "Drip", "Drip@Gravity,# of drips,,,,,Overlay;!,!;!;;m12=1",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_TV_SIMULATOR, "TV Simulator", "TV Simulator@!,!;;!;01",
+     false, false, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2532,6 +2534,106 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+
+/* Direct default-options 1D source port of pinned FX.cpp mode_tv_simulator.
+ * No global scene, renderer allocation, tertiary colors or vehicle assumptions.
+ * C layout preserves source TvSim fields; all timing/RNG is zone-owned. */
+typedef struct {
+    uint32_t total_time, fade_time, start_time, elapsed, pixel_num;
+    uint16_t slider_values;
+    uint32_t scene_start, scene_duration;
+    uint16_t scene_color_hue;
+    uint8_t scene_color_sat, scene_color_bri;
+    uint8_t actual_r, actual_g, actual_b;
+    uint16_t previous_r, previous_g, previous_b;
+} ot_tv_state_t;
+
+static uint16_t tv_rand16_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
+    return (uint16_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
+}
+static uint8_t tv_rand8_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
+    return (uint8_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
+}
+static int32_t tv_map(int32_t x,int32_t lo,int32_t hi,
+                      int32_t dest_lo,int32_t dest_hi) {
+    return (x-lo)*(dest_hi-dest_lo)/(hi-lo)+dest_lo;
+}
+static void tv_simulator_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    ot_tv_state_t *tv=(ot_tv_state_t*)fx_zone_scratch(state,sizeof(ot_tv_state_t));
+    if(!tv) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    const uint8_t color_speed=(uint8_t)tv_map(cfg->speed,0,255,1,20);
+    const uint8_t color_intensity=(uint8_t)tv_map(cfg->intensity,0,255,10,30);
+    const unsigned sliders=((unsigned)cfg->speed<<8)|cfg->intensity;
+    if(sliders!=tv->slider_values) {
+        tv->slider_values=(uint16_t)sliders;
+        state->aux1=0u;
+    }
+    if(now-tv->scene_start>=tv->scene_duration || state->aux1==0u) {
+        tv->scene_start=now;
+        tv->scene_duration=tv_rand16_range(state,60u*250u*color_speed,
+                                                  60u*750u*color_speed);
+        tv->scene_color_hue=tv_rand16_range(state,0u,768u);
+        tv->scene_color_sat=tv_rand8_range(state,100u,130u+color_intensity);
+        tv->scene_color_bri=tv_rand8_range(state,200u,240u);
+        state->aux1=1u;
+        state->aux0=0u;
+    }
+    if(state->aux0==0u) {
+        uint8_t j=fx_rand8(state,4u*color_intensity);
+        int hue=fx_rand8(state,256u)<128u ?
+            ((j<tv->scene_color_hue)?(int)tv->scene_color_hue-(int)j:
+                                      767-(int)tv->scene_color_hue-(int)j):
+            (((int)j+(int)tv->scene_color_hue)<767 ?
+                 (int)tv->scene_color_hue+(int)j:
+                 (int)tv->scene_color_hue+(int)j-767);
+        j=fx_rand8(state,2u*color_intensity);
+        const uint8_t sat=(uint8_t)(((int)tv->scene_color_sat-(int)j)<0 ?
+                             0:(int)tv->scene_color_sat-(int)j);
+        j=fx_rand8(state,100u);
+        const uint8_t bri=(uint8_t)(((int)tv->scene_color_bri-(int)j)<0 ?
+                             0:(int)tv->scene_color_bri-(int)j);
+        const uint8_t n=(uint8_t)((hue>>8)%3);
+        const uint8_t x=(uint8_t)(((((hue&255)*(int)sat)>>8)*(int)bri)>>8);
+        const uint8_t v=(uint8_t)(((256-(int)sat)*(int)bri)>>8);
+        uint8_t temp[5]={v,(uint8_t)(x+v),(uint8_t)(bri-x),v,(uint8_t)(x+v)};
+        tv->actual_r=temp[n+2u];
+        tv->actual_g=temp[n+1u];
+        tv->actual_b=temp[n];
+    }
+    const int nr=(int)tv->actual_r*257,ng=(int)tv->actual_g*257,
+              nb=(int)tv->actual_b*257;
+    if(state->aux0==0u) {
+        state->aux0=1u;
+        tv->total_time=tv_rand16_range(state,250u,2500u);
+        tv->fade_time=tv_rand16_range(state,0u,tv->total_time);
+        if(fx_rand8(state,10u)<3u)tv->fade_time=0u;
+        tv->start_time=now;
+    }
+    tv->elapsed=now-tv->start_time;
+    int r=nr,g=ng,b=nb;
+    if(tv->elapsed<tv->fade_time) {
+        r=tv_map((int)tv->elapsed,0,(int)tv->fade_time,tv->previous_r,nr);
+        g=tv_map((int)tv->elapsed,0,(int)tv->fade_time,tv->previous_g,ng);
+        b=tv_map((int)tv->elapsed,0,(int)tv->fade_time,tv->previous_b,nb);
+    }
+    const ot_wled_rgb_t color=scaled((ot_wled_rgb_t){
+        (uint8_t)(r>>8),(uint8_t)(g>>8),(uint8_t)(b>>8)
+    },cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=color;
+    if(tv->elapsed>=tv->total_time) {
+        tv->previous_r=(uint16_t)nr;
+        tv->previous_g=(uint16_t)ng;
+        tv->previous_b=(uint16_t)nb;
+        state->aux0=0u;
+    }
+}
+
 /* FX.cpp mode_halloween_eyes(): source 1D eye positions, fade, blink,
  * and on/off transitions. The RGB profile uses palette=0 (primary eye
  * color), no matrix or overlay options. Eye state belongs to the zone's
@@ -3304,6 +3406,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_TV_SIMULATOR) {
+        tv_simulator_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_DRIP) {
