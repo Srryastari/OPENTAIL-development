@@ -146,6 +146,9 @@ jobs:
           node android/qa/test_native_source.cjs
       - name: Run full Android release contract audit
         run: python3 android/qa/check_release.py
+      - name: Test indexed Android LED frame fidelity
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
       - name: Compile debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
