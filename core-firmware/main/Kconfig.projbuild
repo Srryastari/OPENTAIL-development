@@ -4,4 +4,17 @@ menu "OpenTail CORE Alpha"
     default "OpenTailLab-ChangeMe"
     help
       Change before bench testing. Do not connect this alpha unit to a vehicle.
+  config OPENTAIL_BUFFER_PIXELS_PER_OUTPUT
+    int "Per-output maximum pixel buffer allocation (hardware memory budget)"
+    range 1 8192
+    default 2048
+    help
+      Independent of vehicle/bench layouts. This build-time upper bound
+      budgets CORE frame memory for each physical channel and prevents
+      oversized profiles from exhausting an ESP32-S3. Users configure the
+      actual active pixel count for each output in Output Manager; the
+      RMT driver transmits only that configured count. Larger installations
+      may select another budget or a different board backend after
+      measuring RAM, DMA, output throughput and power. It is not an
+      advertised optical FPS or tested hardware maximum.
 endmenu
