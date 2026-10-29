@@ -2959,8 +2959,10 @@ static void dancing_shadows_frame(const ot_wled_fx_config_t *cfg,
                 amount=fx_cubic_wave8((uint8_t)((unsigned)j*255u/
                                                     (unsigned)(width-1)));
             else if(width>1&&spot->type==2u)
-                amount=fx_cubic_wave8((uint8_t)((unsigned)j*510u/
-                                                    (unsigned)(width-1)));
+                /* WLED computes 2 * map(j, 0, width-1, 0, 255):
+                 * divide before doubling to preserve integer truncation. */
+                amount=fx_cubic_wave8((uint8_t)(2u*((unsigned)j*255u/
+                                                    (unsigned)(width-1))));
             pixels[index]=shadows_source_blend(pixels[index],color,(uint8_t)amount);
         }
     }
