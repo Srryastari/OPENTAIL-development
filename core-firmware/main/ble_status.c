@@ -139,10 +139,12 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     /* 120 compatibility IDs plus original OpenTail effects fit in a long GATT value.
      * Honor Read Blob offsets so Android can retrieve the complete list even
      * when the negotiated ATT MTU is the default 23 bytes. */
-    uint16_t ids[128]={0};
-    size_t total=ot_effects_1d_supported_ids(ids,128u);
-    if(total>127u)total=127u;
-    uint8_t payload[2u+127u*2u]={1,(uint8_t)total};
+    /* v1 format allows a one-byte count and long GATT Read Blob chunks.
+     * 254 IDs fit in the BLE attribute maximum of 512 bytes. */
+    uint16_t ids[254]={0};
+    size_t total=ot_effects_1d_supported_ids(ids,254u);
+    if(total>254u)total=254u;
+    uint8_t payload[2u+254u*2u]={1,(uint8_t)total};
     for(size_t i=0;i<total;i++){
         payload[2u+i*2u]=(uint8_t)ids[i];
         payload[3u+i*2u]=(uint8_t)(ids[i]>>8);
