@@ -5,7 +5,32 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Exercise the same normalized input levels the independent 10ms sampler
+ * feeds to ot_debounce(): staggered transitions and opto-contact chatter must
+ * not erase unrelated active inputs or create spurious hazard/brake masks. */
+static void test_sampler_transitions(void){
+    ot_inputs_t debounce={0};
+    bool levels[OT_IN_COUNT]={0};
+    levels[1]=true;levels[2]=true;levels[3]=true; /* Brake + both turns */
+    for(unsigned n=0;n<3;n++)assert(ot_debounce(&debounce,levels,4u)==0u);
+    assert(ot_debounce(&debounce,levels,4u)==14u);
+    for(unsigned n=0;n<10;n++){
+        levels[2]=false;assert(ot_debounce(&debounce,levels,4u)==14u);
+        levels[2]=true;assert(ot_debounce(&debounce,levels,4u)==14u);
+    }
+    levels[2]=false;
+    for(unsigned n=0;n<3;n++)assert(ot_debounce(&debounce,levels,4u)==14u);
+    assert(ot_debounce(&debounce,levels,4u)==10u);
+    levels[4]=true; /* Reverse and brake/right can coexist. */
+    for(unsigned n=0;n<3;n++)assert(ot_debounce(&debounce,levels,4u)==10u);
+    assert(ot_debounce(&debounce,levels,4u)==26u);
+    for(unsigned i=0;i<OT_IN_COUNT;i++)levels[i]=false;
+    for(unsigned n=0;n<3;n++)assert(ot_debounce(&debounce,levels,4u)==26u);
+    assert(ot_debounce(&debounce,levels,4u)==0u);
+}
+
 int main(void){
+    test_sampler_transitions();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
