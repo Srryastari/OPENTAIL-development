@@ -2404,16 +2404,6 @@ uint8_t ease8InOutQuad(uint8_t i)
 }
 
 // triangular wave generator
-uint8_t triwave8(uint8_t in) {
-  if (in & 0x80) in = 255 - in;
-  return in << 1;
-}
-
-uint16_t triwave16(uint16_t in) {
-  if (in < 0x8000) return in *2;
-  return 0xFFFF - (in - 0x8000)*2;
-}
-
 // quadratic waveform generator. Spends just a little more time at the limits than "sine" does.
 uint8_t quadwave8(uint8_t in) {
   return ease8InOutQuad(triwave8(in));
