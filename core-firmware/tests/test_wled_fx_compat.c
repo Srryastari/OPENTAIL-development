@@ -1145,7 +1145,7 @@ int main(void) {
      * without modifying outputs; this must not silently enable other FX. */
     const ot_wled_rgb_t prim={123u,56u,9u},sec={3u,88u,174u},ter={0u,0u,0u};
     ot_wled_palette16_t palette={0};
-    assert(!ot_wled_palette_build(13u,prim,sec,ter,&palette));
+    assert(!ot_wled_palette_build(73u,prim,sec,ter,&palette));
     assert(!ot_wled_palette_build(2u,prim,sec,ter,NULL));
     for(unsigned pal=0;pal<=6u;pal++) {
         if(pal==1u)continue; /* WLED's dynamic random palette needs RNG/state */
@@ -1176,7 +1176,7 @@ int main(void) {
     assert(eq(ot_wled_palette_sample(&palette,16u,255u,OT_WLED_PALETTE_NOBLEND),
               (ot_wled_rgb_t){0u,0u,0u}));
 
-    for(uint8_t pal=2u;pal<=12u;pal++) {
+    for(uint8_t pal=2u;pal<=72u;pal++) {
 
         c.effect_id=OT_WLED_COLOR_CLOUDS;
         c.speed=24u;c.intensity=32u;c.brightness=32u;c.palette_id=pal;
@@ -1195,7 +1195,7 @@ int main(void) {
 
     /* Flow Stripe spans short and long arbitrary 1D zones and reuses the
      * palette renderer without hardcoded vehicle LED counts. */
-    for(uint8_t pal=0u;pal<=12u;pal++) {
+    for(uint8_t pal=0u;pal<=72u;pal++) {
         if(pal==1u)continue;
         c.effect_id=OT_WLED_FLOW_STRIPE;
         c.speed=127u;c.intensity=100u;c.brightness=32u;c.palette_id=pal;
