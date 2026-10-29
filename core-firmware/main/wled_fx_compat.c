@@ -21,6 +21,7 @@
  * for palette_id=0 only. No pixel I/O, allocations, Arduino or ESP-IDF dependencies.
  */
 #include "wled_fx_compat.h"
+#include <string.h>
 
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
@@ -161,10 +162,10 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 }
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
-    if (state) { state->step=0; state->aux0=0; state->aux1=0;
-                 state->call=0; state->data_counter=0;
-                 state->rng_state=0x73A11C5Du;
-                 state->held_rng_seed=0; }
+    if (state) {
+        memset(state,0,sizeof(*state));
+        state->rng_state=0x73A11C5Du;
+    }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
