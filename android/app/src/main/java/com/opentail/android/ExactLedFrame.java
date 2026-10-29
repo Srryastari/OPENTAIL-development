@@ -33,6 +33,37 @@ final class ExactLedFrame {
         return new ExactLedFrame(Origin.PROJECT,-1,0,checked(colors));
     }
 
+    /** Exactly reconstruct the local zero-based 1D address map.
+     * Honor auto/manual offsets, configured gaps and zone reversal. Local
+     * paint is NOT a renderer FX frame or a reading of physical LED output. */
+    static ExactLedFrame fromProjectModel(NativeProject project) {
+        if(project==null)throw new IllegalArgumentException("missing project");
+        int end=0;
+        for(int z=0;z<project.zoneCount();z++) {
+            org.json.JSONObject zone=project.zone(z);
+            long start=zone.optLong("start",-1);
+            long length=zone.optLong("length",-1);
+            if(start<0||length<0||start+length>MAX_PIXELS)
+                throw new IllegalArgumentException("design exceeds preview capacity");
+            end=Math.max(end,(int)(start+length));
+        }
+        int[] colors=new int[end];
+        Arrays.fill(colors,0xff000000);
+        for(int z=0;z<project.zoneCount();z++) {
+            org.json.JSONObject zone=project.zone(z);
+            int start=zone.optInt("start");
+            int length=zone.optInt("length");
+            boolean reverse=zone.optBoolean("reverse",false);
+            String id=zone.optString("id");
+            for(int local=0;local<length;local++) {
+                int address=start+(reverse?(length-1-local):local);
+                String hex=project.pixelColor(id,local);
+                colors[address]=0xff000000|Integer.parseInt(hex.substring(1),16);
+            }
+        }
+        return fromProject(colors);
+    }
+
     /** Accept only complete, validated, RGB888 renderer frame snapshots.
      * Byte 0..2 maps directly to physical pixel 0. No BRG/GRB guessing: CORE
      * must deliver canonical logical RGB after its renderer/arbitration stage.
