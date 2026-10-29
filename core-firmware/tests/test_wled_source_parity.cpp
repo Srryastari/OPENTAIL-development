@@ -515,7 +515,7 @@ struct PinnedSeg {
         (void)mapping;
         if(palette!=0){const auto p=ref_palette(palette,colors[0],colors[1],colors[2]);return ColorFromPalette(p,i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);}
         if(slot>2) {
-          if(slot==3u)return ColorFromPalette(ref_palette(0u,colors[0],colors[1],colors[2]),i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);
+          if(slot>=3u)return ColorFromPalette(ref_palette(0u,colors[0],colors[1],colors[2]),i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);
           std::abort();
         }
         return color_fade(colors[slot],pbri,true);
@@ -2393,6 +2393,55 @@ void mode_glitter()
 #undef ULTRAWHITE
 // END UPSTREAM FX.cpp Glitter.
 
+// BEGIN original pinned fastled_slim.cpp 8-bit quadwave math.
+uint8_t ease8InOutQuad(uint8_t i)
+{
+  uint32_t j = i;
+  if (j & 0x80) j = 255 - j; // mirror if > 127
+  uint32_t jj = (j * j) >> 7;
+  return (i & 0x80) ? (255 - jj) : jj;
+}
+
+// triangular wave generator
+uint8_t triwave8(uint8_t in) {
+  if (in & 0x80) in = 255 - in;
+  return in << 1;
+}
+
+uint16_t triwave16(uint16_t in) {
+  if (in < 0x8000) return in *2;
+  return 0xFFFF - (in - 0x8000)*2;
+}
+
+// quadratic waveform generator. Spends just a little more time at the limits than "sine" does.
+uint8_t quadwave8(uint8_t in) {
+  return ease8InOutQuad(triwave8(in));
+}
+
+
+// BEGIN original pinned FX.cpp mode_blends.
+void mode_blends(void) {
+  unsigned pixelLen = SEGLEN > UINT8_MAX ? UINT8_MAX : SEGLEN;
+  unsigned dataSize = sizeof(uint32_t) * (pixelLen + 1);  // max segment length of 56 pixels on 16 segment ESP8266
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  uint32_t* pixels = reinterpret_cast<uint32_t*>(SEGENV.data);
+  uint8_t blendSpeed = map(SEGMENT.intensity, 0, UINT8_MAX, 10, 128);
+  unsigned shift = (strip.now * ((SEGMENT.speed >> 3) +1)) >> 8;
+
+  for (unsigned i = 0; i < pixelLen; i++) {
+    pixels[i] = color_blend(pixels[i], SEGMENT.color_from_palette(shift + quadwave8((i + 1) * 16), false, PALETTE_SOLID_WRAP, 255), blendSpeed);
+    shift += 3;
+  }
+
+  unsigned offset = 0;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, pixels[offset++]);
+    if (offset >= pixelLen) offset = 0;
+  }
+}
+
+// END original pinned Blends.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2444,7 +2493,8 @@ static const RefCase refs[]={
     {89,mode_starburst,"Fireworks Starburst"},
     {44,mode_tetrix,"Tetrix"},
     {179,mode_FlowStripe,"Flow Stripe"},
-    {87,mode_glitter,"Glitter"}
+    {87,mode_glitter,"Glitter"},
+    {115,mode_blends,"Blends"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2489,7 +2539,7 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:pal;
                     PinnedEnv env;
