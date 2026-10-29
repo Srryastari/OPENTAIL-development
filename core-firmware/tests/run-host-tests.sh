@@ -8,36 +8,36 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/te
 
 cc -std=c11 -Wall -Wextra -Werror -Imain main/core_logic.c main/arbitration_logic.c main/show_logic.c tests/test_show_logic.c -o /tmp/ot-show-tests && /tmp/ot-show-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/test_wled_fx_compat.c -o /tmp/ot-wled-fx-tests -lm && /tmp/ot-wled-fx-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/test_wled_fx_compat.c -o /tmp/ot-wled-fx-tests -lm -lm && /tmp/ot-wled-fx-tests
 
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
 # Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain -c main/wled_fx_compat.c -o /tmp/ot-wled-fx-parity.o
-c++ -std=c++17 -Wall -Wextra -Werror -Wno-parentheses -Imain tests/test_wled_source_parity.cpp /tmp/ot-wled-fx-parity.o -o /tmp/ot-wled-source-parity
+c++ -std=c++17 -Wall -Wextra -Werror -Wno-parentheses -Wno-unused-parameter -Imain tests/test_wled_source_parity.cpp /tmp/ot-wled-fx-parity.o -o /tmp/ot-wled-source-parity -lm
 /tmp/ot-wled-source-parity
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_1d.c tests/test_wled_1d.c -o /tmp/ot-wled-1d-tests && /tmp/ot-wled-1d-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests -lm && /tmp/ot-ble-fx-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests -lm -lm && /tmp/ot-ble-fx-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_auto_effects.c -o /tmp/ot-auto-effects-tests -lm && /tmp/ot-auto-effects-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_auto_effects.c -o /tmp/ot-auto-effects-tests -lm -lm && /tmp/ot-auto-effects-tests
 # All named OpenTail originals, including the Event Horizon special and
 # Singularity Shutdown, must compile, be registered and respect true black.
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_proprietary_effects.c -o /tmp/ot-proprietary-fx-tests -lm && /tmp/ot-proprietary-fx-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_proprietary_effects.c -o /tmp/ot-proprietary-fx-tests -lm -lm && /tmp/ot-proprietary-fx-tests
 
 # All decorative fade maths and strobe edge timings must survive every change.
 # This proves only host-side rendered frames; physical FPS/response is separate.
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_render_quality.c -o /tmp/ot-render-quality-tests -lm && /tmp/ot-render-quality-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_render_quality.c -o /tmp/ot-render-quality-tests -lm -lm && /tmp/ot-render-quality-tests
 
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/particle_system_1d.c tests/test_particle_system_1d.c -o /tmp/ot-particle-1d-tests && /tmp/ot-particle-1d-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_effects_1d.c -o /tmp/ot-effects-unified-tests -lm && /tmp/ot-effects-unified-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_effects_1d.c -o /tmp/ot-effects-unified-tests -lm -lm && /tmp/ot-effects-unified-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test -lm && /tmp/ot-fx-presets-test
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test -lm -lm && /tmp/ot-fx-presets-test
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test -lm && /tmp/ot-palettes-test
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test -lm -lm && /tmp/ot-palettes-test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
 
