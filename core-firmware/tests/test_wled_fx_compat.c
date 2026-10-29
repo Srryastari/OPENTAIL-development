@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=98u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=99u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -943,6 +943,36 @@ int main(void) {
     }
     ot_wled_fx_reset(&s);
     assert(s.scratch==NULL);
+
+
+    /* Rolling Balls is a real per-zone source port, not a catalog alias.
+     * Independent zones seeded alike must reproduce the same trajectories,
+     * with no outside-buffer writes and with scratch released at reset. */
+    c.effect_id=OT_WLED_ROLLING_BALLS;
+    c.speed=222u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t rolling_a={0},rolling_b={0};
+    ot_wled_rgb_t rolling_aa[33],rolling_bb[33];
+    for(unsigned k=0u;k<40u;k++) {
+        const uint32_t ms=k*913u;
+        for(size_t px=0;px<33u;px++) {
+            rolling_aa[px]=(ot_wled_rgb_t){99,88,77};
+            rolling_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&rolling_a,ms,&rolling_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&rolling_b,ms,&rolling_bb[1],31u));
+        assert(memcmp(rolling_aa,rolling_bb,sizeof(rolling_aa))==0);
+        assert(eq(rolling_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(rolling_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1;px<=31u;px++) {
+            assert(rolling_aa[px].r<=32u &&
+                   rolling_aa[px].g<=32u &&
+                   rolling_aa[px].b<=32u);
+        }
+    }
+    assert(rolling_a.scratch && rolling_a.scratch_bytes>=16u*16u);
+    ot_wled_fx_reset(&rolling_a);
+    ot_wled_fx_reset(&rolling_b);
+    assert(!rolling_a.scratch && !rolling_b.scratch);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
