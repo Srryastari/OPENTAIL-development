@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=105u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=106u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116 && ids[102]==218 && ids[103]==89 && ids[104]==44);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116 && ids[102]==218 && ids[103]==89 && ids[104]==44 && ids[105]==179);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -1178,6 +1178,28 @@ int main(void) {
         ot_wled_fx_reset(&state_pal);
         c.effect_id=OT_WLED_SOLID;
         assert(!ot_wled_fx_render(&c,&state_pal,1234u,&guarded[1],31u));
+    }
+    c.palette_id=0u;
+
+
+    /* Flow Stripe spans short and long arbitrary 1D zones and reuses the
+     * palette renderer without hardcoded vehicle LED counts. */
+    for(uint8_t pal=0u;pal<=6u;pal++) {
+        if(pal==1u)continue;
+        c.effect_id=OT_WLED_FLOW_STRIPE;
+        c.speed=127u;c.intensity=100u;c.brightness=32u;c.palette_id=pal;
+        ot_wled_fx_state_t flow={0};
+        ot_wled_rgb_t flow_pixels[524];
+        for(size_t px=0;px<524u;px++)
+            flow_pixels[px]=(ot_wled_rgb_t){99,88,77};
+        assert(ot_wled_fx_render(&c,&flow,4000u,&flow_pixels[1],522u));
+        assert(eq(flow_pixels[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(flow_pixels[523],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1;px<523u;px++)
+            assert(flow_pixels[px].r<=32u &&
+                   flow_pixels[px].g<=32u &&
+                   flow_pixels[px].b<=32u);
+        ot_wled_fx_reset(&flow);
     }
     c.palette_id=0u;
 
