@@ -63,7 +63,7 @@ check("Controller writing is separate from authoring, requires confirmation",
       "supportedBleEffects.contains(effectId)" in main and
       "Math.min(32," in main)
 check("Native effects manifest is explicitly 126 IDs",
-      len(re.findall(r'new Effect\\(\\d+, "', effect)) == 126)
+      len(re.findall(r'new Effect\(\d+, "', effect)) == 126)
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
