@@ -62,7 +62,9 @@ enum {
     OT_WLED_SOLID_GLITTER = 103,
     OT_WLED_CHASE_RANDOM = 29,
     OT_WLED_STREAM = 39,
-    OT_WLED_STREAM2 = 61
+    OT_WLED_STREAM2 = 61,
+    OT_WLED_LIGHTNING = 57,
+    OT_WLED_ICU = 58
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
