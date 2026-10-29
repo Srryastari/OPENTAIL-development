@@ -517,7 +517,7 @@ static esp_err_t show_start(httpd_req_t *r){
     }
     if(mode==OT_SHOW_OFF){cJSON_Delete(obj);return respond_err(r,400,"unknown native effect");}
     ot_show_t cfg={.mode=mode,.color={255,0,0},.brightness=24,.speed=50,
-       .chain_mask=3,.section_mask=255};
+       .chain_mask=(uint8_t)((1u<<OT_CHAIN_COUNT)-1u),.section_mask=(uint16_t)((1u<<OT_SECTION_COUNT)-1u)};
     /* Canonical generic output selector; old left/right chain aliases stay
      * read-compatible for existing bench utilities, not as vehicle defaults. */
     const cJSON *output_mask=cJSON_GetObjectItemCaseSensitive(obj,"output_mask");
@@ -693,6 +693,29 @@ static esp_err_t fx_catalog_get(httpd_req_t *r){
  * render state, physical-trigger arbitration and Stop path.
  * It MUST NOT be exposed on production vehicle networks unchanged.
  */
+/* Preview endpoints use physical output bit indices, never vehicle sides.
+ * Keep legacy left/right input aliases only for existing bench clients. */
+static bool preview_output_mask(const cJSON *obj,uint8_t *mask){
+    const cJSON *selection=cJSON_GetObjectItemCaseSensitive(obj,"output_mask");
+    const cJSON *legacy=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    const unsigned all=(1u<<OT_CHAIN_COUNT)-1u;
+    if(!mask||all>UINT8_MAX|| (selection&&legacy))return false;
+    *mask=(uint8_t)all;
+    if(selection){
+        if(!cJSON_IsNumber(selection)||selection->valuedouble!=selection->valueint||
+           selection->valueint<1||(unsigned)selection->valueint>all)return false;
+        *mask=(uint8_t)selection->valueint;
+    }else if(legacy){
+        if(!cJSON_IsString(legacy))return false;
+        if(!strcmp(legacy->valuestring,"left")||!strcmp(legacy->valuestring,"output1"))
+            *mask=1u;
+        else if(!strcmp(legacy->valuestring,"right")||!strcmp(legacy->valuestring,"output2"))
+            *mask=2u;
+        else if(strcmp(legacy->valuestring,"both"))return false;
+        if((*mask&~all)!=0u)return false;
+    }
+    return true;
+}
 static esp_err_t fx_preview_post(httpd_req_t *r){
     cJSON *obj=NULL;
     int status=recv_json(r,&obj);
@@ -710,12 +733,8 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         om_number(obj,"ttl_sec",&ttl,1,60);
     for(unsigned i=0;i<6&&valid;i++)
         valid=om_number(obj,names[i],&values[i],0,255);
-    const cJSON *ch=cJSON_GetObjectItemCaseSensitive(obj,"chain");
-    const char *chain=cJSON_IsString(ch)?ch->valuestring:"both";
-    uint8_t chain_mask=3u;
-    if(!strcmp(chain,"left"))chain_mask=1u;
-    else if(!strcmp(chain,"right"))chain_mask=2u;
-    else if(strcmp(chain,"both"))valid=false;
+    uint8_t chain_mask=0;
+    valid=valid&&preview_output_mask(obj,&chain_mask);
     if(!valid){cJSON_Delete(obj);return respond_err(r,400,"invalid effect preview parameters");}
     for(unsigned i=0;i<3;i++){fg[i]=values[i];bg[i]=values[i+3];}
     ot_ble_fx_packet_t req={
@@ -759,12 +778,10 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
     /* Preserve the allowlisted label before deleting the request JSON. */
     char event_key[32]={0};
     snprintf(event_key,sizeof(event_key),"%s",key);
-    const cJSON *ch=cJSON_GetObjectItemCaseSensitive(obj,"chain");
-    const char *chain=cJSON_IsString(ch)?ch->valuestring:"both";
-    uint8_t chain_mask=3u;
-    if(!strcmp(chain,"left"))chain_mask=1u;
-    else if(!strcmp(chain,"right"))chain_mask=2u;
-    else if(strcmp(chain,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
+    uint8_t chain_mask=0;
+    if(!preview_output_mask(obj,&chain_mask)){
+        cJSON_Delete(obj);return respond_err(r,400,"invalid output_mask or legacy chain");
+    }
     const char *keys[]={"r","g","b","brightness","speed","intensity",
                          "spark_style","spark_peak","spark_r","spark_g","spark_b"};
     for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
