@@ -4685,15 +4685,20 @@ static bool noise_pal_frame(const ot_wled_fx_config_t *cfg,
         st->step=now;
         const uint8_t base=fx_rand8(st,256u);
         const uint8_t min_bri=186u;
-        uint8_t hsv[12]={
-           (uint8_t)(base+fx_rand8(st,64u)),255u,
-                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
-           (uint8_t)(base+128u),255u,
-                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
-           (uint8_t)(base+fx_rand8(st,92u)),192u,
-                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri)),
-           (uint8_t)(base+fx_rand8(st,92u)),255u,
-                        (uint8_t)(min_bri+fx_rand8(st,255u-min_bri))};
+        /* Pinned WLED FX.cpp constructs CHSV(hue,sat,value) in C++.
+         * Its GCC build evaluates arguments right-to-left: draw value
+         * before hue for each color, not the other way around.
+         * Same RNG state alone cannot prove palette parity. */
+        const uint8_t v0=(uint8_t)(min_bri+fx_rand8(st,255u-min_bri));
+        const uint8_t h0=(uint8_t)(base+fx_rand8(st,64u));
+        const uint8_t v1=(uint8_t)(min_bri+fx_rand8(st,255u-min_bri));
+        const uint8_t v2=(uint8_t)(min_bri+fx_rand8(st,255u-min_bri));
+        const uint8_t h2=(uint8_t)(base+fx_rand8(st,92u));
+        const uint8_t v3=(uint8_t)(min_bri+fx_rand8(st,255u-min_bri));
+        const uint8_t h3=(uint8_t)(base+fx_rand8(st,92u));
+        const uint8_t hsv[12]={
+            h0,255u,v0, (uint8_t)(base+128u),255u,v1,
+            h2,192u,v2, h3,255u,v3};
         if(!ot_wled_palette_from_hsv4(hsv,&pal[1]))return false;
     }
     noise_pal_blend(&pal[0],&pal[1]);
