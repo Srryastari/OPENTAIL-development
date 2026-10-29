@@ -475,6 +475,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_GLITTER, "Glitter", "Glitter@!,!,,,,,Overlay;,,Glitter color;!;;pal=11,m12=0",
      false, false, true, true, true},
     {OT_WLED_BLENDS, "Blends", "Blends@Shift speed,Blend speed;;!",
+     false, false, true, true, true},
+    {OT_WLED_PALETTE, "Palette", "Palette@Shift,Size,Rotation,,,Animate Shift,Animate Rotation,Anamorphic;;!;12;ix=112,c1=0,o1=1,o2=0,o3=1",
      false, false, true, true, true}
 };
 
@@ -2793,6 +2795,47 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Pinned mode_palette() ESP32 float 1D profile, source default custom
+ * Rotation 0, Animate Shift enabled, Animate Rotation disabled,
+ * Anamorphic enabled. No matrix reinterpretation or hardcoded LED counts. */
+static void palette_mode_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    ot_wled_palette16_t palette;
+    const uint8_t id=cfg->palette_id?cfg->palette_id:12u;
+    if(!ot_wled_palette_build(id,cfg->foreground,
+                   cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return;
+    const float theta=(128.0f*(3.14159265358979323846f/256.0f));
+    const float sine=sinf(theta),cosine=cosf(theta);
+    const float max_x=(float)(count>1u?count-1u:1u);
+    const float max_y=1.0f;
+    const float max_x_in=max_x,max_y_in=max_y;
+    const float max_x_out=1.0f,max_y_out=1.0f;
+    const float center_x=max_x_out/2.0f;
+    const float center_y=max_y_out/2.0f;
+    const float scale=fabsf(sine)+fabsf(cosine)*max_y_out/max_x_out;
+    const float y_cos=(cosine*(0.0f-center_y*max_y_in))/(max_y_in*scale);
+    const int palette_offset=(int)(((now*((unsigned)(cfg->speed>>3)+1u))
+                                    &0xffffu)>>8);
+    for(size_t i=0;i<count;i++) {
+        const float x_sin=(sine*((float)i-center_x*max_x_in))/
+                          (max_x_in*scale);
+        float source_x=x_sin+y_cos+center_x;
+        if(source_x<0.0f)source_x=0.0f;
+        if(source_x>max_x_out)source_x=max_x_out;
+        int color_index=(int)((source_x*255.0f)/max_x_out);
+        if(cfg->intensity<=128u)
+            color_index=(color_index*(int)cfg->intensity)/128;
+        else
+            color_index=(((int)cfg->intensity-112)*color_index)/16;
+        color_index-=palette_offset;
+        pixels[i]=scaled(ot_wled_palette_sample(&palette,
+             (uint8_t)color_index,255u,OT_WLED_PALETTE_LINEAR),
+             cfg->brightness);
+    }
+}
+
 /* Pinned FX.cpp mode_blends(): zone-local 256-element uint32_t scratch,
  * source intensity/speed arithmetic and fastled_slim quadwave8 math. */
 static uint8_t fx_quadwave8(uint8_t x) {
@@ -3819,7 +3862,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         if((cfg->effect_id!=OT_WLED_COLOR_CLOUDS &&
             cfg->effect_id!=OT_WLED_FLOW_STRIPE &&
             cfg->effect_id!=OT_WLED_GLITTER &&
-            cfg->effect_id!=OT_WLED_BLENDS) ||
+            cfg->effect_id!=OT_WLED_BLENDS &&
+            cfg->effect_id!=OT_WLED_PALETTE) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4013,6 +4057,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_PALETTE) {
+        palette_mode_frame(cfg,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_BLENDS) {
