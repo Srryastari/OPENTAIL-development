@@ -12,11 +12,11 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 
 int main(void) {
     uint16_t ids[16]={0};
-    assert(ot_wled_fx_supported_ids(ids,16)==14);
+    assert(ot_wled_fx_supported_ids(ids,16)==16);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
-           ids[7]==13 && ids[8]==23 && ids[9]==83 && ids[10]==85 &&
-           ids[11]==86 && ids[12]==98 && ids[13]==100);
+           ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
+           ids[12]==85 && ids[13]==86 && ids[14]==98 && ids[15]==100);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -213,6 +213,44 @@ int main(void) {
     for(int k=0;k<7;k++)assert(eq(p[k],c.foreground));
     ot_wled_fx_reset(&s);
     assert(s.aux1==0);
+
+    /* Pinned FX.cpp running(..., theatre=false): the OLD SEGENV.aux0
+     * phase renders before a once-per-cycle increment, even on frame skip. */
+    c.effect_id=OT_WLED_RUNNING_COLOR;c.speed=255;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background));
+    assert(eq(p[2],c.foreground) && eq(p[3],c.background));
+    assert(ot_wled_fx_render(&c,&s,50,p,7));
+    assert(eq(p[0],c.foreground) && s.aux0==1u && s.step==1u);
+    assert(ot_wled_fx_render(&c,&s,51,p,7));
+    assert(eq(p[0],c.background) && eq(p[1],c.foreground));
+    assert(ot_wled_fx_render(&c,&s,250,p,7) && s.aux0==0);
+    assert(ot_wled_fx_render(&c,&s,251,p,7));
+    assert(eq(p[0],c.foreground));
+    c.intensity=255;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    for(int k=0;k<16;k++)assert(eq(p[k],c.foreground));
+    assert(eq(p[16],c.background));
+
+    /* Pinned FX.cpp mode_chase_flash(): four flashes at one position,
+     * paired on/off events and only then advance to the next pixel. */
+    c.effect_id=OT_WLED_CHASE_FLASH;c.speed=255;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[0],c.background) && eq(p[1],c.background));
+    assert(eq(p[2],c.foreground) && s.aux0==0 && s.aux1==1 && s.step==20);
+    assert(ot_wled_fx_render(&c,&s,1,p,7));
+    for(int k=0;k<7;k++)assert(eq(p[k],c.foreground));
+    assert(s.aux1==1 && s.step==20);
+    const uint32_t flash_times[]={20,50,70,100,120,150,170,200};
+    for(size_t t=0;t<sizeof(flash_times)/sizeof(flash_times[0]);t++)
+        assert(ot_wled_fx_render(&c,&s,flash_times[t],p,7));
+    assert(s.aux0==1 && s.aux1==9 && s.step==210);
+    assert(ot_wled_fx_render(&c,&s,210,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background) && eq(p[2],c.background));
+    assert(ot_wled_fx_render(&c,&s,211,p,1));
+    assert(eq(p[0],c.foreground));
 
     c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
