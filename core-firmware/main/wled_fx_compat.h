@@ -68,7 +68,9 @@ enum {
     OT_WLED_FIRE_FLICKER = 45,
     OT_WLED_WAVESINS = 184,
     OT_WLED_BPM = 68,
-    OT_WLED_LAKE = 75
+    OT_WLED_LAKE = 75,
+    OT_WLED_PLASMA = 97,
+    OT_WLED_OSCILLATE = 62
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -91,6 +93,12 @@ typedef struct {
     ot_wled_rgb_t spark_color;
 } ot_wled_fx_config_t;
 typedef struct {
+    uint16_t pos;
+    uint8_t size;
+    int8_t dir;
+    uint8_t speed;
+} ot_wled_oscillator_t;
+typedef struct {
     uint32_t step;          /* Upstream per-segment SEGENV.step */
     uint16_t aux0;          /* Upstream per-segment SEGENV.aux0 */
     uint16_t aux1;          /* Upstream per-segment SEGENV.aux1 (Heartbeat/Percent) */
@@ -98,6 +106,7 @@ typedef struct {
     uint32_t data_counter;  /* Per-zone mode_android() allocated uint32_t counter */
     uint32_t rng_state;     /* Software RNG state for source-driven random modes */
     uint32_t held_rng_seed; /* Reproduce Fire Flicker frame between WLED updates */
+    ot_wled_oscillator_t oscillators[3]; /* 3 source-owned bars, per zone */
 } ot_wled_fx_state_t;
 
 typedef struct {
