@@ -512,12 +512,25 @@ static esp_err_t show_start(httpd_req_t *r){
     if(mode==OT_SHOW_OFF){cJSON_Delete(obj);return respond_err(r,400,"unknown native effect");}
     ot_show_t cfg={.mode=mode,.color={255,0,0},.brightness=24,.speed=50,
        .chain_mask=3,.section_mask=255};
-    const char *channels="both";
-    field=cJSON_GetObjectItemCaseSensitive(obj,"chain");
-    if(field){if(!cJSON_IsString(field)){cJSON_Delete(obj);return respond_err(r,400,"chain must be a string");}channels=field->valuestring;}
-    if(!strcmp(channels,"left"))cfg.chain_mask=1;
-    else if(!strcmp(channels,"right"))cfg.chain_mask=2;
-    else if(strcmp(channels,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
+    /* Canonical generic output selector; old left/right chain aliases stay
+     * read-compatible for existing bench utilities, not as vehicle defaults. */
+    const cJSON *output_mask=cJSON_GetObjectItemCaseSensitive(obj,"output_mask");
+    const cJSON *legacy_chain=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    if(output_mask && legacy_chain){cJSON_Delete(obj);return respond_err(r,400,"use output_mask or legacy chain, not both");}
+    if(output_mask){
+        const unsigned valid_mask=(1u<<OT_CHAIN_COUNT)-1u;
+        if(!cJSON_IsNumber(output_mask)||output_mask->valuedouble!=output_mask->valueint||
+           output_mask->valueint<1||(unsigned)output_mask->valueint>valid_mask){
+            cJSON_Delete(obj);return respond_err(r,400,"output_mask must select one or more available outputs");
+        }
+        cfg.chain_mask=(uint8_t)output_mask->valueint;
+    }else if(legacy_chain){
+        if(!cJSON_IsString(legacy_chain)){cJSON_Delete(obj);return respond_err(r,400,"legacy chain must be a string");}
+        const char *channels=legacy_chain->valuestring;
+        if(!strcmp(channels,"left")||!strcmp(channels,"output1"))cfg.chain_mask=1u;
+        else if(!strcmp(channels,"right")||!strcmp(channels,"output2"))cfg.chain_mask=2u;
+        else if(strcmp(channels,"both")){cJSON_Delete(obj);return respond_err(r,400,"unknown legacy chain name");}
+    }
     field=cJSON_GetObjectItemCaseSensitive(obj,"section_mask");
     if(field){if(!cJSON_IsNumber(field) || field->valuedouble!=field->valueint || field->valueint<1||field->valueint>255){cJSON_Delete(obj);return respond_err(r,400,"section_mask must be 1..255");}cfg.section_mask=(uint16_t)field->valueint;}
     const char *keys[]={"r","g","b","brightness","speed","ttl_ms"};
@@ -958,11 +971,23 @@ static esp_err_t status_get(httpd_req_t *r) {
       arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",
       arb.show_requested?"true":"false",arb.demo_requested?"true":"false",
       arb.demo_suppressed?"true":"false");
+    char active_pixels_json[OT_CHAIN_COUNT*6u+3u];
+    size_t used=0;
+    active_pixels_json[used++]='[';
+    for(unsigned i=0;i<OT_CHAIN_COUNT;i++){
+        int written=snprintf(active_pixels_json+used,sizeof(active_pixels_json)-used,
+                             "%s%u",i?",":"",(unsigned)configured_pixels[i]);
+        if(written<0||(size_t)written>=sizeof(active_pixels_json)-used)
+            return respond_err(r,500,"output status formatting overflow");
+        used+=(size_t)written;
+    }
+    active_pixels_json[used++]=']';
+    active_pixels_json[used]=0;
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,"user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
-       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)OT_TARGET_FPS,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
+       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)OT_TARGET_FPS,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
