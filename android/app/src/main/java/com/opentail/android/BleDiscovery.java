@@ -115,13 +115,13 @@ final class BleDiscovery {
     void setConfigListener(java.util.function.Consumer<String> listener){configListener=listener;}
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
-        if(!canConfigure()){cfgNotify(false,"Authorize BLE over CORE Wi-Fi before editing outputs",null,index);return;}
+        if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
         if(index<0||index>1||cfgBusy||writePending||readReplyPending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     void saveOutput(int index,String json){
-        if(!canConfigure()){cfgNotify(false,"Authorize BLE over CORE Wi-Fi before saving outputs",null,index);return;}
+        if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return;}
         if(index<0||index>1||cfgBusy||writePending||readReplyPending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
