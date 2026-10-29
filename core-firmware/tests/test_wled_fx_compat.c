@@ -11,11 +11,12 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[12]={0};
-    assert(ot_wled_fx_supported_ids(ids,12)==11);
+    uint16_t ids[16]={0};
+    assert(ot_wled_fx_supported_ids(ids,16)==14);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
-           ids[7]==13 && ids[8]==23 && ids[9]==83 && ids[10]==100);
+           ids[7]==13 && ids[8]==23 && ids[9]==83 && ids[10]==85 &&
+           ids[11]==86 && ids[12]==98 && ids[13]==100);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -162,6 +163,56 @@ int main(void) {
     assert(s.aux0==0 && s.aux1==UINT16_MAX && s.step==1501);
     ot_wled_fx_reset(&s);
     assert(s.step==0 && s.aux0==0 && s.aux1==0);
+
+    /* Pinned FX.cpp spots_base() and its phase-varying threshold. */
+    c.effect_id=OT_WLED_SPOTS;c.speed=255;c.intensity=0;
+    c.brightness=255;c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    assert(ot_wled_fx_render(&c,&s,0,p,8));
+    assert(eq(p[0],c.background));
+    assert(p[4].r>=253 && p[4].b<=2);
+    assert(p[2].r>100 && p[2].r<150);
+    c.speed=0;
+    assert(ot_wled_fx_render(&c,&s,0,p,8));
+    assert(p[2].r==0 && p[4].r<4);
+    c.effect_id=OT_WLED_SPOTS_FADE;
+    assert(ot_wled_fx_render(&c,&s,0,p,8));
+    assert(p[2].r>100 && p[2].r<150);
+    assert(ot_wled_fx_render(&c,&s,4096,p,8));
+    assert(eq(p[2],c.background) && p[4].r>=253);
+    assert(ot_wled_fx_render(&c,&s,0,p,1));
+    assert(eq(p[0],c.foreground));
+    /* Multiple spots use the intensity-selected zone count, not a
+     * hardcoded wiring layout or fixed pixel sequence. */
+    c.effect_id=OT_WLED_SPOTS;c.speed=255;c.intensity=255;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.background) && eq(p[4],c.background));
+    assert(p[2].r>200 && p[6].r>200);
+
+    /* Pinned FX.cpp Percent uses the OLD aux1 before adjusting the fill,
+     * so its animation state persists per-zone across frame callbacks. */
+    c.effect_id=OT_WLED_PERCENT;c.speed=0;c.intensity=50;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    for(int k=0;k<7;k++)assert(eq(p[k],c.background));
+    assert(s.aux1==1);
+    assert(ot_wled_fx_render(&c,&s,20,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background) && s.aux1==2);
+    assert(ot_wled_fx_render(&c,&s,40,p,7) && s.aux1==3);
+    assert(ot_wled_fx_render(&c,&s,60,p,7) && s.aux1==4);
+    assert(ot_wled_fx_render(&c,&s,80,p,7) && s.aux1==4);
+    for(int k=0;k<7;k++)assert(eq(p[k],k<4?c.foreground:c.background));
+    c.intensity=150;
+    assert(ot_wled_fx_render(&c,&s,100,p,7));
+    for(int k=0;k<7;k++)assert(eq(p[k],k>=3?c.foreground:c.background));
+    c.intensity=200;
+    assert(ot_wled_fx_render(&c,&s,120,p,7) && s.aux1==3);
+    c.speed=255;c.intensity=100;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7) && s.aux1==7);
+    assert(ot_wled_fx_render(&c,&s,20,p,7));
+    for(int k=0;k<7;k++)assert(eq(p[k],c.foreground));
+    ot_wled_fx_reset(&s);
+    assert(s.aux1==0);
 
     c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
