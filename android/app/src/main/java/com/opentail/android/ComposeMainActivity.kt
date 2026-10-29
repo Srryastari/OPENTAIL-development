@@ -499,8 +499,9 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
                 .padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text("Bluetooth · " + bleMessage.value, color = t.fg, fontSize = 13.sp)
+                Text("Bluetooth · " + ble.connectionPhase(), color = t.fg, fontSize = 13.sp)
             }
+            Caption(bleMessage.value, t)
             Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
             Caption("Connect in Settings first. BOOT is required only for first-time enrollment.", t)
         }
@@ -1126,7 +1127,8 @@ class ComposeMainActivity : ComponentActivity() {
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
         Title("Settings", t)
         Panel(t) {
-            Text("Bluetooth · " + bleMessage.value, color = t.fg)
+            Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
+            Caption(bleMessage.value, t)
             Caption("Authorize only on a physically present CORE bench controller.", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
