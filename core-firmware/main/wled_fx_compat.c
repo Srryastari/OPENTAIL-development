@@ -197,7 +197,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_NOISE_3, "Noise 3", "Noise 3@!,Scale;;!",
      true, false, true, true, false},
     {OT_WLED_NOISE_4, "Noise 4", "Noise 4@!,Scale;;!",
-     true, false, true, true, false}
+     true, false, true, true, false},
+    {OT_WLED_PHASED, "Phased", "Phased@!,!;!,!;!",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -846,6 +848,31 @@ static uint8_t wled_cubicwave8(uint8_t phase) {
     const uint32_t factor=(3u<<8)-((uint32_t)triangle<<1);
     return (uint8_t)((square*factor)>>16);
 }
+/* Direct source adaptation of WLED FX.cpp phased_base(0).
+ * CORE's palette=0 foreground/background semantics match the original
+ * SEGCOLOR(0)/SEGCOLOR(1) path. Preserve the source float phase in
+ * SEGENV.step bits; memcpy avoids strict-aliasing undefined behavior.
+ * Phased Noise is not routed here; it requires original 1D Perlin. */
+static void phased_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,
+                         ot_wled_rgb_t *pixels,size_t count) {
+    float phase;
+    memcpy(&phase,&state->step,sizeof(phase));
+    phase += (float)cfg->speed/32.0f;
+    memcpy(&state->step,&phase,sizeof(phase));
+
+    const unsigned cutoff=255u-(unsigned)cfg->intensity;
+    const ot_wled_rgb_t bg=cfg->background;
+    const ot_wled_rgb_t fg=cfg->foreground;
+    for(size_t i=0;i<count;i++) {
+        unsigned val=((unsigned)i+1u)*16u;
+        val+=(unsigned)(phase*(float)(((unsigned)i%5u)+1u)/2.0f);
+        unsigned b=wled_cubicwave8((uint8_t)val);
+        b=(b>cutoff)?b-cutoff:0u;
+        pixels[i]=scaled(blend_colors(bg,fg,(uint8_t)b),cfg->brightness);
+    }
+}
+
 static void sinewave_frame(const ot_wled_fx_config_t *cfg,
                            ot_wled_fx_state_t *state,
                            ot_wled_rgb_t *pixels,size_t count) {
@@ -2608,6 +2635,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_PHASED) {
+        phased_frame(cfg,state,pixels,count);
         return true;
     }
     if (cfg->effect_id==OT_WLED_SINEWAVE) {
