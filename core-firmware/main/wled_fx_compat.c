@@ -2983,7 +2983,7 @@ static void aurora_frame(const ot_wled_fx_config_t *cfg,
             const uint8_t color=fx_rand8(state,256u);
             wave->ttl=(uint16_t)aurora_random16_range(state,500u,1501u);
             wave->basecolor=ot_wled_palette_sample(&palette,color,255u,
-                                                   OT_WLED_PALETTE_LINEAR);
+                                                   OT_WLED_PALETTE_NOWRAP);
             wave->alpha=(uint16_t)(((unsigned)aurora_random_range(
                                state,60u,100u)*65536u)/100u);
             wave->age=0u;
