@@ -22,6 +22,8 @@ enum {
     OT_WLED_FADE = 12,      /* WLED FX_MODE_FADE */
     OT_WLED_THEATER = 13,   /* WLED FX_MODE_THEATER_CHASE */
     OT_WLED_STROBE = 23,    /* WLED FX_MODE_STROBE */
+    OT_WLED_CHASE_FLASH = 31,  /* WLED FX_MODE_CHASE_FLASH */
+    OT_WLED_RUNNING_COLOR = 37, /* WLED FX_MODE_RUNNING_COLOR */
     OT_WLED_SOLID_PATTERN = 83, /* WLED FX_MODE_STATIC_PATTERN */
     OT_WLED_SPOTS = 85,        /* WLED FX_MODE_SPOTS */
     OT_WLED_SPOTS_FADE = 86,   /* WLED FX_MODE_SPOTS_FADE */
@@ -63,7 +65,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
  * never once per pixel, so that SEGENV.step advances at the right cadence.
  * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
  * Sweep, Scan, Dual Scan, Fade, Theater, Strobe, Solid Pattern and
- * Heartbeat, Spots, Spots Fade and Percent, with default
+ * Heartbeat, Spots, Spots Fade, Percent, Chase Flash and Running Color,
+ * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
