@@ -33,6 +33,29 @@ uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
     return mask;
 }
 
+
+bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                       const ot_tm_profile_t *saved,uint8_t instantaneous,
+                       uint8_t debounced){
+    if(!active||!deferred||!ot_tm_valid(saved))return false;
+    if(instantaneous||debounced){
+        deferred->profile=*saved;
+        deferred->pending=true;
+        return false;
+    }
+    *active=*saved;
+    deferred->pending=false;
+    return true;
+}
+bool ot_tm_apply_if_released(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced){
+    if(!active||!deferred||!deferred->pending||
+       instantaneous||debounced)return false;
+    *active=deferred->profile;
+    deferred->pending=false;
+    return true;
+}
+
 bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
                       uint16_t *expected_revision,ot_tm_profile_t *out){
     if(!wire||!expected_revision||!out||
