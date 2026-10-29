@@ -1,0 +1,292 @@
+package com.opentail.android;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Local authoring model compatible with the web Studio's v4 project document.
+ * No vehicle-specific zones, fixed GPIOs or network side effects exist here.
+ * An export is a design, NOT a firmware-ready or deployed configuration.
+ */
+final class NativeProject {
+    static final String PREFS = "opentail_native_project_v1";
+    static final String KEY = "project_json";
+    static final int MAX_ZONES = 200;
+    static final int MAX_SEQUENCE = 50;
+    static final int MAX_PRESETS = 40;
+    static final String[] MAIN_TRIGGERS = {
+            "Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse"
+    };
+    private final SharedPreferences prefs;
+    private JSONObject data;
+
+    NativeProject(Context context) {
+        prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        try { data = validated(new JSONObject(prefs.getString(KEY, "{}"))); }
+        catch (Exception ignored) { data = empty(); }
+    }
+
+    private static JSONObject empty() {
+        JSONObject p = new JSONObject();
+        try {
+            p.put("version", 4);
+            p.put("projectName", "Untitled project");
+            p.put("layout", new JSONArray());
+            p.put("removedSections", new JSONArray());
+            p.put("profiles", new JSONObject());
+            p.put("sequence", new JSONArray());
+            p.put("savedPresets", new JSONArray());
+            p.put("sequenceOptions", new JSONObject()
+                    .put("shuffleLoop", false).put("favoritesOnly", false)
+                    .put("sharedPaletteEnabled", false).put("sharedPaletteId", 0));
+            p.put("effectFavorites", new JSONArray());
+            p.put("hardwareProfile", new JSONObject().put("chip", "Addressable")
+                    .put("order", "RGB"));
+        } catch (JSONException ignored) { }
+        return p;
+    }
+
+    static JSONObject defaultTrigger(String name) throws JSONException {
+        String color = "Reverse".equals(name) ? "#ffffff" :
+                ("Left Turn".equals(name) || "Right Turn".equals(name) || "Hazards".equals(name))
+                        ? "#ffbf00" : "#ff0000";
+        return new JSONObject()
+                .put("name", name)
+                .put("kind", "automotive")
+                .put("pattern", "Solid")
+                .put("color", color)
+                .put("secondary", "#000000")
+                .put("brightness", 85)
+                .put("speed", 60)
+                .put("intensity", 60)
+                .put("zones", new JSONArray())
+                .put("sectionAnimations", new JSONObject());
+    }
+
+    private static JSONObject validated(JSONObject candidate) throws JSONException {
+        if (candidate.optInt("version", 0) < 1 || candidate.optInt("version", 0) > 4)
+            throw new JSONException("Unsupported project format (expected OpenTail v1-v4)");
+        if (!(candidate.opt("layout") instanceof JSONArray)
+                || !(candidate.opt("profiles") instanceof JSONObject))
+            throw new JSONException("Missing zone layout or profiles");
+        JSONArray layout = candidate.getJSONArray("layout");
+        if (layout.length() > MAX_ZONES) throw new JSONException("Too many design zones");
+        Set<String> ids = new HashSet<>();
+        long lastEnd = 0;
+        for (int i = 0; i < layout.length(); i++) {
+            JSONObject z = layout.getJSONObject(i);
+            String id = z.optString("id", "");
+            String name = z.optString("name", "");
+            int start = z.optInt("start", -1), length = z.optInt("length", -1);
+            if (id.isEmpty() || !ids.add(id) || name.isEmpty() || name.length() > 48
+                    || start < 0 || length < 1 || length > 10000
+                    || ((long) start + length) > 1000000)
+                throw new JSONException("Invalid or overlapping zone layout");
+            if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
+            lastEnd = (long) start + length;
+        }
+        if (candidate.optString("projectName", "Untitled project").length() > 64)
+            throw new JSONException("Project name is too long");
+        if (candidate.optJSONArray("sequence") != null
+                && candidate.getJSONArray("sequence").length() > MAX_SEQUENCE)
+            throw new JSONException("Too many sequence steps");
+        JSONArray steps = candidate.optJSONArray("sequence");
+        if (steps != null) {
+            for (int i = 0; i < steps.length(); i++) {
+                JSONObject step = steps.getJSONObject(i);
+                if (step.optString("fx", "").isEmpty()
+                        || step.optInt("ms", 0) < 50 || step.optInt("ms", 0) > 600000)
+                    throw new JSONException("Invalid sequence step");
+            }
+        }
+        JSONArray presets = candidate.optJSONArray("savedPresets");
+        if (presets != null && presets.length() > MAX_PRESETS)
+            throw new JSONException("Too many presets");
+        // Preserve other v4 fields without interpreting legacy device state.
+        JSONObject copy = new JSONObject(candidate.toString());
+        if (copy.optJSONArray("sequence") == null) copy.put("sequence", new JSONArray());
+        if (copy.optJSONArray("savedPresets") == null) copy.put("savedPresets", new JSONArray());
+        if (copy.optJSONObject("sequenceOptions") == null)
+            copy.put("sequenceOptions", new JSONObject());
+        if (copy.optJSONArray("effectFavorites") == null)
+            copy.put("effectFavorites", new JSONArray());
+        JSONObject profiles = copy.getJSONObject("profiles");
+        for (String name : MAIN_TRIGGERS)
+            if (!profiles.has(name)) profiles.put(name, defaultTrigger(name));
+        for (String name : new String[]{"Startup", "Shutdown"})
+            if (!profiles.has(name)) profiles.put(name, defaultTrigger(name));
+        copy.put("version", 4);
+        return copy;
+    }
+
+    synchronized boolean importJson(String input) {
+        try {
+            if (input.length() > 2000000) return false;
+            JSONObject candidate = validated(new JSONObject(input));
+            data = candidate;
+            return save();
+        } catch (Exception ex) { return false; }
+    }
+
+    synchronized String exportJson() {
+        try { return new JSONObject(data.toString()).put("version", 4).toString(2); }
+        catch (JSONException e) { return data.toString(); }
+    }
+
+    synchronized boolean save() {
+        return prefs.edit().putString(KEY, data.toString()).commit();
+    }
+
+    synchronized String name() { return data.optString("projectName", "Untitled project"); }
+    synchronized void name(String name) {
+        String n = name.trim();
+        if (n.isEmpty()) n = "Untitled project";
+        try { data.put("projectName", n.substring(0, Math.min(64, n.length()))); save(); }
+        catch (JSONException ignored) { }
+    }
+
+    synchronized JSONArray zones() { return data.optJSONArray("layout"); }
+    synchronized int zoneCount() { return zones().length(); }
+    synchronized int pixelCount() {
+        int count = 0;
+        for (int i = 0; i < zoneCount(); i++)
+            count += zones().optJSONObject(i).optInt("length", 0);
+        return count;
+    }
+
+    synchronized JSONObject zone(int index) { return zones().optJSONObject(index); }
+    synchronized int indexOfZone(String id) {
+        for (int i = 0; i < zoneCount(); i++)
+            if (id.equals(zone(i).optString("id"))) return i;
+        return -1;
+    }
+
+    private void reindex() throws JSONException {
+        long end = 0;
+        for (int i = 0; i < zoneCount(); i++) {
+            JSONObject z = zone(i);
+            int length = z.getInt("length");
+            boolean manual = "manual".equals(z.optString("offsetMode"));
+            long start = manual ? Math.max(end, z.optLong("start", end)) : end;
+            if (start + length > 1000000) throw new JSONException("Pixel index ceiling exceeded");
+            z.put("start", start);
+            end = start + length;
+        }
+    }
+
+    synchronized boolean addZone(String label, int length) {
+        if (zoneCount() >= MAX_ZONES || length < 1 || length > 10000) return false;
+        try {
+            JSONObject z = new JSONObject()
+                    .put("id", "zone_" + UUID.randomUUID().toString().replace("-", ""))
+                    .put("name", label.isEmpty() ? "Zone " + (zoneCount()+1) : label)
+                    .put("start", 0).put("length", length)
+                    .put("offsetMode", "auto").put("reverse", false)
+                    .put("functions", new JSONArray()).put("controllerId", "default");
+            zones().put(z); reindex(); return save();
+        } catch (JSONException e) { return false; }
+    }
+
+    synchronized boolean editZone(String id, String label, int length, boolean reverse) {
+        int index = indexOfZone(id);
+        if (index < 0 || length < 1 || length > 10000 || label.trim().isEmpty()
+                || label.trim().length() > 48) return false;
+        try {
+            JSONObject z = zone(index);
+            z.put("name", label.trim()).put("length", length).put("reverse", reverse);
+            reindex();return save();
+        } catch (JSONException e) { return false; }
+    }
+
+    synchronized boolean removeZone(String id) {
+        int index = indexOfZone(id);
+        if (index < 0) return false;
+        JSONArray remaining = new JSONArray();
+        for (int i = 0; i < zoneCount(); i++)
+            if (i != index) remaining.put(zone(i));
+        try {
+            data.put("layout", remaining);
+            // Only remove assignments for deleted zone; preserve all other triggers.
+            JSONObject profiles = data.getJSONObject("profiles");
+            JSONArray names = profiles.names();
+            if (names != null) for (int i = 0; i < names.length(); i++) {
+                JSONObject p = profiles.optJSONObject(names.getString(i));
+                if (p == null) continue;
+                JSONArray assigned = p.optJSONArray("zones"), filtered = new JSONArray();
+                if (assigned != null) for (int j = 0; j < assigned.length(); j++)
+                    if (!id.equals(assigned.optString(j))) filtered.put(assigned.optString(j));
+                p.put("zones", filtered);
+                JSONObject sections = p.optJSONObject("sectionAnimations");
+                if (sections != null) sections.remove(id);
+            }
+            reindex(); return save();
+        } catch (JSONException e) { return false; }
+    }
+
+    synchronized boolean moveZone(int from, int to) {
+        if (from < 0 || to < 0 || from >= zoneCount() || to >= zoneCount()) return false;
+        JSONArray changed = new JSONArray();
+        JSONObject selected = zone(from);
+        for (int k = 0; k < zoneCount(); k++) {
+            if (k == to) changed.put(selected);
+            if (k != from) changed.put(zone(k));
+        }
+        try { data.put("layout", changed); reindex();return save(); }
+        catch (JSONException e) { return false; }
+    }
+
+    synchronized JSONObject profiles() { return data.optJSONObject("profiles"); }
+    synchronized JSONObject trigger(String name) {
+        JSONObject p = profiles().optJSONObject(name);
+        if (p != null) return p;
+        try { p = defaultTrigger(name); profiles().put(name, p);save(); }
+        catch (JSONException ignored) { }
+        return p;
+    }
+
+    synchronized boolean customTrigger(String name) {
+        String n=name.trim();
+        if (!n.matches("[a-zA-Z0-9 _-]{1,32}") || profiles().has(n)) return false;
+        try { profiles().put(n, defaultTrigger(n).put("kind", "trigger-custom")); return save(); }
+        catch (JSONException e) { return false; }
+    }
+
+    synchronized boolean assign(String trigger, String zoneId, boolean enabled) {
+        if (indexOfZone(zoneId) < 0) return false;
+        try {
+            JSONObject p = trigger(trigger);
+            JSONArray old = p.optJSONArray("zones"), next = new JSONArray();
+            if (old != null) for (int i = 0; i < old.length(); i++)
+                if (!zoneId.equals(old.getString(i))) next.put(old.getString(i));
+            if (enabled) next.put(zoneId);
+            p.put("zones", next); return save();
+        } catch (JSONException e) { return false; }
+    }
+
+    synchronized boolean deleteTrigger(String name) {
+        JSONObject p = profiles().optJSONObject(name);
+        if (p == null || !"trigger-custom".equals(p.optString("kind"))) return false;
+        profiles().remove(name);return save();
+    }
+
+    synchronized JSONArray sequence() { return data.optJSONArray("sequence"); }
+    synchronized JSONObject sequenceOptions() { return data.optJSONObject("sequenceOptions"); }
+    synchronized boolean setSequence(JSONArray steps) {
+        if (steps.length() > MAX_SEQUENCE) return false;
+        try { data.put("sequence", steps);return save(); }
+        catch (JSONException e) { return false; }
+    }
+    synchronized JSONArray presets() { return data.optJSONArray("savedPresets"); }
+    synchronized boolean setPresets(JSONArray presets) {
+        if (presets.length() > MAX_PRESETS) return false;
+        try { data.put("savedPresets", presets);return save(); }
+        catch (JSONException e) { return false; }
+    }
+    synchronized JSONObject raw() {return data;}
+}
