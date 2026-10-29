@@ -64,6 +64,9 @@ python3 tests/test_ota_boot_confirmation_contract.py
 # All physical lanes must submit before CORE reports a completed frame or Stop.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_frame_contract.c -o /tmp/ot-frame-contract
 /tmp/ot-frame-contract
+# Frozen logical RGB888 capture must reject incomplete, stale, or disconnected frames.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_frame_snapshot.c tests/test_ot_frame_snapshot.c -o /tmp/ot-frame-snapshot
+/tmp/ot-frame-snapshot
 # Adaptive frame pacing is a pure C hardware-load policy; optical FPS remains a bench gate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_fps_pacer.c tests/test_ot_fps_pacer.c -o /tmp/ot-fps-pacer-tests
 /tmp/ot-fps-pacer-tests
