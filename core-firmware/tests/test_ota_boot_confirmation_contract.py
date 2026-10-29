@@ -32,6 +32,20 @@ assert "ESP_ERROR_CHECK(" not in wifi
 assert "abort();" not in wifi
 assert "return false;" in wifi and "return true;" in wifi
 assert "if(!esp_netif_create_default_wifi_ap())" in wifi
+# Trigger GPIO setup is a fail-closed prerequisite for physical rendering.
+# Bad input pin configuration must not panic-loop or emit lighting based on
+# untrusted GPIO levels. Diagnostic Wi-Fi/BLE may still start for bench repair.
+input_init = core.split("static bool input_init(void) {",1)[1].split(
+    "static bool strip_configure_channel(",1
+)[0]
+assert "ESP_ERROR_CHECK(gpio_config(" not in input_init
+assert "const esp_err_t e=gpio_config(&cfg);" in input_init
+assert "return false;" in input_init and "return true;" in input_init
+assert "const bool inputs_ready=input_init();" in startup
+assert 'if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");' in startup
+assert "const bool sampler_ready=inputs_ready &&" in startup
+assert "bool outputs_ready=sampler_ready&&strip_init();" in startup
+assert startup.index("const bool inputs_ready=input_init();") < startup.index("xTaskCreate(led_task")
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
 assert "http_startup_ready=wifi_started&&http_start();" in startup
