@@ -35,9 +35,7 @@ static ot_st_mode_t mode_at(uint32_t now){
     /* Native Show Mode indication returns whenever a real show is rendering. */
     if(show_active)return OT_ST_SHOW;
     bool wifi_session=had_session && (uint32_t)(now-last_heartbeat_ms)<OT_ST_HEARTBEAT_TIMEOUT_MS;
-    if(wifi_session && ble_connected)return OT_ST_BOTH;
-    if(ble_connected)return OT_ST_BLE;
-    if(wifi_session)return OT_ST_CONNECTED;
+    if(wifi_session || ble_connected)return ot_st_connection_mode(wifi_session,ble_connected);
     if(had_session || had_ble_session)return OT_ST_DISCONNECTED;
     if(wifi_ready)return OT_ST_WIFI;
     return OT_ST_OFF;
