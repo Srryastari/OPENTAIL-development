@@ -66,7 +66,9 @@ enum {
     OT_WLED_LIGHTNING = 57,
     OT_WLED_ICU = 58,
     OT_WLED_FIRE_FLICKER = 45,
-    OT_WLED_WAVESINS = 184
+    OT_WLED_WAVESINS = 184,
+    OT_WLED_BPM = 68,
+    OT_WLED_LAKE = 75
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
