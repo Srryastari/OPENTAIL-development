@@ -51,6 +51,9 @@ jobs:
         run: bash wled-native/tests/run-native-host-tests.sh
 
   core-espidf-build:
+    # Do not publish a flashable bench artifact when host, UI or Android
+    # regression checks on this same commit have failed.
+    needs: [core-host-tests, web-studio-check, android-debug-apk]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
