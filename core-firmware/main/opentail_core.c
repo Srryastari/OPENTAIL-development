@@ -1464,14 +1464,16 @@ static void led_task(void *p) {
                // Hardware driver transmits only this output's configured active length.
                ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
                frame_submitted[ch]=true;
+           }
+           /* Start both output transfers before waiting, so RMT lanes overlap.
+            * Wait for both before reusing their pixel buffers on the next frame. */
+           for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
+               if(!frame_submitted[ch])continue;
+               ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
            }
-           /* Start both output transfers before waiting, so RMT lanes overlap.
-            * Wait for both before reusing their pixel buffers on the next frame. */
-           for(int ch=0;ch<OT_CHAIN_COUNT;ch++)
-               if(frame_submitted[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
            const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
