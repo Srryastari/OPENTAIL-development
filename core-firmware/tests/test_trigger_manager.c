@@ -14,6 +14,7 @@ int main(void){
     for(int i=0;i<OT_IN_COUNT;i++){
         assert(!strcmp(ot_tm_name(p.function[i]),names[i]));
         assert(ot_tm_from_name(names[i])==(int)p.function[i]);
+        assert(ot_tm_signal_mask_of(names[i])==masks[i]);
         assert(ot_tm_resolve(&p,(uint8_t)(1u<<i))==masks[i]);
     }
     for(int i=0;i<256;i++)assert(ot_tm_resolve(&p,(uint8_t)i)==(uint8_t)i);
@@ -41,6 +42,23 @@ int main(void){
     ot_rgb_t aux=ot_om_trigger_color(OT_OM_AUX1,m,32);
     ot_rgb_t reverse=ot_om_trigger_color(OT_OM_REVERSE,m,32);
     assert((aux.r|aux.g|aux.b)!=0&&(reverse.r|reverse.g|reverse.b)!=0);
+    /* The diagnostic simulation parser accepts every physical-input logical
+     * function, not only the first five vehicle functions. A simulated AUX
+     * signal may coexist with a remapped physical reverse input. */
+    uint8_t simulated=(uint8_t)(ot_tm_signal_mask_of("aux1")|
+        ot_tm_signal_mask_of("aux2")|ot_tm_signal_mask_of("aux3"));
+    assert(simulated==((1u<<5)|(1u<<6)|(1u<<7)));
+    ot_tm_defaults(&p);
+    p.function[0]=OT_TM_REVERSE;
+    uint8_t physical=ot_tm_resolve(&p,1u);
+    assert(physical==OT_SIG_REVERSE);
+    assert(ot_om_trigger_overlay(OT_OM_REVERSE,(uint8_t)(physical|simulated),true,32,&reverse));
+    assert(ot_om_trigger_overlay(OT_OM_AUX3,(uint8_t)(physical|simulated),true,32,&aux));
+    assert(ot_tm_signal_mask_of("disabled")==0);
+    assert(ot_tm_signal_mask_of("park_brake")==0);
+    assert(ot_tm_signal_mask_of("LEFT")==0);
+    assert(ot_tm_signal_mask_of("")==0);
+    assert(ot_tm_signal_mask_of(NULL)==0);
     /* Reject malformed profiles and unsupported values. */
     assert(ot_tm_from_name("park_brake")==-1);
     assert(ot_tm_from_name("")==-1);
