@@ -241,8 +241,17 @@ for (const required of ['private String committedJson;',
   'synchronized boolean assignMany(Set<String> triggers, String zoneId, boolean enabled)',
   'JSONObject draft = new JSONObject(data.toString());',
   'data = draft;', 'return save();',
+  'private void restoreCommitted()',
   'synchronized boolean name(String name)']) {
   assert(model.includes(required), 'Shared native project rollback/atomic-edit contract regressed: '+required);
+}
+// Pre-commit JSON/reindex errors must restore state too, not only failed
+// SharedPreferences writes after mutation.
+for (const method of ['addZone', 'editZone', 'removeZone', 'moveZone']) {
+  const block=model.split('synchronized boolean '+method+'(')[1]
+    ?.split('synchronized ')[0];
+  assert(block && block.includes('catch (JSONException e) { restoreCommitted(); return false; }'),
+    'Zone '+method+' must restore last committed state when reindex fails');
 }
 assert(compose.includes('if (project.assignMany(selections, zoneId, !checked)) refresh()') &&
        compose.includes('if (project.name(it)) refresh()') &&
