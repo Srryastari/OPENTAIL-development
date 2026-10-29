@@ -14,11 +14,34 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  pull-requests: read
 concurrency:
   group: verify-active-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # A Studio-only change must never build ESP-IDF or Android. Each artifact
+  # is versioned and tested independently; workflow_dispatch tests all three.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      studio: ${{ steps.filter.outputs.studio }}
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'core-firmware/**'
+            studio:
+              - 'web-studio/**'
+            android:
+              - 'android/**'
   core-host-tests:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -44,7 +67,8 @@ jobs:
   core-espidf-build:
     # CORE build depends only on CORE regression checks, not on an Android
     # release or Studio UI. All three products keep independent CI jobs.
-    needs: [core-host-tests]
+    needs: [changes, core-host-tests]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -99,6 +123,8 @@ jobs:
           retention-days: 14
 
   android-debug-apk:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -156,6 +182,8 @@ jobs:
           retention-days: 14
 
   web-studio-check:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.studio == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -166,12 +194,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
-          assert a == b, 'Stable and versioned Studio copies differ'
+          b=Path('web-studio/opentail-v0.19.119.htm').read_bytes()
+          assert a == b, 'Stable and current web Studio release must match'
+          old=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
+          assert a != old, 'Previous Studio release must remain an unchanged rollback'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
-          assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.118' in a, 'Unexpected Studio version'
-          print('All Studio copies match (web deployment, versioned, Android bundle).')
+          assert b"const OT_VERSION='0.19.118'" in bundled, 'Pinned Android Studio version changed without an Android release'
+          assert b"const OT_VERSION='0.19.119'" in a, 'Unexpected current web Studio version'
+          print('Web Studio 0.19.119 stable/release parity passed; Android independently pinned to 0.19.118.')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
         run: |
@@ -206,10 +236,11 @@ jobs:
           const studio=fs.readFileSync('web-studio/opentail.htm','utf8');
           const gradle=fs.readFileSync('android/app/build.gradle','utf8');
           assert(shell.includes("const showing=route==='home';"),'Android shell still hides approved Layout or Triggers behind a summary');
-          assert(studio.includes('builder:()=>builder()+')&&studio.includes('layout:()=>layout()+'),
-            'CORE full editors must appear before advanced hardware panels');
-          assert(studio.includes('CORE physical trigger input mapping · Advanced'));
-          assert(studio.includes('CORE hardware output mapping · Advanced'));
+          const route=studio.slice(studio.indexOf('function otStudioRoute(tab){'),studio.indexOf('function device(){',studio.indexOf('function otStudioRoute(tab){')));
+          assert(route.includes('scenes,') && route.includes('builder,') && route.includes('layout,'),
+            'CORE Studio must render the original authoring editors directly');
+          assert(!route.includes('otTriggerManagerCard()') && !route.includes('otOutputManagerCard()') && !route.includes('otCoreDiagnostics') && !route.includes('otCoreWorkspaceBanner'),
+            'Firmware bench diagnostics and saved hardware mapping belong only in CORE /dev');
           const scene=studio.slice(studio.indexOf('function scenes(){'),studio.indexOf('let otPresetEditorId=null;'));
           assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
             scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
