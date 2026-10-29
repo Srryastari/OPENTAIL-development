@@ -155,7 +155,15 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_CHUNCHUN, "Chunchun", "Chunchun@!,Spread;!,!;!",
      true, true, true, true, false},
     {OT_WLED_CANDLE, "Candle", "Candle@!,!;!,!;!",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_DYNAMIC, "Dynamic", "Dynamic@!,!,,,,Smooth;;!",
+     false, false, true, true, false},
+    {OT_WLED_DYNAMIC_SMOOTH, "Dynamic Smooth", "Dynamic Smooth@!,!;;!",
+     false, false, true, true, false},
+    {OT_WLED_DISSOLVE, "Dissolve", "Dissolve@Repeat speed,Dissolve speed,,,,Random,Complete;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_DISSOLVE_RANDOM, "Dissolve Rnd", "Dissolve Rnd@Repeat speed,Dissolve speed;,!;!",
+     false, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1643,6 +1651,79 @@ static void candle_frame(const ot_wled_fx_config_t *cfg,
     state->step=step;
 }
 
+/*
+ * Pinned FX.cpp mode_dynamic() / mode_dynamic_smooth() with per-zone
+ * SEGENV.data bytes and source random hue/update probabilities.
+ */
+static bool dynamic_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          uint32_t old_call,ot_wled_rgb_t *pixels,
+                          size_t count,bool smooth) {
+    uint8_t *hues=fx_zone_scratch(state,count);
+    if(!hues)return false;
+    if(old_call==0u) {
+        for(size_t i=0;i<count;i++)hues[i]=fx_rand8(state,256u);
+    }
+    const uint32_t cycle=50u+15u*(255u-(uint32_t)cfg->speed);
+    const uint32_t it=now/cycle;
+    if(it!=state->step && cfg->speed!=0u) {
+        for(size_t i=0;i<count;i++) {
+            if(fx_rand8(state,256u)<=cfg->intensity)
+                hues[i]=fx_rand8(state,256u);
+        }
+        state->step=it;
+    }
+    for(size_t i=0;i<count;i++) {
+        const ot_wled_rgb_t c=scaled(wheel_rgb(hues[i]),cfg->brightness);
+        if(smooth)pixels[i]=blend_colors(pixels[i],c,16u);
+        else pixels[i]=c;
+    }
+    return true;
+}
+static uint32_t fx_pack(ot_wled_rgb_t c) {
+    return ((uint32_t)c.r<<16)|((uint32_t)c.g<<8)|c.b;
+}
+static ot_wled_rgb_t fx_unpack(uint32_t c) {
+    return (ot_wled_rgb_t){(uint8_t)(c>>16),
+                           (uint8_t)(c>>8),(uint8_t)c};
+}
+/* Pinned FX.cpp dissolve() backing array and both wrappers.
+ * Default WLED overlay/check1/check2 options are off; the original
+ * two-way state machine still uses aux0 and step on every render. */
+static bool dissolve_frame(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,uint32_t now,
+                           uint32_t old_call,ot_wled_rgb_t *pixels,
+                           size_t count,bool rainbow) {
+    (void)now;
+    uint32_t *raw=(uint32_t*)fx_zone_scratch(state,count*sizeof(uint32_t));
+    if(!raw)return false;
+    const uint32_t background=fx_pack(cfg->background);
+    if(old_call==0u) {
+        for(size_t i=0;i<count;i++)raw[i]=background;
+        state->aux0=1u;
+    }
+    const uint32_t color=fx_pack(rainbow?
+                              wheel_rgb(fx_rand8(state,256u)):
+                              cfg->foreground);
+    for(size_t j=0;j<=count/15u;j++) {
+        if(fx_rand8(state,256u)<=cfg->intensity) {
+            for(unsigned attempts=0;attempts<10u;attempts++) {
+                const size_t i=fx_rand_index(state,count);
+                if(state->aux0) {
+                    if(raw[i]==background){raw[i]=color;break;}
+                } else if(raw[i]!=background){raw[i]=background;break;}
+            }
+        }
+    }
+    for(size_t i=0;i<count;i++)
+        pixels[i]=scaled(fx_unpack(raw[i]),cfg->brightness);
+    if(state->step>255u-(uint32_t)cfg->speed+15u) {
+        state->aux0=(uint16_t)!state->aux0;
+        state->step=0u;
+    } else state->step++;
+    return true;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1662,6 +1743,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_DYNAMIC ||
+       cfg->effect_id==OT_WLED_DYNAMIC_SMOOTH)
+        return dynamic_frame(cfg,state,time_ms,call,pixels,count,
+                             cfg->effect_id==OT_WLED_DYNAMIC_SMOOTH);
+    if(cfg->effect_id==OT_WLED_DISSOLVE ||
+       cfg->effect_id==OT_WLED_DISSOLVE_RANDOM)
+        return dissolve_frame(cfg,state,time_ms,call,pixels,count,
+                              cfg->effect_id==OT_WLED_DISSOLVE_RANDOM);
     if(cfg->effect_id==OT_WLED_CANDLE) {
         candle_frame(cfg,state,time_ms,pixels,count);
         return true;
