@@ -25,7 +25,11 @@ assert ".max_leds=pixels" in core
 assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
 assert "strip_configure_channel(ch,local_outputs[ch].active_pixels)" in core
 assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
-assert "if(frame_ready[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]))" in core
+assert "if(frame_submitted[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]))" in core
+assert "ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)" in core
+assert "if(!native_rendering && full_frame)" in core
+assert "if(full_frame)frame_window_frames++" in core
+assert "incomplete_frames" in core
 assert "pixel_buffer_budget_per_output" in core
 assert "max_configurable_pixels_per_output" in core
 assert "configured_output_zones" in core
