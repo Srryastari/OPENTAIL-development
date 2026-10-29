@@ -57,6 +57,30 @@ The earlier physically observed input masks are preserved explicitly in `core-fi
 - A test-only illustrative sequence `0 → 1 → 15 → 31 → 15 → 1 → 0` asserts overlay/restoration behavior. This is a software replay, **not** a newly observed physical sequence.
 - No firmware test assumes fixed GS400 zone sizes. Existing saved profile geometry is exercised separately. Optocoupler polarity, sub-40ms response accuracy, GPIO voltage, hardware failover, controller reboot persistence, and output optical timing remain on-bench test gates.
 
+## Expanded prior-trigger test traceability (historical, not a new flash)
+
+The evidence below is deliberately split between an **earlier user-observed bench pass**, **recorded older software/bench output**, and a **current host-level reenactment**. None upgrades the latest firmware to a physical pass. Earlier tested zone sizes and output counts are test fixtures only, never defaults.
+
+| Earlier test / diagnostic | Earlier evidence | Automated regression or current state |
+| --- | --- | --- |
+| PC817 12V IN1 release → assert → release | Reported input mask `0 → 1 → 0`; browser status initially required manual refresh | Four-stable-sample assert/release in `test_trigger_manager.c`; live HTTP polling is separately covered by dashboard tests |
+| Individually connect IN1..IN8, GPIO4..11 | User-confirmed masks `1,2,4,8,16,32,64,128` and all-released `0` | Every bit exercised separately through `ot_debounce` and default `ot_tm_resolve` |
+| IN3 left interrupt Bluetooth Wipe, then release | Previously reported physical interruption and resumed Wipe | Actual `ot_show_pixel` Wipe phase + `ot_om_trigger_overlay` regression, including restoration using a later clock time; no physical RMT claim |
+| IN3+IN4 hazards | User-confirmed simultaneous `12` | Both role-local turn overlays checked with and without show selected |
+| IN1+IN2 Parking+Brake | User-confirmed combined mask `3` | Red Brake precedence over dim-red Parking, both during active show and without one |
+| Brake + hazards and reverse combinations | Reported `14`, `15`, `18`, `30`, `31` with Brake red, turns amber and Reverse white | End-to-end logical mask/role overlay replay; `31` is the clean follow-up after one anomalous observed reading `231` |
+| Other previously recorded combinations | `5,6,9,10,17` and `224,255` reported during older input-matrix testing | Same replay fixture; these recorded cases should not be mistaken for freshly repeated individual optical inspections |
+| Show-mode priority: Parking, Brake, Left/Right, Reverse | Earlier reported overrides and effect resume after release; agreed parking-under-show behavior | Selected-zone show yields to Brake, turns, Reverse, AUX while nonmatching zones remain on the effect; no show means Parking baseline |
+| /simulate Right / Hazards / Reverse | Earlier `simulated_mask` sequence `8 → 12 → 16` | Canonical `ot_tm_signal_mask_of()` tests check exact values; physical and logical simulation mask independence checked |
+| /simulate TTL 15000 ms | Earlier successful 15-second request | `OT_SIM_MAX_MS=15000` restored; CORE /dev maximum follows; separate 10-second demo policy unchanged |
+| Stop/Restore while input active | Older reported Stop/Restore and physically-triggered priority checks | Source guard checks Stop clears simulation/show but **not** physical input state; logical Brake remains active when show absent |
+| BLE authorization/reconnect while triggers live | Earlier connection/authorization reported, with some disconnect instability | Authenticated trigger mapping GATT codec and disconnect/physical state isolation source checks; new physical BLE reconnect acceptance pending |
+| Remap/duplicate/disabled physical function | Earlier user approved independently assignable trigger inputs; save/reboot of trigger map is **not** established by these bench observations | Host mapping tests cover duplicates, disabled inputs, AUX, arbitrary IN→function mappings; NVS reboot persistence must be tested on current hardware |
+| Non-GS400, user-defined zones | User explicitly prohibited fixed vehicle lighting geometry | Trigger tests use role matching independently of pixel lengths; old 522/30 saved geometry lives only in separate historical output test data |
+| Optocoupler contact chatter, debounce, input polarity | Earlier raw masks verified, exact 40ms timing/polarity electrical measurement **not established** | Stable-sample and chatter software tests; actual 12V input thresholds and timing remain hardware gates |
+
+**Important:** A host renderer test shows that the Wipe function continues according to elapsed time. It does *not* independently establish that all 120 1D effects, particles, palette transitions or a physical LED stream preserve their exact phase. Those remain effects/integration owners' responsibilities; this trigger PR changes none of their engines.
+
 ## Handoff / acceptance
 
 Native Android owns the presentation: a trigger mapping editor may add read/write/readback using this packet, preserving the approved UI. Do not edit Android from the trigger branch.
