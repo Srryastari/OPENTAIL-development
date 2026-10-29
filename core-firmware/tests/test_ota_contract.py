@@ -46,7 +46,7 @@ for token in ("esp_ota_begin(", "esp_ota_write(", "esp_ota_end(",
 assert '.uri="/api/v1/ota"' in core
 for token in ('id="otaFile"', 'id="otaSend"', 'id="otaStatus"',
               'async function otaCheck()', 'async function otaSend()',
-              "'X-OpenTail-Update':'confirmed'", 'fetch('/api/v1/ota'',
+              "'X-OpenTail-Update':'confirmed'", "fetch('/api/v1/ota'",
               'confirm('):
     assert token in dev, token
 assert "ot_ota_confirm_boot(true)" in core
