@@ -35,7 +35,7 @@ ET.parse(main / 'res/values/strings.xml')
 ET.parse(main / 'res/values/styles.xml')
 
 check('Android XML parses correctly', manifest.tag == 'manifest')
-check('Studio v0.19.118 bundled, pinned checksum', b"const OT_VERSION='0.19.118'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
+check('Studio v0.19.120 bundled, pinned checksum', b"const OT_VERSION='0.19.120'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
 check('CORE endpoint fixed to known AP', 'http://192.168.4.1' in core_java and '/api/v1/capabilities' in core_java)
 check('CORE protocol validated before opening web controls', 'opentail-core-alpha-v1' in core_java and 'CoreConnection.verify()' in main_java)
 check('Untrusted URLs blocked', 'shouldOverrideUrlLoading' in main_java and 'External navigation blocked' in main_java)
@@ -50,7 +50,7 @@ check('Legacy Wi-Fi token remains optional, not the sole authorization', 'CoreCo
 check('Physical trigger mappings remain not writable over BLE', 'writeTrigger' not in ble_java and 'writeOutput' not in ble_java)
 check('Android 12+ BLE permissions included', all(f'android.permission.{p}' in read(xml_path) for p in ('BLUETOOTH_SCAN','BLUETOOTH_CONNECT')))
 check('Only CORE AP HTTP exception', len(net.findall('./domain-config/domain')) == 1 and net.findtext('./domain-config/domain') == '192.168.4.1' and net.find('./base-config').attrib.get('cleartextTrafficPermitted') == 'false')
-check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionCode 29','versionName \'0.1.29\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
+check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionCode 30','versionName \'0.1.30\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
 check('Bundled Studio output & trigger editors retained', b'Universal Output Manager' in studio and b'Universal Trigger Manager' in studio)
 check('BLE bench-only limitation explicitly documented', 'BENCH' in ble_java.upper() and 'do not use for road lighting' in read('README.md').lower() and 'not a compiled apk' in read('README.md').lower())
 # Android v0.1.4 feature regressions: these are structural/source checks, not physical assertions.
@@ -62,8 +62,10 @@ check('WebView tap bridge is restricted to allowlisted pages',
       'STUDIO_HAPTIC_JS' in main_java and 'allowedPage(web.getUrl())' in main_java and 'OpenTailHaptics' in main_java)
 check('No haptic success before verified CORE save response',
       'Saved to CORE and verified by device readback.' in main_java and 'Saved and verified by CORE readback.' in main_java)
-check('Auto Wi-Fi reconnect requires verified CORE capabilities',
-      'onResume()' in main_java and 'connectCore(true)' in main_java and 'CoreConnection.verify()' in main_java)
+check('Standalone Studio never automatically navigates to firmware /studio',
+      'Never auto-navigate away from bundled authoring UI.' in main_java
+      and 'Do not reopen the firmware-hosted /studio URL' in main_java
+      and 'CoreConnection.verify()' in main_java)
 check('Preferred BLE address stored only after validating expected OpenTail service',
       'preferred_ble_address' in main_java and 'getService(SERVICE_UUID)' in ble_java and 'getCharacteristic(INFO_UUID)' in ble_java and
       ble_java.index('getCharacteristic(INFO_UUID)') < ble_java.index('preferredListener.accept'))
@@ -86,37 +88,35 @@ check('Physical BOOT enrollment, encrypted owner key and HMAC path retained',
       all(token in ble_java for token in ('pairWithBoot()', 'HmacSHA256', 'OpenTail-BLE-v2', 'CHALLENGE_UUID', 'ENROLL_UUID'))
       and 'AES/GCM/NoPadding' in read('app/src/main/java/com/opentail/android/BleOwnerVault.java')
       and 'android:allowBackup="false"' in read(xml_path))
-check('Native shell and Output Manager are bundled and injected',
-      all(token in main_java for token in ('injectUnifiedShell(view)', 'injectBleOutputControls(view)', 'unified-shell.js', 'ble-output-panel.js')))
-check('One six-tab navigation in approved order',
-      all(token in unified for token in ("['home','Home'", "['scenes','Show Modes'", "['layout','Layout'",
-                                   "['builder','Triggers'", "['events','Auto Events'", "['settings','Settings'"))
-      and 'document.body.insertBefore(nav, header.nextSibling)' in unified)
-check('Sticky top tabs replace duplicate Studio and bottom navigation',
-      '.ot-native-nav{position:sticky!important' in unified
-      and '#app .top,#app nav.tabs,#app nav.bottomnav{display:none!important}' in unified)
-check('Independent Wi-Fi/BLE status and OLED/light-mode controls retained',
-      all(token in unified for token in ('ot-status-red','ot-status-amber','ot-status-green',
-                                       'radioOff', 'wifiReady', 'I Hate Dark Mode', 'data-ot-theme="light"')))
+check('Android embeds approved Studio directly without duplicate injected navigation',
+      not any(x in main_java for x in ('injectUnifiedShell(view)', 'injectDirectBleDashboard(view)',
+                                       'injectBleOutputControls(view)', 'injectOutputControlMotion(view)'))
+      and 'window.download=function(name,text)' in main_java)
+check('One approved six-destination Studio navigation matches web',
+      all(token in studio_text for token in ("['home','Home'", "['scenes','Show Modes'", "['layout','Layout'",
+                                       "['builder','Triggers'", "['events','Auto Events'", "['device','Settings'"))
+      and 'otConceptNav()' in studio_text and '<nav class="bottomnav"' not in studio_text)
+check('OLED/light theme handled by Studio, not Android injected CSS',
+      'OT_THEME_KEY' in studio_text and 'data-ot-theme="light"' in studio_text
+      and 'root.setBackgroundColor(Color.BLACK);' in main_java
+      and 'web.setBackgroundColor(Color.BLACK);' in main_java)
 check('BLE Output Manager role and NVS read/save surface retained',
       all(token in panel for token in ('window.OpenTailBLEOutputs', 'data-key="role"',
                                       'window.OpenTailNativeBLE.readOutput', 'window.OpenTailNativeBLE.saveOutput',
                                       'Save to CORE over BLE', 'GPIO${selected?17:16}')))
 check('BLE Output Manager does not issue vehicle trigger writes',
       'writeTrigger' not in main_java and 'writeTrigger' not in panel)
-check('Android shell, Output Manager and bundled Studio JavaScript parse',
+check('Unused legacy scripts retain valid syntax for future rollback',
       all(subprocess.run(['node','--check',str(main / 'assets'/name)],capture_output=True).returncode == 0
-          for name in ('unified-shell.js','ble-output-panel.js')))
-check('Native Studio BLE effect and six-tab regression suites pass',
+          for name in ('unified-shell.js','ble-output-panel.js','direct-ble-dashboard.js')))
+check('Android source/authoring separation and approved Studio regressions pass',
       subprocess.run(['node',str(root/'qa/test_unified_ble_fx.cjs')],cwd=root.parent,
                      capture_output=True,text=True).returncode == 0
-      and subprocess.run(['node',str(root/'qa/test_unified_shell.js')],cwd=root.parent,
-                         capture_output=True,text=True).returncode == 0
       and subprocess.run(['node',str(root.parent/'web-studio/tests/approved-chat-ui.test.cjs')],
                          cwd=root.parent,capture_output=True,text=True).returncode == 0)
-check('Web and Android Studio deployment copies are identical',
+check('Android and web designer carry byte-identical approved v0.19.120 HTML',
       studio == (root.parent/'web-studio/opentail.htm').read_bytes()
-      and studio == (root.parent/'web-studio/opentail-v0.19.118.htm').read_bytes())
+      and studio == (root.parent/'web-studio/opentail-v0.19.120.htm').read_bytes())
 # Decode the injected Java string and syntax-check the exact JavaScript shipped in MainActivity.
 import json
 m = re.search(r'private static final String STUDIO_HAPTIC_JS = (.*?);\n', main_java, re.S)
@@ -164,9 +164,9 @@ codec = read('app/src/main/java/com/opentail/android/BleConfigCodec.java')
 check('Android output codec matches CORE 261-byte wire offsets and CRC',
       all(x in codec for x in ('LENGTH = 261', 'bytes[36]', '37+z*28', '(crc<<1)^0x1021', 'sum!=pixelCount')))
 panel = read('app/src/main/assets/ble-output-panel.js')
-check('Offline and online Layout BLE Output Manager injected',
-      'injectBleOutputControls(view)' in main_java and 'ble-output-panel.js' in main_java and
-      'window.OpenTailBLEOutputs' in panel and "state.tab==='layout'" in panel and 'Save to CORE over BLE' in panel)
+check('Native BLE output protocol remains compiled but no longer injected into designer',
+      'injectBleOutputControls(view)' not in main_java and 'ble-output-panel.js' in main_java and
+      'window.OpenTailBLEOutputs' in panel and 'Save to CORE over BLE' in panel)
 check('BLE Output Manager contains zone role editing and never calls raw GATT from JavaScript',
       all(x in panel for x in ('data-zone=', 'data-key="role"', 'window.OpenTailNativeBLE.saveOutput', 'window.OpenTailNativeBLE.readOutput')))
 check('BLE Output Manager JS syntax valid',
