@@ -69,6 +69,38 @@ int main(void){
       assert(memcmp(pix,expected,sizeof(pix))==0);
     }
   }
+  /* Recheck the complete source registry, not merely ten exemplar modes.
+   * Every registered direct source port must render through the unified
+   * dispatcher with the same zone-local state and RGB frame. Brightness 255
+   * excludes only the separately tested CORE low-brightness safety clamp. */
+  uint16_t source_ids[120]={0};
+  const size_t source_total=ot_wled_fx_supported_ids(source_ids,120u);
+  assert(source_total>0u && source_total<=120u);
+  for(size_t mode_index=0;mode_index<source_total;mode_index++){
+    ot_effects_1d_state_t actual={0};
+    ot_wled_fx_state_t source={0};
+    cfg.effect_id=source_ids[mode_index];cfg.palette_id=0u;
+    cfg.brightness=255u;cfg.speed=127u;cfg.intensity=192u;
+    cfg.foreground=(ot_wled_rgb_t){123u,56u,9u};
+    cfg.background=(ot_wled_rgb_t){3u,88u,174u};
+    ot_effects_1d_reset(&actual,(uint32_t)mode_index+1u);
+    ot_wled_rgb_t dispatched[31]={0};
+    ot_wled_rgb_t direct[31]={0};
+    for(size_t frame=0;frame<7u;frame++){
+      const uint32_t time_ms=(const uint32_t[]){0u,17u,171u,389u,1500u,5000u,65530u}[frame];
+      assert(ot_effects_1d_render(&cfg,&actual,time_ms,dispatched,31u));
+      assert(ot_wled_fx_render(&cfg,&source,time_ms,direct,31u));
+      if(memcmp(dispatched,direct,sizeof(direct))!=0){
+        fprintf(stderr,"Unified effect dispatch diverged: source ID %u at %u ms\\n",
+                (unsigned)source_ids[mode_index],(unsigned)time_ms);
+        assert(0 && "Unified effects source dispatch parity");
+      }
+    }
+    ot_effects_1d_reset(&actual,1u);
+    ot_wled_fx_reset(&source);
+  }
+  printf("CORE unified dispatch: %zu source-derived effects match direct renderer.\\n",source_total);
+
   /* Theater's phase is per-zone and is never shared across outputs. */
   ot_effects_1d_state_t zone_a,zone_b;
   ot_effects_1d_reset(&zone_a,1u);
