@@ -1236,6 +1236,12 @@ static void led_task(void *p) {
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    /* Retain effect pixels only while the same universal zone is active.
+     * Stateful source effects (scanners/trails/particles) need their last frame.
+     * Never reuse stale pixels after a zone move, resize or effect replacement. */
+    static unsigned prior_fx_offset[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static unsigned prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
     uint32_t previous_frame_ms=0;
@@ -1306,7 +1312,9 @@ static void led_task(void *p) {
                /* Render each selected zone once, even if the native frame is indexed by
                 * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
                if(native_rendering && local_fx_enabled){
-                   memset(fx_frame[ch],0,(size_t)output->active_pixels*sizeof(fx_frame[ch][0]));
+                   /* Do not clear the entire frame: source-pinned WLED fade_out()
+                    * and overlay modes must see the preceding zone frame.
+                    * Inactive/replaced/moved zones are cleared individually. */
                    unsigned offset=0;
                    for(int z=0;z<output->zone_count;z++){
                        unsigned len=output->zones[z].pixels;
@@ -1316,11 +1324,19 @@ static void led_task(void *p) {
                           offset+len<=OT_CHAIN_PIXELS){
                            /* Reset ONLY this zone on replacement. Unrelated zone
                             * particle motion and effect phase are preserved. */
-                           if(prior_fx_generation[ch][z]!=slot->generation){
+                           if(!prior_fx_active[ch][z] ||
+                              prior_fx_generation[ch][z]!=slot->generation ||
+                              prior_fx_offset[ch][z]!=offset ||
+                              prior_fx_length[ch][z]!=len){
+                               memset(&fx_frame[ch][offset],0,
+                                      (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_effects_1d_reset(&fx_state[ch][z],
                                    0x1234u+ch*97u+(unsigned)z*19u+slot->generation);
                                prior_fx_generation[ch][z]=slot->generation;
+                               prior_fx_offset[ch][z]=offset;
+                               prior_fx_length[ch][z]=len;
                            }
+                           prior_fx_active[ch][z]=true;
                            const ot_ble_fx_packet_t *fx=&slot->request;
                            ot_wled_fx_config_t cfg={
                                .effect_id=fx->effect_id,
@@ -1335,11 +1351,20 @@ static void led_task(void *p) {
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
-                                                &fx_frame[ch][offset],len))
+                                                &fx_frame[ch][offset],len)){
+                               memset(&fx_frame[ch][offset],0,
+                                      (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                           }
+                       } else {
+                           prior_fx_active[ch][z]=false;
                        }
                        offset+=len;
                    }
+               } else {
+                   /* Stop, shutdown and show disable invalidate all historical
+                    * effect pixels without displaying stale retained frames. */
+                   for(int z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
                /* ot_om_layout() above validated zone totals and ordering.
                 * Visit each contiguous zone only once rather than performing
