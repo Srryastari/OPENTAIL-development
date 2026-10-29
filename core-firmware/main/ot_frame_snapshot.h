@@ -22,6 +22,8 @@ bool ot_frame_snapshot_request(uint8_t output);
 bool ot_frame_snapshot_begin(uint8_t output,uint16_t count,uint32_t sequence);
 void ot_frame_snapshot_pixel(uint16_t pixel,uint8_t r,uint8_t g,uint8_t b);
 void ot_frame_snapshot_complete(bool submitted);
+/* Fail a still-pending request if its physical output cannot render. */
+void ot_frame_snapshot_unavailable(uint8_t output);
 /* Status and sequence-checked immutable slices; count in PIXELS. */
 bool ot_frame_snapshot_info(ot_frame_snapshot_info_t *out);
 bool ot_frame_snapshot_chunk(uint8_t output,uint32_t sequence,uint16_t first,
