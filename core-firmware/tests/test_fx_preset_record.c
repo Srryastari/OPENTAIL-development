@@ -37,6 +37,9 @@ int main(void){
  input.effect_id=179;input.palette_id=12;
  assert(ot_fx_preset_pack(&record,&input));
  assert(ot_fx_preset_valid(&record));
+ input.effect_id=65;input.palette_id=72;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
  input.effect_id=115;input.palette_id=72;
  assert(ot_fx_preset_pack(&record,&input));
  assert(ot_fx_preset_valid(&record));
