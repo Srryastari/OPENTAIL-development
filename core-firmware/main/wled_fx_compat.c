@@ -473,6 +473,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FLOW_STRIPE, "Flow Stripe", "Flow Stripe@Hue speed,Effect speed;;!;pal=11",
      false, false, true, true, true},
     {OT_WLED_GLITTER, "Glitter", "Glitter@!,!,,,,,Overlay;,,Glitter color;!;;pal=11,m12=0",
+     false, false, true, true, true},
+    {OT_WLED_BLENDS, "Blends", "Blends@Shift speed,Blend speed;;!",
      false, false, true, true, true}
 };
 
@@ -2790,6 +2792,47 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Pinned FX.cpp mode_blends(): zone-local 256-element uint32_t scratch,
+ * source intensity/speed arithmetic and fastled_slim quadwave8 math. */
+static uint8_t fx_quadwave8(uint8_t x) {
+    if(x&128u)x=(uint8_t)(255u-x);
+    x=(uint8_t)(x<<1);
+    unsigned j=x;
+    if(j&128u)j=255u-j;
+    const unsigned value=(j*j)>>7;
+    return (uint8_t)((x&128u)?255u-value:value);
+}
+static void blends_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         ot_wled_rgb_t *pixels,size_t count) {
+    const size_t pixel_len=count>255u?255u:count;
+    uint32_t *working=(uint32_t*)fx_zone_scratch(state,
+                                 (pixel_len+1u)*sizeof(uint32_t));
+    if(!working)return;
+    ot_wled_palette16_t pal;
+    /* ID 0 resolves to the WLED default Party palette for mcol 255. */
+    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                    cfg->background,(ot_wled_rgb_t){0,0,0},&pal))return;
+    const uint8_t speed=(uint8_t)(10u+((unsigned)cfg->intensity*118u/255u));
+    unsigned shift=(now*((unsigned)(cfg->speed>>3)+1u))>>8;
+    for(size_t i=0;i<pixel_len;i++) {
+        const uint8_t index=(uint8_t)(shift+
+                    fx_quadwave8((uint8_t)((i+1u)*16u)));
+        const ot_wled_rgb_t next=ot_wled_palette_sample(&pal,index,255u,
+                                            OT_WLED_PALETTE_LINEAR);
+        const ot_wled_rgb_t old=palette_unpack(working[i]);
+        const ot_wled_rgb_t mixed=blend_colors(old,next,speed);
+        working[i]=((uint32_t)mixed.r<<16)|((uint32_t)mixed.g<<8)|mixed.b;
+        shift+=3u;
+    }
+    size_t pos=0u;
+    for(size_t i=0;i<count;i++) {
+        pixels[i]=scaled(palette_unpack(working[pos++]),cfg->brightness);
+        if(pos>=pixel_len)pos=0u;
+    }
+}
+
 /* Source-pinned mode_glitter() + glitter_base() for paletteBlend=0,
  * Overlay=false, tertiary glitter color unset (ULTRAWHITE).
  * Source metadata chooses Rainbow palette 11 until explicitly overridden. */
@@ -3775,7 +3818,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         /* Do not claim palette support for other source ports yet. */
         if((cfg->effect_id!=OT_WLED_COLOR_CLOUDS &&
             cfg->effect_id!=OT_WLED_FLOW_STRIPE &&
-            cfg->effect_id!=OT_WLED_GLITTER) ||
+            cfg->effect_id!=OT_WLED_GLITTER &&
+            cfg->effect_id!=OT_WLED_BLENDS) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -3969,6 +4013,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_BLENDS) {
+        blends_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_GLITTER) {
