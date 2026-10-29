@@ -119,7 +119,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_LIGHTNING, "Lightning", "Lightning@!,!;!,!;!",
      true, true, true, true, false},
     {OT_WLED_ICU, "ICU", "ICU@!,Eye spacing;!,!;!",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_FIRE_FLICKER, "Fire Flicker", "Fire Flicker@!,!;!,!;!",
+     true, false, true, true, false},
+    {OT_WLED_WAVESINS, "Wavesins", "Wavesins@!,!;;!",
+     true, false, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -139,7 +143,8 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
     if (state) { state->step=0; state->aux0=0; state->aux1=0;
                  state->call=0; state->data_counter=0;
-                 state->rng_state=0x73A11C5Du; }
+                 state->rng_state=0x73A11C5Du;
+                 state->held_rng_seed=0; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -1169,6 +1174,48 @@ static void icu_frame(const ot_wled_fx_config_t *cfg,
     state->step=((uint32_t)stage<<16)|next;
 }
 
+/*
+ * Pinned FX.cpp mode_fire_flicker(), palette=0 RGB behavior. WLED holds
+ * the previous frame between cycle boundaries; CORE replays the same
+ * random sequence from the held per-zone seed so a fresh caller buffer
+ * still renders the identical frame, without dynamic allocation.
+ */
+static void fire_flicker_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=40u+255u-(uint32_t)cfg->speed;
+    const uint32_t it=now/cycle;
+    const bool fresh=(state->call==1u || state->step!=it);
+    if(fresh)state->held_rng_seed=state->rng_state;
+    ot_wled_fx_state_t sample={0};
+    sample.rng_state=state->held_rng_seed;
+    unsigned maxc=cfg->foreground.r;
+    if(cfg->foreground.g>maxc)maxc=cfg->foreground.g;
+    if(cfg->foreground.b>maxc)maxc=cfg->foreground.b;
+    const unsigned lum=maxc/(((256u-(unsigned)cfg->intensity)/16u)+1u);
+    for(size_t i=0;i<count;i++) {
+        const unsigned flicker=fx_rand8(&sample,lum);
+        const ot_wled_rgb_t col={
+            (uint8_t)(cfg->foreground.r>flicker?cfg->foreground.r-flicker:0u),
+            (uint8_t)(cfg->foreground.g>flicker?cfg->foreground.g-flicker:0u),
+            (uint8_t)(cfg->foreground.b>flicker?cfg->foreground.b-flicker:0u)
+        };
+        pixels[i]=scaled(col,cfg->brightness);
+    }
+    if(fresh){state->rng_state=sample.rng_state;state->step=it;}
+}
+
+/* Pinned FX.cpp mode_wavesins(), palette=0 direct foreground.
+ * WLED's index modulation is ignored by the source itself when palette=0:
+ * the pixel receives SEGCOLOR(0) at the sin8_t brightness. */
+static void wavesins_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    for(size_t i=0;i<count;i++) {
+        const uint8_t bri=wled_sin8((uint8_t)(now/4u+(uint32_t)i*cfg->intensity));
+        pixels[i]=scaled(scaled(cfg->foreground,bri),cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1180,6 +1227,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_FIRE_FLICKER) {
+        fire_flicker_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_WAVESINS) {
+        wavesins_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_LIGHTNING) {
         lightning_frame(cfg,state,time_ms,pixels,count);
         return true;
