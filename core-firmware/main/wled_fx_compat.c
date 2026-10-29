@@ -218,6 +218,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_ROLLING_BALLS, "Rolling Balls", "Rolling Balls@!,# of balls,,,,Collide,Overlay,Trails;!,!,!;!;1;m12=1",
      true, true, true, true, false},
     {OT_WLED_POPCORN, "Popcorn", "Popcorn@!,!,,,,,Overlay;!,!,!;!;;m12=1",
+     true, true, true, true, false},
+    {OT_WLED_DRIP, "Drip", "Drip@Gravity,# of drips,,,,,Overlay;!,!;!;;m12=1",
      true, true, true, true, false}
 };
 
@@ -2453,6 +2455,83 @@ static void popcorn_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+
+/* Pinned FX.cpp mode_drip(): shared 20-byte Spark state, 1D default
+ * overlay=false, no physical bus assumptions. Keep source update order. */
+static void drip_frame(const ot_wled_fx_config_t *cfg,
+                       ot_wled_fx_state_t *state,ot_wled_rgb_t *pixels,
+                       size_t count) {
+    if(count<=1u) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    ot_fx_spark_t *drops=(ot_fx_spark_t*)fx_zone_scratch(
+        state,4u*sizeof(ot_fx_spark_t));
+    if(!drops) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    const ot_wled_rgb_t black={0,0,0};
+    const ot_wled_rgb_t fg=cfg->foreground;
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    const unsigned num_drops=1u+((unsigned)cfg->intensity>>6);
+    float gravity=-0.0005f-(float)cfg->speed/50000.0f;
+    gravity*=(float)(count-1u);
+    const unsigned swell=1u+((unsigned)cfg->speed*5u/255u);
+    const unsigned source_drop=12u;
+    for(unsigned j=0u;j<num_drops;j++) {
+        if(drops[j].col_index==0u) {
+            drops[j].pos=(float)(count-1u);
+            drops[j].vel=0.0f;
+            drops[j].col=source_drop;
+            drops[j].col_index=1u;
+        }
+        pixels[count-1u]=scaled(blend_colors(black,fg,(uint8_t)source_drop),
+                                cfg->brightness);
+        if(drops[j].col_index==1u) {
+            if(drops[j].col>255u)drops[j].col=255u;
+            const size_t source=(size_t)drops[j].pos;
+            if(source<count)pixels[source]=scaled(
+                blend_colors(black,fg,(uint8_t)drops[j].col),cfg->brightness);
+            drops[j].col=(uint16_t)(drops[j].col+swell);
+            if(fx_rand8(state,256u)<(unsigned)drops[j].col/10u) {
+                drops[j].col_index=2u;
+                drops[j].col=255u;
+            }
+        }
+        if(drops[j].col_index>1u) {
+            if(drops[j].pos>0.0f) {
+                drops[j].pos+=drops[j].vel;
+                if(drops[j].pos<0.0f)drops[j].pos=0.0f;
+                drops[j].vel+=gravity;
+                for(unsigned i=1u;i<7u-(unsigned)drops[j].col_index;i++) {
+                    size_t index=(size_t)drops[j].pos+i;
+                    if(index>=count)index=count-1u;
+                    pixels[index]=scaled(blend_colors(black,fg,
+                        (uint8_t)(drops[j].col/i)),cfg->brightness);
+                }
+                if(drops[j].col_index>2u) {
+                    pixels[0]=scaled(blend_colors(fg,black,
+                       (uint8_t)drops[j].col),cfg->brightness);
+                }
+            } else if(drops[j].col_index>2u) {
+                drops[j].col_index=0u;
+                drops[j].col=source_drop;
+            } else {
+                if(drops[j].col_index==2u) {
+                    drops[j].vel=-drops[j].vel/4.0f;
+                    drops[j].pos+=drops[j].vel;
+                }
+                drops[j].col=source_drop*2u;
+                drops[j].col_index=5u;
+            }
+        }
+    }
+}
+
 /* FX.cpp mode_halloween_eyes(): source 1D eye positions, fade, blink,
  * and on/off transitions. The RGB profile uses palette=0 (primary eye
  * color), no matrix or overlay options. Eye state belongs to the zone's
@@ -3225,6 +3304,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_DRIP) {
+        drip_frame(cfg,state,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_POPCORN) {
