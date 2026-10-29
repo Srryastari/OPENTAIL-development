@@ -59,6 +59,21 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
 }
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
+const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
+const homeSection=compose.split('private fun HomePage(t: Tone, changePage: (Int) -> Unit) {')[1]
+                         .split('private fun EffectsPreview(')[0];
+const settingsSection=compose.split('private fun SettingsPage(t: Tone) {')[1]
+                             .split('private fun HardwareOutputEditor(')[0];
+assert(homeSection.includes('Bluetooth · ') &&
+       homeSection.includes('Pill("Authorize / Pair with BOOT"') &&
+       settingsSection.includes('Pill("Authorize / Pair with BOOT"') &&
+       !settingsSection.includes('Pill("Pair / BOOT"') &&
+       !settingsSection.includes('Pill("Authorize saved key"') &&
+       bleSource.includes('void authorizeOrPair()') &&
+       bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') &&
+       bleSource.includes('if (!connected)'),
+       'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
+
 
 assert(gradle.includes("versionName '0.2.0-alpha1'"));
 for(const widget of ['NativeUi','NativeLedPreview','ScrollView','HorizontalScrollView',
