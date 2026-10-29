@@ -232,6 +232,21 @@ assert(model.includes('data = previous; // a failed disk commit') &&
        'Project import must be atomic and pixel editing must respect zone bounds');
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
   'Native project is universal, not specific to bench vehicle');
+// The storage rollback invariant must be exercised with real JSON and
+// deterministic failed SharedPreferences.commit(), not only static source text.
+const storageTest=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativeProjectCommitTest.java','utf8');
+for (const required of [
+ 'failedCommitRestoresEveryNestedEditAndExport',
+ 'triggerMultiSelectCommitsOnceOrNotAtAll',
+ 'failedReindexBeforeCommitCannotLeavePartialLayout',
+ 'store.fail = true',
+ 'assertEquals(before, project.exportJson())'
+]) assert(storageTest.includes(required), 'Storage transaction JUnit proof missing: '+required);
+const buildFile=fs.readFileSync('android/app/build.gradle','utf8');
+assert(buildFile.includes("testImplementation 'org.json:json:20240303'"),
+  'Native project failure-injection tests require executable JSONObject implementation');
+
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
 for (const required of ['private String committedJson;',
