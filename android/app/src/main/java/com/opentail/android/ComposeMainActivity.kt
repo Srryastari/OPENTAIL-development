@@ -25,6 +25,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -316,14 +317,24 @@ class ComposeMainActivity : ComponentActivity() {
         var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
         var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
         var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
+        var phase by remember { mutableIntStateOf(0) }
+        LaunchedEffect(effect, speed, view) {
+            if (view == "Effects") while (true) {
+                delay(40L)
+                phase++
+            }
+        }
         Panel(t) {
             Caption("Native offline preview — CORE is the authoritative physical renderer", t)
             Canvas(Modifier.fillMaxWidth().height(64.dp)
                 .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
                 val count = 28
                 for (i in 0 until count) {
-                    val color = if (effect == 0 || i % 5 < 3)
-                        Color(foreground) else Color(background)
+                    // Live illustration; actual per-effect pixels come from CORE.
+                    val animated = effect == 0 ||
+                        ((i + phase * (speed.coerceAtLeast(1) / 32 + 1)) % count) < (1 + intensity * count / 255)
+                    val color = (if (animated) Color(foreground) else Color(background))
+                        .copy(alpha = (0.08f + brightness.coerceIn(0,255) / 255f * 0.92f))
                     drawLine(color, Offset(i * size.width / count, size.height * 0.2f),
                              Offset(i * size.width / count, size.height * 0.8f),
                              strokeWidth = size.width / count * 0.65f)
@@ -819,9 +830,8 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Explicit short bench effect demo. Never sent during authoring.", t)
             Pill("Test a supported effect", t) { confirm = true }
             Pill("Stop CORE show", t) {
-                livePreview.stop()
+                if (liveArmed.value) livePreview.stop() else ble.stopShow()
                 liveArmed.value = false
-                ble.stopShow()
             }
         }
         if (confirm) AlertDialog(onDismissRequest = { confirm = false },
