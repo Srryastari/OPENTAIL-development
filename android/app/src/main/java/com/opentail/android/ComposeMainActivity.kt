@@ -137,7 +137,10 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilities()
-            if (!ble.canControl()) coreFrame.value = null
+            if (!ble.canControl()) {
+                coreFrame.value = null
+                outputs.clear() // readback from a disconnected/unauthorized controller is not current
+            }
             if (!ble.canControl() && liveArmed.value) {
                 livePreview.stop()
                 liveArmed.value = false
