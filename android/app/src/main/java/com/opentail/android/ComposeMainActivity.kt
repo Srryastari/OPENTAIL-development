@@ -373,35 +373,70 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("All editors update the local preview instantly. Owner-authorized BLE also previews supported effects transiently; physical geometry still requires explicit controller save.", t)
         }
     }
-    @Composable
-    private fun EffectsPreview(
-        t: Tone, effect: Int, speed: Int, intensity: Int,
-        brightness: Int, foreground: Int, background: Int
-    ) {
-        // Only the tiny LED preview recomposes at 25 Hz. Keeping the 140 effect
-        // rows/inputs out of the animation loop avoids focus and scroll churn.
-        var phase by remember { mutableIntStateOf(0) }
-        LaunchedEffect(effect, speed) {
-            while (true) {
-                delay(40L)
-                phase++
+    /** Pixel-exact LOCAL DESIGN map. CORE's current BLE protocol accepts
+     * FX commands but cannot return authoritative post-render RGB frames. */
+    private fun projectFrame(): ExactLedFrame {
+        val end = (0 until project.zoneCount()).maxOfOrNull { i ->
+            val zone = project.zone(i)
+            (zone?.optInt("start", 0) ?: 0) +
+                (zone?.optInt("length", 0) ?: 0)
+        } ?: 0
+        if (end !in 0..ExactLedFrame.MAX_PIXELS)
+            return ExactLedFrame.fromProject(IntArray(0))
+        val rgb = IntArray(end) { android.graphics.Color.BLACK }
+        for (zoneIndex in 0 until project.zoneCount()) {
+            val zone = project.zone(zoneIndex) ?: continue
+            val id = zone.optString("id")
+            val start = zone.optInt("start", 0)
+            val length = zone.optInt("length", 0)
+            val reverse = zone.optBoolean("reverse", false)
+            if (start < 0 || length < 0 || start.toLong() + length > end) continue
+            for (local in 0 until length) {
+                val index = start + if (reverse) length - 1 - local else local
+                val hex = project.pixelColor(id, local)
+                rgb[index] = 0xff000000.toInt() or hex.substring(1).toInt(16)
             }
         }
-        Canvas(Modifier.fillMaxWidth().height(64.dp)
-            .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
-            val count = 28
-            for (i in 0 until count) {
-                val animated = effect == 0 ||
-                    ((i + phase * (speed.coerceAtLeast(1) / 32 + 1)) % count) <
-                    (1 + intensity * count / 255)
-                val color = (if (animated) Color(foreground) else Color(background))
-                    .copy(alpha = 0.08f + brightness.coerceIn(0,255) / 255f * 0.92f)
-                drawLine(color, Offset(i * size.width / count, size.height * 0.2f),
-                         Offset(i * size.width / count, size.height * 0.8f),
-                         strokeWidth = size.width / count * 0.65f)
-            }
-        }
+        return ExactLedFrame.fromProject(rgb)
     }
+
+    @Composable
+    private fun EffectsPreview(t: Tone, effect: Int) {
+        // Every segment represents exactly one real zero-based LED index.
+        // No fabricated effect motion, fixed 28-dot count, or frame sampling.
+        val revisionKey = revision.intValue
+        val frame = remember(revisionKey) { projectFrame() }
+        val total = frame.size()
+        val window = total.coerceAtMost(64)
+        var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
+        val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
+        Caption("Exact local pixel map · " + total + " indexed design LEDs", t)
+        if (total == 0) {
+            Caption("Add zones in Layout to inspect individual pixel addresses.", t)
+        } else {
+            Canvas(Modifier.fillMaxWidth().height(64.dp)
+                .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
+                val pitch = size.width / window.toFloat()
+                for (i in 0 until window) {
+                    val x = i * pitch
+                    drawRect(Color(frame.colorAt(first + i)), topLeft = Offset(x, 9f),
+                        size = androidx.compose.ui.geometry.Size(
+                            (pitch - 1f).coerceAtLeast(0.5f),
+                            (size.height - 18f).coerceAtLeast(1f)))
+                }
+            }
+            Caption("LED " + first + "–" + (first + window - 1) +
+                " · one display segment per real LED index · black = unpainted", t)
+            if (total > window)
+                ValueSlider("First visible pixel", first, total - window, t) {
+                    requestedFirst = it
+                }
+        }
+        Caption("Effect " + NativeEffectCatalog.byId(effect).name +
+            " · exact animation unavailable: CORE BLE does not return rendered frames. " +
+            "The strip above shows the pixel-address map, NOT a simulated effect.", t)
+    }
+
     @Composable
     private fun ShowModesPage(t: Tone) {
         Title("Show Modes", t)
@@ -415,8 +450,8 @@ class ComposeMainActivity : ComponentActivity() {
         var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
         var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
         Panel(t) {
-            Caption("Native offline preview — CORE is the authoritative physical renderer", t)
-            EffectsPreview(t, effect, speed, intensity, brightness, foreground, background)
+            Caption("Pixel-exact design inspection · effects require CORE rendered frames", t)
+            EffectsPreview(t, effect)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Effects", "Sequences", "Presets").forEach {
                     Pill(it, t, view == it) { view = it }
@@ -440,7 +475,8 @@ class ComposeMainActivity : ComponentActivity() {
                     PaletteEditor("Accent", accent, t) {
                         accent = it; prefs.edit().putInt("accent", it).apply(); previewCurrentEffect(effect)
                     }
-                    Caption("Offline illustration only. Exact timing and palettes are rendered by CORE.", t)
+                    Caption("Edits update the design and authorized CORE effect immediately. " +
+                        "Exact animation preview requires a CORE frame snapshot capability.", t)
                 }
                 // Only compose visible effect rows; never eagerly render 140
                 // cards inside the parent scroll (expensive on entry devices).
