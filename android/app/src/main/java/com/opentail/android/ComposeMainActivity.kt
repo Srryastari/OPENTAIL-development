@@ -729,9 +729,17 @@ class ComposeMainActivity : ComponentActivity() {
                     PalettePicker("Palette", paletteId, t) { id ->
                         paletteId = id
                         prefs.edit().putInt("paletteId", id).apply()
-                        if (NativePaletteEngine.coreSupports(effect, id))
+                        if (NativePaletteEngine.coreSupports(effect, id)) {
                             previewCurrentEffect(effect)
-                        else invalidateCoreFrame() // Unsupported palettes remain local only
+                        } else {
+                            // A new local-only palette must not leave the previous
+                            // live hardware palette playing under its old TTL.
+                            if (liveArmed.value) {
+                                livePreview.stop()
+                                liveArmed.value = false
+                            }
+                            invalidateCoreFrame()
+                        }
                     }
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
