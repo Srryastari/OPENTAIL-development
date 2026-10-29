@@ -23,6 +23,7 @@
 #include "wled_fx_compat.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
@@ -209,6 +210,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FAIRY, "Fairy", "Fairy@!,# of flashers;!,!;!",
      true, true, true, true, false},
     {OT_WLED_FAIRYTWINKLE, "Fairytwinkle", "Fairytwinkle@!,!;!,!;!;;m12=0",
+     true, true, true, true, false},
+    {OT_WLED_BOUNCING_BALLS, "Bouncing Balls", "Bouncing Balls@Gravity,# of balls,,,,,Overlay;!,!,!;!;1;m12=1",
      true, true, true, true, false}
 };
 
@@ -2259,6 +2262,67 @@ static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value) {
 /* WLED colors.cpp color_fade(color, amount, true), packed RGB.
  * The source's dominant-channel rounding is intentional: replacing this
  * with linear scaling visibly changes the default-color Colorwaves path. */
+/* WLED FX.cpp mode_bouncing_balls(): 1D RGB/palette=0, no AA and
+ * no tertiary color. Original 12-byte Ball state and 16-ball ceiling are
+ * algorithm constants, never a vehicle/output-specific LED count.
+ * Every zone owns its own balls via CORE's existing scratch allocator.
+ * Source hw_random8(5,11) maps to CORE's zone-local seeded RNG. */
+typedef struct {
+    uint32_t last_bounce_time; /* upstream 32-bit ESP32 unsigned long */
+    float impact_velocity;
+    float height;
+} ot_bouncing_ball_t;
+
+static void bouncing_balls_frame(const ot_wled_fx_config_t *cfg,
+                                  ot_wled_fx_state_t *state,uint32_t now,
+                                  uint32_t old_call,ot_wled_rgb_t *pixels,
+                                  size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    ot_bouncing_ball_t *balls=(ot_bouncing_ball_t*)fx_zone_scratch(
+        state,16u*sizeof(ot_bouncing_ball_t));
+    if(!balls) {
+        const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=bg;
+        return;
+    }
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    const unsigned num_balls=(unsigned)cfg->intensity*15u/255u+1u;
+    const float gravity=-9.81f;
+    if(old_call==0u)
+        for(size_t i=0;i<16u;i++)balls[i].last_bounce_time=now;
+    for(size_t i=0;i<(size_t)num_balls;i++) {
+        /* Upstream uses integer time division BEFORE converting to float. */
+        const uint32_t elapsed=(uint32_t)(now-balls[i].last_bounce_time);
+        const float elapsed_ms=(float)(elapsed/
+            ((255u-(unsigned)cfg->speed)/64u+1u));
+        const float seconds=elapsed_ms/1000.0f;
+        balls[i].height=(0.5f*gravity*seconds+balls[i].impact_velocity)*seconds;
+        if(balls[i].height<=0.0f) {
+            balls[i].height=0.0f;
+            const float dampening=0.9f-
+                (float)i/(float)(num_balls*num_balls);
+            balls[i].impact_velocity=dampening*balls[i].impact_velocity;
+            balls[i].last_bounce_time=now;
+            if(balls[i].impact_velocity<0.015f) {
+                const float impulse=sqrtf(-2.0f*gravity)*
+                    (float)(5u+fx_rand8(state,6u))/10.0f;
+                balls[i].impact_velocity=impulse;
+            }
+        } else if(balls[i].height>1.0f) {
+            continue;
+        }
+        /* roundf() on nonnegative 1D normalized height; avoid a libm
+         * call for rounding, preserving round-half-away-from-zero. */
+        const size_t pos=(size_t)(balls[i].height*(float)(count-1u)+0.5f);
+        if(pos<count)pixels[pos]=fg;
+    }
+}
+
 static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
 
 /* WLED FX.cpp Fairy uses a four-byte flasher per active sparkle. Reuse
@@ -2931,6 +2995,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_BOUNCING_BALLS) {
+        bouncing_balls_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_FAIRYTWINKLE) {
