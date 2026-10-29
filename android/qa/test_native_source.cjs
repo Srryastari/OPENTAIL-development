@@ -251,6 +251,24 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
+// Palette options/step edits must survive disk failure without changing the
+// live project. Reordering must not leave a positional editor on the wrong row.
+assert(model.includes('synchronized boolean updateSequenceOption(String key, Object value)') &&
+       model.includes('new JSONObject(previous.toString())') &&
+       model.includes('data.put("sequenceOptions", previous == null ? new JSONObject() : previous)') &&
+       model.includes('data.put("sequence", new JSONArray(steps.toString()))') &&
+       model.includes('data.put("sequence", previous == null ? new JSONArray() : previous)'),
+       'Sequence and shared palette persistence must roll back failed commits');
+assert(compose.includes('project.updateSequenceOption(key, !enabled)') &&
+       compose.includes('project.updateSequenceOption("sharedPaletteId", id)') &&
+       compose.includes('val edited = sequenceList()') &&
+       compose.includes('JSONObject(entry.toString())') &&
+       compose.includes('if (updateSequence(updated)) editingStep = -1') &&
+       compose.includes('Could not save sequence; previous design retained') &&
+       compose.includes('editingStep = -1; editingPaletteStep = -1; moveSequence(i, -1)') &&
+       compose.includes('editingStep = -1; editingPaletteStep = -1; removeSequence(i)'),
+       'Local palette and sequence editing must be copy-on-write with save feedback');
+
 // A completed BLE frame can arrive after a palette/effect/zone edit or after
 // output switching. Prevent that older frame from being displayed as current.
 const captureCallback=compose.split('ble.setFrameListener { output, sequence, rgb, error ->')[1]
