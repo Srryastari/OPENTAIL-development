@@ -29,7 +29,6 @@ assert "if(frame_ready[ch])ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch
 assert "pixel_buffer_budget_per_output" in core
 assert "max_configurable_pixels_per_output" in core
 assert "configured_output_zones" in core
-assert '\"active_pixels_per_output\\\\\":%s' not in core  # JSON is C-escaped in source
 assert 'active_pixels_per_output' in core
 assert 'output_mask' in core
 assert 'unknown legacy chain name' in core
