@@ -1160,7 +1160,11 @@ static void icu_frame(const ot_wled_fx_config_t *cfg,
                     next=(uint16_t)(t+200u);
                     break;
                 }
-                /* Fall through exactly as upstream ICU when no blink. */
+                /* Upstream no-blink path enters stage 1 immediately.
+                 * Explicit branch avoids -Wimplicit-fallthrough under CI. */
+                next=(uint16_t)(t+500u+fx_rand_index(state,1000u));
+                stage++;
+                break;
             case 1u:
                 next=(uint16_t)(t+500u+fx_rand_index(state,1000u));
                 stage++;
