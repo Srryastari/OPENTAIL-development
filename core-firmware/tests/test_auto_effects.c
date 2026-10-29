@@ -75,6 +75,42 @@ int main(void){
         for(unsigned i=0;i<64;i++)
             assert(p[i].r<=32&&p[i].g<=32&&p[i].b<=32);
     }
+    /* Independent sparkle color choices: randomized lighter shades really
+     * differ from default, custom blue works, and all colors respect peak. */
+    c.effect_id=OT_FX_MATERIALIZE_SPARKS;
+    c.brightness=16;c.intensity=255;c.spark_peak=32;c.spark_style=0;
+    int shade_changed=0;
+    for(uint32_t t=0;t<dur;t+=13u){
+        assert(ot_auto_fx_render(&c,99,t,out,64));
+        c.spark_style=1;
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++){
+            assert(p[i].r<=32&&p[i].g<=32&&p[i].b<=32);
+            if(p[i].g>out[i].g || p[i].b>out[i].b)shade_changed=1;
+        }
+        c.spark_style=0;
+    }
+    assert(shade_changed);
+    c.spark_style=3;c.spark_color=(ot_wled_rgb_t){0,0,255};
+    int blue_seen=0;
+    for(uint32_t t=0;t<dur;t+=13u){
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++){
+            if(p[i].b>0u)blue_seen=1;
+            assert(p[i].r<=32&&p[i].g<=32&&p[i].b<=32);
+        }
+    }
+    assert(blue_seen);
+    c.spark_peak=12;
+    for(uint32_t t=0;t<dur;t+=13u){
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++)
+            assert(p[i].r<=16&&p[i].g<=16&&p[i].b<=16);
+    }
+    c.spark_peak=33;assert(!ot_auto_fx_render(&c,99,0,p,64));
+    c.spark_peak=32;c.spark_style=4;
+    assert(!ot_auto_fx_render(&c,99,0,p,64));
+    c.spark_style=0;
     c.brightness=0;
     for(uint32_t t=0;t<dur;t+=47u){
         assert(ot_auto_fx_render(&c,99,t,p,64));
