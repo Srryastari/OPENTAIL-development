@@ -20,10 +20,10 @@ assert "web-studio" not in cmake or "independent" in cmake
 assert "studio_gz_start" not in core and "_binary_assets_dev_console_htm_start" in core
 assert 'cfg.max_uri_handlers=30' in core
 for route in ["/dev", "/api/v1/status", "/api/v1/status-led",
-              "/api/v1/status-led/self-test", "/api/v1/capabilities",
+              "/api/v1/status-led/self-test", "/api/v1/status-led/session", "/api/v1/capabilities",
               "/api/v1/ble/session", "/api/v1/fx/catalog",
               "/api/v1/fx/preview", "/api/v1/auto-events/preview",
-              "/api/v1/show/start", "/api/v1/show/stop",
+              "/api/v1/show/start", "/api/v1/show/stop", "/api/v1/demo",
               "/api/v1/simulate", "/api/v1/stop", "/api/v1/outputs",
               "/api/v1/triggers"]:
     assert ('"'+route+'"') in core, f"CORE route missing: {route}"
@@ -47,6 +47,8 @@ assert "const data=await request('/api/v1/fx/catalog')" in page
 assert "catalog.some(f=>f.id===id)" in page
 assert "const data={effect,chain:" in page
 assert "if(!document.hidden)refreshStatus()" in page
+assert "async function nativeShow()" in page and "async function demo()" in page
+assert "async function sessionLed(connected)" in page
 assert "Studio remains a separate animation/sequence design application" in page
 
 class Parser(HTMLParser):
@@ -60,7 +62,7 @@ class Parser(HTMLParser):
                 self.ids.add(value)
 parser=Parser()
 parser.feed(page)
-for required in ["overview","effects","events","inputs","outputs","statusled","api",
+for required in ["overview","lighting","effects","events","inputs","outputs","statusled","api",
                  "eventColor","fxId","fxZones","triggerEditor","outputEditor",
                  "ledJson","apiResult","tokenResult","simResult"]:
     assert required in parser.ids, f"Developer dashboard missing control: {required}"
