@@ -68,7 +68,14 @@ class ComposeMainActivity : ComponentActivity() {
     // owner has explicitly armed a physical bench preview, the same gesture
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
     private fun previewCurrentEffect(effectOverride: Int? = null) {
-        if (!liveArmed.value) return
+        // Live editing is the DEFAULT. Offline rendering always updates;
+        // if owner-authorized BLE can preview this effect, stream the gesture
+        // automatically without an extra "Live Edit Mode" switch.
+        if (!ble.canControl() || supportedIds.value.isEmpty()) return
+        if (!livePreview.isArmed()) {
+            if (!livePreview.arm()) return
+            liveArmed.value = true
+        }
         livePreview.update(LiveBlePreview.Frame(
             effectId = effectOverride ?: prefs.getInt("effectId", 0),
             chainMask = liveChainMask.intValue,
@@ -112,6 +119,8 @@ class ComposeMainActivity : ComponentActivity() {
         project = NativeProject(this)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
+            if (status.contains("OK AUTH") && ble.canControl())
+                ble.readFxCapabilities()
             if (!ble.canControl() && liveArmed.value) {
                 livePreview.stop()
                 liveArmed.value = false
@@ -834,18 +843,9 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("Authorize saved key", t) { ble.authorizeStored() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
-            Caption("All edits are live on screen. Optional physical preview needs authorized CORE; it is temporary and never changes saved output mapping.", t)
-            Pill(if (liveArmed.value) "Stop live CORE preview" else "Preview live on CORE bench",
-                t, liveArmed.value) {
-                if (liveArmed.value) {
-                    livePreview.stop()
-                    liveArmed.value = false
-                } else if (livePreview.arm()) {
-                    liveArmed.value = true
-                    previewCurrentEffect()
-                }
-            }
-            if (liveArmed.value) {
+            Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (temporary TTL, max 24/255).", t)
+            if (ble.canControl() && supportedIds.value.isNotEmpty()) {
+                Caption(if (liveArmed.value) "Hardware preview active" else "Hardware preview ready on next edit", t)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     listOf("Both" to 3, "OUT 1" to 1, "OUT 2" to 2)
                         .forEach { (label, mask) ->
@@ -855,8 +855,8 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                 }
-                Caption("Hardware preview uses saved CORE zone boundaries. New geometry needs a future volatile-config firmware command; Android never repeatedly writes NVS on drag.", t)
-            }
+            } else Caption("Offline design updates instantly. Connect and authorize CORE to preview supported effects on LEDs.", t)
+            Caption("Changing zone boundaries and individual pixels on hardware requires a firmware volatile-preview command; Android does not flash NVS on each edit.", t)
         }
         var confirm by remember { mutableStateOf(false) }
         Panel(t) {
