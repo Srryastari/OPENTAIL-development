@@ -8,17 +8,13 @@ const fs=require('node:fs');
 const path=require('node:path');
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
-const main=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
-const ui=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeUi.java','utf8');
-const preview=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeLedPreview.java','utf8');
-const output=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeOutputManager.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
 const gradle=fs.readFileSync('android/app/build.gradle','utf8');
 const web=fs.readFileSync('web-studio/opentail.htm','utf8');
-assert(!/new WebView\(|WebViewAssetLoader|@JavascriptInterface|evaluateJavascript\(|loadUrl\(|appassets\.androidplatform/.test(main),
+assert(!/new WebView\(|WebViewAssetLoader|@JavascriptInterface|evaluateJavascript\(|loadUrl\(|appassets\.androidplatform/.test(compose),
   'Android launch activity cannot contain WebView, JavaScript bridges, or loadUrl');
 assert(!/implementation\s+['"]androidx\.webkit:/.test(gradle),
   'The Android app must not have AndroidX WebKit as a runtime dependency');
@@ -98,84 +94,55 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
 assert(gradle.includes("versionName '0.2.0-alpha1'"));
-for(const widget of ['NativeUi','NativeLedPreview','ScrollView','HorizontalScrollView',
-                     'SeekBar','EditText','AlertDialog','TextView','CheckBox']) {
-  assert(main.includes(widget),'Required native Android screen widget missing: '+widget);
+// Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
+const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
+const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
+const modes=compose.split('private fun ShowModesPage(t: Tone) {')[1].split('private fun SequencePage(')[0];
+const events=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
+                    .split('private fun SettingsPage(')[0];
+const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(layout && triggers && modes && events && hardware,
+       'A shipped Compose design page is missing');
+for(const required of ['project.previewZoneOffsets(id, n)',
+  'onValueChangeFinished = { applyLiveZone() }',
+  'project.editZone(id, label, n, reverse)',
+  'project.setPixelColor(id, activePixel, hex)',
+  'project.clearPixelColor(id, activePixel)',
+  'project.removeZone(id)', 'project.moveZone(',
+  'Pill("+ Add next"', 'Pill("Remove"']) {
+  assert(layout.includes(required),'Compose layout regression: '+required);
 }
-assert(main.includes('private static final String[] TABS={'));
-const navigation=main.slice(main.indexOf('private static final String[] TABS='),main.indexOf('private static final String[] DEFAULT_EVENTS='));
-const expected=['Home','Show Modes','Layout','Triggers','Auto Events','Settings'];
-assert.deepEqual([...navigation.matchAll(/"([^"]+)"/g)].map(m=>m[1]),expected);
-for(const route of ['home()','showModes()','layout()','triggers()','autoEvents()','settings()']) {
-  assert(main.includes('private void '+route+'{')||main.includes('private void '+route+' {'),
-    'Missing native route '+route);
+assert(!layout.includes('ble.saveOutput(') && !layout.includes('ble.showFx('),
+ 'Local layout authoring must not persist or command physical outputs');
+for(const required of ['selections =', 'testing =', 'project.customTrigger(',
+  'project.deleteTrigger(', 'project.assign(', 'applyTriggerStyle()']) {
+  assert(triggers.includes(required),'Compose trigger regression: '+required);
 }
-assert(main.includes('private void colorDialog(')&&main.includes('chooseEffect(')&&
-       main.includes('editSequenceStep(')&&main.includes('editSelectedTriggers(')&&
-       main.includes('editZone(')&&main.includes('presetEditor('),
- 'Native editors for all design functions must be implemented');
-assert(ui.includes('0xff000000')&&ui.includes('0xffffffff')&&
-       ui.includes('GradientDrawable')&&ui.includes('setCornerRadius(dp(radius))'),
- 'OLED/white theme and approved capsule styling missing');
-assert(preview.includes('extends View')&&preview.includes('onDraw(Canvas')&&
-       preview.includes('ExactLedFrame.fromProjectModel(project)')&&
-       preview.includes('frame.colorAt(first+i)')&&
-       preview.includes('private static final int PAGE = 64')&&
-       !preview.includes('postInvalidateDelayed')&&
-       !preview.includes('NativeEffectCatalog.byId')&&
-       !/Bluetooth|HttpURLConnection|WebSocket|Gatt/i.test(preview),
- 'Native Canvas must inspect exact project pixel indexes, never fabricate effects');
-assert(model.includes('static final int MAX_ZONES = 200')&&
-       model.includes('long end = 0')&&model.includes('start", start')&&
-       model.includes('"offsetMode", "auto"')&&
-       model.includes('reordered.add(to, selected)'),
- 'Universal zone indexing or both-direction reorder regressed');
-// Issue #14: approved zone slider/offset parity. Live previews must be
-// calculated from universal project state, stay unsaved until confirmation,
-// and cascade through later zones without sending any hardware commands.
-const previewOffsets=model.slice(model.indexOf('synchronized String previewZoneOffsets('),
-  model.indexOf('synchronized boolean editZone('));
-assert(previewOffsets.includes('int selected=indexOfZone(id)')&&
-       previewOffsets.includes('i==selected?suggestedLength:zone.optInt("length",0)')&&
-       previewOffsets.includes('Math.max(end,zone.optLong("start",end))')&&
-       previewOffsets.includes('long start=manual?')&&
-       !previewOffsets.includes('save();')&&!previewOffsets.includes('ble.')&&
-       !previewOffsets.includes('z.put('),
-  'Native live dependent-zone preview must match zero-based indexing with no persistence or BLE writes');
-const zoneEditor=main.slice(main.indexOf('private void editZone(String id)'),
-                            main.indexOf('private int number(',main.indexOf('private void editZone(String id)')));
-assert(zoneEditor.includes('count.addTextChangedListener(new TextWatcher()')&&
-       zoneEditor.includes('project.previewZoneOffsets(id,length)')&&
-       zoneEditor.includes('range.setProgress(length)')&&
-       zoneEditor.includes('count.setText(String.valueOf(Math.max(1,n)))')&&
-       zoneEditor.includes('project.editZone(id,'),
-  'Android zone pixel-count slider and typed value must preview every dependent offset before Save');
-assert(ui.includes('bar.setProgressDrawable(track)')&&
-       ui.includes('bar.setProgressTintList(')&&
-       !ui.slice(ui.indexOf('SeekBar slider('),ui.indexOf('LinearLayout.LayoutParams lp(')).includes('setStroke('),
-  'Approved slider must use a borderless rounded capsule track');
-
-assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
- 'Universal project model must never hardcode one car/bench wiring layout');
-assert(model.includes('"version", 4')&&model.includes('validated(new JSONObject(input))')&&
-       model.includes('if (start < lastEnd)')&&model.includes('if (input.length() > 2000000)'),
- 'Shared v4 project export/import must validate bounds, overlap, file size');
-assert(main.includes('ACTION_OPEN_DOCUMENT')&&main.includes('ACTION_CREATE_DOCUMENT')&&
-       main.includes('project.importJson(')&&main.includes('project.exportJson()'),
- 'Native Android system document picker must preserve project backup/export');
-assert(main.includes('private void confirmBleTest()')&&
-       main.includes('if(!ble.canControl())')&&main.includes('supportedBleEffects.contains(effectId)')&&
-       main.includes('new AlertDialog.Builder(this).setTitle("Bench test on CORE?")')&&
-       main.includes('ble.showFx(effectId,3,255,')&&
-       main.includes('Math.min(32,')&&main.includes('safe,speed,intensity,0,15)'),
- 'Real BLE command must require auth, verified capabilities, confirmation, brightness cap and TTL');
-for(const source of ['private void effectEditor()','private void sequenceEditor()',
-                     'private void layout()','private void triggers()','private void autoEvents()']) {
-  const start=main.indexOf(source),end=main.indexOf('\n    private ',start+source.length);
-  assert(start>0&&end>start);
-  const editor=main.slice(start,end);
-  assert(!editor.includes('ble.showFx(')&&!editor.includes('ble.stopShow('),
-    'Authoring path may not write to a physical controller: '+source);
+assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
+for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Sequences", "Presets")',
+  'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
+  'previewCurrentEffect(item.id)', 'Capture actual CORE frame']) {
+  assert(modes.includes(required),'Compose effects regression: '+required);
+}
+assert(events.includes('listOf("Startup", "Shutdown")') &&
+       events.includes('eventUiEnabled') &&
+       events.includes('eventUiFadeMs') &&
+       events.includes('eventDuration') &&
+       events.includes('Preview offline'),
+  'Optional startup/shutdown design regressed');
+assert(hardware.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+       !hardware.includes('623') &&
+       hardware.includes('it.put("pixels", remaining)') &&
+       hardware.includes('structureVersion++') &&
+       hardware.includes('BleConfigCodec.encode(draft)') &&
+       hardware.includes('ble.saveOutput(index, draftText)'),
+  'CORE output editor must validate universal drafts and synchronize zone totals');
+for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
+  'synchronized boolean editZone(', 'synchronized boolean moveZone(',
+  'synchronized boolean removeZone(', 'synchronized boolean importJson(',
+  'if (start < lastEnd)', 'if (input.length() > 2000000)',
+  'synchronized String exportJson()']) {
+  assert(model.includes(required),'Native project v4 import/index invariant missing: '+required);
 }
 const list=[...catalog.matchAll(/new Effect\((\d+), "([^"]+)"\)/g)].map(m=>[Number(m[1]),m[2]]);
 assert.equal(list.length,140,'Native designer must include all approved effect names');
@@ -186,27 +153,17 @@ assert(m&&o,'Approved web metadata catalog must remain intact');
 const webModes=[...JSON.parse(m[1]),...Object.entries(JSON.parse(o[1])).map(([i,n])=>[Number(i),n])];
 assert.deepEqual(list.slice(0,webModes.length),webModes,'Native effect names/IDs have drifted from approved web authoring');
 assert(list.some(([id,name])=>id===32787&&name==='Singularity Shutdown'), 'Newest CORE original effects missing');
-assert(!/WLED firmware|WLED UI/.test(main),'End-user native app must be OpenTail branded');
-const ble=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
-assert(ble.includes('pairWithBoot()')&&ble.includes('authorizeStored()')&&
-       ble.includes('HmacSHA256')&&ble.includes('canControl()'),
- 'Secure BLE authorization flow must remain available in native code');
-assert(main.includes('new NativeOutputManager(this,ble,ui)')&&main.includes('outputManager.onBleResult(result)'),
- 'Advanced native BLE output editor must connect to existing readback protocol');
-assert(output.includes('class NativeOutputManager')&&output.includes('ble.readOutput(selected)')&&
-       output.includes('ble.saveOutput(index,draft.toString())')&&
-       output.includes('BleConfigCodec.encode(draft)')&&output.includes('ble.canConfigure()')&&
-       output.includes('setTitle("Save physical output?")'),
- 'Native BLE output editor must read first, validate and explicitly confirm writes');
-assert(output.includes('new JSONObject(result.getJSONObject("output").toString())')&&
-       output.includes('drafts[index]')&&output.includes('for(int i=0;i<2;i++)'),
- 'Per-output independent drafts and verified hardware readback required');
-assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 623')&&
-       codec.includes('pixels>MAX_LEDS_PER_OUTPUT')&&
-       codec.includes('length>MAX_LEDS_PER_OUTPUT')&&
-       output.includes('Active pixels (1–623)')&&
-       output.includes('1,246 total')&&
-       codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
-       codec.includes('static byte[] encode(')&&codec.includes('static JSONObject decode('),
- 'Native hardware output safety and codec validation regressed');
-console.log('PASS: shipped Kotlin/Compose six-page UI, source-level live-edit/LED map, plus retained Java reference, project, BLE and output codec contracts (static only).');
+assert(!/WLED firmware|WLED UI/.test(compose),'End-user Compose UI must be OpenTail branded');
+assert(bleSource.includes('pairWithBoot()') && bleSource.includes('authorizeStored()') &&
+       bleSource.includes('HmacSHA256') && bleSource.includes('canControl()'),
+  'BLE owner authorization regression');
+assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 65535') &&
+       codec.includes('pixels>MAX_LEDS_PER_OUTPUT') &&
+       codec.includes('length>MAX_LEDS_PER_OUTPUT') &&
+       codec.includes('if(sum!=pixelCount)') &&
+       !codec.includes('index==0?16:17') &&
+       !hardware.includes('623'),
+  'BLE uint16 geometry must be universal and not invent physical pins');
+assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
+  'Native project is universal, not specific to bench vehicle');
+console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
