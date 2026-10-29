@@ -928,7 +928,7 @@ void ot_ble_disconnect_show(void){
 
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
-    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;ot_show_t show_cfg;
+    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;
     uint32_t refresh0,refresh1,stop_requested,stop_rendered;
     uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
@@ -939,7 +939,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     mode=demo_active?demo.mode:OT_DEMO_OFF;
     frames=frame_index;
     show_active=show_window(now);
-    show_cfg=native_show;
+
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
     for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
@@ -947,20 +947,17 @@ static esp_err_t status_get(httpd_req_t *r) {
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
-    char arb_json[600];
+    /* Runtime telemetry is universal and reflects configured output zones.
+     * Historical left/right tail examples belong exclusively in host tests. */
+    char arb_json[480];
     snprintf(arb_json,sizeof(arb_json),
-      "{\"mode\":\"%s\",\"mapping\":\"legacy_example_zone_local\",\"hazards\":%s,\"brake_over_parking\":%s,\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,\"demo_requested\":%s,\"demo_suppressed\":%s,"
-      "\"left\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"},"
-      "\"right\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"}}",
+      "{\"mode\":\"%s\",\"mapping\":\"configured_output_zones\",\"hazards\":%s,\"brake_over_parking\":%s,"
+      "\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,"
+      "\"demo_requested\":%s,\"demo_suppressed\":%s}",
       ot_arb_mode_name(arb.mode),arb.hazards?"true":"false",arb.brake_over_parking?"true":"false",
-      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",arb.show_requested?"true":"false",
-      arb.demo_requested?"true":"false",arb.demo_suppressed?"true":"false",
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TOP,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TURN,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_TOP,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_TURN,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)));
+      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",
+      arb.show_requested?"true":"false",arb.demo_requested?"true":"false",
+      arb.demo_suppressed?"true":"false");
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
     snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,"user-configured",
