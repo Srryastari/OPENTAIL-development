@@ -2160,7 +2160,11 @@ static uint32_t pack(ot_wled_rgb_t x) {
 int main() {
     unsigned checked=0;
     for(const RefCase& fx:refs) {
-        for(unsigned count: {2u,3u,7u,16u,31u}) {
+        const std::vector<unsigned> zone_lengths=
+            (fx.id==89u || fx.id==44u) ?
+            std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
+            std::vector<unsigned>{2u,3u,7u,16u,31u};
+        for(unsigned count: zone_lengths) {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
