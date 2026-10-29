@@ -48,9 +48,13 @@ assert(ui.includes('0xff000000')&&ui.includes('0xffffffff')&&
        ui.includes('GradientDrawable')&&ui.includes('setCornerRadius(dp(radius))'),
  'OLED/white theme and approved capsule styling missing');
 assert(preview.includes('extends View')&&preview.includes('onDraw(Canvas')&&
-       preview.includes('postInvalidateDelayed(33)')&&
+       preview.includes('ExactLedFrame.fromProjectModel(project)')&&
+       preview.includes('frame.colorAt(first+i)')&&
+       preview.includes('private static final int PAGE = 64')&&
+       !preview.includes('postInvalidateDelayed')&&
+       !preview.includes('NativeEffectCatalog.byId')&&
        !/Bluetooth|HttpURLConnection|WebSocket|Gatt/i.test(preview),
- 'Native Canvas offline preview must not have controller access');
+ 'Native Canvas must inspect exact project pixel indexes, never fabricate effects');
 assert(model.includes('static final int MAX_ZONES = 200')&&
        model.includes('long end = 0')&&model.includes('start", start')&&
        model.includes('"offsetMode", "auto"')&&
