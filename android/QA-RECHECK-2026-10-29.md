@@ -30,6 +30,7 @@
 16. Made Auto Events' **Preview offline** enter the same explicitly BLE-isolated session as Settings' **Preview Offline**, and accurately described that offline pixel inspection does not generate CORE animation.
 17. Stopped preset snapshots from recursively embedding the entire saved preset collection. Loading an old design preserves today's preset library, including newer saved presets; malformed presets now show a local error instead of silently doing nothing.
 18. Closed a GATT race by guarding owner pairing/authentication against other active BLE operations and resetting pending authentication on disconnect/reconnect.
+19. Made native v4 preset-library updates **atomic** on disk commit failure; an unsuccessful save restores the prior in-memory collection instead of presenting an unsaved preset as persisted.
 
 ## Not yet accepted; do NOT label these complete
 
