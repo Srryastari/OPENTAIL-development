@@ -91,6 +91,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_LOADING, "Loading", "Loading@!,Fade;!,!;!;;ix=16",
      true, true, true, true, false},
     {OT_WLED_SINEWAVE, "Sine", "Sine@!,Scale;;!",
+     true, true, true, true, false},
+    {OT_WLED_ANDROID, "Android", "Android@!,Width;!,!;!;;m12=1",
      true, true, true, true, false}
 };
 
@@ -109,7 +111,8 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 }
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
-    if (state) { state->step=0; state->aux0=0; state->aux1=0; state->call=0; }
+    if (state) { state->step=0; state->aux0=0; state->aux1=0;
+                 state->call=0; state->data_counter=0; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -727,6 +730,46 @@ static void sinewave_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/*
+ * Source: pinned FX.cpp mode_android(). The upstream effect allocates a
+ * uint32_t frame counter in SEGENV.data per segment; CORE keeps that exact
+ * state in its existing per-zone bank (never shared across outputs).
+ * With palette=0, color_from_palette(...,1) is the secondary color.
+ */
+static void android_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    size_t size=(size_t)(state->aux1>>1);
+    unsigned shrinking=state->aux1&1u;
+    if(now>=state->step) {
+        state->step=now+3u+
+            (8u*(255u-(uint32_t)cfg->speed))/(uint32_t)count;
+        if(size>((uint32_t)cfg->intensity*(uint32_t)count)/255u)
+            shrinking=1u;
+        else if(size<2u)
+            shrinking=0u;
+        if(!shrinking) {
+            if(state->data_counter%3u==1u)state->aux0++;
+            else size++;
+        } else {
+            state->aux0++;
+            if(state->data_counter%3u!=1u)size--;
+        }
+        state->aux1=(uint16_t)((size<<1)|shrinking);
+        state->data_counter++;
+        if(state->aux0>=count)state->aux0=0u;
+    }
+    const size_t start=state->aux0;
+    const size_t end=(start+size)%count;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++) {
+        const bool lit=(start<end && i>=start && i<end) ||
+                       (start>=end && (i>=start || i<end));
+        pixels[i]=lit?fg:bg;
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -738,6 +781,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_ANDROID) {
+        android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_SINEWAVE) {
         sinewave_frame(cfg,state,pixels,count);
         return true;
