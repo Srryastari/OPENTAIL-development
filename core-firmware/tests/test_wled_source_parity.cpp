@@ -545,7 +545,8 @@ static uint32_t source_fast_scale(uint32_t c,uint8_t scale) {
   return rb|wg;
 }
 static uint32_t source_color_add(uint32_t c1,uint32_t c2) {
-  if(c1==0u)return c2;if(c2==0u)return c1;
+  if(c1==0u)return c2;
+  if(c2==0u)return c1;
   const uint32_t mask=0x00ff00ffu;
   uint32_t rb=(c1&mask)+(c2&mask);
   uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
