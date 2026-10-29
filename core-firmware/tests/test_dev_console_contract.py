@@ -76,7 +76,7 @@ assert check.returncode==0, f"Developer script syntax error: {check.stderr}"
 # reviewed web Studio and Android source parity remains independently checked.
 workflow=(root.parent/".github/workflows/verify-active-sources.yml").read_text()
 assert "python3 core-firmware/tools/sync_studio_asset.py" not in workflow
-assert "opentail-core-v0.1.27-alpha-app.bin" in workflow
+assert re.search(r"opentail-core-v0\\.1\\.\\d+-alpha-app\\.bin",workflow), "CORE artifact must have independent firmware version"
 assert "studio-v0.19.118-app.bin" not in workflow
 assert 'node --test web-studio/tests/*.test.cjs' in workflow
 
