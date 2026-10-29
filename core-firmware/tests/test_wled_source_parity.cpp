@@ -687,8 +687,9 @@ static uint16_t source_beatsin16(uint16_t bpm,uint16_t lo,uint16_t hi) {
     uint16_t wave=(uint16_t)(sin16_t(source_beat16(bpm))+32768);
     return (uint16_t)(lo+scale16(wave,(uint16_t)(hi-lo)));
 }
-static uint8_t source_beatsin8(uint16_t bpm,uint8_t lo,uint8_t hi) {
-    uint8_t wave=sin8_t(source_beat8(bpm));
+static uint8_t source_beatsin8(uint16_t bpm,uint8_t lo,uint8_t hi,
+                                  uint32_t timebase=0u,uint8_t phase=0u) {
+    uint8_t wave=sin8_t((uint8_t)(source_beat8(bpm,timebase)+phase));
     return (uint8_t)(lo+scale8(wave,(uint8_t)(hi-lo)));
 }
 #undef millis
