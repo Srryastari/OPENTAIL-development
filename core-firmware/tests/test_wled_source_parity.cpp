@@ -224,6 +224,9 @@ struct PinnedSeg {
     void blendPixelColor(size_t i,CRGBW color,uint8_t b) {
         if(i<pixels.size()) pixels[i]=color_blend(pixels[i],color.color32,b);
     }
+    void blendPixelColor(size_t i,uint32_t color,uint8_t b) {
+        if(i<pixels.size()) pixels[i]=color_blend(pixels[i],color,b);
+    }
     void fill(uint32_t color) {std::fill(pixels.begin(),pixels.end(),color);}
     void setPixelColor(size_t i,uint32_t color) {
         if(i<pixels.size()) pixels[i]=color;
