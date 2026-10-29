@@ -1166,7 +1166,18 @@ int main(void) {
     assert(eq(ot_wled_palette_sample(&palette,16u,255u,
                        OT_WLED_PALETTE_LINEAR),
               (ot_wled_rgb_t){0xBDu,0x00u,0xB8u}));
-    for(uint8_t pal=2u;pal<=6u;pal++) {
+
+    assert(ot_wled_palette_build(11u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,0u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){255u,0u,0u}));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0xEBu,0x70u,0u}));
+    assert(ot_wled_palette_build(12u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0u,0u,0u}));
+
+    for(uint8_t pal=2u;pal<=12u;pal++) {
+        if(pal>=7u && pal<=10u)continue;
         c.effect_id=OT_WLED_COLOR_CLOUDS;
         c.speed=24u;c.intensity=32u;c.brightness=32u;c.palette_id=pal;
         ot_wled_fx_state_t state_pal={0};
@@ -1184,8 +1195,8 @@ int main(void) {
 
     /* Flow Stripe spans short and long arbitrary 1D zones and reuses the
      * palette renderer without hardcoded vehicle LED counts. */
-    for(uint8_t pal=0u;pal<=6u;pal++) {
-        if(pal==1u)continue;
+    for(uint8_t pal=0u;pal<=12u;pal++) {
+        if(pal==1u || (pal>=7u && pal<=10u))continue;
         c.effect_id=OT_WLED_FLOW_STRIPE;
         c.speed=127u;c.intensity=100u;c.brightness=32u;c.palette_id=pal;
         ot_wled_fx_state_t flow={0};
