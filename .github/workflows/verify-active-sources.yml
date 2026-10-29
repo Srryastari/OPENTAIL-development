@@ -58,6 +58,10 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Embed approved Studio into the firmware before compiling
+        run: |
+          python3 core-firmware/tools/sync_studio_asset.py
+          python3 core-firmware/tools/sync_studio_asset.py --check
       - name: Compile ESP32-S3 firmware with ESP-IDF 5.5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -140,6 +144,8 @@ jobs:
           assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
           console.log('Android WebView integration contract checks passed (static checks only).');
           JS
+      - name: Run full Android release contract audit
+        run: python3 android/qa/check_release.py
       - name: Compile debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
