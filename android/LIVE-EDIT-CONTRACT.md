@@ -15,7 +15,7 @@ Do **not** put a Save button in the authoring zone/trigger editor. "Done" closes
 
 ## Supported physical live preview (preexisting BLE v1 FX opcode)
 
-An owner authorizes BLE, reads supported effect IDs from CORE and explicitly arms *Preview live on CORE bench*. Subsequent FX gestures automatically coalesce to a temporary authenticated `showFx` on existing saved output/zone assignments; max one send per 120 ms, max brightness 24/255, five-second TTL, and STOP on disabling/background/exit. Unknown effects cannot be transmitted. Hardware trigger priority remains CORE-owned. This action **never** calls `saveOutput` / NVS persistence.
+An owner authorizes BLE; Android reads supported effect IDs on authorization. **No Live Edit Mode toggle exists.** The next FX edit gesture automatically begins a temporary authenticated `showFx` on existing saved output/zone assignments; max one send per 120 ms, max brightness 24/255, five-second TTL, and STOP on background/exit or an explicit Stop CORE show action. Unknown effects cannot be transmitted. Hardware trigger priority remains CORE-owned. This action **never** calls `saveOutput` / NVS persistence.
 
 ## Not currently supported by CORE's BLE protocol
 
