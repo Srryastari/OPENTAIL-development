@@ -25,4 +25,4 @@ Required future firmware API: authenticated session-bound preview begin, bounded
 
 ## Release evidence
 
-Source/Compose CI proves only compile and static contracts. Before enabling the Compose launcher, physically test offline v4 import/export and pixel persistence, responsive zone offsets during drag, hardware FX rate and TTL, STOP/background behavior, authorized vs unauthenticated commands, reconnect, independent outputs, theme parity with the locked design, and actual pixels after CORE adds volatile geometry support.
+Source/Compose CI proves only compile and static contracts. Before approving or merging the already-registered Compose launcher, physically test offline v4 import/export and pixel persistence, responsive zone offsets during drag, hardware FX rate and TTL, STOP/background behavior, authorized vs unauthenticated commands, reconnect, independent outputs, theme parity with the locked design, and actual pixels after CORE adds volatile geometry support.
