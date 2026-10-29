@@ -164,6 +164,9 @@ assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 65535') &&
        !codec.includes('index==0?16:17') &&
        !hardware.includes('623'),
   'BLE uint16 geometry must be universal and not invent physical pins');
+assert(model.includes('data = previous; // a failed disk commit') &&
+       model.includes('pixel>=zone(zoneIndex).optInt("length",0)'),
+       'Project import must be atomic and pixel editing must respect zone bounds');
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
   'Native project is universal, not specific to bench vehicle');
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
