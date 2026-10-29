@@ -59,6 +59,29 @@ int main(void){
     assert(ot_tm_signal_mask_of("LEFT")==0);
     assert(ot_tm_signal_mask_of("")==0);
     assert(ot_tm_signal_mask_of(NULL)==0);
+    /* One-packet BLE mapping update is completely validated before any profile
+     * or expected revision is touched; wire values refer to functions, not GPIOs. */
+    uint8_t wire[OT_TM_BLE_WRITE_BYTES]={OT_TM_BLE_VERSION,0x34,0x12,
+        OT_TM_PARK,OT_TM_BRAKE,OT_TM_LEFT,OT_TM_RIGHT,
+        OT_TM_REVERSE,OT_TM_AUX1,OT_TM_AUX2,OT_TM_DISABLED};
+    ot_tm_profile_t decoded={0};
+    uint16_t expected=0;
+    assert(ot_tm_ble_decode(wire,sizeof(wire),&expected,&decoded));
+    assert(expected==0x1234u && decoded.function[7]==OT_TM_DISABLED);
+    assert(decoded.function[0]==OT_TM_PARK && decoded.function[6]==OT_TM_AUX2);
+    decoded.function[0]=OT_TM_AUX3;
+    expected=55;
+    wire[3]=255;
+    assert(!ot_tm_ble_decode(wire,sizeof(wire),&expected,&decoded));
+    assert(expected==55 && decoded.function[0]==OT_TM_AUX3);
+    wire[3]=OT_TM_PARK;
+    assert(!ot_tm_ble_decode(wire,sizeof(wire)-1,&expected,&decoded));
+    wire[0]=2;
+    assert(!ot_tm_ble_decode(wire,sizeof(wire),&expected,&decoded));
+    wire[0]=OT_TM_BLE_VERSION;
+    assert(!ot_tm_ble_decode(NULL,sizeof(wire),&expected,&decoded));
+    assert(!ot_tm_ble_decode(wire,sizeof(wire),NULL,&decoded));
+    assert(!ot_tm_ble_decode(wire,sizeof(wire),&expected,NULL));
     /* Reject malformed profiles and unsupported values. */
     assert(ot_tm_from_name("park_brake")==-1);
     assert(ot_tm_from_name("")==-1);
