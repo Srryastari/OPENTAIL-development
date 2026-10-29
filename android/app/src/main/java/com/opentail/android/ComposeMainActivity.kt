@@ -690,6 +690,7 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun PresetsPage(t: Tone) {
         val presets = project.presets()
+        var pendingLoad by remember { mutableIntStateOf(-1) }
         Panel(t) {
             Title("Presets", t)
             Caption("These save a local design snapshot, not CORE firmware.", t)
@@ -706,9 +707,7 @@ class ComposeMainActivity : ComponentActivity() {
             Panel(t) {
                 Text(p.optString("name", "Preset"), color = t.fg)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("Load design", t) {
-                        if (project.importJson(p.optString("studio"))) refresh()
-                    }
+                    Pill("Load design", t) { pendingLoad = i }
                     Pill("Remove", t) {
                         val next = JSONArray()
                         for (j in 0 until presets.length()) if (j != i) next.put(presets.opt(j))
@@ -716,6 +715,17 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        if (pendingLoad in 0 until presets.length()) {
+            AlertDialog(onDismissRequest = { pendingLoad = -1 },
+                title = { Text("Replace current design?") },
+                text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
+                confirmButton = { Pill("Load preset", t, true) {
+                    val saved = presets.optJSONObject(pendingLoad)?.optString("studio", "").orEmpty()
+                    if (saved.isNotEmpty() && project.importJson(saved)) refresh()
+                    pendingLoad = -1
+                } },
+                dismissButton = { Pill("Cancel", t) { pendingLoad = -1 } })
         }
     }
     @Composable
@@ -907,7 +917,14 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                 }
-                if (active) Caption("Local trigger preview active. CORE output unchanged.", t)
+                if (active) {
+                    val previewColor = runCatching {
+                        Color(android.graphics.Color.parseColor(profile.optString("color", "#ff0000")))
+                    }.getOrDefault(t.accent)
+                    Box(Modifier.fillMaxWidth().height(24.dp).clip(RoundedCornerShape(99.dp))
+                        .background(previewColor))
+                    Caption("Local trigger color swatch only. No simulated effect or physical CORE output.", t)
+                }
             }
         }
         if (editing) {
