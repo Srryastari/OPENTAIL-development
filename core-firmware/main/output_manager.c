@@ -3,6 +3,31 @@
 #include <string.h>
 #include <stdio.h>
 
+bool ot_om_saved_apply(ot_om_output_t active[OT_OM_OUTPUTS],
+                        ot_om_pending_t *deferred,
+                        const ot_om_output_t saved[OT_OM_OUTPUTS],
+                        uint8_t instantaneous,uint8_t debounced){
+    if(!active||!deferred||!saved)return false;
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++)if(!ot_om_valid(&saved[i]))return false;
+    if(instantaneous||debounced){
+        memcpy(deferred->outputs,saved,sizeof(deferred->outputs));
+        deferred->pending=true;
+        return false;
+    }
+    memcpy(active,saved,sizeof(deferred->outputs));
+    deferred->pending=false;
+    return true;
+}
+bool ot_om_apply_if_released(ot_om_output_t active[OT_OM_OUTPUTS],
+                             ot_om_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced){
+    if(!active||!deferred||!deferred->pending||
+       instantaneous||debounced)return false;
+    memcpy(active,deferred->outputs,sizeof(deferred->outputs));
+    deferred->pending=false;
+    return true;
+}
+
 static const char *const role_names[]={"off","park_brake","parking","brake","left_turn","right_turn","reverse","aux1","aux2","aux3","decorative"};
 static const char *const order_names[]={"RGB","RBG","GRB","GBR","BRG","BGR"};
 const char *ot_om_role_name(uint8_t v){return v<=OT_OM_DECORATIVE?role_names[v]:"invalid";}
