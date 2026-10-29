@@ -58,10 +58,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Embed approved Studio into the firmware before compiling
-        run: |
-          python3 core-firmware/tools/sync_studio_asset.py
-          python3 core-firmware/tools/sync_studio_asset.py --check
+      - name: Assert firmware embeds only the CORE dev console
+        run: python3 core-firmware/tests/test_dev_console_contract.py
       - name: Compile ESP32-S3 firmware with ESP-IDF 5.5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -93,14 +91,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p core-firmware/releases
-          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin
+          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.27-alpha-app.bin
       - name: Upload flashable CORE bench firmware package
         uses: actions/upload-artifact@v4
         with:
-          name: opentail-core-v0.1.27-alpha-studio-v0.19.118-esp32s3-bench-firmware
+          name: opentail-core-v0.1.27-alpha-esp32s3-bench-firmware
           path: |
             core-firmware/build/opentail_core_alpha.bin
-            core-firmware/releases/opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin
+            core-firmware/releases/opentail-core-v0.1.27-alpha-app.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
