@@ -12,6 +12,7 @@ import subprocess
 root=Path(__file__).resolve().parents[1]
 page=(root/"main/assets/dev_console.htm").read_text(encoding="utf-8")
 core=(root/"main/opentail_core.c").read_text(encoding="utf-8")
+ble=(root/"main/ble_status.c").read_text(encoding="utf-8")
 cmake=(root/"main/CMakeLists.txt").read_text(encoding="utf-8")
 assert len(page)>5000 and page.lstrip().startswith("<!doctype html>")
 assert "EMBED_TXTFILES \"assets/dev_console.htm\"" in cmake
@@ -45,6 +46,17 @@ assert 'full chip erase' not in page.lower()
 assert "No validated safety failover" in page
 assert "confirm('Save persistent output" in page
 assert "confirm('Save IN1" in page
+# Trigger editor must expose all eight simulatable functions and a live-edit
+# revision token. The BLE path must gate changes on owner authorization.
+for function in ("aux1","aux2","aux3"):
+    assert f'value="{function}"' in page, f"Missing {function} simulation control"
+assert "expected_config_revision:triggerSnapshot.config_revision" in page
+assert 'cJSON_AddNumberToObject(root,"config_revision",config_revision)' in core
+assert 'tm_commit(&next,(uint16_t)expected_config_revision,require_revision)' in core
+assert "ot_tm_signal_mask_of(v->valuestring)" in core
+assert "ot_tm_ble_decode(packet,n,&revision,&next)" in ble
+assert "conn!=active_conn||!authorized" in ble
+assert ".uuid=&ot_trigger_uuid.u,.access_cb=trigger_access" in ble
 assert "confirm('Display the temporary BLE enrollment token?" in page
 assert "fetch('/api/v1/ble/session')" not in page, "Never read BLE enrollment token automatically"
 assert "const data=await request('/api/v1/fx/catalog')" in page
