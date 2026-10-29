@@ -21,7 +21,16 @@ assert "if(!http_startup_ready)ot_st_set_fault(" in startup
 assert startup.index("http_startup_ready=http_start();") < startup.index("xTaskCreate(led_task")
 # The diagnostic HTTP service must never take down physical lighting on
 # registration failure. OTA acceptance still requires service startup.
-http = core.split("static bool http_start(void) {",1)[1].split("static void wifi_ap_init(void)",1)[0]
+http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
+wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static void input_init(void)",1)[0]
+assert "ESP_ERROR_CHECK(" not in wifi
+assert "abort();" not in wifi
+assert "return false;" in wifi and "return true;" in wifi
+assert "if(!esp_netif_create_default_wifi_ap())" in wifi
+assert "const bool wifi_started=wifi_ap_init();" in startup
+assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
+assert "http_startup_ready=wifi_started&&http_start();" in startup
+assert startup.index("const bool wifi_started=wifi_ap_init();") < startup.index("xTaskCreate(led_task")
 assert "ESP_ERROR_CHECK(httpd_start" not in http
 assert "ESP_ERROR_CHECK(httpd_register_uri_handler" not in http
 assert "httpd_stop(server);" in http
