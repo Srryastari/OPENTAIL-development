@@ -395,11 +395,10 @@ static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_c
         bool persistent=false;
         if(!ot_ble_trigger_get(&profile,&revision,&raw,&effective,&persistent))
             return BLE_ATT_ERR_UNLIKELY;
-        uint8_t response[7u+OT_IN_COUNT]={
-            OT_TM_BLE_VERSION,trigger_last_status,
-            (uint8_t)revision,(uint8_t)(revision>>8),raw,effective,
-            (uint8_t)(persistent?1u:0u)};
-        memcpy(response+7,profile.function,OT_IN_COUNT);
+        uint8_t response[OT_TM_BLE_READ_BYTES]={0};
+        if(!ot_tm_ble_encode(&profile,revision,raw,effective,persistent,
+                             trigger_last_status,response))
+            return BLE_ATT_ERR_UNLIKELY;
         return os_mbuf_append(ctx->om,response,sizeof(response))==0?
             0:BLE_ATT_ERR_INSUFFICIENT_RES;
     }
