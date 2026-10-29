@@ -1345,6 +1345,7 @@ static void led_task(void *p) {
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
                frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+               if(!frame_ready[ch])ot_frame_snapshot_unavailable((uint8_t)ch);
            }
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
            uint32_t elapsed=(uint32_t)(frame_ms-show_started);
@@ -1359,6 +1360,7 @@ static void led_task(void *p) {
                if(!ot_om_layout(output,&zone_layout)){
                    ot_st_set_fault("invalid output mapping");
                    frame_ready[ch]=false;
+                   ot_frame_snapshot_unavailable((uint8_t)ch);
                    continue; /* No async transfer was submitted. */
                }
                /* Render each selected zone once, even if the native frame is indexed by
