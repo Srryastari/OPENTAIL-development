@@ -55,8 +55,10 @@ bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     if(ot_auto_fx_id(cfg->effect_id))
         return ot_auto_fx_render(cfg,s->particles.seed,ms,frame,count);
     if(cfg->effect_id!=OT_FX_EMBERS){
-        /* Sixteen effects use source-derived WLED adapters. The remainder use
-         * bounded deterministic 1D recipes; catalog names are not a claim of
+        /* Only effects explicitly registered by wled_fx_compat.c use source-
+         * derived WLED adapters. Other catalog IDs use bounded compatibility
+         * recipes and must NOT be counted as equivalent source ports. */
+        /* Catalog names alone are not a claim of
          * pixel-identical parity with the complete upstream WLED renderer. */
         ot_wled_fx_metadata_t source_meta;
         if(ot_wled_fx_metadata(cfg->effect_id,&source_meta))
