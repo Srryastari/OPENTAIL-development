@@ -205,7 +205,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_PRIDE_2015, "Pride 2015", "Pride 2015@!;;",
      false, false, true, false, false},
     {OT_WLED_COLORWAVES, "Colorwaves", "Colorwaves@!,Hue;!;!;;pal=26",
-     true, false, true, true, false}
+     true, false, true, true, false},
+    {OT_WLED_FAIRY, "Fairy", "Fairy@!,# of flashers;!,!;!",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2255,6 +2257,90 @@ static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value) {
 /* WLED colors.cpp color_fade(color, amount, true), packed RGB.
  * The source's dominant-channel rounding is intentional: replacing this
  * with linear scaling visibly changes the default-color Colorwaves path. */
+/* WLED FX.cpp Fairy uses a four-byte flasher per active sparkle. Reuse
+ * CORE's existing per-zone scratch allocation and source shimmer-zone
+ * grouping. The upstream hw_random8 draws use the existing seeded CORE
+ * per-zone RNG until hardware RNG injection is implemented; randomized
+ * event sequences are therefore not yet certified as 1:1. */
+typedef struct {
+    uint16_t state_start;
+    uint8_t state_dur;
+    uint8_t state_on;
+} ot_fairy_flasher_t;
+
+static void fairy_frame(const ot_wled_fx_config_t *cfg,
+                        ot_wled_fx_state_t *state,uint32_t now,
+                        ot_wled_rgb_t *pixels,size_t count) {
+    uint16_t seed=5100u; /* WLED getCurrSegmentId()==0 reference */
+    const ot_wled_rgb_t primary=scaled(cfg->foreground,cfg->brightness);
+    for(size_t i=0;i<count;i++) {
+        seed=(uint16_t)((uint32_t)seed*2053u+1384u);
+        pixels[i]=primary; /* WLED palette=0, mcol=0 */
+    }
+    if(cfg->intensity==0u)return;
+    const size_t distance=((255u-(unsigned)cfg->intensity)/28u)+1u;
+    const size_t flashers_count=count/distance+1u;
+    if(flashers_count>SIZE_MAX/sizeof(ot_fairy_flasher_t))return;
+    ot_fairy_flasher_t *flashers=(ot_fairy_flasher_t*)fx_zone_scratch(
+         state,flashers_count*sizeof(ot_fairy_flasher_t));
+    if(!flashers)return; /* WLED leaves the initialized background */
+    const uint16_t now16=(uint16_t)now;
+
+    /* WLED FLASHERS_PER_ZONE=6, MAX_SHIMMER=92. With 6+ flashers
+     * the last zone may contain up to 11 positions. */
+    size_t zones=flashers_count/6u;
+    if(!zones)zones=1u;
+    size_t in_zone=flashers_count/zones;
+    for(size_t z=0;z<zones;z++) {
+        const size_t first=z*in_zone;
+        const size_t n=(z==zones-1u)?flashers_count-first:in_zone;
+        unsigned brightness[11]={0u};
+        unsigned sum=0u;
+        if(n>11u)return; /* avoid an unsafe buffer on future changes */
+        for(size_t j=0;j<n;j++) {
+            ot_fairy_flasher_t *fl=&flashers[first+j];
+            unsigned age=(uint16_t)(now16-fl->state_start);
+            if(age>(unsigned)fl->state_dur*10u) {
+                fl->state_on=(uint8_t)!fl->state_on;
+                if(fl->state_on)
+                    fl->state_dur=(uint8_t)(12u+fx_rand8(state,
+                            12u+((255u-(unsigned)cfg->speed)>>2)));
+                else
+                    fl->state_dur=(uint8_t)(20u+fx_rand8(state,
+                            6u+((255u-(unsigned)cfg->speed)>>2)));
+                fl->state_start=now16;
+                if(age<255u) {
+                    fl->state_start=(uint16_t)(fl->state_start-
+                                             (uint16_t)(255u-age));
+                    fl->state_dur=(uint8_t)((unsigned)fl->state_dur+
+                                          26u-age/10u);
+                    age=255u-age;
+                } else age=0u;
+            }
+            if(age>255u)age=255u;
+            brightness[j]=fl->state_on?age:255u-age;
+            sum+=brightness[j];
+        }
+        const unsigned avg=sum/(unsigned)n;
+        const unsigned peak=255u-((avg*92u)>>8);
+        const ot_wled_rgb_t dim=fx_video_fade(cfg->foreground,(uint8_t)peak);
+        for(size_t j=0;j<n;j++) {
+            const unsigned bri=(brightness[j]*peak)/255u;
+            seed=(uint16_t)((uint32_t)seed*2053u+1384u);
+            const size_t pos=(first+j)*distance;
+            if(pos<count) {
+                pixels[pos]=scaled(blend_colors(cfg->background,
+                                      cfg->foreground,(uint8_t)bri),
+                                      cfg->brightness);
+            }
+            for(size_t i=pos+1u;i<pos+distance&&i<count;i++) {
+                seed=(uint16_t)((uint32_t)seed*2053u+1384u);
+                pixels[i]=scaled(dim,cfg->brightness);
+            }
+        }
+    }
+}
+
 static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount) {
     const uint32_t c=((uint32_t)input.r<<16)|((uint32_t)input.g<<8)|input.b;
     if(c==0u || amount==0u)return (ot_wled_rgb_t){0u,0u,0u};
@@ -2760,6 +2846,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_FAIRY) {
+        fairy_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_PRIDE_2015 ||
