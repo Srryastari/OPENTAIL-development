@@ -169,10 +169,12 @@ static ot_wled_rgb_t blend_colors(ot_wled_rgb_t a, ot_wled_rgb_t b, uint8_t blen
                            mix_channel(a.g,b.g,blend),mix_channel(a.b,b.b,blend)};
 }
 
-/* WLED triwave16 from FastLED-style triangle timing: 0..65534. */
+/* Exact pinned fastled_slim.cpp triwave16(): ascending 0..65534;
+ * descending 65535..1. The second half is intentionally one LSB above
+ * the old mirrored shortcut, which affected Fade and Spots golden frames. */
 static uint16_t wave16(uint16_t x) {
-    if (x&0x8000u) x=(uint16_t)(65535u-(uint32_t)x);
-    return (uint16_t)((uint32_t)x<<1);
+    if (x<0x8000u) return (uint16_t)((uint32_t)x*2u);
+    return (uint16_t)(0xffffu-(((uint32_t)x-0x8000u)*2u));
 }
 
 /* WLED FX.cpp color_wipe(false/true,false), with direct primary/background
