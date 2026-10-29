@@ -50,6 +50,21 @@ typedef struct {
     ot_om_zone_t zones[OT_OM_ZONES];
 } ot_om_output_t;
 
+/* An output-zone save may finish while a physical trigger is active.
+ * Preserve the old live geometry until both raw and debounced inputs release.
+ * Pure operations; caller holds the existing CORE state lock. */
+typedef struct {
+    ot_om_output_t outputs[OT_OM_OUTPUTS];
+    bool pending;
+} ot_om_pending_t;
+bool ot_om_saved_apply(ot_om_output_t active[OT_OM_OUTPUTS],
+                        ot_om_pending_t *deferred,
+                        const ot_om_output_t saved[OT_OM_OUTPUTS],
+                        uint8_t instantaneous,uint8_t debounced);
+bool ot_om_apply_if_released(ot_om_output_t active[OT_OM_OUTPUTS],
+                             ot_om_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced);
+
 const char *ot_om_role_name(uint8_t role);
 const char *ot_om_order_name(uint8_t order);
 int ot_om_role_from_name(const char *role);
