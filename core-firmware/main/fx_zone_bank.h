@@ -8,10 +8,16 @@
 #include "ble_fx_command.h"
 #include "output_manager.h"
 
+/* Temporary per-zone effect accents; not part of saved NVS v1/v2 payload. */
+typedef struct {
+    uint8_t style,peak;
+    ot_wled_rgb_t color;
+} ot_fx_spark_style_t;
 typedef struct {
     bool configured;
     bool standalone; /* explicitly played stored preset; survives BLE disconnection */
     ot_ble_fx_packet_t request;
+    ot_fx_spark_style_t spark;
     uint32_t started_ms;
     uint32_t generation; /* changes only on this zone's replacement */
 } ot_fx_zone_slot_t;
