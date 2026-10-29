@@ -707,9 +707,58 @@ void mode_android(void) {
   }
 }
 
-// Phased Noise not enabled in this reference table. Abort instead of
-// silently replacing upstream Perlin semantics if that code is called.
-static uint8_t perlin8(uint16_t) { std::abort(); }
+// BEGIN UPSTREAM 1D Perlin source, util.cpp, pinned commit.
+// No alternate or approximate Perlin implementation is used.
+#define PERLIN_SHIFT 1
+int32_t hashToGradient(uint32_t h) {
+  // using more steps yields more "detailed" perlin noise but looks less like the original fastled version (adjust PERLIN_SHIFT to compensate, also changes range and needs proper adustment)
+  // return (h & 0xFF) - 128; // use PERLIN_SHIFT 7
+  // return (h & 0x0F) - 8; // use PERLIN_SHIFT 3
+  // return (h & 0x07) - 4; // use PERLIN_SHIFT 2
+  return (h & 0x03) - 2; // use PERLIN_SHIFT 1 -> closest to original fastled version
+}
+
+int32_t gradient1D(uint32_t x0, int32_t dx) {
+  uint32_t h = x0 * 0x27D4EB2D;
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  h ^= h >> 7;
+  return (hashToGradient(h) * dx) >> PERLIN_SHIFT;
+}
+
+uint32_t smoothstep(const uint32_t t) {
+  uint32_t t_squared = (t * t) >> 16;
+  uint32_t factor = (3 << 16) - ((t << 1));
+  return (t_squared * factor) >> 18; // scale to avoid overflows and give best resolution
+}
+
+int32_t lerpPerlin(int32_t a, int32_t b, int32_t t) {
+    return a + (((b - a) * t) >> 14); // match scaling with smoothstep to yield 16.16bit values
+}
+
+int32_t perlin1D_raw(uint32_t x, bool is16bit) {
+  // integer and fractional part coordinates
+  int32_t x0 = x >> 16;
+  int32_t x1 = x0 + 1;
+  if(is16bit) x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  // gradient values for the two corners
+  int32_t g0 = gradient1D(x0, dx0);
+  int32_t g1 = gradient1D(x1, dx1);
+  // interpolate and smooth function
+  int32_t tx = smoothstep(dx0);
+  int32_t noise = lerpPerlin(g0, g1, tx);
+  return noise;
+}
+
+uint8_t perlin8(uint16_t x) {
+  return (((perlin1D_raw((uint32_t)x << 8, true) * 1353) >> 10) + 32769) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+#undef PERLIN_SHIFT
+// END UPSTREAM 1D Perlin source.
 static void phased_base(uint8_t moder) {                  // We're making sine waves here. By Andrew Tuline.
 
   unsigned allfreq = 16;                                          // Base frequency.
@@ -735,6 +784,10 @@ static void phased_base(uint8_t moder) {                  // We're making sine w
 
 void mode_phased(void) {
   phased_base(0);
+}
+
+void mode_phased_noise(void) {
+  phased_base(1);
 }
 
 // END UPSTREAM FX.cpp functions.
@@ -772,7 +825,8 @@ static const RefCase refs[]={
     {86,mode_spots_fade,"Spots Fade"},
     {100,mode_heartbeat,"Heartbeat"},
     {27,mode_android,"Android"},
-    {105,mode_phased,"Phased"}
+    {105,mode_phased,"Phased"},
+    {109,mode_phased_noise,"Phased Noise"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
