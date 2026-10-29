@@ -24,6 +24,7 @@
 #include "led_strip_rmt.h"
 #include "board_config.h"
 #include "ot_version.h"
+#include "ot_ota_update.h"
 #include "status_led.h"
 #include "show_logic.h"
 #include "ble_command.h"
@@ -1065,7 +1066,7 @@ static esp_err_t legacy_dev_redirect(httpd_req_t *r){
     return httpd_resp_sendstr(r,"Controller tools have moved to /dev. OpenTail Studio is a separate design app.");
 }
 static void http_start(void) {
-    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;
+    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;cfg.recv_wait_timeout=30;
     httpd_handle_t server=NULL;
     ESP_ERROR_CHECK(httpd_start(&server,&cfg));
     const httpd_uri_t routes[]={
@@ -1073,6 +1074,8 @@ static void http_start(void) {
         {.uri="/dev",.method=HTTP_GET,.handler=dev_get},
         {.uri="/studio",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status",.method=HTTP_GET,.handler=status_get},
+        {.uri="/api/v1/ota",.method=HTTP_GET,.handler=ot_ota_status_get},
+        {.uri="/api/v1/ota",.method=HTTP_POST,.handler=ot_ota_upload_post},
         {.uri="/api/v1/status-led",.method=HTTP_GET,.handler=status_led_get},
         {.uri="/status-self-test",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status-led/self-test",.method=HTTP_POST,.handler=status_self_test_post},
@@ -1325,5 +1328,6 @@ void app_main(void) {
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
         if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
+        else ot_ota_confirm_boot(true);
     }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
 }
