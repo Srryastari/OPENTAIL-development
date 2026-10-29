@@ -15,6 +15,7 @@ cfg=(root/"sdkconfig.defaults").read_text()
 core=(root/"main/opentail_core.c").read_text()
 ota=(root/"main/ot_ota_update.c").read_text()
 installer=(root.parent/"scripts/flash-from-github.ps1").read_text()
+dev=(root/"main/assets/dev_console.htm").read_text()
 work=(root.parent/".github/workflows/verify-active-sources.yml").read_text()
 assert 'CONFIG_PARTITION_TABLE_CUSTOM=y' in cfg
 assert 'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota.csv"' in cfg
@@ -43,6 +44,11 @@ for token in ("esp_ota_begin(", "esp_ota_write(", "esp_ota_end(",
               "esp_ota_get_partition_description(", "ot_ota_available()"):
     assert token in ota,token
 assert '.uri="/api/v1/ota"' in core
+for token in ('id="otaFile"', 'id="otaSend"', 'id="otaStatus"',
+              'async function otaCheck()', 'async function otaSend()',
+              "'X-OpenTail-Update':'confirmed'", 'fetch('/api/v1/ota'',
+              'confirm('):
+    assert token in dev, token
 assert "ot_ota_confirm_boot(true)" in core
 assert "gh run download" in installer and "gh run view" in installer
 assert "gh run list" in installer and "-VerifyOnly" not in installer
