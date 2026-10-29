@@ -3575,6 +3575,73 @@ void mode_rocktaves(void) {                 // Rocktaves. Same note from each oc
   SEGMENT.addPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette((uint8_t)frTemp, false, PALETTE_SOLID_WRAP, 0), volTemp));
 } // mode_rocktaves()
 
+
+/* Pinned FX.cpp Noise Pal source adaptation: only CRGB's 3-channel memory
+ * layout is made explicit (48 bytes per FastLED palette). Original source
+ * Perlin2D, HSV conversion, nblend and RNG call ordering are unchanged. */
+struct SourcePaletteRGB {uint8_t channels[48];};
+static void source_noise_palette_to_fastled(const SourcePaletteRGB& src,CRGBPalette16 *out) {
+    for(unsigned i=0;i<16u;i++)
+        (*out)[i]=CRGB(src.channels[3u*i],src.channels[3u*i+1u],src.channels[3u*i+2u]);
+}
+static void source_noise_palette_from_fastled(const CRGBPalette16& src,SourcePaletteRGB *out) {
+    for(unsigned i=0;i<16u;i++){
+        out->channels[3u*i]=src[i].r;
+        out->channels[3u*i+1u]=src[i].g;
+        out->channels[3u*i+2u]=src[i].b;
+    }
+}
+static void source_nblend_palette(SourcePaletteRGB *a,const SourcePaletteRGB *b) {
+    unsigned changed=0;
+    for(unsigned i=0;i<48u;i++) {
+        if(a->channels[i]==b->channels[i])continue;
+        if(a->channels[i]<b->channels[i]){a->channels[i]++;changed++;}
+        if(a->channels[i]>b->channels[i]){
+            a->channels[i]--;changed++;
+            if(a->channels[i]>b->channels[i])a->channels[i]--;
+        }
+        if(changed>=48u)break;
+    }
+}
+static uint8_t source_perlin8_2(uint16_t x,uint16_t y) {
+    return (uint8_t)((((perlin2D_raw((uint32_t)x<<8,(uint32_t)y<<8,true)*1620)>>10)+32771)>>8);
+}
+static void source_noise_pal() {
+    const unsigned scale=15u+(SEGMENT.intensity>>2);
+    if(!SEGENV.allocateData(2u*sizeof(SourcePaletteRGB)))FX_FALLBACK_STATIC;
+    SourcePaletteRGB *palettes=reinterpret_cast<SourcePaletteRGB*>(SEGENV.data);
+    unsigned change=4000u+(unsigned)SEGMENT.speed*10u;
+    if(strip.now-SEGENV.step>change) {
+        SEGENV.step=strip.now;
+        unsigned base=hw_random8();
+        uint8_t floor=ref_gamma8inv(128u);
+        const CRGB colors[4]={
+            CRGB(CHSV((uint8_t)(base+hw_random8(64u)),255u,hw_random8(floor,255u))),
+            CRGB(CHSV((uint8_t)(base+128u),255u,hw_random8(floor,255u))),
+            CRGB(CHSV((uint8_t)(base+hw_random8(92u)),192u,hw_random8(floor,255u))),
+            CRGB(CHSV((uint8_t)(base+hw_random8(92u)),255u,hw_random8(floor,255u)))
+        };
+        CRGBPalette16 target{};
+        fill_gradient_RGB(target.entries,0u,colors[0],5u,colors[1]);
+        fill_gradient_RGB(target.entries,5u,colors[1],10u,colors[2]);
+        fill_gradient_RGB(target.entries,10u,colors[2],15u,colors[3]);
+        source_noise_palette_from_fastled(target,&palettes[1]);
+    }
+    source_nblend_palette(&palettes[0],&palettes[1]);
+    if(SEGMENT.palette>0u) {
+        const CRGBPalette16 chosen=ref_palette(SEGMENT.palette,
+                                   SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2]);
+        source_noise_palette_from_fastled(chosen,&palettes[0]);
+    }
+    CRGBPalette16 current{};
+    source_noise_palette_to_fastled(palettes[0],&current);
+    for(unsigned i=0;i<SEGLEN;i++){
+        unsigned ix=source_perlin8_2((uint16_t)(i*scale),(uint16_t)(SEGENV.aux0+i*scale));
+        SEGMENT.setPixelColor(i,ColorFromPalette(current,ix,255u,LINEARBLEND));
+    }
+    SEGENV.aux0=(uint16_t)(SEGENV.aux0+source_beatsin8(10u,1u,4u));
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3638,7 +3705,8 @@ static const RefCase refs[]={
     {66,mode_fire_2012,"Fire 2012"},
     {101,source_pacifica,"Pacifica"},
     {90,mode_exploding_fireworks,"Fireworks 1D"},
-    {185,mode_rocktaves,"Rocktaves"}
+    {185,mode_rocktaves,"Rocktaves"},
+    {107,source_noise_pal,"Noise Pal"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3755,7 +3823,7 @@ int main() {
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
@@ -3777,7 +3845,9 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==90u ?
+                    const std::vector<uint32_t> frames=fx.id==107u ?
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,4999u,5000u,10000u,20000u,65530u} :
+                        fx.id==90u ?
                         []{std::vector<uint32_t> v;for(unsigned f=0;f<90u;f++)v.push_back(f*23u);return v;}():fx.id==44u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,2024u,
                           2050u,2073u,2200u,2400u,2600u,3000u,5000u,10000u} :
