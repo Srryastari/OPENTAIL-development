@@ -202,7 +202,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
  * Heartbeat, Spots, Spots Fade, Percent, Chase Flash and Running Color,
  * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
- * WLED palette modes, gamma and global brightness handling are NOT ported.
+ * Fixed RGB palettes 2-12 are supported only where explicitly marked.
+ * Dynamic/custom palette import, gamma and global brightness remain separate.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
 bool ot_wled_fx_render(const ot_wled_fx_config_t *config, ot_wled_fx_state_t *state,
