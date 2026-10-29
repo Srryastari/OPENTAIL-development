@@ -51,7 +51,15 @@ enum {
     OT_WLED_GRADIENT = 46,
     OT_WLED_LOADING = 47,
     OT_WLED_SINEWAVE = 108, /* WLED FX_MODE_SINEWAVE */
-    OT_WLED_ANDROID = 27   /* WLED FX_MODE_ANDROID */
+    OT_WLED_ANDROID = 27,  /* WLED FX_MODE_ANDROID */
+    OT_WLED_WIPE_RANDOM = 4,
+    OT_WLED_RANDOM_COLORS = 5,
+    OT_WLED_SPARKLE = 20,
+    OT_WLED_SPARKLE_DARK = 21,
+    OT_WLED_SPARKLE_PLUS = 22,
+    OT_WLED_TRAFFIC_LIGHT = 35,
+    OT_WLED_SWEEP_RANDOM = 36,
+    OT_WLED_SOLID_GLITTER = 103
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -79,6 +87,7 @@ typedef struct {
     uint16_t aux1;          /* Upstream per-segment SEGENV.aux1 (Heartbeat/Percent) */
     uint32_t call;          /* Upstream SEGENV.call, once per rendered frame */
     uint32_t data_counter;  /* Per-zone mode_android() allocated uint32_t counter */
+    uint32_t rng_state;     /* Software RNG state for source-driven random modes */
 } ot_wled_fx_state_t;
 
 typedef struct {
