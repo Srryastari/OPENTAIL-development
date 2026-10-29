@@ -30,6 +30,22 @@ class FlashInstallerContract(unittest.TestCase):
         self.assertIn("-RunId ${{ github.run_id }}", workflow)
         self.assertIn("-VerifyOnly", workflow)
 
+    def test_real_flash_must_match_current_head_not_a_stale_success(self):
+        installer = (ROOT / "scripts/flash-from-github.ps1").read_text(encoding="utf-8")
+        # A PR workflow run is commonly based on a synthetic merge SHA,
+        # so the candidate head may be the run commit's second parent.
+        begin = installer.index("# A completed run is not necessarily the current firmware candidate.")
+        end = installer.index("# Stage the artifact", begin)
+        guard = installer[begin:end]
+        self.assertIn("if (-not $VerifyOnly) {", guard)
+        self.assertIn('gh api "repos/$repo/git/ref/heads/$branch"', guard)
+        self.assertIn('gh api "repos/$repo/commits/$($run.headSha)"', guard)
+        self.assertIn("$run.headSha -ne $currentHead", guard)
+        self.assertIn("$parents -notcontains $currentHead", guard)
+        self.assertIn("Nothing was flashed.", guard)
+        self.assertLess(end, installer.index("gh run download"))
+        self.assertLess(end, installer.index("& python -m esptool"))
+
 
 if __name__ == "__main__":
     unittest.main()
