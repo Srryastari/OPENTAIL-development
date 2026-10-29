@@ -621,9 +621,9 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
  * recipes: the catalog is NEVER evidence of upstream pixel parity.
  */
 static esp_err_t fx_catalog_get(httpd_req_t *r){
-    uint16_t ids[128]={0};
-    const size_t total=ot_effects_1d_supported_ids(ids,128);
-    if(total>128u)return respond_err(r,500,"effect catalog exceeds firmware limit");
+    uint16_t ids[254]={0};
+    const size_t total=ot_effects_1d_supported_ids(ids,254u);
+    if(total>254u)return respond_err(r,500,"effect catalog exceeds firmware limit");
     cJSON *root=cJSON_CreateObject();
     if(!root)return respond_err(r,500,"out of memory");
     cJSON_AddBoolToObject(root,"bench_only",true);
