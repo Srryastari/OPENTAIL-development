@@ -18,6 +18,7 @@
 #include "effects_1d.h"
 #include "fx_preset_record.h"
 #include "ble_config.h"
+#include "ot_frame_snapshot.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
@@ -115,6 +116,8 @@ static const ble_uuid128_t ot_cfg_rsp_uuid=BLE_UUID128_INIT(0x26,0xaf,0x2e,0x10,
 static const ble_uuid128_t ot_enroll_uuid=BLE_UUID128_INIT(0x27,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_challenge_uuid=BLE_UUID128_INIT(0x28,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_frame_cmd_uuid=BLE_UUID128_INIT(0x2a,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_frame_rsp_uuid=BLE_UUID128_INIT(0x2b,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -296,6 +299,77 @@ static int cfg_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *
     }
     return 0;
 }
+/* BLE post-render snapshot v1: authenticated, immutable, demand-driven.
+ * WRITE: [1,1,output] captures next completed RMT frame for that output.
+ *        [1,2,output,seq:uint32LE,first:uint16LE,count:uint8] selects slice.
+ * READ: status [1,1,state,output,count:u16,seq:u32,crc16:u16]
+ *       slice  [1,2,1,output,seq:u32,first:u16,count:u8,RGB888...]
+ * State 0 pending, 1 ready, 2 unavailable/error. Snapshot is NOT optical
+ * playback or a streaming FPS guarantee. Count <= 56 for MTU/ATT budget.
+ */
+static uint8_t frame_reply_kind=0,frame_reply_output=0,frame_reply_count=0;
+static uint16_t frame_reply_first=0;
+static uint32_t frame_reply_sequence=0;
+static void frame_reply_reset(void){
+    frame_reply_kind=0;frame_reply_output=0;
+    frame_reply_first=0;frame_reply_count=0;frame_reply_sequence=0;
+    ot_frame_snapshot_reset();
+}
+static int frame_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR || conn!=active_conn || !authorized)
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t p[10];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0 || n<3 || p[0]!=OT_FRAME_SNAPSHOT_VERSION)
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    if(p[1]==1 && n==3){
+        if(!ot_frame_snapshot_request(p[2]))return BLE_ATT_ERR_UNLIKELY;
+        frame_reply_kind=1;frame_reply_output=p[2];
+        return 0;
+    }
+    if(p[1]==2 && n==10 && p[9]>=1 && p[9]<=OT_FRAME_SNAPSHOT_CHUNK_PIXELS){
+        frame_reply_kind=2;frame_reply_output=p[2];
+        frame_reply_sequence=(uint32_t)p[3]|((uint32_t)p[4]<<8)|
+                             ((uint32_t)p[5]<<16)|((uint32_t)p[6]<<24);
+        frame_reply_first=(uint16_t)p[7]|((uint16_t)p[8]<<8);
+        frame_reply_count=p[9];
+        return 0;
+    }
+    return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+}
+static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn || !authorized)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    uint8_t p[11u+3u*OT_FRAME_SNAPSHOT_CHUNK_PIXELS]={0};
+    size_t size=0;
+    ot_frame_snapshot_info_t info={0};
+    if(!ot_frame_snapshot_info(&info))return BLE_ATT_ERR_UNLIKELY;
+    if(frame_reply_kind==1){
+        p[0]=1;p[1]=1;p[2]=(uint8_t)(info.ready?1:(info.pending?0:2));
+        p[3]=info.output;p[4]=(uint8_t)info.count;p[5]=(uint8_t)(info.count>>8);
+        p[6]=(uint8_t)info.sequence;p[7]=(uint8_t)(info.sequence>>8);
+        p[8]=(uint8_t)(info.sequence>>16);p[9]=(uint8_t)(info.sequence>>24);
+        p[10]=(uint8_t)info.crc;p[11]=(uint8_t)(info.crc>>8);
+        size=12;
+    }else if(frame_reply_kind==2){
+        if(!ot_frame_snapshot_chunk(frame_reply_output,frame_reply_sequence,
+            frame_reply_first,frame_reply_count,p+11))
+            return BLE_ATT_ERR_UNLIKELY;
+        p[0]=1;p[1]=2;p[2]=1;p[3]=frame_reply_output;
+        p[4]=(uint8_t)frame_reply_sequence;p[5]=(uint8_t)(frame_reply_sequence>>8);
+        p[6]=(uint8_t)(frame_reply_sequence>>16);p[7]=(uint8_t)(frame_reply_sequence>>24);
+        p[8]=(uint8_t)frame_reply_first;p[9]=(uint8_t)(frame_reply_first>>8);
+        p[10]=frame_reply_count;
+        size=11u+3u*frame_reply_count;
+    }else return BLE_ATT_ERR_UNLIKELY;
+    if(ctx->offset>size)return BLE_ATT_ERR_INVALID_OFFSET;
+    size_t chunk=size-ctx->offset;
+    const uint16_t mtu=ble_att_mtu(conn);
+    const size_t maximum=mtu>1u?(size_t)mtu-1u:20u;
+    if(chunk>maximum)chunk=maximum;
+    return os_mbuf_append(ctx->om,p+ctx->offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
 static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_info_uuid.u,.access_cb=info_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
@@ -305,6 +379,8 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_cfg_rsp_uuid.u,.access_cb=cfg_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_frame_cmd_uuid.u,.access_cb=frame_write,.flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_frame_rsp_uuid.u,.access_cb=frame_read,.flags=BLE_GATT_CHR_F_READ},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
@@ -325,11 +401,11 @@ static void advertise(void){
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
     if(ev->type==BLE_GAP_EVENT_CONNECT){
-        if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();}
+        if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();frame_reply_reset();}
         else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
-        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();advertise();
+        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();frame_reply_reset();advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }
