@@ -1,5 +1,6 @@
 #include "effects_1d.h"
 #include "palette_1d.h"
+#include "ot_auto_effects.h"
 #include "wled_1d.h"
 #include <string.h>
 /* Unified registry: source-pinned WLED adapters first, then the 1D
@@ -9,7 +10,10 @@ size_t ot_effects_1d_supported_ids(uint16_t *dst,size_t capacity){
     for(size_t i=0;dst&&i<count&&i<capacity;i++)
         dst[i]=ot_wled_1d_at(i)->id;
     if(dst&&capacity>count)dst[count]=OT_FX_EMBERS;
-    return count+1u;
+    const size_t native_count=ot_auto_fx_ids(NULL,0u);
+    if(dst&&capacity>count+1u)
+        ot_auto_fx_ids(&dst[count+1u],capacity-count-1u);
+    return count+1u+native_count;
 }
 bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta){
     if(!meta)return false;
@@ -19,6 +23,7 @@ bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta){
             true,false,true,true,false};
         return true;
     }
+    if(ot_auto_fx_metadata(id,meta))return true;
     /* Prefer source-derived WLED implementations where they exist. */
     if(ot_wled_fx_metadata(id,meta))return true;
     const ot_wled_1d_meta_t *compat=ot_wled_1d_by_id(id);
@@ -47,6 +52,8 @@ bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     ot_effects_1d_state_t *s,uint32_t ms,ot_wled_rgb_t *frame,size_t count){
     if(!cfg||!s||!frame||count==0||count>65535u||cfg->frame_time_ms==0||
        !ot_palette_1d_supported(cfg->effect_id,cfg->palette_id))return false;
+    if(ot_auto_fx_id(cfg->effect_id))
+        return ot_auto_fx_render(cfg,s->particles.seed,ms,frame,count);
     if(cfg->effect_id!=OT_FX_EMBERS){
         /* Sixteen effects use source-derived WLED adapters. The remainder use
          * bounded deterministic 1D recipes; catalog names are not a claim of
