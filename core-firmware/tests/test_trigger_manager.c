@@ -82,6 +82,44 @@ int main(void){
     assert(!ot_tm_ble_decode(NULL,sizeof(wire),&expected,&decoded));
     assert(!ot_tm_ble_decode(wire,sizeof(wire),NULL,&decoded));
     assert(!ot_tm_ble_decode(wire,sizeof(wire),&expected,NULL));
+    /* Exhaustive arbitration regression: all 256 simultaneous logical input
+     * masks, every universal zone role, show/no-show, and trigger-not-matched
+     * preservation of existing effect pixels. Physical layout is irrelevant. */
+    for(unsigned raw=0;raw<256u;raw++){
+        const uint8_t signals=(uint8_t)raw;
+        ot_arbitration_t state=ot_arbitrate(signals,false,true);
+        assert(state.hazards==((signals&(OT_SIG_LEFT|OT_SIG_RIGHT))==
+                              (OT_SIG_LEFT|OT_SIG_RIGHT)));
+        assert(state.brake_over_parking==((signals&(OT_SIG_PARK|OT_SIG_BRAKE))==
+                                         (OT_SIG_PARK|OT_SIG_BRAKE)));
+        assert(!state.show_suppressed);
+        for(unsigned show=0;show<=1;show++){
+            const uint8_t active=show?(uint8_t)(signals&~OT_SIG_PARK):signals;
+            for(unsigned role=OT_OM_OFF;role<=OT_OM_DECORATIVE;role++){
+                bool expected_hit=false;
+                switch(role){
+                    case OT_OM_PARK_BRAKE:expected_hit=(active&(OT_SIG_PARK|OT_SIG_BRAKE))!=0;break;
+                    case OT_OM_PARK:expected_hit=(active&OT_SIG_PARK)!=0;break;
+                    case OT_OM_BRAKE:expected_hit=(active&OT_SIG_BRAKE)!=0;break;
+                    case OT_OM_LEFT:expected_hit=(active&OT_SIG_LEFT)!=0;break;
+                    case OT_OM_RIGHT:expected_hit=(active&OT_SIG_RIGHT)!=0;break;
+                    case OT_OM_REVERSE:expected_hit=(active&OT_SIG_REVERSE)!=0;break;
+                    case OT_OM_AUX1:expected_hit=(active&(1u<<5))!=0;break;
+                    case OT_OM_AUX2:expected_hit=(active&(1u<<6))!=0;break;
+                    case OT_OM_AUX3:expected_hit=(active&(1u<<7))!=0;break;
+                    default:break;
+                }
+                ot_rgb_t before={13,17,19},after=before;
+                bool hit=ot_om_trigger_overlay((uint8_t)role,signals,show!=0,32,&after);
+                assert(hit==expected_hit);
+                if(!hit)assert(!memcmp(&before,&after,sizeof(before)));
+                else {
+                    const ot_rgb_t expected_color=ot_om_trigger_color((uint8_t)role,active,32);
+                    assert(!memcmp(&after,&expected_color,sizeof(after)));
+                }
+            }
+        }
+    }
     /* Reject malformed profiles and unsupported values. */
     assert(ot_tm_from_name("park_brake")==-1);
     assert(ot_tm_from_name("")==-1);
