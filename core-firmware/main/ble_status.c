@@ -416,7 +416,7 @@ static void on_sync(void){
     advertise();
 }
 static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freertos_deinit();}
-void ot_ble_start(void){
+bool ot_ble_start(void){
     owner_valid=owner_load();
     gpio_config_t boot={0};boot.pin_bit_mask=(1ULL<<0);boot.mode=GPIO_MODE_INPUT;boot.pull_up_en=GPIO_PULLUP_ENABLE;
     gpio_config(&boot);
@@ -424,16 +424,17 @@ void ot_ble_start(void){
     token_ready=true;
     esp_err_t err=nimble_port_init();
     if(err==ESP_OK)ble_att_set_preferred_mtu(247);
-    if(err!=ESP_OK){token_ready=false;ESP_LOGE(TAG,"NimBLE init failed: %s",esp_err_to_name(err));return;}
+    if(err!=ESP_OK){token_ready=false;ESP_LOGE(TAG,"NimBLE init failed: %s",esp_err_to_name(err));return false;}
     ble_svc_gap_init();ble_svc_gatt_init();
     int rc=ble_svc_gap_device_name_set("OpenTail CORE");
     if(!rc)rc=ble_gatts_count_cfg(services);
     if(!rc)rc=ble_gatts_add_svcs(services);
-    if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return;}
+    if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}
     ble_hs_cfg.sync_cb=on_sync;
     nimble_port_freertos_init(host_task);
     ESP_LOGI(TAG,"BLE output manager and physical BOOT enrollment available; no production pairing security.");
+    return true;
 }
 #else
-void ot_ble_start(void){token_ready=false;}
+bool ot_ble_start(void){token_ready=false;return false;}
 #endif
