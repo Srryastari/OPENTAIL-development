@@ -308,7 +308,7 @@ struct PinnedEnv {
 struct PinnedClock {
     uint32_t now=0;
     unsigned getActiveSegmentsNum() const {return 1u;}
-    unsigned getMaxSegments() const {return 32u;}
+    unsigned getMaxSegments() const {return 64u;}
     bool isMatrix=false;
     uint16_t getCurrSegmentId() const {return 0u;}
 };
@@ -1512,7 +1512,7 @@ static void mode_rolling_balls(void) {
 // END UPSTREAM FX.cpp Rolling Balls.
 
 // BEGIN UPSTREAM FX.cpp Spark and Popcorn, unchanged source body.
-#define FAIR_DATA_PER_SEG 2048u // ESP32 source allocation budget / segment
+#define FAIR_DATA_PER_SEG 1024u // FX.h ESP32-S3 PSRAM: 64KiB / 64 segments
 typedef struct Spark {
   float pos, posX;
   float vel, velX;
@@ -1881,7 +1881,6 @@ void mode_ColorClouds()
 
 /* Reference adapter: ESP32 budget and source RGBW constructor, no edits to
  * the upstream starburst function body or particle struct. */
-#define FAIR_DATA_PER_SEG 640u
 static uint32_t RGBW32(uint8_t r,uint8_t g,uint8_t b,uint8_t w) {
     (void)w;
     return ((uint32_t)r<<16)|((uint32_t)g<<8)|b;
@@ -2015,6 +2014,7 @@ void mode_starburst(void) {
 #undef STARBURST_MAX_FRAG
 
 // END UPSTREAM FX.cpp starburst.
+static_assert(sizeof(star)==60u,"Pinned ESP32 10-fragment star must be 60 bytes");
 #pragma GCC diagnostic pop
 
 // END UPSTREAM FX.cpp functions.
