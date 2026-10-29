@@ -550,44 +550,159 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
         var index by rememberSaveable { mutableIntStateOf(0) }
-        var draftName by remember(index, outputs[index]) {
-            mutableStateOf(outputs[index]?.optString("name") ?: "")
-        }
-        var draftCount by remember(index, outputs[index]) {
-            mutableStateOf(outputs[index]?.optInt("pixels")?.toString() ?: "")
+        // String snapshots make edits observable without mutating the last
+        // confirmed hardware readback. A failed save cannot masquerade as NVS.
+        var draftText by remember(index, outputs[index]) {
+            mutableStateOf(outputs[index]?.toString().orEmpty())
         }
         var confirm by remember { mutableStateOf(false) }
+        val draft = runCatching { JSONObject(draftText) }.getOrNull()
+        fun edit(change: (JSONObject) -> Unit) {
+            runCatching {
+                val updated = JSONObject(draftText)
+                change(updated)
+                draftText = updated.toString()
+            }.onFailure { outputMessage.value = "Invalid draft: " + (it.message ?: "input") }
+        }
+
         Panel(t) {
             Title("CORE Output Manager", t)
-            Caption("Read actual saved output before changing hardware. 623 pixels per lane is the current temporary firmware ceiling.", t)
+            Caption("Hardware settings are separate from your Studio design. Reload each output over authorized BLE before editing.", t)
+            Caption("Current firmware allocation: up to 623 pixels per output; older installed CORE versions may allow fewer.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Pill("Output 1", t, index == 0) { index = 0 }
                 Pill("Output 2", t, index == 1) { index = 1 }
             }
-            Pill("Reload from CORE", t) { ble.readOutput(index) }
+            Pill("Reload output " + (index + 1) + " from CORE", t) {
+                if (ble.canConfigure()) ble.readOutput(index)
+                else outputMessage.value = "Connect and authorize BLE before loading hardware"
+            }
             Caption(outputMessage.value, t)
-            if (outputs[index] != null) {
-                Field(draftName, "Output name", t) { draftName = it }
-                Field(draftCount, "Pixels", t) { draftCount = it.filter(Char::isDigit).take(4) }
-                val zones = outputs[index]?.optJSONArray("zones")
-                Caption("Firmware zones: " + (zones?.length() ?: 0) +
-                        ". Zone sums must equal output count; reconfigure in full editor before saving.", t)
-                Pill("Validate and save", t) { confirm = true }
+            if (draft == null) Caption("Nothing has been read from this output. No settings will be sent until you explicitly confirm Save.", t)
+        }
+        if (draft == null) return
+        val zones = draft.optJSONArray("zones") ?: JSONArray()
+        val pixelCount = draft.optInt("pixels", 0)
+        val assigned = (0 until zones.length()).sumOf { zones.optJSONObject(it)?.optInt("pixels", 0) ?: 0 }
+        Panel(t) {
+            Text("Output " + (index + 1), color = t.fg, fontWeight = FontWeight.Bold)
+            Field(draft.optString("name"), "Output name", t) { value ->
+                edit { it.put("name", value) }
+            }
+            Caption("Pixel allocation (1–623; temporary firmware limit)", t)
+            Field(pixelCount.toString(), "Pixel count", t) { value ->
+                edit { it.put("pixels", value.toIntOrNull() ?: -1) }
+            }
+            ValueSlider("Pixels", pixelCount.coerceIn(1, 623), 623, t) { n ->
+                edit { it.put("pixels", n.coerceAtLeast(1)) }
+            }
+            Caption("Color order · set this for the actual connected LED strips", t)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                BleConfigCodec.ORDERS.forEach { order ->
+                    Pill(order, t, order == draft.optString("color_order")) {
+                        edit { it.put("color_order", order) }
+                    }
+                }
             }
         }
-        if (confirm) AlertDialog(onDismissRequest = { confirm = false },
-            title = { Text("Save physical output?") },
-            text = { Text("All show effects must be stopped and trigger inputs released. CORE verifies readback after saving.") },
+        var cursor = 0
+        for (i in 0 until zones.length()) {
+            val zone = zones.optJSONObject(i) ?: continue
+            val from = cursor
+            val count = zone.optInt("pixels", 0)
+            cursor += count
+            Panel(t) {
+                Text("Zone " + (i + 1), color = t.fg, fontWeight = FontWeight.SemiBold)
+                Caption("Start " + from + " · end " + (if (count > 0) cursor - 1 else "empty") +
+                    " · next " + cursor, t)
+                Field(zone.optString("name"), "Zone name", t) { value ->
+                    edit { it.getJSONArray("zones").getJSONObject(i).put("name", value) }
+                }
+                Field(count.toString(), "Zone pixel count", t) { value ->
+                    edit { it.getJSONArray("zones").getJSONObject(i)
+                        .put("pixels", value.toIntOrNull() ?: -1) }
+                }
+                Caption("Lighting role (only CORE assigns trigger priority)", t)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BleConfigCodec.ROLES.forEach { role ->
+                        Pill(role.replace('_', ' '), t, zone.optString("role") == role) {
+                            edit { it.getJSONArray("zones").getJSONObject(i).put("role", role) }
+                        }
+                    }
+                }
+                if (zones.length() > 1) Pill("Remove zone", t) {
+                    edit {
+                        val next = JSONArray()
+                        val original = it.getJSONArray("zones")
+                        for (j in 0 until original.length()) if (j != i) next.put(original.get(j))
+                        it.put("zones", next)
+                    }
+                }
+            }
+        }
+        Panel(t) {
+            Caption("Assigned " + assigned + " of " + pixelCount + " pixels · " +
+                (pixelCount - assigned) + " remaining. Zone offsets are zero-based and automatically contiguous.", t)
+            if (zones.length() < 8) Pill("+ Add zone", t) {
+                edit {
+                    it.getJSONArray("zones").put(JSONObject()
+                        .put("name", "Zone " + (zones.length() + 1))
+                        .put("pixels", 0).put("role", "off"))
+                }
+            }
+            Pill("Fit last zone to remaining pixels", t) {
+                edit {
+                    val group = it.getJSONArray("zones")
+                    if (group.length() > 0) {
+                        val other = (0 until group.length() - 1)
+                            .sumOf { j -> group.getJSONObject(j).getInt("pixels") }
+                        val remainder = it.getInt("pixels") - other
+                        if (remainder in 0..623)
+                            group.getJSONObject(group.length() - 1).put("pixels", remainder)
+                    }
+                }
+            }
+            val calibrated = draft.optJSONObject("calibration")
+            val gamma = calibrated?.optBoolean("gamma_enabled", false) ?: false
+            Pill(if (gamma) "Gamma enabled ✓" else "Gamma disabled", t, gamma) {
+                edit {
+                    val cal = it.optJSONObject("calibration") ?: JSONObject()
+                    cal.put("gamma_enabled", !gamma)
+                    it.put("calibration", cal)
+                }
+            }
+            var validationError = ""
+            val valid = try {
+                BleConfigCodec.encode(draft)
+                true
+            } catch (ex: Exception) {
+                validationError = ex.message ?: "Invalid output mapping"
+                false
+            }
+            Caption(if (valid) "Ready to save; no changes sent yet." else
+                "Cannot save: " + validationError, t)
+            if (valid) Pill("Save to CORE · verify readback", t, true) { confirm = true }
+        }
+        if (confirm) AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Apply saved hardware output settings?") },
+            text = { Text("Stop all shows and release physical inputs before applying. Changes affect only output " +
+                (index + 1) + ". CORE must acknowledge flash persistence and return identical BLE readback.") },
             confirmButton = { Pill("Save", t, true) {
                 try {
-                    val next = JSONObject(outputs[index].toString())
-                    next.put("name", draftName)
-                    next.put("pixels", draftCount.toInt())
-                    BleConfigCodec.encode(next) // refuses mismatched zone totals
-                    if (ble.canConfigure()) ble.saveOutput(index, next.toString())
-                    else outputMessage.value = "BLE not authorized"
-                } catch (e: Exception) { outputMessage.value = "Invalid output configuration: " + (e.message ?: "") }
+                    BleConfigCodec.encode(JSONObject(draftText))
+                    if (ble.canConfigure()) {
+                        ble.saveOutput(index, draftText)
+                        outputMessage.value = "Save requested · verifying hardware readback"
+                    } else outputMessage.value = "Not authorized — no settings sent"
+                } catch (ex: Exception) {
+                    outputMessage.value = "Save rejected: " + (ex.message ?: "invalid draft")
+                }
                 confirm = false
-            } }, dismissButton = { Pill("Cancel", t) { confirm = false } })
+            } },
+            dismissButton = { Pill("Cancel", t) { confirm = false } }
+        )
     }
 }
