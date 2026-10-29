@@ -348,6 +348,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11,m12=1",
      true, true, true, true, false},
     {OT_WLED_FLOW_STRIPE, "Flow Stripe", "Flow Stripe@Hue speed,Effect speed;;!;pal=11",
+     false, false, true, true, true},
+    {OT_WLED_GLITTER, "Glitter", "Glitter@!,!,,,,,Overlay;,,Glitter color;!;;pal=11,m12=0",
      false, false, true, true, true}
 };
 
@@ -2664,6 +2666,38 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Source-pinned mode_glitter() + glitter_base() for paletteBlend=0,
+ * Overlay=false, tertiary glitter color unset (ULTRAWHITE).
+ * Source metadata chooses Rainbow palette 11 until explicitly overridden. */
+static void glitter_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    ot_wled_palette16_t palette;
+    const uint8_t palette_id=cfg->palette_id?cfg->palette_id:11u;
+    if(!ot_wled_palette_build(palette_id,cfg->foreground,
+                              cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return;
+    unsigned counter=0u;
+    if(cfg->speed!=0u) {
+        counter=(now*((unsigned)(cfg->speed>>3)+1u))&0xffffu;
+        counter>>=8;
+    }
+    const bool nowrap=cfg->speed==0u; /* WLED paletteBlend=0 */
+    for(size_t i=0;i<count;i++) {
+        unsigned color_index=(unsigned)((uint32_t)i*255u/(uint32_t)count)-counter;
+        if(nowrap)
+            color_index=(unsigned)((uint32_t)color_index*240u/255u);
+        pixels[i]=scaled(ot_wled_palette_sample(&palette,(uint8_t)color_index,
+            255u,nowrap?OT_WLED_PALETTE_NOWRAP:OT_WLED_PALETTE_LINEAR),
+            cfg->brightness);
+    }
+    if(cfg->intensity>fx_rand8(state,256u)) {
+        const size_t pos=fx_rand_index(state,count);
+        pixels[pos]=scaled((ot_wled_rgb_t){255u,255u,255u},cfg->brightness);
+    }
+}
+
 /* Pinned FX.cpp mode_FlowStripe() for a single 1D zone. Its mcol=3
  * palette slot always samples a palette (default source Party table for ID0).
  * All indices use source uint8_t wrapping and the existing sine primitive. */
@@ -3617,7 +3651,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     if(cfg->palette_id!=0u) {
         /* Do not claim palette support for other source ports yet. */
         if((cfg->effect_id!=OT_WLED_COLOR_CLOUDS &&
-            cfg->effect_id!=OT_WLED_FLOW_STRIPE) ||
+            cfg->effect_id!=OT_WLED_FLOW_STRIPE &&
+            cfg->effect_id!=OT_WLED_GLITTER) ||
            (cfg->palette_id<2u || cfg->palette_id>12u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -3811,6 +3846,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_GLITTER) {
+        glitter_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_FLOW_STRIPE) {
