@@ -238,7 +238,7 @@ assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
 for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.lookup(project.raw(),',
   'Field(search, "Search palette name or ID"', 'PaletteSwatch(chosen, t)',
   'PalettePicker("Palette", paletteId, t)', 'putInt("paletteId", id)',
-  'PalettePicker("Shared sequence palette"', 'opts.put("sharedPaletteId", id)',
+  'PalettePicker("Shared sequence palette"', 'project.updateSequenceOption("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
   'invalidateCoreFrame() // palette is NOT in the current BLE FX payload']) {
