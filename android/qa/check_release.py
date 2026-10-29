@@ -46,7 +46,7 @@ check("No duplicate Android shell, BLE panel or injected JavaScript",
 check("Native widget/screen classes compiled from source",
       all((source / name).exists() for name in
           ("MainActivity.java", "NativeUi.java", "NativeLedPreview.java",
-           "NativeProject.java", "NativeEffectCatalog.java")))
+           "NativeProject.java", "NativeEffectCatalog.java", "NativeOutputManager.java")))
 check("Universal zones and v4 document import/export remain local",
       all(s in model for s in ("reindex()", 'put("version", 4)', "importJson(String input)",
                                "synchronized String exportJson()")) and
@@ -64,6 +64,11 @@ check("Controller writing is separate from authoring, requires confirmation",
       "Math.min(32," in main)
 check("Native effects manifest is explicitly 126 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 126)
+check("Native hardware output read/save and post-commit readback retained",
+      "new NativeOutputManager(this,ble,ui)" in main and
+      "NativeOutputManager.java" in str(source / "NativeOutputManager.java") and
+      all(k in ble for k in ("cfgKnownRevision", "cfgExpected", "Arrays.equals(cfgBytes,cfgExpected)",
+                             "cfgCrc", "cfgReadNext()", "cfgWriteNext()")))
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
