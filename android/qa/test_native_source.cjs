@@ -106,6 +106,10 @@ assert(compose.includes('4 -> AutoEventsPage(t) { effectId ->') &&
        'Auto Events offline preview must use the same BLE-isolated session as Settings');
 const presetBlock=compose.split('private fun PresetsPage(t: Tone) {')[1]
                          .split('private fun LayoutPage(t: Tone) {')[0];
+assert(model.includes('JSONArray previous = data.optJSONArray("savedPresets")') &&
+       model.includes('data.put("savedPresets", previous == null ? new JSONArray() : previous)') &&
+       model.includes('if (save()) return true;'),
+       'Persisted preset updates must roll back after a failed disk commit');
 assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('design.put("savedPresets", JSONArray(project.presets().toString()))') &&
        presetBlock.includes('presetStatus = if (restored)') &&
