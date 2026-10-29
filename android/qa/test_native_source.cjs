@@ -9,6 +9,7 @@ const path=require('node:path');
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
+const palettes=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
@@ -231,4 +232,29 @@ assert(model.includes('data = previous; // a failed disk commit') &&
        'Project import must be atomic and pixel editing must respect zone bounds');
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
   'Native project is universal, not specific to bench vehicle');
+// Palette engine: native data-only catalog, exact stop-data swatches, and
+// separate effect, sequence-step and shared-sequence state. No invented
+// gradient preview or unadvertised CORE palette commands are allowed.
+for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.lookup(project.raw(),',
+  'Field(search, "Search palette name or ID"', 'PaletteSwatch(chosen, t)',
+  'PalettePicker("Palette", paletteId, t)', 'putInt("paletteId", id)',
+  'PalettePicker("Shared sequence palette"', 'opts.put("sharedPaletteId", id)',
+  'PalettePicker("Step " + (i + 1) + " palette"',
+  'settings.put("pal", id)', '.put("settings", JSONObject()',
+  'coreFrame.value = null // palette is NOT in the current BLE FX payload']) {
+  assert(compose.includes(required), 'Native palette authoring regressed: ' + required);
+}
+for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
+  'project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())',
+  'entry.length() < 4', 'stops.sortBy { it.first }',
+  'return NativePalette(id, name, null)',
+  'fun effectiveStepPalette(']) {
+  assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
+}
+assert(!compose.includes('ble.setPalette(') && !compose.includes('ble.sendPalette(') &&
+       !palettes.includes('WLED firmware'), 'Unadvertised firmware palette writes or branding');
+assert(compose.includes('Preview unavailable') && compose.includes('shared option is off') &&
+       compose.includes('Palette selection is currently local-only'),
+       'Palette UI must label unknown previews, restoration and BLE limitations');
+
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
