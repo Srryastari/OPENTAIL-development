@@ -2932,11 +2932,17 @@ static const uint8_t ot_inv_gamma22[256]={
     248,248,249,249,250,250,251,251,252,252,252,253,253,254,254,255
 };
 static ot_wled_rgb_t fox_video_fade(ot_wled_rgb_t c,uint8_t amt) {
-    const unsigned scale=(unsigned)amt+1u;
+    if(amt==255u)return c;
+    if(amt==0u)return (ot_wled_rgb_t){0,0,0};
+    /* Pinned colors.cpp color_fade(video=true): full-scale amount and
+     * one-LSB rounding only for channels >= half of the brightest. */
+    unsigned brightest=c.r>c.g?c.r:c.g;
+    if(c.b>brightest)brightest=c.b;
+    const unsigned threshold=(brightest>>1)+1u;
     return (ot_wled_rgb_t){
-        (uint8_t)(((unsigned)c.r*scale)>>8),
-        (uint8_t)(((unsigned)c.g*scale)>>8),
-        (uint8_t)(((unsigned)c.b*scale)>>8)
+      (uint8_t)(((unsigned)c.r*amt>>8)+(c.r>=threshold?1u:0u)),
+      (uint8_t)(((unsigned)c.g*amt>>8)+(c.g>=threshold?1u:0u)),
+      (uint8_t)(((unsigned)c.b*amt>>8)+(c.b>=threshold?1u:0u))
     };
 }
 static unsigned fox_avg(ot_wled_rgb_t c) {
