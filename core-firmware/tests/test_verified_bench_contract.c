@@ -103,12 +103,101 @@ int main(void){
 
     /* Inputs IN1..IN8 were observed on GPIO4..11, respectively. Logical
      * mapping and combinations must remain independent of configured zones. */
-    const uint8_t physical_masks[]={0,1,2,4,8,16,32,64,128,3,12,14,15,18,31,224,255};
+    /* Each case was previously reported from an older physical bench flash.
+     * This list is evidence of input-mask observations, NOT of fresh hardware
+     * coverage for the current firmware build or of mechanical debounce. */
+    const uint8_t physical_masks[]={0,1,2,4,8,16,32,64,128,
+                                    3,5,6,9,10,12,14,15,17,18,30,31,224,255};
     ot_tm_profile_t trigger;
     ot_tm_defaults(&trigger);
     assert(ot_tm_valid(&trigger));
     for(unsigned i=0;i<sizeof(physical_masks);i++)
         assert(ot_tm_resolve(&trigger,physical_masks[i])==physical_masks[i]);
+    /* Reuse the earlier observed masks as a strict per-zone overlay contract.
+     * Observed input combinations are distinct from newly verified optical
+     * colors: the latter are expected software results, not fresh bench passes.
+     * No actual vehicle output geometry is assumed by this fixture. */
+    enum {BR=1u,LT=2u,RT=4u,RV=8u,A1=16u,A2=32u,A3=64u};
+    static const struct {
+        uint8_t physical_mask;
+        uint8_t expected_show_override;
+    } previously_observed[]={
+        {0,0}, {1,0}, {2,BR}, {3,BR}, {4,LT},
+        {5,LT}, {6,BR|LT}, {8,RT}, {9,RT},
+        {10,BR|RT}, {12,LT|RT}, {14,BR|LT|RT},
+        {15,BR|LT|RT}, {16,RV}, {17,RV},
+        {18,BR|RV}, {30,BR|LT|RT|RV},
+        {31,BR|LT|RT|RV}, {32,A1}, {64,A2},
+        {128,A3}, {224,A1|A2|A3},
+        {255,BR|LT|RT|RV|A1|A2|A3}
+    };
+    static const struct {
+        uint8_t role;
+        uint8_t override_flag;
+        uint8_t r,g,b; /* expected at the existing bench cap 32 */
+    } role_expect[]={
+        {OT_OM_PARK_BRAKE,BR,32,0,0},
+        {OT_OM_BRAKE,BR,32,0,0},
+        {OT_OM_LEFT,LT,32,19,0},
+        {OT_OM_RIGHT,RT,32,19,0},
+        {OT_OM_REVERSE,RV,32,32,32},
+        {OT_OM_AUX1,A1,16,0,32},
+        {OT_OM_AUX2,A2,16,0,32},
+        {OT_OM_AUX3,A3,16,0,32},
+        {OT_OM_OFF,0,0,0,0},
+        {OT_OM_DECORATIVE,0,0,0,0}
+    };
+    for(unsigned t=0;t<sizeof(previously_observed)/sizeof(previously_observed[0]);t++){
+        uint8_t physical=previously_observed[t].physical_mask;
+        const uint8_t logical=ot_tm_resolve(&trigger,physical);
+        assert(logical==physical);
+        for(unsigned z=0;z<sizeof(role_expect)/sizeof(role_expect[0]);z++){
+            const bool expected=(previously_observed[t].expected_show_override&
+                                 role_expect[z].override_flag)!=0;
+            ot_rgb_t pixel={11,22,33}; /* sample ongoing-show RGB */
+            const bool overlaid=ot_om_trigger_overlay(role_expect[z].role,
+                                                      logical,true,32,&pixel);
+            assert(overlaid==expected);
+            if(expected){
+                assert(pixel.r==role_expect[z].r);
+                assert(pixel.g==role_expect[z].g);
+                assert(pixel.b==role_expect[z].b);
+            }else{
+                assert(pixel.r==11 && pixel.g==22 && pixel.b==33);
+            }
+        }
+        /* Parking alone must yield to a selected show, but remain the
+         * baseline where that section has no effect selected. */
+        ot_rgb_t pixel={11,22,33};
+        assert(!ot_om_trigger_overlay(OT_OM_PARK,logical,true,32,&pixel));
+        assert(pixel.r==11 && pixel.g==22 && pixel.b==33);
+        const bool park=(logical&OT_SIG_PARK)!=0;
+        assert(ot_om_trigger_overlay(OT_OM_PARK,logical,false,32,&pixel)==park);
+        if(park)assert(pixel.r==7 && pixel.g==0 && pixel.b==0);
+    }
+    /* Replay a locked physical combination sequence with a persistent show.
+     * The mask sequence is an illustrative source-side replay; it is not a
+     * claim that those transitions or effect phases were measured anew. */
+    static const uint8_t replay[]={0,1,15,31,15,1,0};
+    for(unsigned t=0;t<sizeof(replay);t++){
+        const uint8_t logical=ot_tm_resolve(&trigger,replay[t]);
+        ot_rgb_t base={11,22,33},left=base,right=base,reverse=base;
+        const bool braking=(logical&OT_SIG_BRAKE)!=0;
+        const bool hazards=(logical&(OT_SIG_LEFT|OT_SIG_RIGHT))==
+                           (OT_SIG_LEFT|OT_SIG_RIGHT);
+        assert(ot_om_trigger_overlay(OT_OM_PARK_BRAKE,logical,true,32,&base)==braking);
+        assert(ot_om_trigger_overlay(OT_OM_LEFT,logical,true,32,&left)==hazards);
+        assert(ot_om_trigger_overlay(OT_OM_RIGHT,logical,true,32,&right)==hazards);
+        assert(ot_om_trigger_overlay(OT_OM_REVERSE,logical,true,32,&reverse)==
+               ((logical&OT_SIG_REVERSE)!=0));
+        if(!braking)assert(base.r==11 && base.g==22 && base.b==33);
+        if(!hazards){
+            assert(left.r==11 && left.g==22 && left.b==33);
+            assert(right.r==11 && right.g==22 && right.b==33);
+        }
+        if(!(logical&OT_SIG_REVERSE))
+            assert(reverse.r==11 && reverse.g==22 && reverse.b==33);
+    }
     /* Explicit user remapping changes only logical meaning. */
     trigger.function[0]=OT_TM_DISABLED;
     trigger.function[5]=OT_TM_REVERSE;
