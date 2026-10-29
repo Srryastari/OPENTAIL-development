@@ -215,7 +215,10 @@ class ComposeMainActivity : ComponentActivity() {
                 outputMessage.value = response.optString("message", "CORE output result")
                 val index = response.optInt("index", -1)
                 if (response.optBoolean("ok") && index in 0..1)
-                    response.optJSONObject("output")?.let { outputs[index] = JSONObject(it.toString()) }
+                    response.optJSONObject("output")?.let {
+                        outputs[index] = JSONObject(it.toString())
+                        invalidateCoreFrame() // the saved/readback output may have changed
+                    }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
         }
         val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -1333,6 +1336,7 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Bench effect demo requires confirmation. Authorized live effect edits also send bounded temporary previews automatically.", t)
             Pill("Test a supported effect", t) { confirm = true }
             Pill("Stop CORE show", t) {
+                invalidateCoreFrame()
                 if (liveArmed.value) livePreview.stop() else ble.stopShow()
                 liveArmed.value = false
             }
@@ -1343,6 +1347,7 @@ class ComposeMainActivity : ComponentActivity() {
             confirmButton = { Pill("Start bench test", t, true) {
                 val id = prefs.getInt("effectId", 0)
                 if (ble.canControl() && id in supportedIds.value) {
+                    invalidateCoreFrame()
                     ble.showFx(id, 3, 255, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
                 } else bleMessage.value = "Not authorized or effect unsupported by installed firmware"
                 confirm = false
