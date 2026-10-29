@@ -21,6 +21,13 @@ assert "portENTER_CRITICAL(&snap_mux)" in module
 assert "if(recording || record.pending)" in module
 assert "record.ready && !recording" in module
 assert "active_generation==generation" in module
+# BLE reset may clear shared record.count while the render task is capturing.
+# Pixel bounds and CRC length must use the render-owned immutable count.
+assert "static uint16_t active_count=0;" in module
+assert "active_count=count;" in module
+assert "pixel>=active_count" in module
+assert "crc16(pixels,(size_t)active_count*3u)" in module
+assert "pixel>=record.count" not in module
 assert "ot_frame_snapshot_reset()" in ble
 assert "conn!=active_conn || !authorized" in ble
 for uuid in ("ot_frame_cmd_uuid", "ot_frame_rsp_uuid"):
