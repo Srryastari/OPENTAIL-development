@@ -41,6 +41,14 @@
 - The locked LED viewer remains the zero-based design strip or an authenticated single CORE RGB888 frame. A palette swatch is **not** a CORE-rendered animation; end-to-end physical palette application requires CORE palette protocol support and bench proof.
 - Native palette source/shape regression guards were added. **Current-head Kotlin build, Android unit tests, screenshots, TalkBack, BLE, and real palette parity require independent acceptance.** Keep Android PR #21 draft; no cross-domain merges.
 
+## CORE logical-frame preview race regression (October 29 continuation)
+
+- **Root cause:** the native RGB888 frame listener could publish a previously requested capture after an effect/color/palette/layout edit, offline-preview switch, disconnection, hardware output readback or explicit STOP had cleared the prior frame. A stale frame could thus be displayed under a current-state label.
+- **Android-only fix:** `invalidateCoreFrame()` now advances a UI revision and disarms pending captures whenever the design or physical preview context changes. The listener requires the initiating revision, selected output, owner capability and non-offline mode to remain valid before it may publish the bytes.
+- BLE `captureFrame` now returns a truthful started/rejected result; a short callback-delivery barrier prevents starting the next request between transport completion and delivery of its prior UI callback. Failed/busy requests do not claim to be capturing.
+- Added source regression assertions for stale-callback rejection, output routing and the BLE handoff. Existing authenticated snapshot CRC/offset/sequence verification remains unchanged. **Still not a physical LED frame/optical parity test.** An Android APK CI success alone does not certify transport race timing on a device.
+- No CORE, trigger, WLED source, Web Studio styling or unrelated PR was changed.
+
 ## Not yet accepted; do NOT label these complete
 
 - **Visual 1:1 UI:** Shared native capsule slider styling is implemented across editors, but exact icons, optical glow strength, spacing, scrolling, dialogs and white-mode appearance still require on-phone screenshot comparison with the locked reference. Static checks cannot certify visual identity.
