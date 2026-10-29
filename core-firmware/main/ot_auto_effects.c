@@ -272,7 +272,6 @@ bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
         return false;
     const uint32_t duration=ot_auto_fx_duration_ms(cfg->speed);
     const uint32_t elapsed=ms>=duration?duration:ms;
-    const uint32_t phase=(elapsed*255u)/duration;
     const ot_wled_rgb_t fg=cfg->foreground,bg=cfg->background;
     if(original_concept(cfg->effect_id))
         return render_original_concept(cfg,seed,ms,pixels,count);
