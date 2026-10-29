@@ -17,8 +17,7 @@ ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
     .effect_id=id,.chain_mask=p[4],.zone_mask=p[5],
     .r=p[6],.g=p[7],.b=p[8],.bg_r=p[9],.bg_g=p[10],.bg_b=p[11],
     .brightness=p[12],.speed=p[13],.intensity=p[14],
-    .palette_id=p[15],.ttl_sec=p[16],
-    .spark_style=0,.spark_peak=0,.spark_r=255,.spark_g=255,.spark_b=255
+    .palette_id=p[15],.ttl_sec=p[16]
   };
   return OT_BLE_FX_OK;
 }
