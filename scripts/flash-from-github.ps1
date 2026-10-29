@@ -8,7 +8,8 @@ param(
     [string]$Port = "COM9",
     [string]$Version = "0.1.30-alpha",
     [Nullable[long]]$RunId = $null,
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    [switch]$BenchCandidate
 )
 $ErrorActionPreference = 'Stop'
 $repo = 'Srryastari/OPENTAIL-development'
@@ -26,18 +27,33 @@ if ($LASTEXITCODE -ne 0) { throw "Sign in to GitHub CLI using 'gh auth login'. N
 
 if (-not $RunId) {
     $runsText = & gh run list --repo $repo --workflow 'Verify OpenTail active sources' --branch $branch --limit 30 --json databaseId,conclusion,status,headBranch
-    if ($LASTEXITCODE -ne 0) { throw "Could not fetch successful GitHub build runs." }
+    if ($LASTEXITCODE -ne 0) { throw "Could not fetch GitHub build runs." }
     $build = @($runsText | ConvertFrom-Json) | Where-Object {
-        $_.conclusion -eq 'success' -and $_.status -eq 'completed' -and $_.headBranch -eq $branch
+        $_.status -eq 'completed' -and $_.headBranch -eq $branch
     } | Select-Object -First 1
-    if (-not $build) { throw "No successful GitHub build for branch $branch. Nothing was flashed." }
+    if (-not $build) { throw "No completed GitHub build for branch $branch. Nothing was flashed." }
     $RunId = [long]$build.databaseId
 }
-$runText = & gh run view ([string]$RunId) --repo $repo --json conclusion,status,headBranch,headSha
+$runText = & gh run view ([string]$RunId) --repo $repo --json conclusion,status,headBranch,headSha,jobs
 if ($LASTEXITCODE -ne 0) { throw "Could not verify GitHub run $RunId." }
 $run = $runText | ConvertFrom-Json
-if ($run.status -ne 'completed' -or $run.conclusion -ne 'success' -or $run.headBranch -ne $branch) {
-    throw "GitHub run not approved (successful completed build on $branch required). Nothing was flashed."
+if ($run.headBranch -ne $branch -or (!$VerifyOnly -and $run.status -ne 'completed')) {
+    throw "GitHub run not a completed target branch run. Nothing was flashed."
+}
+# A software-verified bench candidate must be installable BEFORE its physical
+# release gate can pass; otherwise physical acceptance is impossible.
+$required = @('change-impact-audit','core-host-tests','core-espidf-build')
+if (-not $VerifyOnly) {
+    $required += @('web-studio-check','android-debug-apk','github-flash-package-check')
+}
+foreach ($name in $required) {
+    $job = @($run.jobs | Where-Object { $_.name -eq $name } | Select-Object -First 1)
+    if ($job.Count -ne 1 -or $job[0].conclusion -ne 'success') {
+        throw "Required software CI job '$name' has not passed. Nothing was flashed."
+    }
+}
+if (-not $VerifyOnly -and $run.conclusion -ne 'success' -and -not $BenchCandidate) {
+    throw "Physical release approval is not complete. Use -BenchCandidate ONLY for the isolated bench after reviewing the release blockers."
 }
 
 # Stage the artifact in a temporary directory only. Never overwrite an old
@@ -78,7 +94,7 @@ try {
         Write-Host 'Verification only: no serial port opened and nothing flashed.'
         return
     }
-    Write-Host "Flashing CORE $Version on $Port. Close any serial monitor first."
+    Write-Host "BENCH ONLY: flashing CORE $Version on $Port; this does not imply physical release approval. Close serial monitors." -ForegroundColor Yellow
     Push-Location $flashDir
     try {
         & python -m esptool --chip esp32s3 --port $Port --baud 460800 write_flash '@flash_args'
