@@ -2236,14 +2236,7 @@ static inline int32_t hashToGradient(uint32_t h) {
   return (h & 0x03) - 2; // use PERLIN_SHIFT 1 -> closest to original fastled version
 }
 
-static inline int32_t gradient1D(uint32_t x0, int32_t dx) {
-  uint32_t h = x0 * 0x27D4EB2D;
-  h ^= h >> 15;
-  h *= 0x92C3412B;
-  h ^= h >> 13;
-  h ^= h >> 7;
-  return (hashToGradient(h) * dx) >> PERLIN_SHIFT;
-}
+
 
 static inline int32_t gradient2D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy) {
   uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D);
@@ -2272,22 +2265,7 @@ static inline int32_t lerpPerlin(int32_t a, int32_t b, int32_t t) {
     return a + (((b - a) * t) >> 14); // match scaling with smoothstep to yield 16.16bit values
 }
 
-static int32_t fx_perlin1D_raw(uint32_t x, bool is16bit) {
-  // integer and fractional part coordinates
-  int32_t x0 = x >> 16;
-  int32_t x1 = x0 + 1;
-  if(is16bit) x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
 
-  int32_t dx0 = x & 0xFFFF;
-  int32_t dx1 = dx0 - 0x10000;
-  // gradient values for the two corners
-  int32_t g0 = gradient1D(x0, dx0);
-  int32_t g1 = gradient1D(x1, dx1);
-  // interpolate and smooth function
-  int32_t tx = smoothstep(dx0);
-  int32_t noise = lerpPerlin(g0, g1, tx);
-  return noise;
-}
 
 static int32_t fx_perlin2D_raw(uint32_t x, uint32_t y, bool is16bit) {
   int32_t x0 = x >> 16;
@@ -2365,9 +2343,7 @@ static int32_t fx_perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit)
   return noise;
 }
 
-static uint16_t fx_perlin16_1(uint32_t x) {
-  return ((fx_perlin1D_raw(x, false) * 1159) >> 10) + 32803; //scale to 16bit and offset (fastled range: about 4838 to 60766)
-}
+
 
 static uint16_t fx_perlin16_2(uint32_t x, uint32_t y) {
  return ((fx_perlin2D_raw(x, y, false) * 1537) >> 10) + 32725; //scale to 16bit and offset (fastled range: about 1748 to 63697)
@@ -2377,9 +2353,7 @@ static uint16_t fx_perlin16_3(uint32_t x, uint32_t y, uint32_t z) {
   return ((fx_perlin3D_raw(x, y, z, false) * 1731) >> 10) + 33147; //scale to 16bit and offset (fastled range: about 4766 to 60840)
 }
 
-static uint8_t fx_perlin8_1(uint16_t x) {
-  return (((fx_perlin1D_raw((uint32_t)x << 8, true) * 1353) >> 10) + 32769) >> 8; //scale to 16 bit, offset, then scale to 8bit
-}
+
 
 static uint8_t fx_perlin8_2(uint16_t x, uint16_t y) {
   return (((fx_perlin2D_raw((uint32_t)x << 8, (uint32_t)y << 8, true) * 1620) >> 10) + 32771) >> 8; //scale to 16 bit, offset, then scale to 8bit
