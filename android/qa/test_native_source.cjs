@@ -246,11 +246,37 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
   'project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())',
-  'entry.length() < 4', 'stops.sortBy { it.first }',
+  'entry.length() != 4', 'stops.sortBy { it.first }',
   'return NativePalette(id, name, null)',
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
+// Native sequence/palette import boundaries are strict unsigned bytes;
+// source-backed RGB stop gradients must not round fractional samples.
+for (const required of ['static boolean validPaletteId(Object value)',
+  'number >= 0 && number <= 255 && number == Math.floor(number)',
+  'private static void validateSequenceStep(JSONObject step)',
+  'validateSequenceStep(steps.getJSONObject(i))',
+  'settings.has("pal") && !validPaletteId(settings.opt("pal"))',
+  'options.has("sharedPaletteId")',
+  'for (int i = 0; i < steps.length(); i++)',
+  'Invalid shared palette ID']) {
+  assert(model.includes(required),'Palette import/save schema validation regressed: '+required);
+}
+assert(palettes.includes('number !in 0.0..255.0 || number % 1.0 != 0.0') &&
+       palettes.includes('entry.length() != 4'),
+       'Native palette swatches must preserve exact integer RGB stop values');
+assert(compose.includes('val modelRevision = revision.intValue') &&
+       compose.includes('val steps = remember(modelRevision) { project.sequence() }') &&
+       compose.includes('val opts = remember(modelRevision) { project.sequenceOptions() }'),
+       'Native sequence editor must redraw after palette and option persistence');
+const paletteTest=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativePaletteValidationTest.java','utf8');
+assert(paletteTest.includes('NativeProject.validPaletteId(Double.NaN)') &&
+       paletteTest.includes('NativeProject.validPaletteId(255L)') &&
+       paletteTest.includes('NativeProject.validPaletteId("42")'),
+       'Executable palette byte regression cases missing');
+
 // Palette options/step edits must survive disk failure without changing the
 // live project. Reordering must not leave a positional editor on the wrong row.
 assert(model.includes('synchronized boolean updateSequenceOption(String key, Object value)') &&
