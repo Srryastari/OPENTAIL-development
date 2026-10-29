@@ -17,7 +17,7 @@ assert len(page)>5000 and page.lstrip().startswith("<!doctype html>")
 assert "EMBED_TXTFILES \"assets/dev_console.htm\"" in cmake
 assert "studio.htm.gz" not in cmake
 assert "web-studio" not in cmake or "independent" in cmake
-assert "studio_gz_start" not in core and "_binary_assets_dev_console_htm_start" in core
+assert "studio_gz_start" not in core and "_binary_dev_console_htm_start" in core
 assert 'cfg.max_uri_handlers=30' in core
 for route in ["/dev", "/api/v1/status", "/api/v1/status-led",
               "/api/v1/status-led/self-test", "/api/v1/status-led/session", "/api/v1/capabilities",
