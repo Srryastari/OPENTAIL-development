@@ -40,6 +40,7 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "ot_fps_pacer.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -53,7 +54,7 @@ static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_G
 static led_strip_handle_t strip[OT_CHAIN_COUNT]={0};
 static uint16_t strip_capacity[OT_CHAIN_COUNT]={0}; /* Currently allocated/transmitted pixel count per lane. */
 static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGHTNESS};
-static ot_inputs_t inputs={0};
+static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
 static uint8_t live_input_mask=0;
@@ -63,6 +64,7 @@ static ot_demo_t demo={OT_DEMO_OFF,{0,0,0},0};
 static TickType_t demo_deadline=0;
 static uint32_t frame_index=0;
 static uint32_t measured_fps=0;
+static uint16_t adaptive_target_fps=OT_FPS_PREFERRED_HIGH;
 static uint32_t frame_window_start_ms=0,frame_window_frames=0;
 /* Software-side evidence only: successful driver refresh != observed pixel state. */
 static uint32_t output_refreshes[OT_CHAIN_COUNT]={0};
@@ -942,7 +944,7 @@ void ot_ble_disconnect_show(void){
 
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
-    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;
+    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;uint16_t target_fps;
     uint32_t refresh0,refresh1,stop_requested,stop_rendered;
     uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
@@ -952,6 +954,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     demo_active=before_deadline(now,demo_deadline);
     mode=demo_active?demo.mode:OT_DEMO_OFF;
     frames=frame_index;
+    target_fps=adaptive_target_fps;
     show_active=show_window(now);
 
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
@@ -988,12 +991,12 @@ static esp_err_t status_get(httpd_req_t *r) {
     snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,"user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
-       (unsigned long)frames,(unsigned long)measured_fps,0u,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
+       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":0,\"fps_policy\":\"uncapped_measured\",\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -1200,26 +1203,69 @@ static bool strip_init(void){
         if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
     return true;
 }
+/* The input sampler is independent of FPS. Four 10ms samples stay 40ms,
+ * not four display frames. Wakes pixel rendering after a trigger transition. */
+static void input_sampler_task(void *arg){
+    (void)arg;
+    ot_inputs_t sampler={0};
+    TickType_t last_wake=xTaskGetTickCount();
+    TickType_t period=pdMS_TO_TICKS(10u);
+    if(!period)period=1u;
+    for(;;){
+        bool levels[OT_IN_COUNT];
+        for(unsigned i=0;i<OT_IN_COUNT;i++){
+            const int level=gpio_get_level(input_pin[i]);
+            levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+        }
+        uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
+        TaskHandle_t target=NULL;
+        portENTER_CRITICAL(&state_lock);
+        if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+        portEXIT_CRITICAL(&state_lock);
+        if(target)xTaskNotifyGive(target);
+        vTaskDelayUntil(&last_wake,period);
+    }
+}
+static void frame_wake_callback(void *arg){
+    TaskHandle_t target=(TaskHandle_t)arg;
+    if(target)xTaskNotifyGive(target);
+}
 static void led_task(void *p) {
     (void)p;
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    ot_fps_pacer_t pacer;
+    ot_fps_pacer_init(&pacer);
+    uint32_t previous_frame_ms=0;
+    TaskHandle_t self=xTaskGetCurrentTaskHandle();
+    esp_timer_handle_t frame_timer=NULL;
+    esp_timer_create_args_t timer_args={
+        .callback=frame_wake_callback,.arg=(void*)self,
+        .dispatch_method=ESP_TIMER_TASK,.name="ot-frame-pacer"
+    };
+    if(esp_timer_create(&timer_args,&frame_timer)!=ESP_OK){
+        ot_st_set_fault("adaptive frame timer initialization failed");
+        portENTER_CRITICAL(&state_lock);
+        native_outputs_ready=false;
+        portEXIT_CRITICAL(&state_lock);
+        vTaskDelete(NULL);
+        return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    render_task_handle=self;
+    portEXIT_CRITICAL(&state_lock);
     while(1){
-       bool levels[OT_IN_COUNT];
-       for(int i=0;i<OT_IN_COUNT;++i) {
-           int pin=gpio_get_level(input_pin[i]);
-           levels[i]=OT_INPUT_ACTIVE_LOW?(pin==0):(pin!=0);
-       }
-       uint8_t physical=ot_debounce(&inputs,levels,OT_DEBOUNCE_TICKS);
+       const int64_t frame_started_us=esp_timer_get_time();
        TickType_t now=xTaskGetTickCount();
+       uint8_t physical=0;
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
        uint32_t local_stop_generation=0;
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
-       live_input_mask=physical;
+       physical=live_input_mask;
        memcpy(local_outputs,om_outputs,sizeof(local_outputs));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
@@ -1246,6 +1292,10 @@ static void led_task(void *p) {
            }
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
            uint32_t elapsed=(uint32_t)(frame_ms-show_started);
+           uint32_t frame_delta_ms=previous_frame_ms?(uint32_t)(frame_ms-previous_frame_ms):8u;
+           previous_frame_ms=frame_ms;
+           if(frame_delta_ms<1u)frame_delta_ms=1u;
+           if(frame_delta_ms>65535u)frame_delta_ms=65535u;
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
@@ -1276,7 +1326,7 @@ static void led_task(void *p) {
                                .effect_id=fx->effect_id,
                                .speed=fx->speed,.intensity=fx->intensity,
                                .brightness=fx->brightness,
-                               .palette_id=fx->palette_id,.frame_time_ms=23,
+                               .palette_id=fx->palette_id,.frame_time_ms=(uint16_t)frame_delta_ms,
                                .foreground={fx->r,fx->g,fx->b},
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
                                .spark_style=slot->spark.style,
@@ -1361,7 +1411,27 @@ static void led_task(void *p) {
            if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
        }
-       taskYIELD(); /* avoid an unconditional 1ms penalty on near-16ms frames */
+       /* Observe measured work + RGB800 wire minimum. At overload there is
+        * no extra delay; actual FPS may dip below the preferred 53 FPS. */
+       int64_t work_elapsed=esp_timer_get_time()-frame_started_us;
+       uint32_t work_us=work_elapsed<=0?0u:
+           (uint32_t)(work_elapsed>2000000LL?2000000LL:work_elapsed);
+       uint16_t longest_pixels=0;
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+           if(local_outputs[ch].active_pixels>longest_pixels)
+               longest_pixels=local_outputs[ch].active_pixels;
+       ot_fps_pacer_observe(&pacer,work_us,longest_pixels);
+       portENTER_CRITICAL(&state_lock);
+       adaptive_target_fps=pacer.target_fps;
+       portEXIT_CRITICAL(&state_lock);
+       const uint32_t wait_us=ot_fps_pacer_wait_us(&pacer,work_us);
+       if(wait_us>=100u){
+           if(esp_timer_start_once(frame_timer,wait_us)==ESP_OK){
+               /* Input sampler can wake the frame early on a trigger change. */
+               (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30u));
+               (void)esp_timer_stop(frame_timer);
+           }else vTaskDelay(1);
+       }else taskYIELD();
     }
 }
 void app_main(void) {
@@ -1372,7 +1442,9 @@ void app_main(void) {
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     input_init();
-    bool outputs_ready=strip_init();
+    const bool sampler_ready=xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
+    if(!sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    bool outputs_ready=sampler_ready&&strip_init();
     portENTER_CRITICAL(&state_lock);native_outputs_ready=outputs_ready;portEXIT_CRITICAL(&state_lock);
     wifi_ap_init();
     om_write_mutex=xSemaphoreCreateMutex();
