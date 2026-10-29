@@ -342,7 +342,7 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Caption("Web Studio and Android author offline. CORE firmware renders animations, " +
                     "owns trigger arbitration and drives the physical outputs.", t)
-            Caption("Design edits never change vehicle lighting unless explicitly sent from Settings.", t)
+            Caption("All editors update the local preview instantly. Owner-authorized BLE also previews supported effects transiently; physical geometry still requires explicit controller save.", t)
         }
     }
     @Composable
@@ -920,7 +920,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
         var confirm by remember { mutableStateOf(false) }
         Panel(t) {
-            Caption("Explicit short bench effect demo. Never sent during authoring.", t)
+            Caption("Bench effect demo requires confirmation. Authorized live effect edits also send bounded temporary previews automatically.", t)
             Pill("Test a supported effect", t) { confirm = true }
             Pill("Stop CORE show", t) {
                 if (liveArmed.value) livePreview.stop() else ble.stopShow()
