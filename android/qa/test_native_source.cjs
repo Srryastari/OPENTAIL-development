@@ -241,7 +241,7 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
   'PalettePicker("Shared sequence palette"', 'project.updateSequenceOption("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
-  'if (NativePaletteEngine.coreSupports(effect, id))']) {
+  '!NativePaletteEngine.coreSupports(effectId, paletteId)']) {
   assert(compose.includes(required), 'Native palette authoring regressed: ' + required);
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
@@ -256,9 +256,11 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
 assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
        palettes.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(') &&
-       compose.includes('if (NativePaletteEngine.coreSupports(effect, id))') &&
+       compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
        compose.includes('else {') &&
        compose.includes('livePreview.stop()') &&
+       compose.includes('supportedIds.value = emptySet() // never reuse another CORE') &&
+       compose.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
        compose.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
        bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))'),
        'Only the verified existing CORE palette subset may be previewed over BLE');
@@ -330,7 +332,7 @@ assert(captureCallback && captureCallback.includes('pendingFrameRevision != fram
        'Stale or unauthorized asynchronous RGB frames must be rejected before display');
 for (const expected of ['private fun invalidateCoreFrame()', 'pendingFrameRevision = -1L',
   'pendingFrameOutput = -1', 'frameRevision++', 'invalidateCoreFrame() // local design changes',
-  'invalidateCoreFrame() // any parameter change', 'if (NativePaletteEngine.coreSupports(effect, id))',
+  'invalidateCoreFrame() // any parameter change', '!NativePaletteEngine.coreSupports(effectId, paletteId)',
   'invalidateCoreFrame() // the saved/readback output may have changed',
   'if (ble.captureFrame(captureOutput.intValue))', 'pendingFrameRevision = frameRevision',
   'pendingFrameOutput = captureOutput.intValue']) {
