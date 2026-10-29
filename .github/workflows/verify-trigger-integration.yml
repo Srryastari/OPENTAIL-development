@@ -11,6 +11,7 @@ on:
       - 'core-firmware/main/output_manager.*'
       - 'core-firmware/main/assets/dev_console.htm'
       - 'core-firmware/tests/test_trigger_manager.c'
+      - 'core-firmware/tests/test_trigger_runtime_contract.py'
       - 'core-firmware/tests/test_prior_trigger_profiles.c'
       - 'core-firmware/tests/test_verified_bench_contract.c'
       - 'core-firmware/tests/run-host-tests.sh'
@@ -26,6 +27,8 @@ jobs:
         working-directory: core-firmware
     steps:
       - uses: actions/checkout@v4
+      - name: Audit the actual CORE GPIO, effects-overlay, BLE and NVS boundaries
+        run: python3 tests/test_trigger_runtime_contract.py
       - name: Validate mapped inputs, optocoupler debounce, BLE codec and overlays
         run: |
           set -eu
