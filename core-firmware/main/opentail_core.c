@@ -580,7 +580,8 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
 /* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
  * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
-static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone){
+static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
+                                      const ot_fx_spark_style_t *spark){
     ot_wled_fx_metadata_t meta;
     if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
@@ -595,6 +596,19 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
+        if(ready&&spark){
+            /* Optional sparkle tuning is transient per-zone state. Preserve
+             * legacy fixed-size BLE FX packets and saved NVS profile layout. */
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+                if(!(req->chain_mask&(1u<<o)))continue;
+                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                    if(!(req->zone_mask&(1u<<z))||
+                       om_outputs[o].zones[z].pixels==0||
+                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                    fx_bank.zones[o][z].spark=*spark;
+                }
+            }
+        }
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
@@ -613,7 +627,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL); /* live 60-sec bench preview */
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -689,7 +703,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         .ttl_sec=(uint8_t)ttl
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false))
+    if(!ot_ble_apply_fx_internal(&req,false,NULL))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -745,15 +759,19 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
         .speed=speed,
         .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
-        .palette_id=0,.ttl_sec=6,
-        .spark_style=(uint8_t)bounded_int(obj,"spark_style",0,0,3),
-        .spark_peak=(uint8_t)bounded_int(obj,"spark_peak",32,1,32),
-        .spark_r=(uint8_t)bounded_int(obj,"spark_r",255,0,255),
-        .spark_g=(uint8_t)bounded_int(obj,"spark_g",255,0,255),
-        .spark_b=(uint8_t)bounded_int(obj,"spark_b",255,0,255)
+        .palette_id=0,.ttl_sec=6
+    };
+    const ot_fx_spark_style_t spark={
+        .style=(uint8_t)bounded_int(obj,"spark_style",0,0,3),
+        .peak=(uint8_t)bounded_int(obj,"spark_peak",32,1,32),
+        .color={
+            (uint8_t)bounded_int(obj,"spark_r",255,0,255),
+            (uint8_t)bounded_int(obj,"spark_g",255,0,255),
+            (uint8_t)bounded_int(obj,"spark_b",255,0,255)
+        }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -825,7 +843,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -1204,9 +1222,9 @@ static void led_task(void *p) {
                                .palette_id=fx->palette_id,.frame_time_ms=23,
                                .foreground={fx->r,fx->g,fx->b},
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
-                               .spark_style=fx->spark_style,
-                               .spark_peak=fx->spark_peak,
-                               .spark_color={fx->spark_r,fx->spark_g,fx->spark_b}
+                               .spark_style=slot->spark.style,
+                               .spark_peak=slot->spark.peak,
+                               .spark_color=slot->spark.color
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
