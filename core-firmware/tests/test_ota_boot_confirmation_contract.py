@@ -10,9 +10,10 @@ led = core.split("static void led_task(void *p) {", 1)[1].split("void app_main(v
 startup = core.split("void app_main(void) {", 1)[1]
 done = "led_strip_refresh_async_done(strip[ch])"
 all_lanes = "const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)"
-gate = "if(full_frame && ble_startup_ready && http_startup_ready && !boot_frame_verified)"
+gate = "if(full_frame && ble_startup_ready && http_startup_ready &&"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
+assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
@@ -39,6 +40,12 @@ assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
 assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index("xTaskCreate(led_task")
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
 assert "bool ot_ble_start(void)" in ble
+assert "bool ot_ble_radio_ever_ready(void)" in ble
+assert "__atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE)" in ble
+assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
+assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&ble_radio_ever_ready,true")
+assert "else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in ble
+assert "__atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);" in ble
 assert 'if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}' in ble
 assert "boot_frame_verified=true;" not in led, "A failed flash confirmation must retry"
 ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
