@@ -9,9 +9,16 @@ int main(void){
     ot_frame_snapshot_reset();
     assert(ot_frame_snapshot_info(&i) && !i.ready);
     assert(!ot_frame_snapshot_request(255));
+    assert(ot_frame_snapshot_request(1));
+    ot_frame_snapshot_unavailable(0); /* unrelated output is not the fault */
+    assert(ot_frame_snapshot_info(&i) && i.pending);
+    ot_frame_snapshot_unavailable(1);
+    assert(ot_frame_snapshot_info(&i) && !i.pending && !i.ready);
     assert(ot_frame_snapshot_request(0));
     assert(ot_frame_snapshot_request(0)); /* pending request is replaceable */
     assert(ot_frame_snapshot_begin(0,3,23));
+    ot_frame_snapshot_unavailable(0); /* cannot cancel a capture in flight */
+    assert(ot_frame_snapshot_info(&i) && i.pending && !i.ready);
     assert(!ot_frame_snapshot_request(1));
     assert(i.ready==false);
     ot_frame_snapshot_pixel(0,255,0,7);
