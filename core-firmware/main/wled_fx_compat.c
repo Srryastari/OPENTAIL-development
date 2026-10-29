@@ -507,6 +507,9 @@ static const ot_wled_fx_metadata_t supported[] = {
      true, false, true, false, true},
     {OT_WLED_DANCING_SHADOWS, "Dancing Shadows", "Dancing Shadows@!,# of shadows;!;!",
      false, false, true, true, true},
+    {OT_WLED_EXPLODING_FIREWORKS, "Fireworks 1D",
+     "Fireworks 1D@Gravity,Firing side;!,!;!;12;pal=11,ix=128",
+     true, true, true, true, true},
     {OT_WLED_ROCKTAVES, "Rocktaves", "Rocktaves@;!,!;!;01f;m12=1,si=0",
      true, true, false, false, false},
     {OT_WLED_PACIFICA, "Pacifica", "Pacifica@!,Angle;;!;;pal=51",
@@ -4502,6 +4505,120 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     pixels[pos].b=pacifica_add(pixels[pos].b,dst.b);
     return true;
 }
+
+/* Pinned WLED FX.cpp mode_exploding_fireworks(): RGB-only 1D flare, spark
+ * physics, explosion and dying gravity. Spark layout is the source's
+ * 20-byte struct, with source ESP32's conservative 640-byte/segment budget.
+ * Fewer active segments can allow more sparks upstream; CORE retains a
+ * deterministic conservative count until the live segment budget is exposed. */
+typedef struct {
+    float pos,pos_x,vel,vel_x;
+    uint16_t col;
+    uint8_t col_index;
+} ot_firework_spark_t;
+
+static bool exploding_fireworks_frame(const ot_wled_fx_config_t *cfg,
+                                      ot_wled_fx_state_t *st,
+                                      ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return true;
+    }
+    const unsigned max_sparks=640u/sizeof(ot_firework_spark_t);
+    const unsigned calculated=5u+(unsigned)(count>>1u);
+    const unsigned num=calculated<max_sparks?calculated:max_sparks;
+    const size_t data_bytes=(size_t)num*sizeof(ot_firework_spark_t);
+    uint8_t *scratch=fx_zone_scratch(st,data_bytes+sizeof(float));
+    if(!scratch)return false;
+    ot_firework_spark_t *sparks=(ot_firework_spark_t*)scratch;
+    float *dying=(float*)(scratch+data_bytes);
+    if(st->aux1!=data_bytes) {
+        *dying=0.0f;st->aux0=0u;st->aux1=(uint16_t)data_bytes;
+    }
+    fx_fade_previous(cfg,pixels,count,252u);
+    ot_firework_spark_t *flare=&sparks[0];
+    float gravity=-0.0004f-(float)cfg->speed/800000.0f;
+    gravity*=(float)count;
+    if(st->aux0<2u) {
+        if(st->aux0==0u) {
+            flare->pos=0.0f;
+            flare->pos_x=(cfg->intensity>fx_rand8(st,256u))?1.0f:0.0f;
+            unsigned peak=75u+fx_rand8(st,180u);
+            peak=(peak*(unsigned)(count-1u))>>8u;
+            flare->vel=sqrtf(-2.0f*gravity*(float)peak);
+            flare->vel_x=0.0f;flare->col=255u;
+            st->aux0=1u;
+        }
+        if(flare->vel>12.0f*gravity) {
+            const int pos=flare->pos_x>0.0f?
+                      (int)count-(int)flare->pos-1:(int)flare->pos;
+            if(pos>=0&&(size_t)pos<count) {
+                const uint8_t v=(uint8_t)flare->col;
+                pixels[pos]=scaled((ot_wled_rgb_t){v,v,v},cfg->brightness);
+            }
+            flare->pos+=flare->vel;
+            if(flare->pos<0.0f)flare->pos=0.0f;
+            if(flare->pos>(float)(count-1u))flare->pos=(float)(count-1u);
+            flare->vel+=gravity;flare->col=(uint16_t)(flare->col-2u);
+        } else st->aux0=2u;
+    } else if(st->aux0<4u) {
+        unsigned sparks_count=(unsigned)flare->pos+fx_rand8(st,4u);
+        if(sparks_count<4u)sparks_count=4u;
+        if(sparks_count>num)sparks_count=num;
+        if(st->aux0==2u) {
+            for(unsigned i=1u;i<sparks_count;i++) {
+                sparks[i].pos=flare->pos;sparks[i].pos_x=flare->pos_x;
+                sparks[i].vel=(float)(fx_prng(st)%20001u)/10000.0f-0.9f;
+                if(count<32u)sparks[i].vel*=0.5f;
+                sparks[i].vel_x=0.0f;sparks[i].col=345u;
+                sparks[i].col_index=fx_rand8(st,256u);
+                sparks[i].vel*=flare->pos/(float)count;
+                sparks[i].vel*=-gravity*50.0f;
+            }
+            *dying=gravity/2.0f;st->aux0=3u;
+        }
+        if(sparks[1].col>4u) {
+            ot_wled_palette16_t palette={0};
+            if(cfg->palette_id)
+                ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                          cfg->background,(ot_wled_rgb_t){0,0,0},&palette);
+            for(unsigned i=1u;i<sparks_count;i++) {
+                sparks[i].pos+=sparks[i].vel;
+                sparks[i].pos_x+=sparks[i].vel_x;
+                sparks[i].vel+=*dying;
+                if(sparks[i].col>3u)sparks[i].col-=4u;
+                if(sparks[i].pos>0.0f&&sparks[i].pos<(float)count) {
+                    const unsigned prog=sparks[i].col;
+                    ot_wled_rgb_t sp=cfg->palette_id?
+                        ot_wled_palette_sample(&palette,sparks[i].col_index,255u,
+                                               OT_WLED_PALETTE_LINEAR):
+                        cfg->foreground;
+                    ot_wled_rgb_t color={0,0,0};
+                    if(prog>300u) {
+                        const uint8_t v=(uint8_t)((prog-300u)*5u);
+                        color=blend_colors(sp,(ot_wled_rgb_t){255,255,255},v);
+                    } else if(prog>45u) {
+                        color=blend_colors((ot_wled_rgb_t){0,0,0},sp,
+                                            (uint8_t)(prog-45u));
+                        const uint8_t cool=(uint8_t)((300u-prog)>>5u);
+                        color.g=color.g>cool?(uint8_t)(color.g-cool):0u;
+                        const unsigned cool2=(unsigned)cool*2u;
+                        color.b=color.b>cool2?(uint8_t)(color.b-cool2):0u;
+                    }
+                    const int pos=sparks[i].pos_x>0.0f?
+                             (int)count-(int)sparks[i].pos-1:(int)sparks[i].pos;
+                    if(pos>=0&&(size_t)pos<count)
+                        pixels[pos]=scaled(color,cfg->brightness);
+                }
+            }
+            *dying*=0.8f;
+        } else st->aux0=(uint16_t)(6u+fx_rand8(st,10u));
+    } else {
+        st->aux0--;
+        if(st->aux0<4u)st->aux0=0u;
+    }
+    return true;
+}
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0)
@@ -4520,7 +4637,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_SLOW_TRANSITION &&
             cfg->effect_id!=OT_WLED_DANCING_SHADOWS &&
             cfg->effect_id!=OT_WLED_FIRE_2012 &&
-            cfg->effect_id!=OT_WLED_PACIFICA) ||
+            cfg->effect_id!=OT_WLED_PACIFICA &&
+            cfg->effect_id!=OT_WLED_EXPLODING_FIREWORKS) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4716,6 +4834,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
+    if(cfg->effect_id==OT_WLED_EXPLODING_FIREWORKS)
+        return exploding_fireworks_frame(cfg,state,pixels,count);
     if(cfg->effect_id==OT_WLED_ROCKTAVES)
         return rocktaves_frame(cfg,time_ms,pixels,count);
     if(cfg->effect_id==OT_WLED_PACIFICA) {
