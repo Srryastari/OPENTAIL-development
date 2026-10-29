@@ -39,11 +39,11 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_effects_1d.c -o /tmp/ot-effects-unified-tests && /tmp/ot-effects-unified-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test && /tmp/ot-fx-presets-test
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/fx_overlay_engine.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test && /tmp/ot-fx-presets-test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test && /tmp/ot-palettes-test
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
 
 python3 tests/test_wled_catalog.py
 # Inventory audit is separate from release certification (which remains blocked
