@@ -44,8 +44,8 @@ int main(void){
   }
   /* The CORE dispatcher must invoke the source-derived per-frame stateful
    * renderer, not fall back to the catalog's per-pixel approximations. */
-  for(unsigned ididx=0;ididx<8;ididx++){
-    const uint16_t mode=(uint16_t[]){OT_WLED_SCAN,OT_WLED_DUAL_SCAN,OT_WLED_THEATER,OT_WLED_SOLID_PATTERN,OT_WLED_HEARTBEAT,OT_WLED_SPOTS,OT_WLED_SPOTS_FADE,OT_WLED_PERCENT}[ididx];
+  for(unsigned ididx=0;ididx<10;ididx++){
+    const uint16_t mode=(uint16_t[]){OT_WLED_SCAN,OT_WLED_DUAL_SCAN,OT_WLED_THEATER,OT_WLED_SOLID_PATTERN,OT_WLED_HEARTBEAT,OT_WLED_SPOTS,OT_WLED_SPOTS_FADE,OT_WLED_PERCENT,OT_WLED_CHASE_FLASH,OT_WLED_RUNNING_COLOR}[ididx];
     ot_effects_1d_state_t actual;
     ot_effects_1d_reset(&actual,13u);
     ot_wled_fx_state_t reference={0};
