@@ -316,7 +316,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_STARBURST, "Fireworks Starburst", "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
      false, true, true, true, false},
     {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11,m12=1",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_FLOW_STRIPE, "Flow Stripe", "Flow Stripe@Hue speed,Effect speed;;!;pal=11",
+     false, false, true, true, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2631,6 +2633,35 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Pinned FX.cpp mode_FlowStripe() for a single 1D zone. Its mcol=3
+ * palette slot always samples a palette (default source Party table for ID0).
+ * All indices use source uint8_t wrapping and the existing sine primitive. */
+static void flow_stripe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                              ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    ot_wled_palette16_t palette;
+    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                              cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return;
+    const int hl=(int)(count*10u/13u);
+    const uint8_t hue=(uint8_t)(now/((uint32_t)cfg->speed+1u));
+    const uint32_t t=now/((uint32_t)cfg->intensity/8u+1u);
+    for(size_t i=0;i<count;i++) {
+        const int d=(int)i-hl;
+        int c=((d<0?-d:d)*127)/hl;
+        c=wled_sin8((uint8_t)c);
+        c=wled_sin8((uint8_t)((uint32_t)(c/2)+t));
+        const uint8_t b=wled_sin8((uint8_t)((uint32_t)c+t/8u));
+        const ot_wled_rgb_t sampled=ot_wled_palette_sample(&palette,
+            (uint8_t)(b+hue),255u,OT_WLED_PALETTE_LINEAR);
+        pixels[i]=scaled(sampled,cfg->brightness);
+    }
+}
+
 /* Pinned mode_tetrix(), one virtual strip/zone. Palette=0 resolves
  * slot zero directly to the primary color. Source's persistent frame
  * buffer is retained for fade and partially painted brick stacks. */
@@ -3554,7 +3585,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         return false;
     if(cfg->palette_id!=0u) {
         /* Do not claim palette support for other source ports yet. */
-        if(cfg->effect_id!=OT_WLED_COLOR_CLOUDS ||
+        if((cfg->effect_id!=OT_WLED_COLOR_CLOUDS &&
+            cfg->effect_id!=OT_WLED_FLOW_STRIPE) ||
            (cfg->palette_id!=2u && cfg->palette_id!=3u &&
             cfg->palette_id!=4u && cfg->palette_id!=5u &&
             cfg->palette_id!=6u))return false;
@@ -3750,6 +3782,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_FLOW_STRIPE) {
+        flow_stripe_frame(cfg,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_TETRIX) {
