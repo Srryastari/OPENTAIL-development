@@ -116,6 +116,21 @@ class ComposeMainActivity : ComponentActivity() {
         // automatically without an extra "Live Edit Mode" switch.
         val effectId = effectOverride ?: prefs.getInt("effectId", 0)
         if (!ble.canControl() || supportedIds.value.isEmpty()) return
+        val paletteId = prefs.getInt("paletteId", 0)
+        // Preflight BEFORE arming or coalescing a BLE packet. Otherwise
+        // changing the effect, speed or color could silently replay palette
+        // zero while the screen still shows an unsupported selected palette.
+        if (effectId !in supportedIds.value ||
+            !NativePaletteEngine.coreSupports(effectId, paletteId)) {
+            if (liveArmed.value) {
+                livePreview.stop()
+                liveArmed.value = false
+            }
+            bleMessage.value = if (effectId !in supportedIds.value)
+                "Selected effect is unavailable on this CORE; design stays local"
+            else "Selected palette is unavailable for this CORE effect; design stays local"
+            return
+        }
         if (!livePreview.isArmed()) {
             if (!livePreview.arm()) return
             liveArmed.value = true
@@ -129,8 +144,7 @@ class ComposeMainActivity : ComponentActivity() {
             brightness = prefs.getInt("brightness", 160),
             speed = prefs.getInt("speed", 128),
             intensity = prefs.getInt("intensity", 128),
-            paletteId = NativePaletteEngine.corePreviewPalette(
-                effectId, prefs.getInt("paletteId", 0))
+            paletteId = NativePaletteEngine.corePreviewPalette(effectId, paletteId)
         ))
     }
 
@@ -170,6 +184,7 @@ class ComposeMainActivity : ComponentActivity() {
                 ble.readFxCapabilities()
             if (!ble.canControl()) {
                 invalidateCoreFrame()
+                supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
             }
             if (!ble.canControl() && liveArmed.value) {
@@ -729,17 +744,7 @@ class ComposeMainActivity : ComponentActivity() {
                     PalettePicker("Palette", paletteId, t) { id ->
                         paletteId = id
                         prefs.edit().putInt("paletteId", id).apply()
-                        if (NativePaletteEngine.coreSupports(effect, id)) {
-                            previewCurrentEffect(effect)
-                        } else {
-                            // A new local-only palette must not leave the previous
-                            // live hardware palette playing under its old TTL.
-                            if (liveArmed.value) {
-                                livePreview.stop()
-                                liveArmed.value = false
-                            }
-                            invalidateCoreFrame()
-                        }
+                        previewCurrentEffect(effect) // one safety gate for every edit gesture
                     }
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
