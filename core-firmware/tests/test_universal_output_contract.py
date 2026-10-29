@@ -67,6 +67,12 @@ assert r'\"outputs_ready\":%s' in status
 assert 'OT_FW,ble_startup_ready?"true":"false",outputs_ready?"true":"false"' in status
 assert "measured_fps=fps;" in core
 assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n               portEXIT_CRITICAL(&state_lock);" in core
+# A BLE client whose HMAC authorization was lost must not read a cached
+# output configuration response, even on the same connected GATT session.
+ble = (root / "ble_status.c").read_text(encoding="utf-8")
+cfg_read = ble.split("static int cfg_read(",1)[1].split("static int cfg_write(",1)[0]
+assert "if(conn!=active_conn || !authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;" in cfg_read
+
 # BLE FX validation must follow the physical output count, not a vehicle or
 # two-lane mask literal. Actual 12-output hardware/protocol support is future work.
 assert "(req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0" in core
