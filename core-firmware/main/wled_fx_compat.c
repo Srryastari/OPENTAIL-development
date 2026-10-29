@@ -964,6 +964,8 @@ static uint8_t fx_rand8(ot_wled_fx_state_t *s,uint32_t bound) {
     return (uint8_t)(fx_prng(s)%bound);
 }
 static size_t fx_rand_index(ot_wled_fx_state_t *s,size_t count) {
+    /* WLED hw_random16(0) returns zero; never divide by a zero bound. */
+    if(count==0u)return 0u;
     return (size_t)(fx_prng(s)%(uint32_t)count);
 }
 static uint8_t fx_new_wheel(ot_wled_fx_state_t *s,uint8_t prev) {
