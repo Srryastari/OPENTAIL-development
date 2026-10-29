@@ -1055,6 +1055,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
+        val outputLimit = BleConfigCodec.MAX_LEDS_PER_OUTPUT
         var index by rememberSaveable { mutableIntStateOf(0) }
         // String snapshots make edits observable without mutating the last
         // confirmed hardware readback. A failed save cannot masquerade as NVS.
@@ -1062,6 +1063,7 @@ class ComposeMainActivity : ComponentActivity() {
             mutableStateOf(outputs[index]?.toString().orEmpty())
         }
         var confirm by remember { mutableStateOf(false) }
+        var structureVersion by remember(index, outputs[index]) { mutableIntStateOf(0) }
         val draft = runCatching { JSONObject(draftText) }.getOrNull()
         fun edit(change: (JSONObject) -> Unit) {
             runCatching {
@@ -1074,20 +1076,20 @@ class ComposeMainActivity : ComponentActivity() {
         // output's active allocation and every downstream start automatically.
         // This changes draft RAM only; NVS still requires confirmed Save.
         fun adjustZone(zoneIndex: Int, newLength: Int) {
-            if (newLength !in 0..623) return
+            if (newLength !in 0..outputLimit) return
             edit { next ->
                 val arr = next.getJSONArray("zones")
                 if (zoneIndex !in 0 until arr.length()) return@edit
                 val others = (0 until arr.length())
                     .filter { it != zoneIndex }.sumOf { arr.getJSONObject(it).getInt("pixels") }
                 val total = others + newLength
-                if (total !in 1..623) return@edit
+                if (total !in 1..outputLimit) return@edit
                 arr.getJSONObject(zoneIndex).put("pixels", newLength)
                 next.put("pixels", total)
             }
         }
         fun adjustOutput(newTotal: Int) {
-            if (newTotal !in 1..623) return
+            if (newTotal !in 1..outputLimit) return
             edit { next ->
                 val arr = next.getJSONArray("zones")
                 if (arr.length() == 0) return@edit
@@ -1102,7 +1104,7 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Title("CORE Output Manager", t)
             Caption("Hardware settings are separate from your Studio design. Reload each output over authorized BLE before editing.", t)
-            Caption("Current firmware allocation: up to 623 pixels per output; older installed CORE versions may allow fewer.", t)
+            Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Pill("Output 1", t, index == 0) { index = 0 }
                 Pill("Output 2", t, index == 1) { index = 1 }
@@ -1126,12 +1128,12 @@ class ComposeMainActivity : ComponentActivity() {
             Field(draft.optString("name"), "Output name", t) { value ->
                 edit { it.put("name", value) }
             }
-            Caption("Pixel allocation (1–623; temporary firmware limit)", t)
+            Caption("Pixels (1–" + outputLimit + " BLE format limit; CORE validates hardware capacity)", t)
             Field(outputCountText, "Pixel count", t) { value ->
-                outputCountText = value.filter(Char::isDigit).take(3)
+                outputCountText = value.filter(Char::isDigit).take(5)
                 outputCountText.toIntOrNull()?.let(::adjustOutput)
             }
-            ValueSlider("Total output pixels", pixelCount.coerceIn(1, 623), 623, t) { newCount ->
+            ValueSlider("Total output pixels", pixelCount.coerceIn(1, outputLimit), outputLimit, t) { newCount ->
                 adjustOutput(newCount.coerceAtLeast(1))
                 outputCountText = newCount.coerceAtLeast(1).toString()
             }
@@ -1151,7 +1153,7 @@ class ComposeMainActivity : ComponentActivity() {
             val from = cursor
             val count = zone.optInt("pixels", 0)
             cursor += count
-            var zoneCountText by remember(index, i, outputs[index]) {
+            var zoneCountText by remember(index, i, outputs[index], structureVersion) {
                 mutableStateOf(zone.optInt("pixels", 0).toString())
             }
             Panel(t) {
@@ -1162,13 +1164,13 @@ class ComposeMainActivity : ComponentActivity() {
                     edit { it.getJSONArray("zones").getJSONObject(i).put("name", value) }
                 }
                 Field(zoneCountText, "Zone pixel count", t) { value ->
-                    zoneCountText = value.filter(Char::isDigit).take(3)
+                    zoneCountText = value.filter(Char::isDigit).take(5)
                     zoneCountText.toIntOrNull()?.let { n ->
                         adjustZone(i, n)
                         outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                     }
                 }
-                ValueSlider("Next start · zero-based", cursor.coerceIn(0, 623), 623, t) { nextStart ->
+                ValueSlider("Next start · zero-based", cursor.coerceIn(0, outputLimit), outputLimit, t) { nextStart ->
                     val n = (nextStart - from).coerceAtLeast(0)
                     adjustZone(i, n)
                     zoneCountText = n.toString()
@@ -1188,8 +1190,18 @@ class ComposeMainActivity : ComponentActivity() {
                         val next = JSONArray()
                         val original = it.getJSONArray("zones")
                         for (j in 0 until original.length()) if (j != i) next.put(original.get(j))
+                        var remaining = (0 until next.length()).sumOf { j ->
+                            next.getJSONObject(j).getInt("pixels")
+                        }
+                        if (remaining == 0 && next.length() > 0) {
+                            next.getJSONObject(0).put("pixels", 1)
+                            remaining = 1
+                        }
                         it.put("zones", next)
+                        it.put("pixels", remaining)
                     }
+                    structureVersion++
+                    outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
             }
         }
@@ -1207,6 +1219,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .put("name", "Zone " + (zones.length() + 1))
                         .put("pixels", 0).put("role", "off"))
                 }
+                structureVersion++
             }
             Pill("Fit last zone to remaining pixels", t) {
                 edit {
@@ -1215,7 +1228,7 @@ class ComposeMainActivity : ComponentActivity() {
                         val other = (0 until group.length() - 1)
                             .sumOf { j -> group.getJSONObject(j).getInt("pixels") }
                         val remainder = it.getInt("pixels") - other
-                        if (remainder in 0..623)
+                        if (remainder in 0..outputLimit)
                             group.getJSONObject(group.length() - 1).put("pixels", remainder)
                     }
                 }
