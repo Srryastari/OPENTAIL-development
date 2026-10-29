@@ -169,6 +169,14 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_METEOR, "Meteor", "Meteor@!,Trail;!,!;!",
      true, true, true, true, false},
     {OT_WLED_TWINKLEUP, "Twinkleup", "Twinkleup@!,Intensity;!,!;!;;m12=0",
+     true, true, true, true, false},
+    {OT_WLED_RAILWAY, "Railway", "Railway@!,Smoothness;1,2;!;;pal=3",
+     true, true, true, true, false},
+    {OT_WLED_WASHING_MACHINE, "Washing Machine", "Washing Machine@!,!;;!",
+     true, true, true, true, false},
+    {OT_WLED_FLOW, "Flow", "Flow@!,Zones;;!;;m12=1",
+     true, true, true, true, false},
+    {OT_WLED_SUNRISE, "Sunrise", "Sunrise@Time [min],Width;;!;;pal=35,sx=60",
      true, true, true, true, false}
 };
 
@@ -1842,6 +1850,139 @@ static void twinkleup_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+/* Pinned FX.cpp mode_railway() state and ramp timing. The upstream
+ * default 'Colors 1 & 2' palette is represented with two configurable
+ * RGB colors; multi-entry palette interpolation remains outside this port. */
+static void railway_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,
+                          ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const uint32_t dur=(256u-(uint32_t)cfg->speed)*40u;
+    const uint16_t ramp=(uint16_t)((dur*(uint32_t)cfg->intensity)>>8);
+    if(state->step>dur) {
+        state->step=0u;
+        state->aux0=(uint16_t)!state->aux0;
+    }
+    unsigned pos=255u;
+    if(ramp!=0u) {
+        const unsigned p=(unsigned)(((uint64_t)state->step*255u)/ramp);
+        if(p<255u)pos=p;
+    }
+    if(state->aux0)pos=255u-pos;
+    const ot_wled_rgb_t first=scaled(
+         blend_colors(cfg->background,cfg->foreground,(uint8_t)(255u-pos)),
+         cfg->brightness);
+    const ot_wled_rgb_t second=scaled(
+         blend_colors(cfg->background,cfg->foreground,(uint8_t)pos),
+         cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=(i&1u)?second:first;
+    state->step+=(uint32_t)cfg->frame_time_ms;
+}
+/* Exact pinned FX.cpp tristate_square8() signed waveform. */
+static int8_t fx_tristate8(uint8_t x,uint8_t pulse,uint8_t attack) {
+    int8_t amplitude=127;
+    if(x>127u) {
+        amplitude=-127;
+        x=(uint8_t)(x-127u);
+    }
+    if(x<attack)return (int8_t)(((int16_t)x*amplitude)/attack);
+    if(x<(uint8_t)(pulse-attack))return amplitude;
+    if(x<pulse)return (int8_t)(((int16_t)(pulse-x)*amplitude)/attack);
+    return 0;
+}
+/* Pinned mode_washing_machine() sine and phase arithmetic; default
+ * palette-index to RGB colors requires full palette mapper later. */
+static void washing_frame(const ot_wled_fx_config_t *cfg,
+                           ot_wled_fx_state_t *state,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    const int speed=fx_tristate8((uint8_t)(now>>7),90u,15u);
+    const int delta=(speed*2048)/(512-(int)cfg->speed);
+    state->step+=(uint32_t)delta;
+    for(size_t i=0;i<count;i++) {
+        const uint32_t angle=(((uint32_t)cfg->intensity/25u+1u)*255u*
+                              (uint32_t)i)/(uint32_t)count+(state->step>>7);
+        const uint8_t color_index=wled_sin8((uint8_t)angle);
+        pixels[i]=scaled(blend_colors(cfg->background,cfg->foreground,
+                                       color_index),cfg->brightness);
+    }
+}
+/* Pinned mode_flow() 1D zigzag zones and rotating stripe indices.
+ * The source palette mapping for mcol=255 still needs engine-wide parity. */
+static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                       ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    uint32_t counter=0u;
+    if(cfg->speed)counter=(now*((uint32_t)(cfg->speed>>2)+1u))>>8;
+    const unsigned max_zones=(unsigned)count/6u;
+    unsigned zones=((uint32_t)cfg->intensity*max_zones)>>8;
+    if(zones&1u)zones++;
+    if(zones<2u)zones=2u;
+    const unsigned zone_len=(unsigned)count/zones;
+    if(!zone_len) {
+        for(size_t i=0;i<count;i++)pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const unsigned required=((unsigned)count+zone_len-1u)/zone_len;
+    zones=required+2u;
+    const int32_t offset=((int32_t)count-(int32_t)zones*(int32_t)zone_len)/2;
+    for(size_t i=0;i<count;i++)pixels[i]=scaled(cfg->background,cfg->brightness);
+    for(unsigned z=0;z<zones;z++) {
+        const int32_t pos=offset+(int32_t)z*(int32_t)zone_len;
+        for(unsigned i=0;i<zone_len;i++) {
+            const uint8_t index=(uint8_t)(((uint32_t)i*255u)/zone_len-counter);
+            const unsigned led=(z&1u)?i:(zone_len-1u-i);
+            const int32_t dst=pos+(int32_t)led;
+            if(dst<0 || (size_t)dst>=count)continue;
+            pixels[dst]=scaled(blend_colors(cfg->background,cfg->foreground,index),
+                               cfg->brightness);
+        }
+    }
+}
+/* Pinned mode_sunrise() stage progress and center-out geometry. Upstream
+ * Fire palette (ID 35) is not available yet; use the current two-color
+ * interpolation only as a source-derived geometry port. */
+static void sunrise_frame(const ot_wled_fx_config_t *cfg,
+                          ot_wled_fx_state_t *state,uint32_t now,
+                          uint32_t old_call,ot_wled_rgb_t *pixels,
+                          size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);return;
+    }
+    if(old_call==0u || cfg->speed!=state->aux0) {
+        state->step=now;state->aux0=cfg->speed;
+    }
+    uint32_t stage=0xffffu;
+    uint32_t elapsed=(now-state->step)/100u;
+    if(cfg->speed>120u) {
+        const uint16_t counter=(uint16_t)(
+            (now>>1)*(((uint32_t)(cfg->speed-120u)>>1)+1u));
+        stage=wave16(counter);
+    } else if(cfg->speed) {
+        const uint32_t minutes=cfg->speed>60u?(uint32_t)cfg->speed-60u:
+                                (uint32_t)cfg->speed;
+        const uint32_t target=minutes*600u;
+        if(elapsed>target)elapsed=target;
+        stage=(elapsed*65535u)/target;
+        if(cfg->speed>60u)stage=65535u-stage;
+    }
+    for(size_t i=0;i<=count/2u;i++) {
+        const uint32_t angle=(uint32_t)(((uint64_t)i*stage)/count);
+        const uint32_t wave=wave16((uint16_t)angle);
+        uint32_t luminance=(wave>>8)+((wave*(uint32_t)cfg->intensity)>>15);
+        if(luminance>240u)luminance=240u;
+        const ot_wled_rgb_t c=scaled(blend_colors(cfg->background,cfg->foreground,
+                                        (uint8_t)luminance),cfg->brightness);
+        pixels[i]=c;
+        pixels[count-1u-i]=c;
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1861,6 +2002,22 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_RAILWAY) {
+        railway_frame(cfg,state,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_WASHING_MACHINE) {
+        washing_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_FLOW) {
+        flow_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_SUNRISE) {
+        sunrise_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_TWINKLEUP) {
         twinkleup_frame(cfg,time_ms,pixels,count);
         return true;
