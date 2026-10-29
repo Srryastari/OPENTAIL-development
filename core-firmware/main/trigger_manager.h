@@ -23,4 +23,7 @@ void ot_tm_defaults(ot_tm_profile_t *p);
 bool ot_tm_valid(const ot_tm_profile_t *p);
 const char *ot_tm_name(uint8_t function);
 int ot_tm_from_name(const char *name);
+/* Canonical function-name to logical signal mask for bench simulation and tests.
+ * Disabled/unknown names map to zero; never interpret simulation names as GPIO pins. */
+uint8_t ot_tm_signal_mask_of(const char *name);
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t physical_bits);
