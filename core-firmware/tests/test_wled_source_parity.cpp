@@ -271,10 +271,19 @@ struct PinnedEnv {
     uint32_t call=0,step=0;
     uint16_t aux0=0,aux1=0;
     uint32_t data_counter=0;       // upstream mode_android allocation
+    std::vector<uint8_t> allocation;
     void* data=&data_counter;
-    bool allocateData(size_t bytes) {return bytes<=sizeof(data_counter);}
+    bool allocateData(size_t bytes) {
+        if(bytes<=sizeof(data_counter) && allocation.empty()) return true;
+        if(allocation.size()<bytes) allocation.resize(bytes,0u);
+        data=allocation.data();
+        return true;
+    }
 };
-struct PinnedClock {uint32_t now=0;};
+struct PinnedClock {
+    uint32_t now=0;
+    uint16_t getCurrSegmentId() const {return 0u;}
+};
 static PinnedSeg* current_segment=nullptr;
 static PinnedEnv* current_environment=nullptr;
 static PinnedClock strip;
@@ -304,6 +313,20 @@ uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t hig
 #define SEGENV (*current_environment)
 #define SEGLEN (static_cast<unsigned>(current_segment->pixels.size()))
 #define SEGCOLOR(i) (current_segment->colors[(i)])
+
+/* Fixed host RNG injection, identical for CORE and pinned WLED source.
+ * This validates stochastic branch/state ordering, not device RNG sequence
+ * parity. The 1D source still uses hw_random8 with its original arguments. */
+static uint32_t ref_rng_state=0x73a11c5du;
+static uint32_t ref_random32() {
+    uint32_t x=ref_rng_state;
+    if(x==0u)x=0x73a11c5du;
+    x^=x<<13;x^=x>>17;x^=x<<5;
+    ref_rng_state=x;return x;
+}
+static uint8_t hw_random8(uint32_t max=256u) {
+    return max?(uint8_t)(ref_random32()%max):0u;
+}
 
 // BEGIN UPSTREAM FX.cpp functions, unchanged source bodies.
 void mode_breath(void) {
@@ -921,6 +944,88 @@ void mode_colorwaves() {
   mode_colorwaves_pride_base(false);
 }
 
+//4 bytes
+typedef struct Flasher {
+  uint16_t stateStart;
+  uint8_t stateDur;
+  bool stateOn;
+} flasher;
+
+#define FLASHERS_PER_ZONE 6
+#define MAX_SHIMMER 92
+
+
+void mode_fairy() {
+  //set every pixel to a 'random' color from palette (using seed so it doesn't change between frames)
+  uint16_t PRNG16 = 5100 + strip.getCurrSegmentId();
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    PRNG16 = (uint16_t)(PRNG16 * 2053) + 1384; //next 'random' number
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(PRNG16 >> 8, false, false, 0));
+  }
+
+  //amount of flasher pixels depending on intensity (0: none, 255: every LED)
+  if (SEGMENT.intensity == 0) return;
+  unsigned flasherDistance = ((255 - SEGMENT.intensity) / 28) +1; //1-10
+  unsigned numFlashers = (SEGLEN / flasherDistance) +1;
+
+  unsigned dataSize = sizeof(flasher) * numFlashers;
+  if (!SEGENV.allocateData(dataSize)) return; //allocation failed
+  Flasher* flashers = reinterpret_cast<Flasher*>(SEGENV.data);
+  unsigned now16 = strip.now & 0xFFFF;
+
+  //Up to 11 flashers in one brightness zone, afterwards a new zone for every 6 flashers
+  unsigned zones = numFlashers/FLASHERS_PER_ZONE;
+  if (!zones) zones = 1;
+  unsigned flashersInZone = numFlashers/zones;
+  uint8_t flasherBri[FLASHERS_PER_ZONE*2 -1];
+
+  for (unsigned z = 0; z < zones; z++) {
+    unsigned flasherBriSum = 0;
+    unsigned firstFlasher = z*flashersInZone;
+    if (z == zones-1) flashersInZone = numFlashers-(flashersInZone*(zones-1));
+
+    for (unsigned f = firstFlasher; f < firstFlasher + flashersInZone; f++) {
+      unsigned stateTime = uint16_t(now16 - flashers[f].stateStart);
+      //random on/off time reached, switch state
+      if (stateTime > flashers[f].stateDur * 10) {
+        flashers[f].stateOn = !flashers[f].stateOn;
+        if (flashers[f].stateOn) {
+          flashers[f].stateDur = 12 + hw_random8(12 + ((255 - SEGMENT.speed) >> 2)); //*10, 250ms to 1250ms
+        } else {
+          flashers[f].stateDur = 20 + hw_random8(6 + ((255 - SEGMENT.speed) >> 2)); //*10, 250ms to 1250ms
+        }
+        //flashers[f].stateDur = 51 + hw_random8(2 + ((255 - SEGMENT.speed) >> 1));
+        flashers[f].stateStart = now16;
+        if (stateTime < 255) {
+          flashers[f].stateStart -= 255 -stateTime; //start early to get correct bri
+          flashers[f].stateDur += 26 - stateTime/10;
+          stateTime = 255 - stateTime;
+        } else {
+          stateTime = 0;
+        }
+      }
+      if (stateTime > 255) stateTime = 255; //for flasher brightness calculation, fades in first 255 ms of state
+      //flasherBri[f - firstFlasher] = (flashers[f].stateOn) ? 255-SEGMENT.gamma8((510 - stateTime) >> 1) : SEGMENT.gamma8((510 - stateTime) >> 1);
+      flasherBri[f - firstFlasher] = (flashers[f].stateOn) ? stateTime : 255 - (stateTime >> 0);
+      flasherBriSum += flasherBri[f - firstFlasher];
+    }
+    //dim factor, to create "shimmer" as other pixels get less voltage if a lot of flashers are on
+    unsigned avgFlasherBri = flasherBriSum / flashersInZone;
+    unsigned globalPeakBri = 255 - ((avgFlasherBri * MAX_SHIMMER) >> 8); //183-255, suitable for 1/5th of LEDs flashers
+
+    for (unsigned f = firstFlasher; f < firstFlasher + flashersInZone; f++) {
+      uint8_t bri = (flasherBri[f - firstFlasher] * globalPeakBri) / 255;
+      PRNG16 = (uint16_t)(PRNG16 * 2053) + 1384; //next 'random' number
+      unsigned flasherPos = f*flasherDistance;
+      SEGMENT.setPixelColor(flasherPos, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(PRNG16 >> 8, false, false, 0), bri));
+      for (unsigned i = flasherPos+1; i < flasherPos+flasherDistance && i < SEGLEN; i++) {
+        PRNG16 = (uint16_t)(PRNG16 * 2053) + 1384; //next 'random' number
+        SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(PRNG16 >> 8, false, false, 0, globalPeakBri));
+      }
+    }
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -959,7 +1064,8 @@ static const RefCase refs[]={
     {105,mode_phased,"Phased"},
     {109,mode_phased_noise,"Phased Noise"},
     {63,mode_pride_2015,"Pride 2015"},
-    {67,mode_colorwaves,"Colorwaves"}
+    {67,mode_colorwaves,"Colorwaves"},
+    {49,mode_fairy,"Fairy"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -977,6 +1083,7 @@ int main() {
                     seg.colors[1]=0x000358AEu; // secondary 3,88,174
                     seg.colors[2]=0u;         // missing CORE tertiary stays black
                     current_segment=&seg;current_environment=&env;
+                    ref_rng_state=0x73a11c5du;
                     ot_wled_fx_config_t cfg{};
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
@@ -987,6 +1094,8 @@ int main() {
                     for(uint32_t t:{0u,17u,171u,389u,1500u,65530u}) {
                         strip.now=t;
                         fx.effect();
+                        if(fx.id==49 && t!=0u && env.allocation.size() && env.data==nullptr)
+                            std::abort(); // validate source allocation invariants
                         env.call++;  // upstream effect engine increments after frame
                         if(!ot_wled_fx_render(&cfg,&state,t,actual.data(),count)) {
                             std::fprintf(stderr,"CORE rejected pinned FX %u (%s)\n",fx.id,fx.name);
@@ -1007,7 +1116,7 @@ int main() {
             }
         }
     }
-    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (palette=0, RGB, no gamma)\n",
+    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (palette=0, RGB, no gamma; Fairy uses synchronized test RNG)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
     return 0;
 }
