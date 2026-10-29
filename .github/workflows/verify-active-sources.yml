@@ -36,24 +36,15 @@ jobs:
           for term in required:
               assert term.lower() in contract.lower(), f'Locked release contract missing: {term}'
           assert 'Not repeated' in matrix or 'Not yet' in matrix, 'Physical verification must be distinguished from software checks'
-          files=[Path('web-studio/opentail.htm'),Path('web-studio/opentail-v0.19.118.htm'),Path('android/app/src/main/assets/opentail.htm')]
-          assert all(f.is_file() for f in files), 'Missing Studio source'
-          assert len({f.read_bytes() for f in files})==1, 'Approved Studio sources diverged'
-          print('Locked contract, physical-evidence separation and Studio source parity verified')
+          print('Locked CORE contract and physical-evidence separation verified')
           PY
       - name: Run native firmware logic tests
         run: bash tests/run-host-tests.sh
-      - name: Run Studio UI and interaction regression suite
-        working-directory: .
-        run: node --test web-studio/tests/*.test.cjs
-      - name: Regression-test native WLED bridge and OpenTail overlay
-        working-directory: .
-        run: bash wled-native/tests/run-native-host-tests.sh
 
   core-espidf-build:
-    # Do not publish a flashable bench artifact when host, UI or Android
-    # regression checks on this same commit have failed.
-    needs: [core-host-tests, web-studio-check, android-debug-apk]
+    # CORE build depends only on CORE regression checks, not on an Android
+    # release or Studio UI. All three products keep independent CI jobs.
+    needs: [core-host-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -168,6 +159,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Run standalone Studio UI and interaction regressions
+        run: node --test web-studio/tests/*.test.cjs
       - name: Check deployment and versioned Studio copies
         run: |
           python3 - <<'PY'
