@@ -3351,7 +3351,7 @@ int main() {
             const uint32_t actual=pack(ot_wled_palette_sample(&built,(uint8_t)ix,
                         (uint8_t)bt,(ot_wled_palette_blend_t)blend));
             if(actual!=expected) {
-              std::fprintf(stderr,"Fixed palette mismatch id=%u index=%u brightness=%u blend=%u upstream=%06X CORE=%06X\\n",
+              std::fprintf(stderr,"Fixed palette mismatch id=%u index=%u brightness=%u blend=%u upstream=%06X CORE=%06X\n",
                            id,ix,bt,blend,(unsigned)expected,(unsigned)actual);
               return 1;
             }
@@ -3360,7 +3360,7 @@ int main() {
         }
       }
     }
-    std::printf("WLED fixed palette reference comparison passed: %u RGB samples across 12 built-in/default palette IDs.\\n",fixed_palette_samples);
+    std::printf("WLED fixed palette reference comparison passed: %u RGB samples across 12 built-in/default palette IDs.\n",fixed_palette_samples);
 
     /* Exhaustively compare all 60 pinned gradient tables against source
      * loadDynamicGradientPalette and verbatim ColorFromPalette sampling. */
