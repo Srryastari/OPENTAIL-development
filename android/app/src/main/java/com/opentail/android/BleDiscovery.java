@@ -76,21 +76,31 @@ final class BleDiscovery {
         connectReadOnly(device);
     }
     private CoreFrameCapture.Listener frameListener;
+    // The transport can become idle before its completed frame reaches Compose.
+    // Hold capture admission until the previous callback has been consumed.
+    private volatile boolean frameCallbackPending=false;
     private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
         CoreFrameCapture.Listener cb=frameListener;
-        if(cb!=null)ui.post(()->cb.done(output,sequence,rgb,error));
+        if(cb!=null) {
+            frameCallbackPending=true;
+            ui.post(()->{
+                try {cb.done(output,sequence,rgb,error);}
+                finally {frameCallbackPending=false;}
+            });
+        }
         pumpQueue();
     });
     void setFrameListener(CoreFrameCapture.Listener cb) { frameListener=cb; }
     boolean canCaptureFrame() {return canControl() && frameCapture.supported();}
     void cancelFrameCapture() { frameCapture.abortForStop(); }
-    void captureFrame(int output) {
-        if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return;}
-        if(frameCapture.busy() || cfgBusy || writePending || readReplyPending || fxCapsBusy ||
-           authPending || pairPending || challengePending) {
-            notifyStatus("BLE busy; retry frame capture");return;
+    boolean captureFrame(int output) {
+        if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return false;}
+        if(frameCapture.busy() || frameCallbackPending || cfgBusy || writePending ||
+           readReplyPending || fxCapsBusy || authPending || pairPending || challengePending) {
+            notifyStatus("BLE busy; retry frame capture");return false;
         }
         frameCapture.request(output);
+        return true;
     }
     private final ArrayAdapter<String> entries;
     private BluetoothLeScanner scanner;
