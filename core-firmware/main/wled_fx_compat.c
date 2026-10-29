@@ -163,7 +163,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_DISSOLVE, "Dissolve", "Dissolve@Repeat speed,Dissolve speed,,,,Random,Complete;!,!;!",
      true, true, true, true, false},
     {OT_WLED_DISSOLVE_RANDOM, "Dissolve Rnd", "Dissolve Rnd@Repeat speed,Dissolve speed;,!;!",
-     false, true, true, true, false}
+     false, true, true, true, false},
+    {OT_WLED_CANDLE_MULTI, "Candle Multi", "Candle Multi@!,!;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_METEOR, "Meteor", "Meteor@!,Trail;!,!;!",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1724,6 +1728,99 @@ static bool dissolve_frame(const ot_wled_fx_config_t *cfg,
     return true;
 }
 
+
+/* Pinned FX.cpp candle(true): one 32-bit last-call time plus a three-byte
+ * brightness/target/step tuple per pixel beyond candle zero. */
+static bool candle_multi_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    if(count>SIZE_MAX/3u-4u)return false;
+    uint8_t *data=fx_zone_scratch(state,4u+(count>1u?(count-1u)*3u:3u));
+    if(!data)return false;
+    uint32_t lastcall;
+    memcpy(&lastcall,data,sizeof(lastcall));
+    if(now-lastcall<23u)return true;
+    memcpy(data,&now,sizeof(now));
+    const unsigned valrange=cfg->intensity;
+    const unsigned rndval=valrange>>1;
+    const unsigned factor=cfg->speed>252u?1u:cfg->speed>99u?2u:
+                          cfg->speed>49u?3u:4u;
+    for(size_t i=0;i<count;i++) {
+        const size_t off=4u+(i-1u)*3u;
+        unsigned brightness=i==0u?state->aux0:data[off];
+        unsigned target=i==0u?state->aux1:data[off+1u];
+        unsigned fade_step=i==0u?state->step:data[off+2u];
+        if(fade_step==0u) {
+            brightness=128u;
+            target=130u+fx_rand8(state,4u);
+            fade_step=1u;
+        }
+        bool new_target=false;
+        if(target>brightness) {
+            brightness=brightness+fade_step>255u?255u:brightness+fade_step;
+            if(brightness>=target)new_target=true;
+        } else {
+            brightness=brightness>fade_step?brightness-fade_step:0u;
+            if(brightness<=target)new_target=true;
+        }
+        if(new_target) {
+            target=fx_rand8(state,rndval)+fx_rand8(state,rndval);
+            if(target<(rndval>>1))
+                target=(rndval>>1)+fx_rand8(state,rndval);
+            target+=(255u-valrange);
+            unsigned difference=target>brightness?
+                target-brightness:brightness-target;
+            fade_step=difference>>factor;
+            if(!fade_step)fade_step=1u;
+        }
+        const ot_wled_rgb_t col=scaled(blend_colors(cfg->background,
+                         cfg->foreground,(uint8_t)brightness),cfg->brightness);
+        if(i==0u) {
+            for(size_t j=0;j<count;j++)pixels[j]=col;
+            state->aux0=(uint16_t)brightness;
+            state->aux1=(uint16_t)target;
+            state->step=fade_step;
+        } else {
+            pixels[i]=col;
+            data[off]=(uint8_t)brightness;
+            data[off+1u]=(uint8_t)target;
+            data[off+2u]=(uint8_t)fade_step;
+        }
+    }
+    return true;
+}
+/* Pinned FX.cpp mode_meteor() source path with check1/check3 false.
+ * Palette 0 maps the source heat-trail brightness into foreground RGB.
+ * Each universal zone retains its own WLED trail SEGENV.data bytes. */
+static bool meteor_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);return true;
+    }
+    uint8_t *trail=fx_zone_scratch(state,count);
+    if(!trail)return false;
+    const size_t size=1u+count/20u;
+    const uint32_t counter=now*((uint32_t)(cfg->speed>>2)+8u);
+    const size_t start=(size_t)((counter*(uint32_t)count)>>16);
+    for(size_t i=0;i<count;i++) {
+        if(fx_rand8(state,256u)<=255u-(uint32_t)cfg->intensity) {
+            const uint8_t scale=(uint8_t)(128u+fx_rand8(state,127u));
+            trail[i]=(uint8_t)(((uint16_t)trail[i]*(1u+scale))>>8);
+            const uint8_t luminance=trail[i];
+            pixels[i]=scaled(scaled(cfg->foreground,luminance),cfg->brightness);
+        }
+    }
+    const ot_wled_rgb_t full=scaled(cfg->foreground,cfg->brightness);
+    for(size_t j=0;j<size;j++) {
+        const size_t index=(start+j)%count;
+        trail[index]=240u;
+        pixels[index]=full;
+    }
+    state->step+=(uint32_t)cfg->speed+1u;
+    return true;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1743,6 +1840,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_CANDLE_MULTI)
+        return candle_multi_frame(cfg,state,time_ms,pixels,count);
+    if(cfg->effect_id==OT_WLED_METEOR)
+        return meteor_frame(cfg,state,time_ms,pixels,count);
     if(cfg->effect_id==OT_WLED_DYNAMIC ||
        cfg->effect_id==OT_WLED_DYNAMIC_SMOOTH)
         return dynamic_frame(cfg,state,time_ms,call,pixels,count,
