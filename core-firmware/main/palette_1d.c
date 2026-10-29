@@ -2,8 +2,12 @@
 #include "effects_1d.h"
 bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette){
  if(palette==0)return true;
- /* WLED effect adapters currently implement direct color rendering only. */
- return effect_id==OT_FX_EMBERS&&(palette==2||palette==3||palette==4);
+ /* Only these two source-pinned WLED adapters currently sample the
+  * verified fixed 16-color palette table. Keep all other borrowed modes
+  * and existing Embers settings fail-closed / backward compatible. */
+ if(effect_id==OT_WLED_COLOR_CLOUDS||effect_id==OT_WLED_FLOW_STRIPE)
+   return palette>=2u&&palette<=12u;
+ return effect_id==OT_FX_EMBERS&&(palette==2u||palette==3u||palette==4u);
 }
 static uint8_t linear(uint8_t a,uint8_t b,uint8_t t){
  return (uint8_t)(((uint32_t)a*(255u-t)+(uint32_t)b*t+127u)/255u);
