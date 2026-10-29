@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[69]={0};
-    assert(ot_wled_fx_supported_ids(ids,69)==69);
+    uint16_t ids[73]={0};
+    assert(ot_wled_fx_supported_ids(ids,73)==73);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -33,7 +33,8 @@ int main(void) {
            ids[58]==40 && ids[59]==41 && ids[60]==60 &&
            ids[61]==92 && ids[62]==93 && ids[63]==94 &&
            ids[64]==17 && ids[65]==32 && ids[66]==59 && ids[67]==111 &&
-           ids[68]==88);
+           ids[68]==88 && ids[69]==7 && ids[70]==117 &&
+           ids[71]==18 && ids[72]==19);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -632,16 +633,34 @@ int main(void) {
     ot_wled_rgb_t candle_col=p[0];
     assert(ot_wled_fx_render(&c,&s,30,p,31));
     assert(eq(p[0],candle_col));
+    /* Dynamic/Dissolve source states allocate only their configured zone
+     * size and are safely released on replacement or explicit reset. */
+    for(size_t k=69;k<73;k++) {
+        c.effect_id=ids[k];c.speed=125;c.intensity=195;c.brightness=255;
+        c.foreground=(ot_wled_rgb_t){200,10,20};
+        c.background=(ot_wled_rgb_t){1,2,3};
+        ot_wled_fx_reset(&s);
+        memset(p,0,sizeof(p));
+        assert(ot_wled_fx_render(&c,&s,0,p,31));
+        assert(s.scratch!=NULL);
+        assert(s.scratch_bytes>=31u);
+        uint8_t *scratch_before=s.scratch;
+        for(uint32_t t=1u;t<2000u;t+=29u)
+            assert(ot_wled_fx_render(&c,&s,t,p,31));
+        assert(s.scratch==scratch_before);
+        ot_wled_fx_reset(&s);
+        assert(s.scratch==NULL && s.scratch_bytes==0u);
+    }
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<69;k++) {
+    for(size_t k=0;k<73;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 69 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 73 modes, timing, zone limits and validation passed.");
     return 0;
 }
