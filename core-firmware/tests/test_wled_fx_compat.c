@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[47]={0};
-    assert(ot_wled_fx_supported_ids(ids,47)==47);
+    uint16_t ids[50]={0};
+    assert(ot_wled_fx_supported_ids(ids,50)==50);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -26,7 +26,8 @@ int main(void) {
            ids[34]==34 && ids[35]==46 && ids[36]==47 &&
            ids[37]==108 && ids[38]==27 &&
            ids[39]==4 && ids[40]==5 && ids[41]==20 && ids[42]==21 &&
-           ids[43]==22 && ids[44]==35 && ids[45]==36 && ids[46]==103);
+           ids[43]==22 && ids[44]==35 && ids[45]==36 && ids[46]==103 &&
+           ids[47]==29 && ids[48]==39 && ids[49]==61);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -511,16 +512,38 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,0,p,31));
     for(size_t i=0;i<31;i++)assert(eq(p[i],c.foreground));
 
+    /* The Chase Random and both Stream source ports remain deterministic
+     * for a given local RNG seed and output length, with no bus hardcoding. */
+    for(size_t k=47;k<50;k++) {
+        c.effect_id=ids[k];c.speed=170;c.intensity=85;c.brightness=255;
+        ot_wled_fx_reset(&s);
+        assert(ot_wled_fx_render(&c,&s,1024,p,31));
+        ot_wled_rgb_t first[31];
+        memcpy(first,p,sizeof(first));
+        ot_wled_fx_reset(&s);
+        assert(ot_wled_fx_render(&c,&s,1024,p,31));
+        assert(memcmp(first,p,sizeof(first))==0);
+        assert(ot_wled_fx_render(&c,&s,2048,p,31));
+    }
+    c.effect_id=OT_WLED_STREAM;c.speed=210;c.intensity=255;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    assert(ot_wled_fx_render(&c,&s,3000,p,31));
+    c.effect_id=OT_WLED_STREAM2;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    assert(ot_wled_fx_render(&c,&s,3000,p,31));
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<47;k++) {
+    for(size_t k=0;k<50;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 47 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 50 modes, timing, zone limits and validation passed.");
     return 0;
 }
