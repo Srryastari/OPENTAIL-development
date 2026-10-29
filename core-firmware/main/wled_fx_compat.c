@@ -2257,6 +2257,8 @@ static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value) {
 /* WLED colors.cpp color_fade(color, amount, true), packed RGB.
  * The source's dominant-channel rounding is intentional: replacing this
  * with linear scaling visibly changes the default-color Colorwaves path. */
+static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
+
 /* WLED FX.cpp Fairy uses a four-byte flasher per active sparkle. Reuse
  * CORE's existing per-zone scratch allocation and source shimmer-zone
  * grouping. The upstream hw_random8 draws use the existing seeded CORE
