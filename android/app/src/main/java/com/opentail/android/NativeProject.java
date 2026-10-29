@@ -193,11 +193,12 @@ final class NativeProject {
     }
 
     synchronized String name() { return data.optString("projectName", "Untitled project"); }
-    synchronized void name(String name) {
+    synchronized boolean name(String name) {
+        if (name == null) return false;
         String n = name.trim();
         if (n.isEmpty()) n = "Untitled project";
-        try { data.put("projectName", n.substring(0, Math.min(64, n.length()))); save(); }
-        catch (JSONException ignored) { }
+        try { data.put("projectName", n.substring(0, Math.min(64, n.length()))); return save(); }
+        catch (JSONException ignored) { return false; }
     }
 
     /** v4 Studio-compatible per-zone zero-based colors, local-only (never BLE). */
