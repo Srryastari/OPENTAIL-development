@@ -2284,8 +2284,9 @@ static void bouncing_balls_frame(const ot_wled_fx_config_t *cfg,
     ot_bouncing_ball_t *balls=(ot_bouncing_ball_t*)fx_zone_scratch(
         state,16u*sizeof(ot_bouncing_ball_t));
     if(!balls) {
-        const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
-        for(size_t i=0;i<count;i++)pixels[i]=bg;
+        /* Upstream FX_FALLBACK_STATIC on segment allocation failure. */
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
         return;
     }
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
