@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[34]={0};
-    assert(ot_wled_fx_supported_ids(ids,34)==34);
+    uint16_t ids[37]={0};
+    assert(ot_wled_fx_supported_ids(ids,37)==37);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -22,7 +22,8 @@ int main(void) {
            ids[21]==25 && ids[22]==28 && ids[23]==30 && ids[24]==33 &&
            ids[25]==50 && ids[26]==54 && ids[27]==55 && ids[28]==56 &&
            ids[29]==2 && ids[30]==15 && ids[31]==16 &&
-           ids[32]==52 && ids[33]==84);
+           ids[32]==52 && ids[33]==84 &&
+           ids[34]==34 && ids[35]==46 && ids[36]==47);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -408,16 +409,44 @@ int main(void) {
     assert(eq(p[2],c.background) && eq(p[3],c.background));
     assert(eq(p[4],(ot_wled_rgb_t){0,0,0}));
 
+    /* Pinned Colorful base and high-intensity three-color phase. */
+    c.effect_id=OT_WLED_COLORFUL;c.speed=0;c.intensity=0;
+    c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,128,64}));
+    assert(eq(p[1],(ot_wled_rgb_t){229,210,65}));
+    assert(eq(p[4],p[0]));
+    c.intensity=200;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background));
+    assert(eq(p[2],(ot_wled_rgb_t){0,0,0}));
+
+    /* Gradient/Loading share pinned integer source maths. Gradient starts
+     * from primary at index zero; Loading uses a different distance field. */
+    c.effect_id=OT_WLED_GRADIENT;c.intensity=128;c.speed=255;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(p[0].r>240 && p[15].r<p[0].r);
+    c.effect_id=OT_WLED_LOADING;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(p[1].b>p[15].b);
+    c.effect_id=OT_WLED_GRADIENT;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.background) && eq(p[15],c.background));
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<34;k++) {
+    for(size_t k=0;k<37;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 34 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 37 modes, timing, zone limits and validation passed.");
     return 0;
 }
