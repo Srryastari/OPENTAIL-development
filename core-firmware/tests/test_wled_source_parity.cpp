@@ -360,7 +360,16 @@ static CRGBPalette16 ref_palette(uint8_t id,uint32_t primary,uint32_t secondary,
  else if(id==0||id==6){
  const uint32_t colors[16]={0x9B00D5u,0xBD00B8u,0xDA0092u,0xF3005Cu,0xF45500u,0xDC8F00u,0xD5B400u,0xD5D500u,0xD59B00u,0xEF6600u,0xF90044u,0xE10086u,0xC400B0u,0xA300CFu,0x7600E8u,0x0032FCu};
  for(unsigned i=0;i<16;i++)pal[i]=CRGB(colors[i]);
- } else if(id==11u||id==12u) {
+ } else if(id>=7u && id<=10u) {
+ const uint32_t colors[4][16]={
+ {0x0000FFu,0x00008Bu,0x00008Bu,0x00008Bu,0x00008Bu,0x00008Bu,0x00008Bu,0x00008Bu,0x0000FFu,0x00008Bu,0x87CEEBu,0x87CEEBu,0xADD8E6u,0xFFFFFFu,0xADD8E6u,0x87CEEBu},
+ {0x000000u,0x800000u,0x000000u,0x800000u,0x8B0000u,0x8B0000u,0x800000u,0x8B0000u,0x8B0000u,0x8B0000u,0xFF0000u,0xFFA500u,0xFFFFFFu,0xFFA500u,0xFF0000u,0x8B0000u},
+ {0x191970u,0x00008Bu,0x191970u,0x000080u,0x00008Bu,0x0000CDu,0x2E8B57u,0x008080u,0x5F9EA0u,0x0000FFu,0x008B8Bu,0x6495EDu,0x7FFFD4u,0x2E8B57u,0x00FFFFu,0x87CEFAu},
+ {0x006400u,0x006400u,0x556B2Fu,0x006400u,0x008000u,0x228B22u,0x6B8E23u,0x008000u,0x2E8B57u,0x66CDAAu,0x32CD32u,0x9ACD32u,0x90EE90u,0x7CFC00u,0x66CDAAu,0x228B22u}
+ };
+ for(unsigned i=0;i<16u;i++)pal[i]=CRGB(colors[id-7u][i]);
+ }
+ else if(id==11u||id==12u) {
  const uint32_t rainbow[16]={
  0xFF0000u,0xEB7000u,0xD59B00u,0xD5BA00u,0xD5D500u,0x9CEB00u,0x00FF00u,0x00EB70u,
  0x00D59Bu,0x009CD4u,0x0000FFu,0x7000EBu,0x9B00D5u,0xBA00BBu,0xD5009Bu,0xEB0072u};
@@ -2307,7 +2316,7 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,11u,12u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=(fx.id==179u&&pal==0u)?11u:pal;
                     PinnedEnv env;
