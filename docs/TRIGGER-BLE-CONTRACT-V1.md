@@ -46,6 +46,17 @@ The write is acknowledged at ATT level; clients must **read back** the character
 - Rendering owns the final pixel writer. Mapped Brake/Turn/Reverse/AUX override only assigned universal output zones; Parking yields where a selected show is active. Trigger release restores ongoing effect phase.
 - This protocol **does not yet** expose per-trigger effect animation assignment, per-trigger custom colors, wiring auto-detection, independent failover, or vehicle-safe optical response measurements.
 
+## Prior bench observations as regression fixtures
+
+The earlier physically observed input masks are preserved explicitly in `core-firmware/tests/test_verified_bench_contract.c`. These are **historical observations from an older flashed build**, not newly measured hardware results on this source:
+
+- Individual inputs: IN1..IN8 on GPIO4..11 produced masks `1, 2, 4, 8, 16, 32, 64, 128`; release produced `0`.
+- Previously reported combinations: `3, 5, 6, 9, 10, 12, 14, 15, 17, 18, 30, 31, 224, 255`. Hazard inputs = `12`; Brake + hazards = `14`; Parking + Brake + hazards = `15`; Brake + hazards + Reverse = `30`; adding Park to that = `31`.
+- Earlier user's bench observations described both turn zones amber for hazards, the Brake zone red over Parking, Reverse on its assigned zone, and an interrupted effect resuming after release. Those optical observations require **fresh physical confirmation** on the new firmware; host overlay tests do not measure effect phase or photons.
+- The regression fixture applies every historical mask to the identity mapping and verifies expected role-local trigger colors **independent of geometry**, including no-show Parking baseline and uninterrupted pre-existing show pixels for nonmatching roles.
+- A test-only illustrative sequence `0 → 1 → 15 → 31 → 15 → 1 → 0` asserts overlay/restoration behavior. This is a software replay, **not** a newly observed physical sequence.
+- No firmware test assumes fixed GS400 zone sizes. Existing saved profile geometry is exercised separately. Optocoupler polarity, sub-40ms response accuracy, GPIO voltage, hardware failover, controller reboot persistence, and output optical timing remain on-bench test gates.
+
 ## Handoff / acceptance
 
 Native Android owns the presentation: a trigger mapping editor may add read/write/readback using this packet, preserving the approved UI. Do not edit Android from the trigger branch.
