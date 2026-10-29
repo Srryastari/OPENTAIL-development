@@ -32,6 +32,15 @@
 18. Closed a GATT race by guarding owner pairing/authentication against other active BLE operations and resetting pending authentication on disconnect/reconnect.
 19. Made native v4 preset-library updates **atomic** on disk commit failure; an unsuccessful save restores the prior in-memory collection instead of presenting an unsaved preset as persisted.
 
+## Native palette engine and locked styling (October 29 continuation)
+
+- **Android-only change:** Native Compose PalettePicker now replaces the sequence's unlabelled numeric palette slider and appears in Show Modes Effects and per-sequence-step editing. Same existing OLED/white Tone, pill controls and fields; no new tab, WebView, Internet permission or other UI theme.
+- Per-step palette is stored as `sequence[].settings.pal`, interoperable with Studio's v4 sequence settings. Shared palette remains `sequenceOptions.sharedPaletteEnabled/sharedPaletteId`, default OFF; toggling OFF restores stored step palette without overwriting it. The visible step summary reports the effective preference and clearly limits it to palette-compatible effects.
+- Native catalog identifies default IDs 0–4; other IDs remain honest numbered choices unless a project supplies `paletteNames`. Gradient swatches are drawn **only** from well-formed project `palettePreviews` fixed RGB stop entries with proper 0–255 offsets; no fabricated preview for a dynamic/unknown palette. Existing Studio v4 exports do not include those optional preview fields, so most palette swatches will correctly say “Preview unavailable.”
+- Standalone effect palette choice currently persists in **local Android preferences** like its existing speed/color settings; it is not yet a firmware scene or a portable Show Mode profile. Selecting it invalidates an old CORE frame but **does not send a pretend palette write** through the current palette-free BLE FX request. Sequence palette authoring is locally exported/imported with the v4 project.
+- The locked LED viewer remains the zero-based design strip or an authenticated single CORE RGB888 frame. A palette swatch is **not** a CORE-rendered animation; end-to-end physical palette application requires CORE palette protocol support and bench proof.
+- Native palette source/shape regression guards were added. **Current-head Kotlin build, Android unit tests, screenshots, TalkBack, BLE, and real palette parity require independent acceptance.** Keep Android PR #21 draft; no cross-domain merges.
+
 ## Not yet accepted; do NOT label these complete
 
 - **Visual 1:1 UI:** Shared native capsule slider styling is implemented across editors, but exact icons, optical glow strength, spacing, scrolling, dialogs and white-mode appearance still require on-phone screenshot comparison with the locked reference. Static checks cannot certify visual identity.
