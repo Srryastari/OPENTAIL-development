@@ -3437,63 +3437,6 @@ int main() {
                         }
                         for(size_t i=0;i<count;i++) {
                             if(pack(actual[i])!=(seg.pixels[i]&0xffffffu)) {
-                                if(fx.id==112u && env.data && state.scratch) {
-                                    /* Failure-only diagnostic: compare upstream and CORE
-                                     * particle setup, without changing the renderer. */
-                                    struct CoreSpotProbe {
-                                        float speed;
-                                        uint8_t color_idx;
-                                        int16_t position;
-                                        uint32_t last;
-                                        uint8_t width,type;
-                                    };
-                                    static_assert(sizeof(CoreSpotProbe)==16u,"CORE spot layout");
-                                    const auto* upstream_spots=reinterpret_cast<const spotlight*>(env.data);
-                                    const auto* core_spots=reinterpret_cast<const CoreSpotProbe*>(state.scratch);
-                                    const unsigned num=2u+(unsigned)intensity*47u/255u;
-                                    std::fprintf(stderr,"Dancing Shadows probe: upstream RNG=%08X CORE RNG=%08X spots=%u\\n",
-                                                 ref_rng_state,state.rng_state,num);
-                                    uint32_t expected_replayed=0u;
-                                    const auto diag_pal=ref_palette(seg.palette,seg.colors[0],
-                                                                    seg.colors[1],seg.colors[2]);
-                                    for(unsigned si=0u;si<num;si++) {
-                                        const auto& spot=upstream_spots[si];
-                                        const uint32_t color=ColorFromPalette(diag_pal,
-                                               spot.colorIdx,255u,LINEARBLEND_NOWRAP);
-                                        for(unsigned j=0u;j<spot.width;j++) {
-                                            const int target=spot.position+(int)j;
-                                            if(target!=(int)i)continue;
-                                            if(spot.width>1u && spot.type>=3u &&
-                                               j%((unsigned)spot.type-1u)!=0u)continue;
-                                            unsigned amount=128u;
-                                            if(spot.width>1u && spot.type==1u)
-                                                amount=cubicwave8(map(j,0,spot.width-1u,0,255));
-                                            else if(spot.width>1u && spot.type==2u)
-                                                amount=cubicwave8(2*map(j,0,spot.width-1u,0,255));
-                                            expected_replayed=color_blend(expected_replayed,color,
-                                                                         (uint8_t)amount);
-                                            std::fprintf(stderr,"spot contribution si=%u j=%u pos=%d width=%u type=%u idx=%u alpha=%u color=%06X accum=%06X\\n",
-                                                si,j,spot.position,spot.width,spot.type,
-                                                spot.colorIdx,amount,(unsigned)(color&0xffffffu),
-                                                (unsigned)(expected_replayed&0xffffffu));
-                                        }
-                                    }
-                                    std::fprintf(stderr,"spot replay %06X source %06X CORE %06X\\n",
-                                                 (unsigned)(expected_replayed&0xffffffu),
-                                                 (unsigned)(seg.pixels[i]&0xffffffu),
-                                                 (unsigned)pack(actual[i]));
-                                    for(unsigned si=0u;si<num;si++) {
-                                        const auto& u=upstream_spots[si];
-                                        const auto& c=core_spots[si];
-                                        if(u.position!=c.position || u.width!=c.width ||
-                                           u.colorIdx!=c.color_idx || u.type!=c.type || u.speed!=c.speed) {
-                                            std::fprintf(stderr,"spot=%u pos=%d/%d width=%u/%u colorIdx=%u/%u type=%u/%u speed=%.7g/%.7g\\n",
-                                                         si,u.position,c.position,u.width,c.width,
-                                                         u.colorIdx,c.color_idx,u.type,c.type,
-                                                         (double)u.speed,(double)c.speed);
-                                        }
-                                    }
-                                }
                                 std::fprintf(stderr,
                                   "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
                                   fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
