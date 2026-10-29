@@ -102,6 +102,28 @@ The evidence below is deliberately split between an **earlier user-observed benc
 - **Universal input reassignment:** Beyond the older physical identity mask tests, the new host suite checks **8 pins × 9 supported functions × all 256 raw masks** (18,432 mapping cases), including Disabled, arbitrary duplicate functions, one-function-for-all-inputs, last-source release, and physical Brake coexisting with simulated Reverse. These are **new software tests**, not claimed as historical physical passes.
 - **Previously unsuccessful initial wiring attempt:** earlier optocoupler testing included an instance where grounding GPIO48 froze the onboard status light before the correctly isolated pin map was established. This was an earlier wiring issue, not evidence that input debounce or arbitration is incorrect. Exact optocoupler output voltage, active-low polarity and on-board status pin allocation still require direct hardware validation.
 
+## October 29 audit recheck — all 11 responsibilities
+
+**Scope:** trigger-only audit across the current PR #24 branch and its moving CORE PR #19 merge base. Software evidence is not optical/electrical proof. The dedicated trigger CI now also executes `core-firmware/tests/test_trigger_runtime_contract.py` to check live-source boundaries independent of unrelated OTA, Android and effects release jobs. [Exact-head trigger CI on `dfa8998`](https://github.com/Srryastari/OPENTAIL-development/actions/runs/40972032467) passed its source-contract and three production-linked host test groups.
+
+| # | Area | Software evidence checked | Still unverified / acceptance gate |
+| --- | --- | --- | --- |
+| 1 | Physical trigger GPIO / polarity / isolation / startup | Eight pins GPIO4–11; configured input/pull-up; shared active-low normalization; CORE base now propagates failed `input_init()` into sampler/output startup readiness | Actual PC817 board output polarity, 3.3V levels, channel cross-talk and power-up states measured on target PCB |
+| 2 | Independent debounce | Nominal 10ms FreeRTOS sampler, four stable samples, render-task wake, per-pin assert/release/chatter tests | Scheduler jitter and actual trigger-to-LED latency recorded physically; four samples do **not** prove a 40ms worst-case |
+| 3 | Universal mapping | All 8 pins × 9 functions × 256 raw masks; disabled/duplicate/AUX combinations, malformed packets, NVS schema validation on load | Saved custom mapping after real power cycle and corrupted-NVS bench recovery |
+| 4 | Priority | Exhaustive 256 mask/role overlays; Brake > Parking; hazards both turns; Reverse and AUX independent | Live simultaneous 12V inputs and real emitted pixels on the candidate firmware |
+| 5 | Show interaction | Actual legacy Wipe host phase and user-zone compositor; selected effects preserved outside matching roles and resumed after trigger release | Physical CORE effects/particles/flaring frame fidelity and trigger timing under heavy frame load |
+| 6 | Universal output integration | Distinct two-output user-defined roles and lengths; inert factory default; saved 522/30 lengths used **only in historical fixtures**; overlays before final wire swizzle | Physical output1/output2 behavior with configured arbitrary zones and driver load |
+| 7 | Simulation / Stop | Logical-name parser and masks `8→12→16`; restored 15s simulation TTL; physical OR simulation; Stop and BLE disconnect never clear the physical input mask | Actual TTL expiry/remap boundary timing, Stop/Resume on attached hardware |
+| 8 | BLE / HTTP | Owner authorization in trigger GATT; exact 11-byte write / 15-byte readback; revision/stale/invalid/duplicate/disabled packets; HTTP schema and readback normalized GPIO + debounced physical masks | Native Android GATT trigger-map integration and owner-authorized phone read/write/readback |
+| 9 | Persistence / concurrency | Mutex between BLE and HTTP saves; NVS commit before RAM profile swap; same instantaneous GPIO + debounced busy veto for trigger and output saves; invalid store falls back to neutral trigger defaults | Race where input asserts *during* NVS write still open; atomically deferred mapping application and power-loss test not verified |
+| 10 | Historical and automatic regression | Three compiled host suites, 18,432 remap cases, previous optocoupler masks/bench geometry/combos, new trigger runtime contract; dedicated independent green CI | Regression suite rerun after upstream CORE merges and hardware reflash |
+| 11 | Hardware acceptance | Only historic earlier-firmware physical masks/observations are recorded; candidate firmware host builds and source checks are not hardware measurements | Scope of physical acceptance includes PC817 polarity, 12V isolation, input latency, real RGB/brightness, reverse/turn/brake and safe boot/failed-input startup |
+
+**Cross-workstream handoffs (October 29):** [CORE/firmware PR #19](https://github.com/Srryastari/OPENTAIL-development/pull/19#issuecomment-6510787613), [flare/spark PR #22](https://github.com/Srryastari/OPENTAIL-development/pull/22#issuecomment-6510788183), [native Android PR #21](https://github.com/Srryastari/OPENTAIL-development/pull/21#issuecomment-6510788658). Those changes remain owned by their workstreams; no unrelated PR is merged by this audit.
+
+**Release disposition:** Trigger software regression milestone **PASSED**. Hardware acceptance **PENDING**. NVS-during-activation atomicity **PENDING**. PR #24 stays draft/unmerged. Independent CI does not waive full CORE firmware, effects, phone or physical proof gates.
+
 ## Handoff / acceptance
 
 Native Android owns the presentation: a trigger mapping editor may add read/write/readback using this packet, preserving the approved UI. Do not edit Android from the trigger branch.
