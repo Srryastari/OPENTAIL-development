@@ -9,6 +9,7 @@ const path=require('node:path');
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
+const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
@@ -87,19 +88,29 @@ assert(bleSource.includes('frameCapture.cancel(); // GATT close may never produc
        'Clear stale CORE output UI and prevent conflicting GATT operations');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
-const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const homeSection=compose.split('private fun HomePage(t: Tone, changePage: (Int) -> Unit) {')[1]
                          .split('private fun EffectsPreview(')[0];
 const settingsSection=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
                              .split('private fun HardwareOutputEditor(')[0];
 assert(settingsSection.includes('Pill("Preview Offline", t)') &&
-       settingsSection.includes('if (liveArmed.value)') &&
-       settingsSection.includes('livePreview.stop()') &&
-       settingsSection.includes('offlinePreview.value = true') &&
-       settingsSection.includes('coreFrame.value = null') &&
+       settingsSection.includes('enterOfflinePreview()') &&
        settingsSection.includes('changePage(1)') &&
-       settingsSection.includes('ConnectPill {'),
+       settingsSection.includes('ConnectPill {') &&
+       compose.includes('private fun enterOfflinePreview()') &&
+       compose.includes('offlinePreview.value = true') &&
+       compose.includes('livePreview.stop()'),
        'Locked Settings Connect and offline preview regression');
+assert(compose.includes('4 -> AutoEventsPage(t) { effectId ->') &&
+       compose.includes('enterOfflinePreview()\n                        page = 1') &&
+       compose.includes('Offline preview inspects exact design pixels; CORE provides animation.'),
+       'Auto Events offline preview must use the same BLE-isolated session as Settings');
+const presetBlock=compose.split('private fun PresetsPage(t: Tone) {')[1]
+                         .split('private fun LayoutPage(t: Tone) {')[0];
+assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
+       presetBlock.includes('design.put("savedPresets", JSONArray(project.presets().toString()))') &&
+       presetBlock.includes('presetStatus = if (restored)') &&
+       !presetBlock.includes('.put("studio", project.exportJson())'),
+       'Presets may not recursively embed or erase their own library');
 assert(homeSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        settingsSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        homeSection.includes('Caption(bleMessage.value, t)') &&
