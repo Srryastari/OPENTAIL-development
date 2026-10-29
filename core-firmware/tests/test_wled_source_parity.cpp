@@ -383,7 +383,10 @@ struct PinnedSeg {
     uint32_t color_from_palette(uint16_t i,bool mapping,bool moving,uint8_t slot,uint8_t pbri=255u) const {
         (void)mapping;
         if(palette!=0){const auto p=ref_palette(palette,colors[0],colors[1],colors[2]);return ColorFromPalette(p,i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);}
-        if(slot>2)std::abort();
+        if(slot>2) {
+          if(slot==3u)return ColorFromPalette(ref_palette(0u,colors[0],colors[1],colors[2]),i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);
+          std::abort();
+        }
         return color_fade(colors[slot],pbri,true);
     }
     void blendPixelColor(size_t i,CRGBW color,uint8_t b) {
@@ -2211,6 +2214,24 @@ void mode_tetrix(void) {
 static_assert(sizeof(tetris)==20u,"Pinned Tetris C++ data must be 20 bytes");
 // END UPSTREAM FX.cpp Tetrix.
 
+// BEGIN UPSTREAM FX.cpp Flow Stripe, original source.
+void mode_FlowStripe(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const int hl = SEGLEN * 10 / 13;
+  uint8_t hue = strip.now / (SEGMENT.speed+1);
+  uint32_t t = strip.now / (SEGMENT.intensity/8+1);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    int c = ((abs((int)i - hl) * 127) / hl);
+    c = sin8_t(c);
+    c = sin8_t(c / 2 + t);
+    byte b = sin8_t(c + t/8);
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(b + hue, false, true, 3));
+  }
+} // mode_FlowStripe()
+
+// END UPSTREAM FX.cpp Flow Stripe.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2260,7 +2281,8 @@ static const RefCase refs[]={
     {116,mode_tv_simulator,"TV Simulator"},
     {218,mode_ColorClouds,"Color Clouds"},
     {89,mode_starburst,"Fireworks Starburst"},
-    {44,mode_tetrix,"Tetrix"}
+    {44,mode_tetrix,"Tetrix"},
+    {179,mode_FlowStripe,"Flow Stripe"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2276,7 +2298,7 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=fx.id==218u?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=pal;
                     PinnedEnv env;
