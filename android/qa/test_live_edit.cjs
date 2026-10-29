@@ -67,6 +67,12 @@ assert(!preview.includes('saveOutput(') && !preview.includes('fxPreset('),
   'Live FX preview cannot use NVS config or preset writes.');
 assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview.stop()'),
  'Live hardware preview must STOP on activity background/exit.');
+assert(hardwareBlock.includes('fun adjustZone(') &&
+       hardwareBlock.includes('fun adjustOutput(') &&
+       hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
+       hardwareBlock.includes('next.put("pixels", total)') &&
+       hardwareBlock.includes('PixelStrip(t,'),
+       'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
 assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
        hardwareBlock.includes('Save to CORE · verify readback'),
