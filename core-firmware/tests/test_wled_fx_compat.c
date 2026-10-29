@@ -11,14 +11,16 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[21]={0};
-    assert(ot_wled_fx_supported_ids(ids,21)==21);
+    uint16_t ids[29]={0};
+    assert(ot_wled_fx_supported_ids(ids,29)==29);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
            ids[12]==85 && ids[13]==86 && ids[14]==98 && ids[15]==100 &&
            ids[16]==8 && ids[17]==9 && ids[18]==14 &&
-           ids[19]==24 && ids[20]==26);
+           ids[19]==24 && ids[20]==26 &&
+           ids[21]==25 && ids[22]==28 && ids[23]==30 && ids[24]==33 &&
+           ids[25]==50 && ids[26]==54 && ids[27]==55 && ids[28]==56);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -319,6 +321,71 @@ int main(void) {
     ot_wled_fx_reset(&s);
     assert(s.call==0u);
 
-    puts("CORE source-derived effects: 21 modes, timing, zone limits and validation passed.");
+
+    /* Pinned FX.cpp Strobe Mega renders its current aux1 phase before the
+     * source-timed state transition, without decorative smoothing. */
+    c.effect_id=OT_WLED_MULTI_STROBE;c.speed=255;c.intensity=20;
+    c.foreground=(ot_wled_rgb_t){7,80,120};
+    c.background=(ot_wled_rgb_t){2,3,4};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[7],c.foreground));
+    assert(ot_wled_fx_render(&c,&s,1,p,16));
+    assert(eq(p[7],c.background));
+
+    /* Chase uses upstream 16-bit wrapped position, two adjacent color runs
+     * and one source-compatible secondary background. */
+    c.effect_id=OT_WLED_CHASE_COLOR;c.speed=0;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.foreground));
+    assert(eq(p[2],c.background) && s.step==0u);
+    c.effect_id=OT_WLED_CHASE_RAINBOW;
+    c.foreground=(ot_wled_rgb_t){0,0,255};
+    c.background=(ot_wled_rgb_t){0,255,0};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background));
+    assert(eq(p[2],(ot_wled_rgb_t){255,0,0}));
+    c.effect_id=OT_WLED_CHASE_RAINBOW_WHITE;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(eq(p[2],c.foreground));
+
+    /* Two Dots uses the native frame-time-dependent period and half-strip
+     * offset. Overlay off means untouched positions are black. */
+    c.effect_id=OT_WLED_TWO_DOTS;c.speed=0;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground));
+    assert(eq(p[8],c.background));
+    assert(eq(p[4],(ot_wled_rgb_t){0,0,0}));
+
+    /* Three-color default is RGB black, not the vehicle's configured
+     * second color; no GS400 geometry or output assumption is baked in. */
+    c.effect_id=OT_WLED_TRICOLOR_CHASE;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[15],(ot_wled_rgb_t){0,0,0}));
+    assert(eq(p[14],c.foreground));
+    assert(eq(p[13],c.background));
+    c.effect_id=OT_WLED_TRICOLOR_WIPE;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.background) && eq(p[1],c.foreground));
+    c.effect_id=OT_WLED_TRICOLOR_FADE;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],c.foreground) && eq(p[15],c.foreground));
+
+    /* Every source adapter must actually dispatch and honor zero brightness;
+     * this keeps the release inventory from drifting into name-only claims. */
+    c.brightness=0;
+    for(size_t k=0;k<29;k++) {
+        c.effect_id=ids[k];
+        ot_wled_fx_reset(&s);
+        for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
+        assert(ot_wled_fx_render(&c,&s,0,p,31));
+        for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
+    }
+    puts("CORE source-derived effects: 29 modes, timing, zone limits and validation passed.");
     return 0;
 }
