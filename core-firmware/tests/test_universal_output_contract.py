@@ -62,6 +62,10 @@ assert "(unsigned long)observed_fps" in status
 assert "(unsigned long)measured_fps" not in status
 assert "measured_fps=fps;" in core
 assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n               portEXIT_CRITICAL(&state_lock);" in core
+# BLE FX validation must follow the physical output count, not a vehicle or
+# two-lane mask literal. Actual 12-output hardware/protocol support is future work.
+assert "(req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0" in core
+assert "req->chain_mask>3" not in core
 assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target FPS"
 assert 'fps_policy' in core and 'adaptive_load_53_to_120' in core
 assert 'ot_fps_pacer_observe(&pacer,work_us,longest_pixels)' in core
