@@ -73,6 +73,7 @@ static uint32_t frame_window_start_ms=0,frame_window_frames=0;
 static uint32_t output_refreshes[OT_CHAIN_COUNT]={0};
 /* Render iterations that did not complete every configured lane. */
 static uint32_t incomplete_frames=0;
+static uint32_t output_runtime_fault_mask=0; /* Latched physical RMT lanes; bench diagnostics. */
 static uint32_t stop_request_generation=0,stop_render_generation=0;
 /* Single render-task owner of physical outputs; HTTP handlers only modify copied state. */
 static ot_show_t native_show={0};
@@ -1001,7 +1002,7 @@ void ot_ble_disconnect_show(void){
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
     uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active,outputs_ready;ot_demo_mode_t mode;uint32_t frames;uint16_t target_fps;
-    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames,observed_fps;
+    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames,observed_fps,faulted_outputs;
     uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
     physical=live_input_mask;tm=tm_profile;
@@ -1019,6 +1020,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
     partial_frames=incomplete_frames;
+    faulted_outputs=output_runtime_fault_mask;
     portEXIT_CRITICAL(&state_lock);
     const bool ble_radio_ready=ot_ble_radio_ever_ready();
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
@@ -1048,13 +1050,13 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used++]=']';
     active_pixels_json[used]=0;
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
-       (unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
@@ -1334,6 +1336,7 @@ static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     ot_st_set_fault("external pixel RMT runtime failure");
     portENTER_CRITICAL(&state_lock);
     native_outputs_ready=false;
+    output_runtime_fault_mask|=(1u<<ch);
     portEXIT_CRITICAL(&state_lock);
 }
 static void led_task(void *p) {
