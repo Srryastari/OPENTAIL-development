@@ -241,7 +241,7 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
   'PalettePicker("Shared sequence palette"', 'project.updateSequenceOption("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
-  'invalidateCoreFrame() // palette is NOT in the current BLE FX payload']) {
+  'if (NativePaletteEngine.coreSupports(effect, id))']) {
   assert(compose.includes(required), 'Native palette authoring regressed: ' + required);
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
@@ -251,6 +251,28 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
+// Firmware has a narrow existing palette BLE byte. This must not be
+// generalized to WLED palette parity or new wire operations.
+assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+       palettes.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)') &&
+       compose.includes('NativePaletteEngine.corePreviewPalette(') &&
+       compose.includes('if (NativePaletteEngine.coreSupports(effect, id))') &&
+       compose.includes('else {') &&
+       compose.includes('livePreview.stop()') &&
+       compose.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
+       bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))'),
+       'Only the verified existing CORE palette subset may be previewed over BLE');
+const preview=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
+assert(preview.includes('frame.paletteId, 5') &&
+       preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)'),
+       'BLE preview may not send unsupported palettes');
+const corePaletteTest=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativePaletteCoreContractTest.kt','utf8');
+assert(corePaletteTest.includes('corePreviewPalette(32768, palette)') &&
+       corePaletteTest.includes('otherEffectsNeverClaimEmbersPaletteSupport'),
+       'Executable narrow-palette contract tests missing');
+
 // Native sequence/palette import boundaries are strict unsigned bytes;
 // source-backed RGB stop gradients must not round fractional samples.
 for (const required of ['static boolean validPaletteId(Object value)',
@@ -308,7 +330,7 @@ assert(captureCallback && captureCallback.includes('pendingFrameRevision != fram
        'Stale or unauthorized asynchronous RGB frames must be rejected before display');
 for (const expected of ['private fun invalidateCoreFrame()', 'pendingFrameRevision = -1L',
   'pendingFrameOutput = -1', 'frameRevision++', 'invalidateCoreFrame() // local design changes',
-  'invalidateCoreFrame() // any parameter change', 'invalidateCoreFrame() // palette is NOT',
+  'invalidateCoreFrame() // any parameter change', 'if (NativePaletteEngine.coreSupports(effect, id))',
   'invalidateCoreFrame() // the saved/readback output may have changed',
   'if (ble.captureFrame(captureOutput.intValue))', 'pendingFrameRevision = frameRevision',
   'pendingFrameOutput = captureOutput.intValue']) {
@@ -327,7 +349,7 @@ assert(compose.includes('captureOutput.intValue = 0; invalidateCoreFrame()') &&
 assert(!compose.includes('ble.setPalette(') && !compose.includes('ble.sendPalette(') &&
        !palettes.includes('WLED firmware'), 'Unadvertised firmware palette writes or branding');
 assert(compose.includes('Preview unavailable') && compose.includes('shared option is off') &&
-       compose.includes('Palette selection is currently local-only'),
+       compose.includes('Other palette choices stay local'),
        'Palette UI must label unknown previews, restoration and BLE limitations');
 
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
