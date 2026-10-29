@@ -66,55 +66,7 @@ if (-not $VerifyOnly) {
     $headText = & gh api "repos/$repo/git/ref/heads/$branch" --jq '.object.sha'
     if ($LASTEXITCODE -ne 0) { throw "Could not resolve current firmware branch head. Nothing was flashed." }
     $currentHead = ([string]$headText).Trim()
-    if ($currentHead -notmatch '^[0-9a-fA-F]{40} in a temporary directory only. Never overwrite an old
-# build or depend on the console's current working directory.
-$work = Join-Path ([IO.Path]::GetTempPath()) ("OpenTail-GitHub-" + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $work -Force | Out-Null
-try {
-    & gh run download ([string]$RunId) --repo $repo --name $artifactName --dir $work
-    if ($LASTEXITCODE -ne 0) { throw "GitHub artifact $artifactName unavailable. Nothing was flashed." }
-    $manifests = @(Get-ChildItem -LiteralPath $work -Recurse -Filter flash_args -File)
-    if ($manifests.Count -ne 1) { throw "Expected exactly one flash_args manifest; found $($manifests.Count). Nothing was flashed." }
-    $flashDir = $manifests[0].DirectoryName
-    $app = Join-Path $flashDir 'opentail_core_alpha.bin'
-    $json = Join-Path $flashDir 'flasher_args.json'
-    if (-not (Test-Path -LiteralPath $app) -or -not (Test-Path -LiteralPath $json)) {
-        throw "GitHub package is missing the app or flash metadata. Nothing was flashed."
-    }
-    if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($app)).Contains($Version)) {
-        throw "Downloaded firmware does not contain expected version $Version. Nothing was flashed."
-    }
-    $flashSpec = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json
-    $files = $flashSpec.flash_files
-    if ($null -eq $files) { throw "Flash metadata missing flash_files. Nothing was flashed." }
-    $images = @($files.PSObject.Properties)
-    if ($images.Count -lt 3) { throw "Flash metadata missing bootloader/partition/app images. Nothing was flashed." }
-    foreach ($file in $images) {
-        $name = [string]$file.Value
-        if ([IO.Path]::IsPathRooted($name) -or $name.Contains('..')) {
-            throw "Unsafe flash image path in manifest. Nothing was flashed."
-        }
-        $p = Join-Path $flashDir $name
-        if (-not (Test-Path -LiteralPath $p -PathType Leaf) -or (Get-Item -LiteralPath $p).Length -eq 0) {
-            throw "Flash image missing: $name. Nothing was flashed."
-        }
-    }
-    Write-Host "GitHub run $RunId ($($run.headSha)) verified: CORE $Version, $($images.Count) images." -ForegroundColor Green
-    if ($VerifyOnly) {
-        Write-Host 'Verification only: no serial port opened and nothing flashed.'
-        return
-    }
-    Write-Host "BENCH ONLY: flashing CORE $Version on $Port; this does not imply physical release approval. Close serial monitors." -ForegroundColor Yellow
-    Push-Location $flashDir
-    try {
-        & python -m esptool --chip esp32s3 --port $Port --baud 460800 write_flash '@flash_args'
-        if ($LASTEXITCODE -ne 0) { throw "esptool failed (code $LASTEXITCODE)." }
-        Write-Host "Flash command completed for $Version. Reconnect at http://192.168.4.1/dev and confirm version." -ForegroundColor Green
-    } finally { Pop-Location }
-} finally {
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
-}
-) {
+    if ($currentHead -notmatch '^[0-9a-fA-F]{40}$') {
         throw "Invalid current firmware branch commit. Nothing was flashed."
     }
     if ($run.headSha -ne $currentHead) {
