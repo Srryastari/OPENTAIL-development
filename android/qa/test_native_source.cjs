@@ -46,13 +46,20 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame.colorAt(first + i)', 'NOT a simulated effect.', 'onValueChangeFinished = { applyLiveZone() }',
+  'frame.colorAt(first + i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id, activePixel, hex)',
   'project.assign(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
   'BleConfigCodec.encode(JSONObject(draftText))']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
+assert(compose.includes('private fun CapsuleSlider(') &&
+       compose.includes('height(12.dp)') &&
+       compose.includes('shadow(5.dp, RoundedCornerShape(99.dp)') &&
+       compose.includes('Field(hex, "#RRGGBB", t, Modifier.weight(1f))') &&
+       !compose.includes('Slider(value = n.coerceIn(1, 10000)') &&
+       compose.includes('Modifier.heightIn(min = 48.dp)'),
+       'All editing controls should use the approved capsule slider and accessible pills');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
@@ -104,7 +111,7 @@ const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
 for(const required of ['project.previewZoneOffsets(id, n)',
-  'onValueChangeFinished = { applyLiveZone() }',
+  'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
   'project.editZone(id, label, n, reverse)',
   'project.setPixelColor(id, activePixel, hex)',
   'project.clearPixelColor(id, activePixel)',
