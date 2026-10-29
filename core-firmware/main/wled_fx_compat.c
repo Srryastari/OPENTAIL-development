@@ -2,7 +2,8 @@
  * Isolated adaptation of WLED wled00/FX.cpp:
  * mode_static(), blink(), mode_blink(), mode_strobe(),
  * color_wipe(), mode_color_wipe(), mode_color_sweep(), mode_fade(),
- * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase().
+ * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase(),
+ * mode_static_pattern(), and mode_heartbeat().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -21,7 +22,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_DUAL_SCAN, "Scan Dual", "Scan Dual@!,# of dots,,,,,Overlay;!,!,!;!", true, true, true, true, false},
     {OT_WLED_FADE,   "Fade",   "Fade@!;!,!;!;01",              true, true, true, false, false},
     {OT_WLED_THEATER, "Theater", "Theater@!,Gap size;!,!;!", true, true, true, true, false},
-    {OT_WLED_STROBE, "Strobe", "Strobe@!;!,!;!;01",            true, true, true, false, false}
+    {OT_WLED_STROBE, "Strobe", "Strobe@!;!,!;!;01",            true, true, true, false, false},
+    {OT_WLED_SOLID_PATTERN, "Solid Pattern", "Solid Pattern@Fg size,Bg size;Fg,!;!;;pal=0",
+     true, true, true, true, false},
+    {OT_WLED_HEARTBEAT, "Heartbeat", "Heartbeat@!,!;!,!;!;01;m12=1",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -39,7 +44,7 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 }
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
-    if (state) { state->step=0; state->aux0=0; }
+    if (state) { state->step=0; state->aux0=0; state->aux1=0; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -138,6 +143,46 @@ static void theater_frame(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *st
     }
 }
 
+/* Source adaptation: pinned FX.cpp mode_static_pattern(), default palette. */
+static void solid_pattern_frame(const ot_wled_fx_config_t *cfg,
+                                ot_wled_rgb_t *pixels, size_t count) {
+    const uint32_t lit=1u+(uint32_t)cfg->speed;
+    const uint32_t unlit=1u+(uint32_t)cfg->intensity;
+    uint32_t run=0;
+    bool drawing_lit=true;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for (size_t i=0;i<count;i++) {
+        pixels[i]=drawing_lit?fg:bg;
+        if (++run >= (drawing_lit?lit:unlit)) {
+            run=0; drawing_lit=!drawing_lit;
+        }
+    }
+}
+
+/* Source adaptation: pinned FX.cpp mode_heartbeat() state machine. */
+static void heartbeat_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t bpm=40u+((uint32_t)cfg->speed>>3);
+    const uint32_t ms_per_beat=60000u/bpm;
+    const uint32_t second_beat=ms_per_beat/3u;
+    const uint32_t beat_timer=now-state->step;
+    uint32_t lower=((uint32_t)state->aux1*2042u)/
+                   (2048u+(uint32_t)cfg->intensity);
+    state->aux1=(uint16_t)lower;
+    if (beat_timer>second_beat && state->aux0==0u) {
+        state->aux1=UINT16_MAX; state->aux0=1;
+    }
+    if (beat_timer>ms_per_beat) {
+        state->aux1=UINT16_MAX; state->aux0=0; state->step=now;
+    }
+    const uint8_t fade=(uint8_t)(255u-((uint32_t)state->aux1>>8));
+    const ot_wled_rgb_t c=scaled(blend_colors(cfg->foreground,cfg->background,fade),
+                                 cfg->brightness);
+    for (size_t i=0;i<count;i++)pixels[i]=c;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -156,6 +201,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_THEATER) {
         theater_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_SOLID_PATTERN) {
+        solid_pattern_frame(cfg,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_HEARTBEAT) {
+        heartbeat_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if (cfg->effect_id==OT_WLED_FADE) {
