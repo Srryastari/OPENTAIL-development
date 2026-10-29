@@ -981,7 +981,7 @@ void ot_ble_disconnect_show(void){
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
     uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;uint16_t target_fps;
-    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames;
+    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames,observed_fps;
     uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
     physical=live_input_mask;tm=tm_profile;
@@ -991,6 +991,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     mode=demo_active?demo.mode:OT_DEMO_OFF;
     frames=frame_index;
     target_fps=adaptive_target_fps;
+    observed_fps=measured_fps;
     show_active=show_window(now);
 
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
@@ -1028,7 +1029,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
        OT_FW,"user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
-       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
+       (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
        (unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
@@ -1497,7 +1498,13 @@ static void led_task(void *p) {
            }
            if(frame_window_start_ms==0)frame_window_start_ms=ms;
            uint32_t span=ms-frame_window_start_ms;
-           if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
+           if(span>=1000u){
+               const uint32_t fps=(frame_window_frames*1000u)/span;
+               portENTER_CRITICAL(&state_lock);
+               measured_fps=fps;
+               portEXIT_CRITICAL(&state_lock);
+               frame_window_frames=0;frame_window_start_ms=ms;
+           }
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
        }
        /* Observe measured work + RGB800 wire minimum. At overload there is
