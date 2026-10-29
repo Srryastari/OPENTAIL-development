@@ -435,15 +435,16 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     return result;
 }
 
-/* Treat an electrically asserted pin as busy even before its four
- * debounce samples have settled. This is a pre-save admission check only:
- * GPIO sampling/rendering remain independent of NVS operations. */
-static bool tm_raw_input_active(void){
+/* Normalized instantaneous GPIO levels (NOT debounced). Used only for
+ * diagnostic readback and the pre-save busy gate; the independent sampler
+ * still owns the debounced physical mask used for rendering. */
+static uint8_t tm_gpio_input_mask(void){
+    uint8_t mask=0;
     for(unsigned i=0;i<OT_IN_COUNT;i++){
         const bool high=gpio_get_level(input_pin[i])!=0;
-        if(OT_INPUT_ACTIVE_LOW?!high:high)return true;
+        if(OT_INPUT_ACTIVE_LOW?!high:high)mask|=(uint8_t)(1u<<i);
     }
-    return false;
+    return mask;
 }
 /* Serialize authenticated BLE and bench-HTTP trigger edits with the existing
  * configuration mutex. Commit to NVS before exposing new logical routing.
@@ -455,7 +456,7 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
        xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     /* The debounced mask alone has a nominal 40ms assertion blind spot.
      * Reject an already asserted optocoupler pin before any NVS write. */
-    const bool raw_active=tm_raw_input_active();
+    const bool raw_active=tm_gpio_input_mask()!=0;
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     const bool busy=raw_active || live_input_mask!=0 ||
@@ -513,7 +514,10 @@ static esp_err_t tm_get(httpd_req_t *r){
     cJSON_AddBoolToObject(root,"bench_only",true);
     cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
     cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0);
+    /* Backward compatibility: raw_input_mask historically meant DEBOUNCED
+     * physical inputs. Report instantaneous normalized pins separately. */
     cJSON_AddNumberToObject(root,"raw_input_mask",physical);
+    cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask());
     cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical));
     cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim);
     cJSON *supported=cJSON_AddArrayToObject(root,"supported_functions");
