@@ -74,6 +74,16 @@ void ot_frame_snapshot_complete(bool submitted){
     recording=false;
     UNLOCK();
 }
+void ot_frame_snapshot_unavailable(uint8_t output){
+    LOCK();
+    /* A request that never reached the render loop must not stay pending
+     * forever after an RMT/configuration fault. Preserve completed captures. */
+    if(record.pending && !recording && record.output==output){
+        record.pending=false;
+        record.ready=false;
+    }
+    UNLOCK();
+}
 bool ot_frame_snapshot_info(ot_frame_snapshot_info_t *out){
     if(!out)return false;
     LOCK();
