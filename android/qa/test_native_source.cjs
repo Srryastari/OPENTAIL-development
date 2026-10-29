@@ -73,8 +73,13 @@ assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const homeSection=compose.split('private fun HomePage(t: Tone, changePage: (Int) -> Unit) {')[1]
                          .split('private fun EffectsPreview(')[0];
-const settingsSection=compose.split('private fun SettingsPage(t: Tone) {')[1]
+const settingsSection=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
                              .split('private fun HardwareOutputEditor(')[0];
+assert(settingsSection.includes('Pill("Preview Offline", t)') &&
+       settingsSection.includes('coreFrame.value = null') &&
+       settingsSection.includes('changePage(1)') &&
+       settingsSection.includes('ConnectPill {'),
+       'Locked Settings Connect and offline preview regression');
 assert(homeSection.includes('Bluetooth · ') &&
        homeSection.includes('Pill("Authorize / Pair with BOOT"') &&
        settingsSection.includes('Pill("Authorize / Pair with BOOT"') &&
