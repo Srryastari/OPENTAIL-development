@@ -11,12 +11,14 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[16]={0};
-    assert(ot_wled_fx_supported_ids(ids,16)==16);
+    uint16_t ids[21]={0};
+    assert(ot_wled_fx_supported_ids(ids,21)==21);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
-           ids[12]==85 && ids[13]==86 && ids[14]==98 && ids[15]==100);
+           ids[12]==85 && ids[13]==86 && ids[14]==98 && ids[15]==100 &&
+           ids[16]==8 && ids[17]==9 && ids[18]==14 &&
+           ids[19]==24 && ids[20]==26);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -262,6 +264,61 @@ int main(void) {
     c.speed=255;c.intensity=255;ot_wled_fx_reset(&s);
     assert(ot_wled_fx_render(&c,&s,45,p,31));
     assert(ot_wled_fx_render(&c,&s,46,p,31));
-    puts("CORE source-derived effects: 9 modes, timing, zone limits and validation passed.");
+    /* Source-pin FX.cpp mode_rainbow() (Colorloop): intensity below 128
+     * blends the exact FastLED hue-wheel red against RGB white. */
+    c.effect_id=OT_WLED_COLORLOOP;c.speed=0;c.intensity=0;
+    c.brightness=255;c.palette_id=0;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,128,128}));
+    assert(eq(p[15],p[0]));
+    c.intensity=255;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(ot_wled_fx_render(&c,&s,512,p,16));
+    assert(!eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(s.call==3u);
+
+    /* FX.cpp Rainbow: exact integer intensity-spread quantization and hue
+     * arithmetic at palette=0, independent of physical pixel count. */
+    c.effect_id=OT_WLED_RAINBOW;c.speed=0;c.intensity=0;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(eq(p[8],(ot_wled_rgb_t){234,21,0}));
+    assert(s.call==1u);
+    c.intensity=29;
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[4],(ot_wled_rgb_t){234,21,0}));
+
+    /* Theater Rainbow reads the OLD step as its hue, then increments the
+     * phase ONCE per iteration. Per-zone states must not interfere. */
+    c.effect_id=OT_WLED_THEATER_RAINBOW;c.speed=0;c.intensity=0;
+    c.background=(ot_wled_rgb_t){0,0,0};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(ot_wled_fx_render(&c,&s,306,p,16) && s.step==1u);
+    assert(ot_wled_fx_render(&c,&s,307,p,16));
+    assert(eq(p[1],(ot_wled_rgb_t){252,2,0}));
+
+    /* Blink/Strobe Rainbow follow the same WLED time gate as Blink/Strobe,
+     * but choose the frame's hue from SEGENV.call, not elapsed milliseconds. */
+    c.effect_id=OT_WLED_BLINK_RAINBOW;c.speed=255;c.intensity=255;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(ot_wled_fx_render(&c,&s,1,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){252,2,0}));
+    c.effect_id=OT_WLED_STROBE_RAINBOW;ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){255,0,0}));
+    assert(ot_wled_fx_render(&c,&s,24,p,16));
+    assert(eq(p[0],c.background));
+    assert(ot_wled_fx_render(&c,&s,46,p,16));
+    assert(eq(p[0],(ot_wled_rgb_t){250,5,0}));
+    ot_wled_fx_reset(&s);
+    assert(s.call==0u);
+
+    puts("CORE source-derived effects: 21 modes, timing, zone limits and validation passed.");
     return 0;
 }
