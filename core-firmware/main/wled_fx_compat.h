@@ -145,6 +145,12 @@ typedef enum {
 bool ot_wled_palette_build(uint8_t id, ot_wled_rgb_t primary,
                            ot_wled_rgb_t secondary, ot_wled_rgb_t tertiary,
                            ot_wled_palette16_t *out);
+/* Source WLED colors.cpp generateRandomPalette() CHSV->RGB construction.
+ * Accept four HSV triplets in upstream generation order (h,s,v), so RNG
+ * timing and state stay caller-owned. Does not enable dynamic palette ID 1
+ * or change current fixed-palette selection/transport semantics. */
+bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
+                               ot_wled_palette16_t *out);
 ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
