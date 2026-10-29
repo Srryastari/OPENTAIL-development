@@ -77,7 +77,7 @@ final class NativeProject {
     // Palette IDs are unsigned bytes in the shared v4 sequence schema.
     // Reject malformed imported values instead of displaying a clamped ID
     // while silently exporting a different, invalid value.
-    private static boolean validPaletteId(Object value) {
+    static boolean validPaletteId(Object value) {
         if (!(value instanceof Number)) return false;
         double number = ((Number)value).doubleValue();
         return number >= 0 && number <= 255 && number == Math.floor(number);
