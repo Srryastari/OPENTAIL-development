@@ -17,7 +17,7 @@ assert(zoneBlock && triggerBlock && effectBlock && hardwareBlock);
 
 for(const required of [
   'project.previewZoneOffsets(id, n)',
-  'onValueChangeFinished = { applyLiveZone() }',
+  'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
   'project.editZone(id, label, n, reverse)',
   'project.setPixelColor(id, activePixel, hex)',
   'project.clearPixelColor(id, activePixel)',
