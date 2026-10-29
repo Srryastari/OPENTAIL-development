@@ -20,6 +20,7 @@ int main(void){
    assert(ot_palette_1d_supported(OT_WLED_TWINKLECAT,palette));
    assert(ot_palette_1d_supported(OT_WLED_AURORA,palette));
    assert(ot_palette_1d_supported(OT_WLED_COLORTWINKLE,palette));
+   assert(ot_palette_1d_supported(OT_WLED_SLOW_TRANSITION,palette));
    assert(!ot_palette_1d_supported(OT_WLED_WIPE,palette));
  }
  assert(!ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,1u));
