@@ -485,14 +485,15 @@ int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved;uint8_t physical,sim;
+    ot_tm_profile_t cfg;bool saved;uint8_t physical,sim;uint16_t config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    cfg=tm_profile;saved=tm_persistent;physical=live_input_mask;
+    cfg=tm_profile;saved=tm_persistent;physical=live_input_mask;config_revision=tm_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION);
+    cJSON_AddNumberToObject(root,"config_revision",config_revision);
     cJSON_AddBoolToObject(root,"saved_on_device",saved);
     cJSON_AddBoolToObject(root,"bench_only",true);
     cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
@@ -518,9 +519,13 @@ static esp_err_t tm_get(httpd_req_t *r){
 static esp_err_t tm_post(httpd_req_t *r){
     cJSON *root=NULL;int status=recv_json(r,&root);
     if(status!=200){cJSON_Delete(root);return respond_err(r,status,"invalid JSON request");}
-    unsigned revision=0;
+    unsigned revision=0,expected_config_revision=0;
+    const cJSON *expected=cJSON_GetObjectItemCaseSensitive(root,"expected_config_revision");
+    const bool require_revision=expected!=NULL;
     const cJSON *arr=cJSON_GetObjectItemCaseSensitive(root,"inputs");
-    bool valid=om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
+    bool valid=(!require_revision || om_number(root,"expected_config_revision",
+                    &expected_config_revision,0,UINT16_MAX)) &&
+        om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
         cJSON_IsArray(arr) && cJSON_GetArraySize(arr)==OT_IN_COUNT;
     ot_tm_profile_t next={0};
     for(int i=0;valid && i<OT_IN_COUNT;i++){
@@ -535,8 +540,9 @@ static esp_err_t tm_post(httpd_req_t *r){
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
     /* Same transaction and busy policy as authenticated BLE. The HTTP
      * 'revision' field is a schema version, not the BLE edit revision. */
-    const int result=tm_commit(&next,0u,false);
+    const int result=tm_commit(&next,(uint16_t)expected_config_revision,require_revision);
     if(result==2)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
+    if(result==3)return respond_err(r,409,"stale trigger mapping revision; read back current profile before saving");
     if(result==4)return respond_err(r,500,"failed to save trigger mapping in flash");
     if(result!=0)return respond_err(r,400,"invalid trigger mapping");
     return tm_get(r);
