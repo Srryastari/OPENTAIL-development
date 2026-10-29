@@ -619,17 +619,28 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
-        if(ready&&(spark||overlay)){
-            /* Optional sparkle tuning is transient per-zone state. Preserve
-             * legacy fixed-size BLE FX packets and saved NVS profile layout. */
+        if(ready&&spark){
+            /* Preserve legacy one-shot spark behavior and its regression
+             * contract independently of the new general-purpose overlay. */
             for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
                 if(!(req->chain_mask&(1u<<o)))continue;
                 for(unsigned z=0;z<om_outputs[o].zone_count;z++){
                     if(!(req->zone_mask&(1u<<z))||
                        om_outputs[o].zones[z].pixels==0||
                        om_outputs[o].zones[z].role==OT_OM_OFF)continue;
-                    if(spark)fx_bank.zones[o][z].spark=*spark;
-                    if(overlay)fx_bank.zones[o][z].overlay=*overlay;
+                    fx_bank.zones[o][z].spark=*spark;
+                }
+            }
+        }
+        if(ready&&overlay){
+            /* Engine overlay is volatile, per zone, and never stored in NVS. */
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+                if(!(req->chain_mask&(1u<<o)))continue;
+                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                    if(!(req->zone_mask&(1u<<z))||
+                       om_outputs[o].zones[z].pixels==0||
+                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                    fx_bank.zones[o][z].overlay=*overlay;
                 }
             }
         }
