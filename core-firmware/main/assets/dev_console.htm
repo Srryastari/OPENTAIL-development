@@ -86,6 +86,9 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <label>Brightness (0–32)<input type="number" id="eventBri" min="0" max="32" value="16"></label>
 <label>Speed (0–255)<input type="range" id="eventSpeed" min="0" max="255" value="180"></label>
 <label>Spark strength<input type="range" id="eventIntensity" min="0" max="255" value="220"></label>
+<label>Spark color style<select id="eventSparkStyle"><option value="0">Original</option><option value="1">Random bright shades</option><option value="2">Rainbow + white</option><option value="3">Custom color</option></select></label>
+<label>Spark peak brightness (1–32)<input type="number" id="eventSparkPeak" min="1" max="32" value="32"></label>
+<label>Custom spark color<input type="color" id="eventSparkColor" value="#ffffff"></label>
 </div>
 <div class="bar"><button class="primary" onclick="previewEvent('materialize_sparks')">Materialize Sparks</button><button class="primary" onclick="previewEvent('random_materialize')">Random Materialize</button><button onclick="previewEvent('smooth_fade')">Smooth Fade In</button><button onclick="previewEvent('plasma_sweep')">Plasma Sweep</button><button class="danger" onclick="previewEvent('smooth_fade_out')">Smooth Fade Out</button></div>
 <small>Startup previews finish at the selected foreground color; Smooth Fade Out finishes at black. Preview expires after six seconds.</small>
@@ -225,7 +228,11 @@ async function stopAll(){const x=await act('simResult','/api/v1/stop',{});if(x){
 async function stopShow(){await act('fxResult','/api/v1/show/stop',{});await refreshStatus()}
 async function previewEvent(effect){try{
  const [r,g,b]=rgb('eventColor');
- const data={effect,chain:$('eventChain').value,r,g,b,brightness:integer('eventBri',0,32),speed:integer('eventSpeed',0,255),intensity:integer('eventIntensity',0,255)};
+ const [spark_r,spark_g,spark_b]=rgb('eventSparkColor');
+ const data={effect,chain:$('eventChain').value,r,g,b,
+   brightness:integer('eventBri',0,32),speed:integer('eventSpeed',0,255),
+   intensity:integer('eventIntensity',0,255),spark_style:integer('eventSparkStyle',0,3),
+   spark_peak:integer('eventSparkPeak',1,32),spark_r,spark_g,spark_b};
  await act('eventResult','/api/v1/auto-events/preview',data);await refreshStatus();
  }catch(e){$('eventResult').textContent=e.message}}
 async function previewEffect(){try{
