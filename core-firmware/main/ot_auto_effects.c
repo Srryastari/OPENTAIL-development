@@ -9,7 +9,12 @@
 
 static const uint16_t ids[] = {
     OT_FX_MATERIALIZE_SPARKS, OT_FX_RANDOM_MATERIALIZE,
-    OT_FX_SMOOTH_FADE, OT_FX_PLASMA_SWEEP, OT_FX_SMOOTH_FADE_OUT
+    OT_FX_SMOOTH_FADE, OT_FX_PLASMA_SWEEP, OT_FX_SMOOTH_FADE_OUT,
+    OT_FX_DIMENSIONAL_RIFT, OT_FX_METEOR_STORM, OT_FX_HELIX_DRIVE,
+    OT_FX_CRYSTAL_GROWTH, OT_FX_FUSION_CORE, OT_FX_PORTAL_GATE,
+    OT_FX_TIME_FRACTURE, OT_FX_AURORA_SURGE, OT_FX_CHROMATIC_SHATTER,
+    OT_FX_VORTEX, OT_FX_QUANTUM_COLLAPSE, OT_FX_REALITY_BREAK,
+    OT_FX_EVENT_HORIZON, OT_FX_SINGULARITY_SHUTDOWN
 };
 
 bool ot_auto_fx_id(uint16_t id) {
@@ -32,6 +37,20 @@ bool ot_auto_fx_metadata(uint16_t id,ot_wled_fx_metadata_t *out){
       case OT_FX_SMOOTH_FADE:name="Smooth Fade";break;
       case OT_FX_PLASMA_SWEEP:name="Plasma Sweep";break;
       case OT_FX_SMOOTH_FADE_OUT:name="Smooth Fade Out";break;
+      case OT_FX_DIMENSIONAL_RIFT:name="Dimensional Rift";break;
+      case OT_FX_METEOR_STORM:name="Meteor Storm";break;
+      case OT_FX_HELIX_DRIVE:name="Helix Drive";break;
+      case OT_FX_CRYSTAL_GROWTH:name="Crystal Growth";break;
+      case OT_FX_FUSION_CORE:name="Fusion Core";break;
+      case OT_FX_PORTAL_GATE:name="Portal Gate";break;
+      case OT_FX_TIME_FRACTURE:name="Time Fracture";break;
+      case OT_FX_AURORA_SURGE:name="Aurora Surge";break;
+      case OT_FX_CHROMATIC_SHATTER:name="Chromatic Shatter";break;
+      case OT_FX_VORTEX:name="Vortex";break;
+      case OT_FX_QUANTUM_COLLAPSE:name="Quantum Collapse";break;
+      case OT_FX_REALITY_BREAK:name="Reality Break";break;
+      case OT_FX_EVENT_HORIZON:name="Event Horizon";break;
+      case OT_FX_SINGULARITY_SHUTDOWN:name="Singularity Shutdown";break;
       default:return false;
     }
     *out=(ot_wled_fx_metadata_t){id,name,name,true,true,true,true,false};
@@ -96,6 +115,155 @@ static ot_wled_rgb_t fade_color(ot_wled_rgb_t from,ot_wled_rgb_t to,
         fade_channel(from.g,to.g,k,brightness),
         fade_channel(from.b,to.b,k,brightness)};
 }
+/* OpenTail-owned original animations (not WLED compatibility recipes).
+ * This is the first shared speed/color/intensity implementation for the
+ * approved concepts. Per-effect advanced sliders, visual signoff and golden
+ * frames remain release blockers; never claim those are already validated.
+ * Frame result is absolute-time derived; no allocation or vehicle geometry. */
+static uint8_t tri8(uint32_t v){
+    v&=511u;
+    return (uint8_t)(v>255u?511u-v:v);
+}
+static uint32_t absdiff(uint32_t a,uint32_t b){return a>b?a-b:b-a;}
+static bool original_concept(uint16_t id){
+    return id>=OT_FX_DIMENSIONAL_RIFT&&id<=OT_FX_SINGULARITY_SHUTDOWN;
+}
+static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed,
+                                    uint32_t ms,ot_wled_rgb_t *pixels,size_t count){
+    const uint32_t duration=ot_auto_fx_duration_ms(cfg->speed);
+    const uint32_t cycle=ms/duration;
+    const uint32_t elapsed=ms%duration;
+    const uint32_t t=(elapsed*255u)/duration;
+    const uint32_t whole=(ms>=duration)?duration:ms;
+    const uint32_t one_shot_t=(whole*255u)/duration;
+    const uint32_t center=(uint32_t)count/2u;
+    const uint32_t width=1u+((uint32_t)cfg->intensity*(uint32_t)count)/4096u;
+    const ot_wled_rgb_t fg=cfg->foreground,bg=cfg->background;
+    const ot_wled_rgb_t white={255u,255u,255u};
+    for(size_t px=0;px<count;px++){
+        const uint32_t p=(uint32_t)px;
+        const uint32_t normalized=(p*255u)/(uint32_t)count;
+        const uint32_t distance=absdiff(p,center);
+        const uint32_t h=hash32(p*2654435761u+seed+cycle*1037u);
+        const uint32_t drift=(t*(uint32_t)count)/255u;
+        ot_wled_rgb_t c=bg;
+        switch(cfg->effect_id){
+          case OT_FX_DIMENSIONAL_RIFT:{
+            uint32_t tear=(t*center)/255u;
+            uint32_t d=absdiff(distance,tear);
+            c=distance<tear?fg:bg;
+            if(d<=width)c=blend(c,white,(uint8_t)(240u-(d*170u)/(width+1u)));
+            else if(d<=width*4u)c=blend(c,wheel((uint8_t)(h>>12)),80u);
+            break;
+          }
+          case OT_FX_METEOR_STORM:{
+            c=bg;
+            for(uint32_t lane=0;lane<4u;lane++){
+                uint32_t head=(drift+(hash32(cycle*977u+lane*137u+seed)%(uint32_t)count))%(uint32_t)count;
+                uint32_t d=(head+(uint32_t)count-p)%(uint32_t)count;
+                uint32_t tail=3u+width*7u;
+                if(d<tail){
+                    uint32_t v=255u-(d*255u)/tail;
+                    c=blend(c,lane==0u?white:wheel((uint8_t)(lane*57u+h)),(uint8_t)v);
+                }
+            }
+            break;
+          }
+          case OT_FX_HELIX_DRIVE:{
+            uint8_t a=tri8(normalized*5u+t*4u);
+            uint8_t b=tri8(normalized*5u+t*4u+255u);
+            c=blend(bg,fg,a);
+            c=blend(c,white,(uint8_t)((b*(uint32_t)cfg->intensity)/510u));
+            break;
+          }
+          case OT_FX_CRYSTAL_GROWTH:{
+            uint32_t reveal=hash32(p*7919u+seed)%256u;
+            c=reveal<=t?fg:bg;
+            if(reveal<=t&&t-reveal<20u)
+                c=blend(c,white,(uint8_t)((20u-(t-reveal))*10u));
+            else if(reveal<=t)
+                c=blend(c,wheel((uint8_t)(p*29u)),(uint8_t)(cfg->intensity/6u));
+            break;
+          }
+          case OT_FX_FUSION_CORE:{
+            uint32_t radius=1u+(uint32_t)count*(32u+tri8(t*4u))/1536u;
+            c=distance<radius?blend(fg,white,(uint8_t)(220u-distance*150u/(radius+1u))):bg;
+            if(distance>=radius&&distance<radius*4u)c=blend(bg,fg,(uint8_t)(128u-(distance-radius)*128u/(radius*3u+1u)));
+            break;
+          }
+          case OT_FX_PORTAL_GATE:{
+            uint32_t portal=(uint32_t)count*(32u+tri8(t*2u))/1024u;
+            uint32_t d=absdiff(distance,portal);
+            c=distance<portal?blend(bg,fg,90u):bg;
+            if(d<width+3u)c=blend(c,white,(uint8_t)(230u-d*160u/(width+4u)));
+            break;
+          }
+          case OT_FX_TIME_FRACTURE:{
+            uint32_t chunk=p/(1u+(uint32_t)count/12u);
+            uint32_t offset=hash32(chunk*109u+seed)%128u;
+            uint8_t v=tri8(normalized*3u+t*3u+offset);
+            c=blend(bg,(chunk&1u)?fg:wheel((uint8_t)(t+chunk*17u)),v);
+            break;
+          }
+          case OT_FX_AURORA_SURGE:{
+            uint32_t v=(uint32_t)tri8(normalized*4u+t*2u)+tri8(normalized*7u+t*3u+90u);
+            c=blend(bg,fg,(uint8_t)(v/2u));
+            c=blend(c,wheel((uint8_t)(normalized+t)),(uint8_t)(cfg->intensity/3u));
+            break;
+          }
+          case OT_FX_CHROMATIC_SHATTER:{
+            uint32_t shard=h&15u;
+            uint32_t d=absdiff((p+shard*3u)%(uint32_t)count,drift);
+            c=d<width*4u?wheel((uint8_t)(h>>8)):bg;
+            if(d<width)c=blend(c,white,180u);
+            break;
+          }
+          case OT_FX_VORTEX:{
+            uint8_t v=tri8(distance*24u+t*5u);
+            c=blend(bg,wheel((uint8_t)(normalized*3u+t)),v);
+            if(distance<width)c=blend(c,white,150u);
+            break;
+          }
+          case OT_FX_QUANTUM_COLLAPSE:{
+            uint32_t radius=((uint32_t)count*(255u-t))/512u+1u;
+            c=distance<=radius?blend(fg,white,(uint8_t)(t/2u)):bg;
+            if(absdiff(distance,radius)<width)c=white;
+            break;
+          }
+          case OT_FX_REALITY_BREAK:{
+            uint32_t crack=(hash32(p/(1u+(uint32_t)count/25u)+seed)&255u);
+            uint8_t distortion=tri8(normalized*11u+t*6u+crack);
+            c=blend(bg,fg,distortion);
+            if(distortion>220u)c=blend(c,wheel((uint8_t)(h>>14)),cfg->intensity);
+            break;
+          }
+          case OT_FX_EVENT_HORIZON:{
+            if(ms>=duration){c=fg;break;}
+            const uint32_t front=(one_shot_t*((uint32_t)count-1u))/255u;
+            uint32_t d=absdiff(p,front);
+            c=fg;
+            if(d<=width)c=bg; /* traveling black gravitational core */
+            else if(d<=width+2u)c=white; /* compressed bright ring */
+            else if(p<front && d<=width+12u)
+                c=blend(fg,wheel((uint8_t)(t*4u+d*19u)),
+                    (uint8_t)(200u-(d-width-2u)*120u/13u));
+            break;
+          }
+          case OT_FX_SINGULARITY_SHUTDOWN:{
+            if(ms>=duration){c=(ot_wled_rgb_t){0,0,0};break;}
+            const uint32_t radius=(center*(255u-one_shot_t))/255u;
+            c=distance<=radius?fg:(ot_wled_rgb_t){0,0,0};
+            if(distance<=radius && absdiff(distance,radius)<width+2u)c=white;
+            if(radius<width+2u && distance<=width)c=white;
+            break;
+          }
+          default:return false;
+        }
+        pixels[px]=scale(c,cfg->brightness);
+    }
+    return true;
+}
+
 bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
                        uint32_t ms,ot_wled_rgb_t *pixels,size_t count){
     if(!cfg||!pixels||!ot_auto_fx_id(cfg->effect_id)||count==0||
@@ -106,6 +274,8 @@ bool ot_auto_fx_render(const ot_wled_fx_config_t *cfg,uint32_t seed,
     const uint32_t elapsed=ms>=duration?duration:ms;
     const uint32_t phase=(elapsed*255u)/duration;
     const ot_wled_rgb_t fg=cfg->foreground,bg=cfg->background;
+    if(original_concept(cfg->effect_id))
+        return render_original_concept(cfg,seed,ms,pixels,count);
     if(cfg->effect_id==OT_FX_SMOOTH_FADE ||
        cfg->effect_id==OT_FX_SMOOTH_FADE_OUT){
         const uint16_t k=smoothstep16(elapsed,duration);
