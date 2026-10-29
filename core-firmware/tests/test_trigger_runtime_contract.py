@@ -125,7 +125,14 @@ assert "OT_INPUT_ACTIVE_LOW?!high:high" in raw
 save = between(core, "static int tm_commit(", "bool ot_ble_trigger_get(")
 assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save
 assert "raw_active || live_input_mask!=0" in save
-assert save.index("if(!tm_save(next))code=4") < save.index("tm_profile=*next;")
+assert save.index("if(!tm_save(next))code=4") < save.index("ot_tm_saved_apply(")
+assert "const uint8_t pins_after=tm_gpio_input_mask();" in save
+assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," in save
+assert "tm_deferred.pending || raw_active || live_input_mask!=0" in save
+assert "config_apply_pending" in readback
+assert "tm_persistent && !tm_deferred.pending" in core
+assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in sampler
+assert "instantaneous,physical" in sampler
 assert "xSemaphoreGive(om_write_mutex)" in save
 assert "require_revision&&tm_revision!=expected" in save
 assert "tm_revision++;" in save
