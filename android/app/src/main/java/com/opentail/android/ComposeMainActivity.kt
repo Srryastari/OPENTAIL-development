@@ -343,6 +343,35 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun EffectsPreview(
+        t: Tone, effect: Int, speed: Int, intensity: Int,
+        brightness: Int, foreground: Int, background: Int
+    ) {
+        // Only the tiny LED preview recomposes at 25 Hz. Keeping the 140 effect
+        // rows/inputs out of the animation loop avoids focus and scroll churn.
+        var phase by remember { mutableIntStateOf(0) }
+        LaunchedEffect(effect, speed) {
+            while (true) {
+                delay(40L)
+                phase++
+            }
+        }
+        Canvas(Modifier.fillMaxWidth().height(64.dp)
+            .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
+            val count = 28
+            for (i in 0 until count) {
+                val animated = effect == 0 ||
+                    ((i + phase * (speed.coerceAtLeast(1) / 32 + 1)) % count) <
+                    (1 + intensity * count / 255)
+                val color = (if (animated) Color(foreground) else Color(background))
+                    .copy(alpha = 0.08f + brightness.coerceIn(0,255) / 255f * 0.92f)
+                drawLine(color, Offset(i * size.width / count, size.height * 0.2f),
+                         Offset(i * size.width / count, size.height * 0.8f),
+                         strokeWidth = size.width / count * 0.65f)
+            }
+        }
+    }
+    @Composable
     private fun ShowModesPage(t: Tone) {
         Title("Show Modes", t)
         var view by rememberSaveable { mutableStateOf("Effects") }
@@ -354,29 +383,9 @@ class ComposeMainActivity : ComponentActivity() {
         var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
         var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
         var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
-        var phase by remember { mutableIntStateOf(0) }
-        LaunchedEffect(effect, speed, view) {
-            if (view == "Effects") while (true) {
-                delay(40L)
-                phase++
-            }
-        }
         Panel(t) {
             Caption("Native offline preview — CORE is the authoritative physical renderer", t)
-            Canvas(Modifier.fillMaxWidth().height(64.dp)
-                .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
-                val count = 28
-                for (i in 0 until count) {
-                    // Live illustration; actual per-effect pixels come from CORE.
-                    val animated = effect == 0 ||
-                        ((i + phase * (speed.coerceAtLeast(1) / 32 + 1)) % count) < (1 + intensity * count / 255)
-                    val color = (if (animated) Color(foreground) else Color(background))
-                        .copy(alpha = (0.08f + brightness.coerceIn(0,255) / 255f * 0.92f))
-                    drawLine(color, Offset(i * size.width / count, size.height * 0.2f),
-                             Offset(i * size.width / count, size.height * 0.8f),
-                             strokeWidth = size.width / count * 0.65f)
-                }
-            }
+            EffectsPreview(t, effect, speed, intensity, brightness, foreground, background)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Effects", "Sequences", "Presets").forEach {
                     Pill(it, t, view == it) { view = it }
