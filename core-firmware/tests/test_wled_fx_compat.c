@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=101u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=102u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -1029,6 +1029,32 @@ int main(void) {
     ot_wled_fx_reset(&drip_a);
     ot_wled_fx_reset(&drip_b);
     assert(!drip_a.scratch && !drip_b.scratch);
+
+
+    /* TV Simulator scene state stays independent for each zone, preserves
+     * bounded RGB and uses stable source RNG/timing, without pixel leakage. */
+    c.effect_id=OT_WLED_TV_SIMULATOR;
+    c.speed=128u;c.intensity=200u;c.brightness=32u;
+    ot_wled_fx_state_t tv_a={0},tv_b={0};
+    ot_wled_rgb_t tv_aa[33],tv_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*1013u;
+        for(size_t px=0;px<33u;px++) {
+            tv_aa[px]=(ot_wled_rgb_t){99,88,77};
+            tv_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&tv_a,ms,&tv_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&tv_b,ms,&tv_bb[1],31u));
+        assert(memcmp(tv_aa,tv_bb,sizeof(tv_aa))==0);
+        assert(eq(tv_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(tv_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(tv_aa[px].r<=32u && tv_aa[px].g<=32u && tv_aa[px].b<=32u);
+    }
+    assert(tv_a.scratch && tv_a.scratch_bytes>=40u);
+    ot_wled_fx_reset(&tv_a);
+    ot_wled_fx_reset(&tv_b);
+    assert(!tv_a.scratch && !tv_b.scratch);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
