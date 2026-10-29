@@ -89,14 +89,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p core-firmware/releases
-          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.30-alpha-app.bin
+          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.31-alpha-app.bin
       - name: Upload flashable CORE bench firmware package
         uses: actions/upload-artifact@v4
         with:
-          name: opentail-core-v0.1.30-alpha-esp32s3-bench-firmware
+          name: opentail-core-v0.1.31-alpha-esp32s3-bench-firmware
           path: |
             core-firmware/build/opentail_core_alpha.bin
-            core-firmware/releases/opentail-core-v0.1.30-alpha-app.bin
+            core-firmware/releases/opentail-core-v0.1.31-alpha-app.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
@@ -121,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          & ./scripts/flash-from-github.ps1 -RunId ${{ github.run_id }} -Version '0.1.30-alpha' -VerifyOnly
+          & ./scripts/flash-from-github.ps1 -RunId ${{ github.run_id }} -Version '0.1.31-alpha' -VerifyOnly
 
   release-evidence-gate:
     # Intentionally BLOCKS release until actual physical evidence is supplied
