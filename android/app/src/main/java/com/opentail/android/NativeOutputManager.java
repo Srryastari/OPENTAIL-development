@@ -124,7 +124,7 @@ final class NativeOutputManager {
         if(page==null)return;
         page.removeAllViews();
         page.addView(theme.text("Readback-controlled hardware editor",16,true));
-        page.addView(theme.caption("Current firmware: two physical outputs, up to 522 LEDs / output, " +
+        page.addView(theme.caption("Current firmware: two physical outputs, up to 623 LEDs / output (1,246 total), " +
                 "eight zones per output. These limits are firmware protocol bounds, not Studio design defaults."),
                 theme.lp(5,8));
         LinearLayout chooser=theme.horizontal();
@@ -147,7 +147,7 @@ final class NativeOutputManager {
         LinearLayout fields=theme.card();
         fields.addView(theme.text("Output "+(selected+1),16,true));
         field(fields,"Output name",draft.optString("name"),false,value->put(draft,"name",value));
-        field(fields,"Active pixels (1–522)",String.valueOf(draft.optInt("pixels",0)),true,
+        field(fields,"Active pixels (1–623)",String.valueOf(draft.optInt("pixels",0)),true,
                 value->put(draft,"pixels",getInt(value,-1)));
         spinner(fields,"Color order",BleConfigCodec.ORDERS,
                 draft.optString("color_order","RGB"),value->put(draft,"color_order",value));
