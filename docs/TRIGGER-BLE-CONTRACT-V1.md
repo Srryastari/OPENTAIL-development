@@ -32,6 +32,10 @@ Logical function IDs: 0=disabled, 1=park, 2=brake, 3=left, 4=right, 5=reverse, 6
 
 The write is acknowledged at ATT level; clients must **read back** the characteristic and check status, revision, mapping and saved flag. Reject stale/busy results rather than assuming the change took effect. Each packet fits the default 23-byte ATT MTU; there is no multi-chunk transaction or BLE frame streaming.
 
+## Compatible bench HTTP concurrency guard
+
+`GET /api/v1/triggers` still reports `revision: 1` as the **storage/schema version**. It now also returns `config_revision`, the live edit revision shared with BLE. For clients that read then edit the mapping, include `expected_config_revision` with that value in the existing JSON POST body. An intervening successful HTTP or BLE edit returns HTTP 409 and never overwrites the newer mapping. The CORE `/dev` trigger editor now supplies this field automatically. Legacy HTTP requests without `expected_config_revision` retain the existing version-1 request shape; their saves are serialized but do not have stale-draft detection.
+
 ## Arbitration and persistence
 
 - CORE alone samples physical inputs; a BLE disconnect must not disable any physical trigger.
