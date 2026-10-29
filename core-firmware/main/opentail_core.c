@@ -667,6 +667,9 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
     else if(!strcmp(key,"plasma_sweep"))id=OT_FX_PLASMA_SWEEP;
     else if(!strcmp(key,"smooth_fade_out"))id=OT_FX_SMOOTH_FADE_OUT;
     else{cJSON_Delete(obj);return respond_err(r,400,"unsupported automatic event preview");}
+    /* Preserve the allowlisted label before deleting the request JSON. */
+    char event_key[32]={0};
+    snprintf(event_key,sizeof(event_key),"%s",key);
     const cJSON *ch=cJSON_GetObjectItemCaseSensitive(obj,"chain");
     const char *chain=cJSON_IsString(ch)?ch->valuestring:"both";
     uint8_t chain_mask=3u;
@@ -698,7 +701,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
     char payload[185];
     snprintf(payload,sizeof(payload),
        "{\"ok\":true,\"event\":\"%s\",\"duration_ms\":%lu,\"preview_ttl_sec\":6,\"brightness_cap\":%u,\"bench_only\":true}",
-       key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
+       event_key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
     return send_json(r,payload);
 }
 void ot_ble_stop_show(void){
