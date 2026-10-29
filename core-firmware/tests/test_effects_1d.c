@@ -35,10 +35,12 @@ int main(void){
   /* Every catalog ID must resolve and render a deterministic bounded frame. */
   cfg.palette_id=0;cfg.brightness=32;cfg.foreground=(ot_wled_rgb_t){255,45,10};
   cfg.background=(ot_wled_rgb_t){3,4,5};
+  const ot_wled_audio_peak_t catalog_peak={220.0f,1800.0f};
   for(size_t i=0;i<ot_wled_1d_count();i++){
     const ot_wled_1d_meta_t *entry=ot_wled_1d_at(i);
     assert(entry&&ot_effects_1d_metadata(entry->id,&meta));
     cfg.effect_id=entry->id;
+    cfg.audio_peak=entry->id==OT_WLED_ROCKTAVES?&catalog_peak:NULL;
     ot_effects_1d_reset(&s,(uint32_t)i+1u);
     /* Resetting an effect also invalidates the previous zone pixel frame
      * in the authoritative CORE LED task. Trailing effects may read the
