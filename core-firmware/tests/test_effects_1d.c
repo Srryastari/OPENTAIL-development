@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include "effects_1d.h"
 #include "wled_1d.h"
@@ -40,7 +41,12 @@ int main(void){
     cfg.effect_id=entry->id;
     ot_effects_1d_reset(&s,(uint32_t)i+1u);
     assert(ot_effects_1d_render(&cfg,&s,500,pix,31));
-    for(unsigned k=0;k<31;k++)assert(pix[k].r<=32&&pix[k].g<=32&&pix[k].b<=32);
+    for(unsigned k=0;k<31;k++){
+      if(pix[k].r>cfg.brightness||pix[k].g>cfg.brightness||pix[k].b>cfg.brightness)
+        fprintf(stderr,"effect %u (%s), pixel %u, RGB %u %u %u exceeds brightness %u\\n",
+                (unsigned)entry->id,entry->name,k,pix[k].r,pix[k].g,pix[k].b,cfg.brightness);
+      assert(pix[k].r<=cfg.brightness&&pix[k].g<=cfg.brightness&&pix[k].b<=cfg.brightness);
+    }
   }
   /* The CORE dispatcher must invoke the source-derived per-frame stateful
    * renderer, not fall back to the catalog's per-pixel approximations. */
