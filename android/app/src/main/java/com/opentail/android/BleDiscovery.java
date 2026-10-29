@@ -296,7 +296,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
-        if(cfgBusy||writePending||readReplyPending||frameCapture.busy()){notifyStatus("BLE is busy; retry pairing");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
@@ -307,7 +307,7 @@ final class BleDiscovery {
     void authorizeStored(){
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
-        if(cfgBusy||writePending||readReplyPending||frameCapture.busy()){notifyStatus("BLE busy; retry authorization");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
         try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
@@ -589,7 +589,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -615,7 +615,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
