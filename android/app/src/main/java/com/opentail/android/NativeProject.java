@@ -42,6 +42,7 @@ final class NativeProject {
             p.put("profiles", new JSONObject());
             p.put("sequence", new JSONArray());
             p.put("savedPresets", new JSONArray());
+            p.put("selectedPixels", new JSONObject());
             p.put("sequenceOptions", new JSONObject()
                     .put("shuffleLoop", false).put("favoritesOnly", false)
                     .put("sharedPaletteEnabled", false).put("sharedPaletteId", 0));
@@ -116,6 +117,7 @@ final class NativeProject {
         JSONObject copy = new JSONObject(candidate.toString());
         if (copy.optJSONArray("sequence") == null) copy.put("sequence", new JSONArray());
         if (copy.optJSONArray("savedPresets") == null) copy.put("savedPresets", new JSONArray());
+        if (copy.optJSONObject("selectedPixels") == null) copy.put("selectedPixels", new JSONObject());
         if (copy.optJSONObject("sequenceOptions") == null)
             copy.put("sequenceOptions", new JSONObject());
         if (copy.optJSONArray("effectFavorites") == null)
@@ -155,6 +157,36 @@ final class NativeProject {
         catch (JSONException ignored) { }
     }
 
+    /** v4 Studio-compatible per-zone zero-based colors, local-only (never BLE). */
+    synchronized String pixelColor(String id,int pixel) {
+        int ix=indexOfZone(id);
+        if(ix<0||pixel<0||pixel>=zone(ix).optInt("length",0))return "#000000";
+        JSONObject all=data.optJSONObject("selectedPixels");
+        JSONObject entries=all==null?null:all.optJSONObject(id);
+        String hex=entries==null?"#000000":entries.optString(Integer.toString(pixel),"#000000");
+        return hex.matches("#[0-9A-Fa-f]{6}")?hex:"#000000";
+    }
+    synchronized boolean setPixelColor(String id,int pixel,String hex) {
+        int ix=indexOfZone(id);
+        if(ix<0||pixel<0||pixel>=zone(ix).optInt("length",0)||
+           hex==null||!hex.matches("#[0-9A-Fa-f]{6}"))return false;
+        try {
+            JSONObject all=data.optJSONObject("selectedPixels");
+            if(all==null){all=new JSONObject();data.put("selectedPixels",all);}
+            JSONObject entries=all.optJSONObject(id);
+            if(entries==null){entries=new JSONObject();all.put(id,entries);}
+            entries.put(Integer.toString(pixel),hex);
+            return save();
+        }catch(JSONException e){return false;}
+    }
+    synchronized boolean clearPixelColor(String id,int pixel) {
+        if(indexOfZone(id)<0||pixel<0)return false;
+        JSONObject all=data.optJSONObject("selectedPixels");
+        JSONObject entries=all==null?null:all.optJSONObject(id);
+        if(entries==null)return true;
+        entries.remove(Integer.toString(pixel));
+        return save();
+    }
     synchronized JSONArray zones() { return data.optJSONArray("layout"); }
     synchronized int zoneCount() { return zones().length(); }
     synchronized int pixelCount() {
@@ -232,6 +264,16 @@ final class NativeProject {
         try {
             JSONObject z = zone(index);
             z.put("name", label.trim()).put("length", length).put("reverse", reverse);
+            JSONObject colors=data.optJSONObject("selectedPixels");
+            JSONObject painted=colors==null?null:colors.optJSONObject(id);
+            if(painted!=null){
+                JSONArray keys=painted.names();
+                if(keys!=null)for(int i=0;i<keys.length();i++){
+                    String key=keys.optString(i);
+                    try {if(Integer.parseInt(key)>=length)painted.remove(key);}
+                    catch(NumberFormatException ex){painted.remove(key);}
+                }
+            }
             reindex();return save();
         } catch (JSONException e) { return false; }
     }
@@ -244,6 +286,8 @@ final class NativeProject {
             if (i != index) remaining.put(zone(i));
         try {
             data.put("layout", remaining);
+            JSONObject all=data.optJSONObject("selectedPixels");
+            if(all!=null)all.remove(id);
             // Only remove assignments for deleted zone; preserve all other triggers.
             JSONObject profiles = data.getJSONObject("profiles");
             JSONArray names = profiles.names();
