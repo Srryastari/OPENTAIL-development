@@ -5,8 +5,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const src=fs.readFileSync('web-studio/opentail.htm','utf8');
 assert(src.includes("const OT_VERSION='0.19.120'"));
-assert(src.includes("otCoreStoredValue('ot-controller-mode-v1','core')"),
-  'New standalone Studio installs should open the CORE design workspace');
+assert(src.includes("let otControllerMode='core';"),
+  'Existing localStorage from earlier WLED sessions must not hijack the standalone designer');
 const i=src.indexOf('function otStudioRoute(tab){');
 const j=src.indexOf('function device(){',i);
 assert(i>0 && j>i,'Authoring router boundaries are missing');
