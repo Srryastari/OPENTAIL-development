@@ -207,6 +207,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_COLORWAVES, "Colorwaves", "Colorwaves@!,Hue;!;!;;pal=26",
      true, false, true, true, false},
     {OT_WLED_FAIRY, "Fairy", "Fairy@!,# of flashers;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_FAIRYTWINKLE, "Fairytwinkle", "Fairytwinkle@!,!;!,!;!;;m12=0",
      true, true, true, true, false}
 };
 
@@ -2343,6 +2345,87 @@ static void fairy_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/* WLED FX.cpp mode_fairytwinkle() shares the four-byte Fairy flasher
+ * state and per-zone allocator. The original mode explicitly applies
+ * gamma8(), independent of the bus gamma switch. This pinned WLED 2.2
+ * lookup curve preserves the default effect envelope; user-configurable
+ * gamma remains an explicit later engine-parity requirement. */
+static const uint8_t fx_wled_gamma_22[256]={
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,
+      1,   1,   1,   1,   1,   1,   1,   1,   1,   2,   2,   2,   2,   2,   2,   2,
+      3,   3,   3,   3,   3,   4,   4,   4,   4,   5,   5,   5,   5,   6,   6,   6,
+      6,   7,   7,   7,   8,   8,   8,   9,   9,   9,  10,  10,  11,  11,  11,  12,
+     12,  13,  13,  13,  14,  14,  15,  15,  16,  16,  17,  17,  18,  18,  19,  19,
+     20,  20,  21,  22,  22,  23,  23,  24,  25,  25,  26,  26,  27,  28,  28,  29,
+     30,  30,  31,  32,  33,  33,  34,  35,  35,  36,  37,  38,  39,  39,  40,  41,
+     42,  43,  43,  44,  45,  46,  47,  48,  49,  49,  50,  51,  52,  53,  54,  55,
+     56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  71,
+     73,  74,  75,  76,  77,  78,  79,  81,  82,  83,  84,  85,  87,  88,  89,  90,
+     91,  93,  94,  95,  97,  98,  99, 100, 102, 103, 105, 106, 107, 109, 110, 111,
+    113, 114, 116, 117, 119, 120, 121, 123, 124, 126, 127, 129, 130, 132, 133, 135,
+    137, 138, 140, 141, 143, 145, 146, 148, 149, 151, 153, 154, 156, 158, 159, 161,
+    163, 165, 166, 168, 170, 172, 173, 175, 177, 179, 181, 182, 184, 186, 188, 190,
+    192, 194, 196, 197, 199, 201, 203, 205, 207, 209, 211, 213, 215, 217, 219, 221,
+    223, 225, 227, 229, 231, 234, 236, 238, 240, 242, 244, 246, 248, 251, 253, 255
+};
+
+static void fairytwinkle_frame(const ot_wled_fx_config_t *cfg,
+                             ot_wled_fx_state_t *state,uint32_t now,
+                             ot_wled_rgb_t *pixels,size_t count) {
+    if(count>SIZE_MAX/sizeof(ot_fairy_flasher_t))return;
+    ot_fairy_flasher_t *flashers=(ot_fairy_flasher_t*)fx_zone_scratch(
+                                state,count*sizeof(ot_fairy_flasher_t));
+    if(!flashers) {
+        for(size_t i=0;i<count;i++)
+            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const uint16_t now16=(uint16_t)now;
+    uint16_t seed=5100u; /* pinned segment-0 PRNG16 starting value */
+    const unsigned rise_fall=400u+(255u-(unsigned)cfg->speed)*3u;
+    const unsigned max_duration=rise_fall/100u+
+             ((255u-(unsigned)cfg->intensity)>>2)+13u+
+             ((255u-(unsigned)cfg->intensity)>>1);
+    for(size_t i=0;i<count;i++) {
+        ot_fairy_flasher_t *fl=&flashers[i];
+        unsigned age=(uint16_t)(now16-fl->state_start);
+        if(age>(unsigned)fl->state_dur*100u) {
+            fl->state_on=(uint8_t)!fl->state_on;
+            const bool init=fl->state_dur==0u;
+            if(fl->state_on)
+                fl->state_dur=(uint8_t)(rise_fall/100u+
+                    ((255u-(unsigned)cfg->intensity)>>2)+
+                    fx_rand8(state,12u+((255u-(unsigned)cfg->intensity)>>1))+1u);
+            else
+                fl->state_dur=(uint8_t)(rise_fall/100u+
+                    fx_rand8(state,3u+((255u-(unsigned)cfg->speed)>>6))+1u);
+            fl->state_start=now16;
+            age=0u;
+            if(init) {
+                fl->state_start=(uint16_t)(fl->state_start-(uint16_t)rise_fall);
+                fl->state_dur=(uint8_t)(rise_fall/100u+
+                    fx_rand8(state,12u+((255u-(unsigned)cfg->intensity)>>1))+5u);
+                age=rise_fall;
+            }
+        }
+        if(fl->state_on && (unsigned)fl->state_dur>max_duration)
+            fl->state_dur=(uint8_t)max_duration;
+        if(age>rise_fall)age=rise_fall;
+        const unsigned fade_prog=255u-(age*255u)/rise_fall;
+        const uint8_t gamma=fx_wled_gamma_22[fade_prog];
+        const uint8_t brightness=fl->state_on?(uint8_t)(255u-gamma):gamma;
+        const uint16_t last_seed=seed;
+        unsigned diff=0u;
+        do {
+            seed=(uint16_t)((uint32_t)seed*2053u+1384u);
+            diff=(seed>last_seed)?(unsigned)(seed-last_seed):
+                                  (unsigned)(last_seed-seed);
+        } while(diff<0x4000u);
+        pixels[i]=scaled(blend_colors(cfg->background,cfg->foreground,
+                                      brightness),cfg->brightness);
+    }
+}
+
 static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount) {
     const uint32_t c=((uint32_t)input.r<<16)|((uint32_t)input.g<<8)|input.b;
     if(c==0u || amount==0u)return (ot_wled_rgb_t){0u,0u,0u};
@@ -2848,6 +2931,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_FAIRYTWINKLE) {
+        fairytwinkle_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_FAIRY) {
