@@ -6,7 +6,7 @@
 [CmdletBinding()]
 param(
     [string]$Port = "COM9",
-    [string]$Version = "0.1.30-alpha",
+    [string]$Version = "0.1.31-alpha",
     [Nullable[long]]$RunId = $null,
     [switch]$VerifyOnly,
     [switch]$BenchCandidate
