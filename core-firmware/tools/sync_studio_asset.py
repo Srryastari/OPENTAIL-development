@@ -23,7 +23,8 @@ def main() -> int:
         print(f"ERROR: Studio source missing: {SOURCE}", file=sys.stderr)
         return 2
     raw = SOURCE.read_bytes()
-    if not raw.startswith(b"<!doctype html>") or b"ot-core-output-advanced" not in raw:
+    if (not raw.startswith(b"<!doctype html>") or b"ot-core-advanced" not in raw or
+            "CORE hardware output mapping · Advanced".encode("utf-8") not in raw):
         print("ERROR: Studio source is missing expected HTML or Output Manager fix", file=sys.stderr)
         return 2
     compressed = gzip.compress(raw, compresslevel=9, mtime=0)
