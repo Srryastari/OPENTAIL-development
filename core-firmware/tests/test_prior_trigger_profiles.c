@@ -100,6 +100,46 @@ static void test_independent_outputs_and_selected_zones(void){
                                      selected[out][0],32,&c));
         expect_rgb(c,32,0,0);
     }
+    /* Previously user-confirmed simulated Brake+Hazards diagnostics:
+     * mode=vehicle, hazards=true; both brake roles red, both turn roles
+     * amber, Reverse off. This tests the logical overlay, not optical LEDs. */
+    const uint8_t brake_hazards=(uint8_t)(OT_SIG_BRAKE|OT_SIG_LEFT|OT_SIG_RIGHT);
+    const ot_arbitration_t diag=ot_arbitrate(brake_hazards,false,false);
+    assert(diag.mode==OT_ARB_VEHICLE && diag.hazards && !diag.show_requested);
+    for(unsigned out=0;out<2;out++){
+        ot_rgb_t tail={0,0,0},turn={0,0,0};
+        assert(ot_om_trigger_overlay(outputs[out].zones[0].role,
+                                     brake_hazards,false,32,&tail));
+        assert(ot_om_trigger_overlay(outputs[out].zones[1].role,
+                                     brake_hazards,false,32,&turn));
+        expect_rgb(tail,32,0,0);
+        expect_rgb(turn,32,19,0);
+    }
+    ot_rgb_t reverse_off={0,0,0};
+    assert(!ot_om_trigger_overlay(OT_OM_REVERSE,brake_hazards,false,32,&reverse_off));
+    expect_rgb(reverse_off,0,0,0);
+
+    /* Previously user-confirmed Reverse simulation: both independently
+     * configured reverse sections were active; turn sections stayed dark;
+     * after simulated expiry, normal rendering restored. */
+    outputs[1].zones[2].role=OT_OM_REVERSE; /* temporary TEST profile only */
+    assert(ot_om_valid(&outputs[1]));
+    for(unsigned out=0;out<2;out++){
+        ot_rgb_t reverse={0,0,0},turn={0,0,0};
+        assert(ot_om_trigger_overlay(outputs[out].zones[2].role,
+                                     OT_SIG_REVERSE,false,32,&reverse));
+        expect_rgb(reverse,32,32,32);
+        assert(!ot_om_trigger_overlay(outputs[out].zones[1].role,
+                                      OT_SIG_REVERSE,false,32,&turn));
+        expect_rgb(turn,0,0,0);
+        reverse=(ot_rgb_t){11,22,33}; /* effect resumes underneath on release */
+        assert(!ot_om_trigger_overlay(outputs[out].zones[2].role,
+                                      0,true,32,&reverse));
+        expect_rgb(reverse,11,22,33);
+    }
+    outputs[1].zones[2].role=OT_OM_AUX1;
+    assert(ot_om_valid(&outputs[1]));
+
     /* Releasing Brake leaves the effect on A and black on unselected B. */
     ot_rgb_t a={11,22,33},b={0,0,0};
     assert(!ot_om_trigger_overlay(OT_OM_PARK_BRAKE,0,true,32,&a));
