@@ -2688,6 +2688,150 @@ void mode_twinklecat()
 #undef SEGPALETTE
 #undef gamma8inv
 
+// BEGIN pinned WLED FX.cpp AuroraWave and mode_aurora source.
+#define gamma8inv(x) ref_gamma8inv((uint8_t)(x))
+#ifdef ESP8266
+  #define W_MAX_COUNT  9          //Number of simultaneous waves
+#else
+  #define W_MAX_COUNT 20          //Number of simultaneous waves
+#endif
+#define W_MAX_SPEED 6             //Higher number, higher speed
+#define W_WIDTH_FACTOR 6          //Higher number, smaller waves
+
+// fixed-point math scaling
+#define AW_SHIFT 16
+#define AW_SCALE (1 << AW_SHIFT)  // 65536 representing 1.0
+
+// 32 bytes
+class AuroraWave {
+  private:
+    int32_t center;               // scaled by AW_SCALE
+    uint32_t ageFactor_cached;    // cached age factor scaled by AW_SCALE
+    uint16_t ttl;
+    uint16_t age;
+    uint16_t width;
+    uint16_t basealpha;           // scaled by AW_SCALE
+    uint16_t speed_factor;        // scaled by AW_SCALE
+    int16_t  wave_start;          // wave start LED index
+    int16_t  wave_end;            // wave end LED index
+    bool goingleft;
+    bool alive = true;
+    CRGBW basecolor;
+
+  public:
+    void init(uint32_t segment_length, CRGBW color) {
+      ttl = hw_random16(500, 1501);
+      basecolor = color;
+      basealpha = hw_random8(60, 100) * AW_SCALE / 100; // 0-99% note: if using 100% there is risk of integer overflow
+      age = 0;
+      width = hw_random16(segment_length / 20, segment_length / W_WIDTH_FACTOR) + 1;
+      center = (((uint32_t)hw_random8(101) << AW_SHIFT) / 100) * segment_length; // 0-100%
+      goingleft = hw_random8() & 0x01; // 50/50 chance
+      speed_factor = (((uint32_t)hw_random8(10, 31) * W_MAX_SPEED) << AW_SHIFT) / (100 * 255);
+      alive = true;
+    }
+
+    void updateCachedValues() {
+      uint32_t half_ttl = ttl >> 1;
+      if (age < half_ttl) {
+        ageFactor_cached = ((uint32_t)age << AW_SHIFT) / half_ttl;
+      } else {
+        ageFactor_cached = ((uint32_t)(ttl - age) << AW_SHIFT) / half_ttl;
+      }
+      if (ageFactor_cached >= AW_SCALE) ageFactor_cached = AW_SCALE - 1; // prevent overflow
+
+      uint32_t center_led = center >> AW_SHIFT;
+      wave_start = (int16_t)center_led - (int16_t)width;
+      wave_end = (int16_t)center_led + (int16_t)width;
+    }
+
+    CRGBW getColorForLED(int ledIndex) {
+      // linear brightness falloff from center to edge of wave
+      if (ledIndex < wave_start || ledIndex > wave_end) return 0;
+      int32_t ledIndex_scaled = (int32_t)ledIndex << AW_SHIFT;
+      int32_t offset = ledIndex_scaled - center;
+      if (offset < 0) offset = -offset;
+      uint32_t offsetFactor = offset / width;  // scaled by AW_SCALE
+      if (offsetFactor > AW_SCALE) return 0;   // outside of wave
+      uint32_t brightness_factor = (AW_SCALE - offsetFactor);
+      brightness_factor = (brightness_factor * ageFactor_cached) >> AW_SHIFT;
+      brightness_factor = (brightness_factor * basealpha) >> AW_SHIFT;
+
+      CRGBW rgb;
+      rgb.r = (basecolor.r * brightness_factor) >> AW_SHIFT;
+      rgb.g = (basecolor.g * brightness_factor) >> AW_SHIFT;
+      rgb.b = (basecolor.b * brightness_factor) >> AW_SHIFT;
+      rgb.w = (basecolor.w * brightness_factor) >> AW_SHIFT;
+
+      return rgb;
+    };
+
+    //Change position and age of wave
+    //Determine if its still "alive"
+    void update(uint32_t segment_length, uint32_t speed) {
+      int32_t step = speed_factor * speed;
+      center += goingleft ? -step : step;
+      age++;
+
+      if (age > ttl) {
+        alive = false;
+      } else {
+        uint32_t width_scaled = (uint32_t)width << AW_SHIFT;
+        uint32_t segment_length_scaled = segment_length << AW_SHIFT;
+
+         if (goingleft) {
+           if (center < - (int32_t)width_scaled) {
+             alive = false;
+           }
+         } else {
+           if (center > (int32_t)segment_length_scaled + (int32_t)width_scaled) {
+             alive = false;
+           }
+         }
+      }
+    };
+
+    bool stillAlive() { return alive; }
+};
+
+void mode_aurora(void) {
+  AuroraWave* waves;
+  SEGENV.aux1 = map(SEGMENT.intensity, 0, 255, 2, W_MAX_COUNT); // aux1 = Wavecount
+  if (!SEGENV.allocateData(sizeof(AuroraWave) * SEGENV.aux1)) {
+    FX_FALLBACK_STATIC;
+  }
+  waves = reinterpret_cast<AuroraWave*>(SEGENV.data);
+
+  // note: on first call, SEGENV.data is zero -> all waves are dead and will be initialized
+  for (int i = 0; i < SEGENV.aux1; i++) {
+    waves[i].update(SEGLEN, SEGMENT.speed);
+    if (!(waves[i].stillAlive())) {
+      waves[i].init(SEGLEN, SEGMENT.color_from_palette(hw_random8(), false, false, hw_random8(0, 3)));
+    }
+    waves[i].updateCachedValues();
+  }
+
+  uint8_t backlight = 0; // note: original code used 1, with inverse gamma applied background would never be black
+  if (SEGCOLOR(0)) backlight++;
+  if (SEGCOLOR(1)) backlight++;
+  if (SEGCOLOR(2)) backlight++;
+  backlight = gamma8inv(backlight); // preserve backlight when using gamma correction
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    CRGBW mixedRgb = CRGBW(backlight, backlight, backlight);
+
+    for (int j = 0; j < SEGENV.aux1; j++) {
+      CRGBW rgb = waves[j].getColorForLED(i);
+      mixedRgb = color_add(mixedRgb, rgb); // sum all waves influencing this pixel
+    }
+
+    SEGMENT.setPixelColor(i, mixedRgb);
+  }
+}
+
+#undef gamma8inv
+// END pinned Aurora source.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2743,7 +2887,8 @@ static const RefCase refs[]={
     {115,mode_blends,"Blends"},
     {65,mode_palette,"Palette"},
     {80,mode_twinklefox,"Twinklefox"},
-    {81,mode_twinklecat,"Twinklecat"}
+    {81,mode_twinklecat,"Twinklecat"},
+    {38,mode_aurora,"Aurora"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2788,9 +2933,9 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
