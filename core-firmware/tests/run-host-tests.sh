@@ -60,6 +60,18 @@ for lane_budget in 1024 3072; do
   /tmp/ot-output-budget-tests
 done
 python3 tests/test_universal_output_contract.py
+# Trigger-only host coverage runs before unrelated OTA/firmware gates so
+# trigger regressions remain observable even when upstream contracts fail.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c main/show_logic.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
+
+# Replay previously reported two-output zone arbitration and exercise every
+# IN1..IN8 -> logical function reassignment with all raw input combinations.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_prior_trigger_profiles.c -o /tmp/ot-prior-trigger-profiles && /tmp/ot-prior-trigger-profiles
+
+# Preserve the verified physical bench contract as a host regression baseline.
+# This DOES NOT replace repeating the checks on GPIO16/17 and IN1..IN8.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/core_logic.c main/arbitration_logic.c main/trigger_manager.c main/ble_config.c tests/test_verified_bench_contract.c -o /tmp/ot-verified-bench-contract && /tmp/ot-verified-bench-contract
+
 python3 tests/test_ota_boot_confirmation_contract.py
 # All physical lanes must submit before CORE reports a completed frame or Stop.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_frame_contract.c -o /tmp/ot-frame-contract
@@ -75,16 +87,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_fps_pacer.c tests/tes
 # Verify the unchanged v1 BLE wire ABI round-trips arbitrary user-created zones.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_config.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c main/show_logic.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
-# Replay previously reported two-output zone arbitration and exercise every
-# IN1..IN8 -> logical function reassignment with all raw input combinations.
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_prior_trigger_profiles.c -o /tmp/ot-prior-trigger-profiles && /tmp/ot-prior-trigger-profiles
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_transition.c -o /tmp/ot-transition-tests && /tmp/ot-transition-tests
 
-# Preserve the verified physical bench contract as a host regression baseline.
-# This DOES NOT replace repeating the checks on GPIO16/17 and IN1..IN8.
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/core_logic.c main/arbitration_logic.c main/trigger_manager.c main/ble_config.c tests/test_verified_bench_contract.c -o /tmp/ot-verified-bench-contract && /tmp/ot-verified-bench-contract
 
 # BLE output map serialization must roundtrip arbitrary user-owned zones,
 # without either Studio or the firmware presuming a vehicle's geometry.
