@@ -1214,6 +1214,26 @@ int main(void) {
     }
     c.palette_id=0u;
 
+
+    /* Glitter's source palette + random white pixel must remain inside an
+     * arbitrary 522 pixel zone, even at the maximum spark intensity. */
+    c.effect_id=OT_WLED_GLITTER;
+    c.palette_id=11u;c.speed=255u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t glit={0};
+    ot_wled_rgb_t glit_pixels[524];
+    for(size_t i=0;i<524u;i++)glit_pixels[i]=(ot_wled_rgb_t){99u,88u,77u};
+    for(unsigned f=0;f<50u;f++) {
+        assert(ot_wled_fx_render(&c,&glit,f*223u,&glit_pixels[1],522u));
+        assert(eq(glit_pixels[0],(ot_wled_rgb_t){99u,88u,77u}));
+        assert(eq(glit_pixels[523],(ot_wled_rgb_t){99u,88u,77u}));
+        for(size_t i=1u;i<=522u;i++)
+            assert(glit_pixels[i].r<=32u&&
+                   glit_pixels[i].g<=32u&&
+                   glit_pixels[i].b<=32u);
+    }
+    ot_wled_fx_reset(&glit);
+    c.palette_id=0u;
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
