@@ -241,7 +241,7 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
   'PalettePicker("Shared sequence palette"', 'opts.put("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
-  'coreFrame.value = null // palette is NOT in the current BLE FX payload']) {
+  'invalidateCoreFrame() // palette is NOT in the current BLE FX payload']) {
   assert(compose.includes(required), 'Native palette authoring regressed: ' + required);
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
