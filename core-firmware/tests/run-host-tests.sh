@@ -60,6 +60,7 @@ for lane_budget in 1024 3072; do
   /tmp/ot-output-budget-tests
 done
 python3 tests/test_universal_output_contract.py
+python3 tests/test_ota_boot_confirmation_contract.py
 # All physical lanes must submit before CORE reports a completed frame or Stop.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_frame_contract.c -o /tmp/ot-frame-contract
 /tmp/ot-frame-contract
