@@ -50,6 +50,8 @@ final class BleDiscovery {
     private static final UUID ENROLL_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf27");
     private static final UUID CHALLENGE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf28");
     private static final UUID REPLY_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf24");
+    private static final UUID FRAME_CMD_UUID=UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2a");
+    private static final UUID FRAME_RSP_UUID=UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2b");
     private static final UUID FX_CAPS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf29");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
@@ -73,6 +75,22 @@ final class BleDiscovery {
         stopScan();
         connectReadOnly(device);
     }
+    private CoreFrameCapture.Listener frameListener;
+    private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
+        CoreFrameCapture.Listener cb=frameListener;
+        if(cb!=null)ui.post(()->{if(!stopped)cb.done(output,sequence,rgb,error);});
+        pumpQueue();
+    });
+    void setFrameListener(CoreFrameCapture.Listener cb) { frameListener=cb; }
+    boolean canCaptureFrame() {return canControl() && frameCapture.supported();}
+    void captureFrame(int output) {
+        if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return;}
+        if(frameCapture.busy() || cfgBusy || writePending || readReplyPending || fxCapsBusy ||
+           authPending || pairPending || challengePending) {
+            notifyStatus("BLE busy; retry frame capture");return;
+        }
+        frameCapture.request(output);
+    }
     private final ArrayAdapter<String> entries;
     private BluetoothLeScanner scanner;
     private BluetoothGatt gatt;
@@ -91,7 +109,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void readFxCapabilities(){
         if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||authPending||pairPending||challengePending){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
@@ -130,13 +148,13 @@ final class BleDiscovery {
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||frameCapture.busy()){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     void saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||frameCapture.busy()){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return;}
@@ -375,7 +393,7 @@ final class BleDiscovery {
 
     /** Serialize Android GATT operations; BLE GATT only allows one pending request. */
     private void enqueueWrite(byte[] data) {
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || frameCapture.busy()) {
             // One pending latest action; explicit STOP replaces queued starts.
             nextPacket=Arrays.copyOf(data,data.length);return;
         }
@@ -400,7 +418,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){writePending=false;authPending=false;notifyStatus("BLE permission missing");}
     }
     private void pumpQueue(){
-        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&nextPacket!=null){
+        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!frameCapture.busy()&&nextPacket!=null){
             pendingPacket=nextPacket;nextPacket=null;writeNow();
         }
     }
@@ -562,7 +580,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -588,7 +606,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
+                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;nextPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -625,6 +643,7 @@ final class BleDiscovery {
             activeAddress=connection.getDevice().getAddress();
             cfgCommand = service.getCharacteristic(CFG_CMD_UUID);
             cfgReply = service.getCharacteristic(CFG_RSP_UUID);
+            frameCapture.configure(connection,service.getCharacteristic(FRAME_CMD_UUID),service.getCharacteristic(FRAME_RSP_UUID));
             authorized = false;
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             connection.readCharacteristic(info);
@@ -635,6 +654,7 @@ final class BleDiscovery {
             if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,value,status);return;}
             if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(value,status);return;}
             if (CFG_RSP_UUID.equals(characteristic.getUuid())) { cfgResponse(value,status);return; }
+            if (FRAME_RSP_UUID.equals(characteristic.getUuid())) { frameCapture.read(connection,value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
@@ -652,6 +672,7 @@ final class BleDiscovery {
                 if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,characteristic.getValue(),status);return;}
                 if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(characteristic.getValue(),status);return;}
                 if (CFG_RSP_UUID.equals(characteristic.getUuid())) {cfgResponse(characteristic.getValue(),status);return;}
+                if (FRAME_RSP_UUID.equals(characteristic.getUuid())) {frameCapture.read(connection,characteristic.getValue(),status);return;}
                 if (REPLY_UUID.equals(characteristic.getUuid())) {
                     acceptReply(characteristic.getValue(),status);return;
                 }
@@ -665,6 +686,7 @@ final class BleDiscovery {
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
+            if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {frameCapture.written(connection,status);return;}
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
@@ -705,6 +727,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void shutdown() {
         stopped = true;
+        frameCapture.cancel();
         connected = false;
         connecting = false;
         authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");cfgWatchdog++;
