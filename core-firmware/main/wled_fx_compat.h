@@ -185,6 +185,8 @@ typedef struct {
     uint8_t spark_peak;
     ot_wled_rgb_t spark_color;
     const ot_wled_audio_peak_t *audio_peak; /* nullable, source FX 185 only */
+    uint8_t active_segments;   /* FX 90 WLED spark budget, 0=isolated 1D zone */
+    uint8_t max_segments;      /* FX 90 WLED spark budget, 0=64 (ESP32-S3) */
 } ot_wled_fx_config_t;
 typedef struct {
     uint16_t pos;
