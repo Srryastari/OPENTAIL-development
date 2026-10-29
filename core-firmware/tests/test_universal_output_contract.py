@@ -60,6 +60,11 @@ status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split(
 assert "observed_fps=measured_fps;" in status.split("portEXIT_CRITICAL(&state_lock);",1)[0]
 assert "(unsigned long)observed_fps" in status
 assert "(unsigned long)measured_fps" not in status
+# BLE startup and renderer readiness are independent; expose both for bench diagnosis.
+assert "outputs_ready=native_outputs_ready;" in status
+assert r'\"ble_ready\":%s' in status
+assert r'\"outputs_ready\":%s' in status
+assert 'OT_FW,ble_startup_ready?"true":"false",outputs_ready?"true":"false"' in status
 assert "measured_fps=fps;" in core
 assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n               portEXIT_CRITICAL(&state_lock);" in core
 # BLE FX validation must follow the physical output count, not a vehicle or
