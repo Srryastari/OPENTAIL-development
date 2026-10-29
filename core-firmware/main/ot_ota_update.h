@@ -8,4 +8,5 @@
 bool ot_ota_available(void);
 esp_err_t ot_ota_status_get(httpd_req_t *r);
 esp_err_t ot_ota_upload_post(httpd_req_t *r);
-void ot_ota_confirm_boot(bool outputs_ready);
+/* True when validation succeeded or the running image needs no confirmation. */
+bool ot_ota_confirm_boot(bool outputs_ready);
