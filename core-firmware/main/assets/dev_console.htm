@@ -26,7 +26,7 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <div class="bar"><button class="primary" id="refresh" onclick="refreshAll()">Refresh controller</button><button class="danger" id="stop" onclick="stopAll()">Stop ALL tests</button><span id="connection" class="status" role="status">Connecting…</span></div>
 </header>
 <nav aria-label="Developer tools">
-<a href="#overview">Overview</a><a href="#lighting">Lighting Tests</a><a href="#events">Startup / Shutdown</a><a href="#effects">Effects</a><a href="#inputs">Triggers</a><a href="#outputs">Outputs</a><a href="#statusled">Status LED</a><a href="#api">API / Diagnostics</a>
+<a href="#overview">Overview</a><a href="#lighting">Lighting Tests</a><a href="#events">Startup / Shutdown</a><a href="#effects">Effects</a><a href="#inputs">Triggers</a><a href="#outputs">Outputs</a><a href="#statusled">Status LED</a><a href="#firmware">Firmware Update</a><a href="#api">API / Diagnostics</a>
 </nav>
 <main>
 <section id="overview">
@@ -153,6 +153,17 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 </div><div class="card"><h3>Status LED telemetry</h3><pre id="ledJson">—</pre><button onclick="readLed()">Refresh indicator</button></div></div>
 </section>
 
+<section id="firmware"><h2>Firmware update</h2>
+<div class="grid"><div class="card"><h3>Local CORE OTA · inactive firmware slot</h3>
+<small>Requires one-time USB installation of the dual-slot firmware. This is a BENCH-ONLY update path on the controller's private Wi-Fi AP. It does not install WLED, Android, Studio, or an entire GitHub ZIP. Select the CORE application .bin. User zone settings stay in NVS.</small>
+<pre id="otaStatus">Check whether dual-slot OTA is installed</pre>
+<div class="bar"><button onclick="otaCheck()">Check OTA support</button></div>
+<label>Verified CORE application binary (.bin)<input type="file" id="otaFile" accept=".bin,application/octet-stream"></label>
+<div class="bar"><button class="danger" id="otaSend" onclick="otaSend()">Confirm and install firmware</button></div>
+<pre id="otaResult">No OTA update requested. Do not update while connected to vehicle lighting.</pre>
+<small class="warning">The upload must be completed over the controller's own Wi-Fi with a stable power supply. Flashing an invalid image leaves the current slot intact; initial dual-slot conversion cannot be performed OTA. Real rollback remains a mandatory physical regression test.</small>
+</div></div></section>
+
 <section id="api"><h2>API &amp; diagnostics</h2>
 <div class="grid">
 <div class="card"><h3>Read-only endpoints</h3>
@@ -249,6 +260,30 @@ async function clearSimulation(){document.querySelectorAll('#signals input').for
 async function statusRgb(mode){await act('ledResult','/api/v1/status-led/self-test',{mode});await readLed()}
 async function readLed(){try{$('ledJson').textContent=pretty(await request('/api/v1/status-led'))}catch(e){$('ledJson').textContent=e.message}}
 async function readToken(){if(!confirm('Display the temporary BLE enrollment token? Keep it private.'))return;try{$('tokenResult').textContent=pretty(await request('/api/v1/ble/session'))}catch(e){$('tokenResult').textContent=e.message}}
+async function otaCheck(){
+ try{const status=await request('/api/v1/ota');$('otaStatus').textContent=pretty(status);return status}
+ catch(e){$('otaStatus').textContent='OTA unavailable: '+e.message;return null}
+}
+async function otaSend(){
+ const output=$('otaResult'),button=$('otaSend'),file=$('otaFile').files[0];
+ try{
+  if(!file||!file.name.toLowerCase().endsWith('.bin'))throw Error('Choose a CORE application .bin file');
+  const status=await otaCheck();
+  if(!status?.available)throw Error('Two-slot OTA not installed; migrate once by USB before using local OTA.');
+  if(status.busy)throw Error('An update is already running');
+  if(file.size<32768)throw Error('Firmware image too small');
+  if(!confirm('BENCH ONLY. Install '+file.name+' ('+file.size+' bytes) on the inactive OpenTail CORE slot and reboot? Verify this binary came from the expected GitHub CI release.'))return;
+  button.disabled=true;output.textContent='Uploading firmware… Do not disconnect power.';
+  const res=await fetch('/api/v1/ota',{method:'POST',cache:'no-store',
+   headers:{'Content-Type':'application/octet-stream','X-OpenTail-Update':'confirmed'},
+   body:file});
+  const text=await res.text();let reply;
+  try{reply=JSON.parse(text)}catch{throw Error('Firmware upload returned HTTP '+res.status)}
+  if(!res.ok)throw Error(reply.error||'HTTP '+res.status);
+  output.textContent=pretty(reply)+'\nController rebooting. Reconnect to Wi-Fi and confirm firmware version.';
+ }catch(e){output.textContent='Update not installed: '+e.message}
+ finally{button.disabled=false}
+}
 refreshAll();
 setInterval(()=>{if(!document.hidden)refreshStatus()},3000);
 </script>
