@@ -4,7 +4,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const src=fs.readFileSync('web-studio/opentail.htm','utf8');
-assert(src.includes("const OT_VERSION='0.19.119'"));
+assert(src.includes("const OT_VERSION='0.19.120'"));
 assert(src.includes("otCoreStoredValue('ot-controller-mode-v1','core')"),
   'New standalone Studio installs should open the CORE design workspace');
 const i=src.indexOf('function otStudioRoute(tab){');
@@ -54,8 +54,8 @@ const settingsStart=src.indexOf('function otCoreDevice(){');
 const settingsEnd=src.indexOf('// In CORE mode, retain the existing Studio editor',settingsStart);
 const settings=src.slice(settingsStart,settingsEnd);
 assert(settings.includes('exportProject()')&&settings.includes('importProject(this.files[0])'),'Local project backups must work');
-assert(settings.includes('otCoreConnect()')&&settings.includes('otCoreDisconnect()'),'Optional CORE connection must be preserved');
-assert(settings.includes('http://192.168.4.1/dev'),'Hardware testing must link to CORE dashboard');
+assert(!settings.includes('otCoreConnect()')&&!settings.includes('otCoreDisconnect()'),'Studio Settings must not require a hardware connection');
+assert(settings.includes('192.168.4.1/dev'),'Hardware testing must remain separate in CORE dashboard');
 for(const forbidden of ['otCoreControllerPicker()','otCoreSignalActions()','otCoreDemoActions()','otCoreLiveCard()','otOutputManagerCard()']){
   assert(!settings.includes(forbidden),'CORE hardware tools were duplicated in Studio Settings: '+forbidden);
 }
@@ -118,4 +118,4 @@ const selectFn=new Function('otBleFxMode','otBleApplyEffect','otControllerMode',
  console.log('Offline 126-mode data catalog and source-level non-device effect selection passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 
-console.log('Studio v0.19.119: design-only CORE routes, preserved authoring, offline events, project backup, old-device fallback and approved UI passed.');
+console.log('Studio v0.19.120: design-only CORE routes, preserved authoring, offline events, project backup, old-device fallback and approved UI passed.');
