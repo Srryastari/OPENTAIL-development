@@ -5,6 +5,9 @@ on:
   pull_request:
     paths:
       - 'core-firmware/**'
+      - 'scripts/**'
+      - 'docs/**'
+      - '.github/workflows/**'
       - 'wled-native/**'
       - 'android/**'
       - 'web-studio/**'
@@ -18,6 +21,19 @@ concurrency:
   group: verify-active-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  change-impact-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare all changed files to last verified successful CI baseline
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+      - name: Verify OTA layout and local-update contract without asserting hardware success
+        run: python3 core-firmware/tests/test_ota_contract.py
+
   core-host-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -115,6 +131,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           & ./scripts/flash-from-github.ps1 -RunId ${{ github.run_id }} -Version '0.1.30-alpha' -VerifyOnly
+
+  release-evidence-gate:
+    # Intentionally BLOCKS release until actual physical evidence is supplied
+    # for the exact commit. A green host build is NOT hardware approval.
+    if: always()
+    needs:
+      - change-impact-audit
+      - core-host-tests
+      - core-espidf-build
+      - github-flash-package-check
+      - web-studio-check
+      - android-debug-apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require every software job to have succeeded on this candidate
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          results=json.loads(os.environ['JOB_RESULTS'])
+          problems=[f'{name}: {value["result"]}' for name,value in results.items()
+                    if value['result']!='success']
+          assert not problems,'CI software jobs failed or skipped: '+', '.join(problems)
+          print('All required firmware/UI/Android/installer jobs passed in this run.')
+          PY
+      - name: Require current physical test evidence and full effect provenance
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode release
 
   android-debug-apk:
     runs-on: ubuntu-latest
