@@ -481,7 +481,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TWINKLEFOX, "Twinklefox", "Twinklefox@!,Twinkle rate,,,,Cool;!,!;!",
      false, true, true, true, true},
     {OT_WLED_TWINKLECAT, "Twinklecat", "Twinklecat@!,Twinkle rate,,,,Cool,Reverse;!,!;!",
-     false, true, true, true, true}
+     false, true, true, true, true},
+    {OT_WLED_AURORA, "Aurora", "Aurora@!,!;1,2,3;!;;sx=24,pal=50",
+     true, true, true, true, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2801,6 +2803,112 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* AuroraWave source fields, per-zone scratch; fixed-point AW_SHIFT=16.
+ * Avoid global wave arrays and preserve source wave lifetime and RNG order.
+ * RGB-only default is the source's Aurora fixed palette ID 50. */
+typedef struct {
+    int32_t center;
+    uint32_t cached;
+    uint16_t ttl,age,width,alpha,speed_factor;
+    int16_t start,end;
+    bool goingleft,alive;
+    ot_wled_rgb_t basecolor;
+} ot_aurora_wave_t;
+static uint8_t aurora_random_range(ot_wled_fx_state_t *s,
+                                  uint8_t low,uint8_t high) {
+    return high>low?(uint8_t)(low+fx_rand8(s,(uint32_t)high-low)):low;
+}
+static size_t aurora_random16_range(ot_wled_fx_state_t *s,
+                                   size_t low,size_t high) {
+    return high>low?low+fx_rand_index(s,high-low):low;
+}
+static void aurora_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         ot_wled_rgb_t *pixels,size_t count) {
+    const unsigned waves=2u+((unsigned)cfg->intensity*18u/255u);
+    ot_aurora_wave_t *data=(ot_aurora_wave_t*)fx_zone_scratch(
+                             state,(size_t)waves*sizeof(*data));
+    if(!data)return;
+    ot_wled_palette16_t palette;
+    const uint8_t id=cfg->palette_id?cfg->palette_id:50u;
+    if(!ot_wled_palette_build(id,cfg->foreground,
+               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
+    for(unsigned w=0;w<waves;w++) {
+        ot_aurora_wave_t *wave=&data[w];
+        if(wave->alive) {
+            const int32_t step=(int32_t)wave->speed_factor*cfg->speed;
+            wave->center+=wave->goingleft?-step:step;
+            wave->age++;
+            if(wave->age>wave->ttl)wave->alive=false;
+            else {
+                const int32_t width=(int32_t)wave->width<<16;
+                const int32_t size=(int32_t)count<<16;
+                if((wave->goingleft&&wave->center< -width)||
+                   (!wave->goingleft&&wave->center>size+width))
+                    wave->alive=false;
+            }
+        }
+        if(!wave->alive) {
+            /* GCC evaluates the innermost palette selection's last argument
+             * first, then index; both consume source RNG even with palette. */
+            (void)fx_rand8(state,3u);
+            const uint8_t color=fx_rand8(state,256u);
+            wave->ttl=(uint16_t)aurora_random16_range(state,500u,1501u);
+            wave->basecolor=ot_wled_palette_sample(&palette,color,255u,
+                                                   OT_WLED_PALETTE_LINEAR);
+            wave->alpha=(uint16_t)(((unsigned)aurora_random_range(
+                               state,60u,100u)*65536u)/100u);
+            wave->age=0u;
+            wave->width=(uint16_t)(aurora_random16_range(state,
+                       count/20u,count/6u)+1u);
+            wave->center=(int32_t)((((uint32_t)fx_rand8(state,101u)<<16)
+                                  /100u)*count);
+            wave->goingleft=(fx_rand8(state,256u)&1u)!=0u;
+            wave->speed_factor=(uint16_t)((((uint32_t)aurora_random_range(
+                 state,10u,31u)*6u)<<16)/(100u*255u));
+            wave->alive=true;
+        }
+        const uint32_t half=(unsigned)wave->ttl>>1;
+        uint32_t cached=wave->age<half?
+            ((uint32_t)wave->age<<16)/half:
+            ((uint32_t)(wave->ttl-wave->age)<<16)/half;
+        if(cached>=65536u)cached=65535u;
+        wave->cached=cached;
+        const int32_t center_led=wave->center>>16;
+        wave->start=(int16_t)center_led-(int16_t)wave->width;
+        wave->end=(int16_t)center_led+(int16_t)wave->width;
+    }
+    unsigned backlight=0u;
+    if(cfg->foreground.r||cfg->foreground.g||cfg->foreground.b)backlight++;
+    if(cfg->background.r||cfg->background.g||cfg->background.b)backlight++;
+    backlight=ot_inv_gamma22[backlight];
+    for(size_t i=0;i<count;i++) {
+        unsigned rr=backlight,gg=backlight,bb=backlight;
+        for(unsigned w=0;w<waves;w++) {
+            const ot_aurora_wave_t *wave=&data[w];
+            if((int32_t)i<wave->start||(int32_t)i>wave->end)continue;
+            const int32_t scaled_pos=(int32_t)i<<16;
+            int32_t offset=scaled_pos-wave->center;
+            if(offset<0)offset=-offset;
+            const uint32_t off=(uint32_t)offset/wave->width;
+            if(off>65536u)continue;
+            uint32_t brightness=65536u-off;
+            brightness=(brightness*wave->cached)>>16;
+            brightness=(brightness*wave->alpha)>>16;
+            rr+=(unsigned)((uint32_t)wave->basecolor.r*brightness>>16);
+            gg+=(unsigned)((uint32_t)wave->basecolor.g*brightness>>16);
+            bb+=(unsigned)((uint32_t)wave->basecolor.b*brightness>>16);
+            if(rr>255u)rr=255u;
+            if(gg>255u)gg=255u;
+            if(bb>255u)bb=255u;
+        }
+        pixels[i]=scaled((ot_wled_rgb_t){(uint8_t)rr,(uint8_t)gg,(uint8_t)bb},
+                         cfg->brightness);
+    }
+    (void)now;
+}
+
 /* Source WLED colors.cpp NeoGammaWLEDMethod::calcGammaTable(2.2f)
  * inverse LUT, generated using the pinned powf formula and rounded to uint8.
  * The LUT is immutable; no per-frame gamma calculation or shared state. */
@@ -3960,7 +4068,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_BLENDS &&
             cfg->effect_id!=OT_WLED_PALETTE &&
             cfg->effect_id!=OT_WLED_TWINKLEFOX &&
-            cfg->effect_id!=OT_WLED_TWINKLECAT) ||
+            cfg->effect_id!=OT_WLED_TWINKLECAT &&
+            cfg->effect_id!=OT_WLED_AURORA) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4154,6 +4263,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_AURORA) {
+        aurora_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_TWINKLEFOX ||
