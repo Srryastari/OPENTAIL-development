@@ -152,6 +152,7 @@ class ComposeMainActivity : ComponentActivity() {
                 ble.readFxCapabilities()
             if (!ble.canControl()) {
                 coreFrame.value = null
+                captureMessage.value = "CORE frame not captured"
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
             }
             if (!ble.canControl() && liveArmed.value) {
