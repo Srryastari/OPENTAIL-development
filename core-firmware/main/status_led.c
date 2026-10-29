@@ -94,7 +94,7 @@ void ot_st_format_json(char *buf,size_t size){
         (unsigned long)s.self_test_remaining_ms);
 }
 static void status_task(void *arg){
-    (void)arg;ot_st_rgb_t prior={255,255,255};
+    (void)arg;ot_st_rgb_t prior={0,0,0};bool prior_valid=false;
     while(1){
         uint32_t now=ms_now();ot_st_snapshot_t s;ot_st_snapshot(&s);
         /* Show/rainbow self-test starts its cycle from zero, not from uptime. */
@@ -105,14 +105,14 @@ static void status_task(void *arg){
             portEXIT_CRITICAL(&lock);
         }
         ot_st_rgb_t c=ot_st_render(s.mode,phase,s.brightness,s.enabled);
-        if(status_pixel && (c.r!=prior.r||c.g!=prior.g||c.b!=prior.b)){
+        if(status_pixel && (!prior_valid||c.r!=prior.r||c.g!=prior.g||c.b!=prior.b)){
             esp_err_t e=led_strip_set_pixel(status_pixel,0,c.r,c.g,c.b);
             if(e==ESP_OK)e=led_strip_refresh(status_pixel);
             if(e!=ESP_OK){ESP_LOGE(TAG,"Onboard RGB update failed: %s",esp_err_to_name(e));
                 portENTER_CRITICAL(&lock);available=false;portEXIT_CRITICAL(&lock);status_pixel=NULL;
             }
         }
-        prior=c;
+        prior=c;prior_valid=true;
         vTaskDelay(pdMS_TO_TICKS(OT_ST_TICK_MS));
     }
 }
