@@ -24,6 +24,10 @@
 - [ ] In Settings explicitly scan/pair/authorize CORE via BLE, read FX
       capabilities, confirm a supported bench effect, and verify physical
       LEDs with short TTL and brightness cap. Stop and verify restoration.
+- [ ] Open Settings → CORE Output Manager (Advanced), read Output 1 and 2
+      independently, edit one draft, confirm the other remains unchanged,
+      and save only after stopping shows/releasing trigger inputs.
+      Require verified BLE readback and power-cycle persistence checks.
 - [ ] Disable Bluetooth; confirm no stale authorized status or unintended
       operations. Re-enable and reconnect explicitly.
 
