@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stddef.h>
+#include <string.h>
 #include "effects_1d.h"
 #include "wled_1d.h"
 int main(void){
@@ -41,6 +42,33 @@ int main(void){
     assert(ot_effects_1d_render(&cfg,&s,500,pix,31));
     for(unsigned k=0;k<31;k++)assert(pix[k].r<=32&&pix[k].g<=32&&pix[k].b<=32);
   }
+  /* The CORE dispatcher must invoke the source-derived per-frame stateful
+   * renderer, not fall back to the catalog's per-pixel approximations. */
+  for(unsigned ididx=0;ididx<3;ididx++){
+    const uint16_t mode=(uint16_t[]){OT_WLED_SCAN,OT_WLED_DUAL_SCAN,OT_WLED_THEATER}[ididx];
+    ot_effects_1d_state_t actual;
+    ot_effects_1d_reset(&actual,13u);
+    ot_wled_fx_state_t reference={0};
+    cfg.effect_id=mode;cfg.palette_id=0;cfg.brightness=30;
+    cfg.speed=255;cfg.intensity=128;
+    ot_wled_rgb_t expected[31]={0};
+    for(unsigned frame=0;frame<8;frame++){
+      uint32_t ms=frame*75u;
+      assert(ot_effects_1d_render(&cfg,&actual,ms,pix,31));
+      assert(ot_wled_fx_render(&cfg,&reference,ms,expected,31));
+      assert(memcmp(pix,expected,sizeof(pix))==0);
+    }
+  }
+  /* Theater's phase is per-zone and is never shared across outputs. */
+  ot_effects_1d_state_t zone_a,zone_b;
+  ot_effects_1d_reset(&zone_a,1u);
+  ot_effects_1d_reset(&zone_b,2u);
+  cfg.effect_id=OT_WLED_THEATER;
+  assert(ot_effects_1d_render(&cfg,&zone_a,0u,pix,31));
+  assert(ot_effects_1d_render(&cfg,&zone_a,300u,pix,31));
+  assert(zone_a.wled.aux0==1u && zone_b.wled.aux0==0u);
+  assert(ot_effects_1d_render(&cfg,&zone_b,0u,pix,31));
+  assert(zone_b.wled.aux0==0u);
   ot_effects_1d_reset(&s,1);assert(ot_particles_1d_count(&s.particles)==0);
   return 0;
 }
