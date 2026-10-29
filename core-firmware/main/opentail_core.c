@@ -1491,10 +1491,8 @@ static void led_task(void *p) {
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && !boot_frame_verified){
-               ot_ota_confirm_boot(true);
-               boot_frame_verified=true;
-           }
+           if(full_frame && !boot_frame_verified)
+               boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
