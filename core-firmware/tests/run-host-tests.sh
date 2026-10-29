@@ -60,6 +60,9 @@ for lane_budget in 1024 3072; do
   /tmp/ot-output-budget-tests
 done
 python3 tests/test_universal_output_contract.py
+# Adaptive frame pacing is a pure C hardware-load policy; optical FPS remains a bench gate.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_fps_pacer.c tests/test_ot_fps_pacer.c -o /tmp/ot-fps-pacer-tests
+/tmp/ot-fps-pacer-tests
 
 # Verify the unchanged v1 BLE wire ABI round-trips arbitrary user-created zones.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_config.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
