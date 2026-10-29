@@ -52,6 +52,14 @@ python3 tests/test_dev_console_contract.py
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_output_manager.c -o /tmp/ot-output-tests && /tmp/ot-output-tests
+# Validate two independent board-memory budgets. Neither is a vehicle layout.
+for lane_budget in 1024 3072; do
+  cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain -DCONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT="$lane_budget" \
+     main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_output_manager.c \
+     -o /tmp/ot-output-budget-tests
+  /tmp/ot-output-budget-tests
+done
+python3 tests/test_universal_output_contract.py
 
 # Verify the unchanged v1 BLE wire ABI round-trips arbitrary user-created zones.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_config.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
