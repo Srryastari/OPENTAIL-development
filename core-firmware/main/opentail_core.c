@@ -766,7 +766,27 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
     if(!ot_fx_overlay_valid(&overlay)){
        cJSON_Delete(obj);return respond_err(r,400,"invalid overlay fade or radius");
     }
+    const cJSON *only=cJSON_GetObjectItemCaseSensitive(obj,"overlay_only");
+    if(only&&!cJSON_IsBool(only)){
+       cJSON_Delete(obj);return respond_err(r,400,"overlay_only must be boolean");
+    }
+    const bool overlay_only=cJSON_IsTrue(only);
     cJSON_Delete(obj);
+    if(overlay_only){
+       /* Modify the active RAM-only overlay without replacing the effect.
+        * No generation, elapsed time, timeout, NVS or arbitration changes.
+        * Only the isolated bench AP exposes this developer preview. */
+       const TickType_t now=xTaskGetTickCount();
+       const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       bool changed=false;
+       portENTER_CRITICAL(&state_lock);
+       if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
+           changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
+                      req.chain_mask,req.zone_mask,ms,&overlay);
+       portEXIT_CRITICAL(&state_lock);
+       if(!changed)return respond_err(r,409,"no active eligible effect zone");
+       return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
+    }
     if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
