@@ -79,12 +79,21 @@ assert(preview.includes('val paletteId: Int,') &&
        preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)') &&
        preview.includes('frame.paletteId, 5'),
   'Unsupported palette IDs must never enter a physical BLE FX packet');
-assert(effectBlock.includes('if (NativePaletteEngine.coreSupports(effect, id))') &&
-       effectBlock.includes('previewCurrentEffect(effect)') &&
-       effectBlock.includes('livePreview.stop()') &&
+const previewGate=compose.split('private fun previewCurrentEffect(effectOverride: Int? = null) {')[1]
+  ?.split('private val importer =')[0];
+assert(previewGate &&
+       previewGate.includes('effectId !in supportedIds.value') &&
+       previewGate.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
+       previewGate.indexOf('!NativePaletteEngine.coreSupports(effectId, paletteId)') <
+         previewGate.indexOf('livePreview.arm()') &&
+       previewGate.includes('livePreview.stop()') &&
+       previewGate.includes('liveArmed.value = false') &&
+       effectBlock.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
        effectBlock.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
-       compose.includes('NativePaletteEngine.corePreviewPalette('),
-  'Locked Effects editor must preview supported palettes and stop stale incompatible demos');
+       compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
+  'All Effects edits must reject unsupported palettes before arming BLE without silent fallback');
+assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
+       'Disconnect must clear stale effect capability ownership');
 
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
