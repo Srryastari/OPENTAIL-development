@@ -10,7 +10,7 @@ int main(void){
     assert(ot_frame_snapshot_info(&i) && !i.ready);
     assert(!ot_frame_snapshot_request(255));
     assert(ot_frame_snapshot_request(0));
-    assert(!ot_frame_snapshot_request(0));
+    assert(ot_frame_snapshot_request(0)); /* pending request is replaceable */
     assert(ot_frame_snapshot_begin(0,3,23));
     assert(!ot_frame_snapshot_request(1));
     assert(i.ready==false);
