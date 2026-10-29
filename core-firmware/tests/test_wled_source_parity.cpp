@@ -317,7 +317,7 @@ uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t hig
 #define SEGCOLOR(i) (current_segment->colors[(i)])
 #define NUM_COLORS 3u
 #define MAX(a,b) ((a)>(b)?(a):(b))
-#define indexToVStrip(i,strip) (i) /* 1D only, no virtual strip encoding */
+#define indexToVStrip(i,strip) ((void)(strip),(i)) /* 1D keeps strip input, never encodes it */
 
 
 /* Fixed host RNG injection, identical for CORE and pinned WLED source.
