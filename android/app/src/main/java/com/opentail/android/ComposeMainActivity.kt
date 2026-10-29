@@ -203,7 +203,10 @@ class ComposeMainActivity : ComponentActivity() {
         ble.shutdown()
         super.onDestroy()
     }
-    private fun refresh() { revision.intValue++ }
+    private fun refresh() {
+        coreFrame.value = null // local design changes invalidate an older CORE snapshot
+        revision.intValue++
+    }
 
     private data class Tone(val bg: Color, val surface: Color, val raised: Color,
                             val fg: Color, val muted: Color, val accent: Color, val red: Color)
