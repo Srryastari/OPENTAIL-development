@@ -41,6 +41,11 @@
       "domain": "core"
     },
     {
+      "id": "full_1246_dual_lane",
+      "description": "Actual independently configured 623+623 WS2815 data lanes (1246 total); observe every pixel, Stop off, actual measured FPS and frame jitter, no flicker or RMT fault; 522/30 NVS migration unchanged",
+      "domain": "core"
+    },
+    {
       "id": "universal_zones",
       "description": "Non-GS400 arbitrary zone counts, zero-based offsets, no hardcoded roles",
       "domain": "core"
