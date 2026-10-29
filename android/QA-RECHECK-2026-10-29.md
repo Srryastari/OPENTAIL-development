@@ -18,11 +18,16 @@
 4. Replaced obsolete Java Views source audits with assertions against **shipped Compose** pages and their real actions, plus new universal geometry regression guards.
 5. Invalidated stale captured CORE frames on local project edits. Live preview/STOP and GATT capture paths remain capability-gated.
 6. Restored the previous project on failed local import persistence and applied zone bounds to pixel-clear operations.
+7. Consolidated Layout and other editors onto a shared native **borderless soft-capsule Slider** (12dp track, rounded accent fill, subtle 22dp thumb glow), without replacing Material3 drag/keyboard/accessibility semantics. Corrected the color field's weighted row layout and gave action pills 48dp minimum height.
+8. Made action rows horizontally scroll on narrow phones, reset vertical scroll when switching top destinations, and added exact-address 8/16/32/64 LED inspection zoom. No pixel interpolation or animated-frame approximation was introduced.
+9. Added a local trigger-color swatch to Start/Stop instead of a misleading simulated animation; the test explicitly says CORE LEDs are unchanged.
+10. Added a confirmation before a local preset replaces the active project. Restored Settings **Preview Offline** beside the locked white Connect action; opening it clears any prior CORE frame and does not send BLE.
+11. Expanded active Compose regression checks for unified slider, touch targets, screen-scroll reset, zoom, preview isolation, and destructive-action confirmation.
 
 ## Not yet accepted; do NOT label these complete
 
-- **Visual 1:1 UI:** native Material3 Slider is not yet proven visually identical to the approved glowing capsule design. Exact icons, spacing, scroll ergonomics, dialog behavior and white-mode polish require on-phone screenshot comparison with the locked reference. Static source checks alone cannot certify visual identity.
-- **Trigger test UI:** Start/Stop currently tracks local selection state; it is not a real CORE-rendered animation preview, despite the offline selection message. Physical test controls must be separated from local authoring and must never imply verified hardware playback.
+- **Visual 1:1 UI:** Shared native capsule slider styling is implemented across editors, but exact icons, optical glow strength, spacing, scrolling, dialogs and white-mode appearance still require on-phone screenshot comparison with the locked reference. Static checks cannot certify visual identity.
+- **Trigger test UI:** Start/Stop now shows the selected trigger's **local color swatch**, not a full CORE-rendered effect animation or a physical trigger simulation. Full motion or hardware-backed trigger tests still require the CORE render protocol and bench evidence.
 - **Full CORE parity:** optional snapshot proves individual logical RGB frames only. Continuous 53–120 FPS playback mirroring, optical light output, WLED 1:1 golden frames for every mode, flare/spark/particle equivalence, and dual-output synchronization are not yet certified.
 - **Physical integration:** Android BLE owner enrollment/reconnect, supported effects, low-MTU multi-chunk RGB snapshots, STOP priority, Output 1/2 NVS readback, eight 12V input priorities, actual LED color order and measured FPS need actual device evidence.
 - **Broader product behavior:** hardware live pixel/zone geometry edits need a separate authorized volatile-preview protocol; automatic Startup/Shutdown ignition transitions and controller power-off are firmware projects, not completed by the Android UI.
