@@ -50,6 +50,13 @@
 - Added executable JVM coverage of palette-byte boundaries, plus Android source contract regressions for v4 import, Compose model revision and exact palette stop parsing. Verify latest-head CI separately.
 - Existing limitations remain: full actual effect animation parity requires CORE frames; only palette 0 for any supported effect and palettes 2–4 for Embers are accepted by the existing FX BLE command. No other palette selection may be claimed as physical LED playback.
 
+## BLE STOP ordering under rapid Android edits (October 29 continuation)
+
+- **Root cause:** Android's BLE command queue had one last-write-wins successor (`nextPacket`). A STOP queued during an in-flight command, snapshot read or output config could be silently replaced by a following effect edit before the STOP reached CORE.
+- **Minimal Android transport correction:** retain a queued STOP ahead of one latest subsequent FX edit (`afterStopPacket`). Send the STOP first after the active ATT transaction completes, then dispatch the latest coalesced edit; an additional STOP cancels that follow-up. Snapshot cancellation still drains the GATT transaction before STOP. Clear both queue slots on adapter off, reconnect and GATT disconnect.
+- **Regression guards:** Android live-edit source tests enforce STOP-first ordering, coalescing, cancellation, and connection reset. No change to native locked styling, palette picker, CORE protocol, effect renderer, or trigger arbitration.
+- **Acceptance limit:** source/CI checks cannot prove on-phone BLE timing or optical timing. The existing bounded FX TTL remains a safety net; physical bench validation is still needed.
+
 ## Unsupported palette/effect preview preflight (October 29 continuation)
 
 - **Root cause:** selecting a palette unsupported by the installed CORE stopped the prior transient show, but a subsequent speed/color/effect gesture silently substituted palette 0 in the BLE packet via `corePreviewPalette()`. This misrepresented the selected UI palette and could restart a misleading physical demo.
