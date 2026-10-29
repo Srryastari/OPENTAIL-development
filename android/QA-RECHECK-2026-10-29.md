@@ -50,6 +50,14 @@
 - Added executable JVM coverage of palette-byte boundaries, plus Android source contract regressions for v4 import, Compose model revision and exact palette stop parsing. Verify latest-head CI separately.
 - Existing limitations remain: full actual effect animation parity requires CORE frames; only palette 0 for any supported effect and palettes 2–4 for Embers are accepted by the existing FX BLE command. No other palette selection may be claimed as physical LED playback.
 
+## Unsupported palette/effect preview preflight (October 29 continuation)
+
+- **Root cause:** selecting a palette unsupported by the installed CORE stopped the prior transient show, but a subsequent speed/color/effect gesture silently substituted palette 0 in the BLE packet via `corePreviewPalette()`. This misrepresented the selected UI palette and could restart a misleading physical demo.
+- **Fix:** every effect-edit gesture now validates that the connected CORE advertises the selected effect and that the selected palette is accepted **before** arming the existing transient BLE preview. An unsupported selection stays editable locally, cancels any armed show and never sends a substituted default packet.
+- The palette picker now calls the same common preview path as sliders and effect selection; duplicate palette-specific STOP handling was removed. The existing locked UI geometry, navigation, themes, controls, authenticated packet, brightness cap, TTL and trigger ownership were left intact.
+- Effect IDs reported by a prior CORE are discarded when BLE is disconnected/unauthorized; reconnecting cannot inherit stale capabilities from another controller.
+- Static architecture/live-edit regressions assert that the preflight runs before BLE arm, that STOP handles stale demos, and that capabilities are invalidated on disconnect. This is a source-level proof only; phone/BLE/physical-LED observation remains outstanding.
+
 ## Existing CORE palette BLE support restored accurately (October 29 continuation)
 
 - Verified current firmware `core-firmware/main/ble_fx_command.c` and `palette_1d.c`: existing `showFx` 17-byte command **does** contain palette ID byte 15. CORE permits ID 0 for all supported effects; effect 32768 Embers additionally permits 2 (Color 1), 3 (Colors 1&2) and 4 (Color Gradient). Palette 1 and other custom IDs are not physically supported.
