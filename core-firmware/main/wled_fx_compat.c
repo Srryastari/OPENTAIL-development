@@ -181,6 +181,12 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_RIPPLE, "Ripple", "Ripple@!,Frequency;!,!;!",
      true, true, true, true, false},
     {OT_WLED_RIPPLE_RAINBOW, "Ripple Rainbow", "Ripple Rainbow@!,Frequency;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_FIREWORKS, "Fireworks", "Fireworks@,Frequency;!,!;!;12;ix=192,pal=11",
+     true, true, true, true, false},
+    {OT_WLED_RAIN, "Rain", "Rain@,Frequency;!,!;!;12;ix=192,pal=11",
+     true, true, true, true, false},
+    {OT_WLED_JUGGLE, "Juggle", "Juggle@!,Trail;;!;;sx=64,ix=128",
      true, true, true, true, false}
 };
 
@@ -2069,6 +2075,135 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
     return true;
 }
 
+/* Pinned WLED FX_fcn.cpp blur(16) 1D RGB three-channel adaptation:
+ * keep=239, seep=8, carryover to next pixel. */
+static ot_wled_rgb_t fx_scale256(ot_wled_rgb_t c,uint8_t amount) {
+    return (ot_wled_rgb_t){
+        (uint8_t)(((uint16_t)c.r*amount)>>8),
+        (uint8_t)(((uint16_t)c.g*amount)>>8),
+        (uint8_t)(((uint16_t)c.b*amount)>>8)};
+}
+static ot_wled_rgb_t fx_add_saturate(ot_wled_rgb_t a,ot_wled_rgb_t b) {
+    const unsigned r=(unsigned)a.r+b.r,g=(unsigned)a.g+b.g,
+                   blue=(unsigned)a.b+b.b;
+    return (ot_wled_rgb_t){(uint8_t)(r>255u?255u:r),
+                          (uint8_t)(g>255u?255u:g),
+                          (uint8_t)(blue>255u?255u:blue)};
+}
+static void fx_blur16(ot_wled_rgb_t *pixels,size_t count) {
+    if(!count)return;
+    ot_wled_rgb_t carry=fx_scale256(pixels[0],8u);
+    pixels[0]=fx_scale256(pixels[0],239u);
+    for(size_t i=1;i<count;i++) {
+        const ot_wled_rgb_t cur=pixels[i];
+        const ot_wled_rgb_t part=fx_scale256(cur,8u);
+        pixels[i]=fx_add_saturate(fx_scale256(cur,239u),carry);
+        pixels[i-1u]=fx_add_saturate(pixels[i-1u],part);
+        carry=part;
+    }
+}
+/* Source FX.cpp mode_fireworks() with retained 1D framebuffer and sparse
+ * random sparks. Source default palette=11 requires separate palette port. */
+static void fireworks_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t old_call,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    if(old_call==0u){
+        state->aux0=UINT16_MAX;
+        state->aux1=UINT16_MAX;
+    }
+    fx_fade_previous(cfg,pixels,count,128u);
+    if(state->step==0u) {
+        const bool valid_a=state->aux0<count;
+        const bool valid_b=state->aux1<count;
+        const ot_wled_rgb_t old_a=valid_a?pixels[state->aux0]:
+                                 (ot_wled_rgb_t){0,0,0};
+        const ot_wled_rgb_t old_b=valid_b?pixels[state->aux1]:
+                                 (ot_wled_rgb_t){0,0,0};
+        fx_blur16(pixels,count);
+        if(valid_a)pixels[state->aux0]=old_a;
+        if(valid_b)pixels[state->aux1]=old_b;
+    }
+    const size_t bursts=count/20u?count/20u:1u;
+    const uint32_t chance=129u-(cfg->intensity>>1);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for(size_t j=0;j<bursts;j++) {
+        if(fx_rand8(state,chance)==0u) {
+            const size_t index=fx_rand_index(state,count);
+            (void)fx_rand8(state,256u); /* palette hue draw, mcol=0 */
+            pixels[index]=fg;
+            state->aux1=state->aux0;
+            state->aux0=(uint16_t)index;
+        }
+    }
+}
+/* Source FX.cpp mode_rain() reuses the Fireworks renderer but scrolls the
+ * retained framebuffer before adding new sparks. */
+static void rain_frame(const ot_wled_fx_config_t *cfg,
+                        ot_wled_fx_state_t *state,uint32_t old_call,
+                        ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    state->step+=(uint32_t)cfg->frame_time_ms;
+    const uint32_t delay=5u+(50u*(255u-(uint32_t)cfg->speed))/(uint32_t)count;
+    if(old_call!=0u && state->step>delay) {
+        state->step=1u;
+        const ot_wled_rgb_t first=pixels[0];
+        for(size_t i=0;i+1u<count;i++)pixels[i]=pixels[i+1u];
+        pixels[count-1u]=first;
+        state->aux0++;
+        state->aux1++;
+        if(state->aux0==0u)state->aux0=UINT16_MAX;
+        if(state->aux1==0u)state->aux0=UINT16_MAX;
+        if(state->aux0>=count)state->aux0=0u;
+        if(state->aux1>=count)state->aux1=0u;
+    }
+    fireworks_frame(cfg,state,old_call,pixels,count);
+}
+/* Pinned util.cpp beatsin88_t(), plus FastLED hsv2rgb_rainbow RGB
+ * color OR used by mode_juggle. */
+static uint16_t fx_beatsin88(uint16_t bpm88,uint16_t upper,uint32_t now) {
+    const uint16_t phase=(uint16_t)(
+        ((uint32_t)(now*(uint32_t)bpm88*280u))>>16);
+    const uint16_t sine=(uint16_t)((int32_t)wled_sin16(phase)+32768);
+    return (uint16_t)(((uint32_t)sine*(1u+(uint32_t)upper))>>16);
+}
+static ot_wled_rgb_t fx_hsv220(uint8_t hue) {
+    ot_wled_rgb_t c=wheel_rgb(hue);
+    const uint32_t desat=(255u-220u)*(255u-220u);
+    const uint32_t floor=desat>>8;
+    const uint32_t factor=65535u-desat;
+    c.r=(uint8_t)((c.r?((uint32_t)c.r*factor)>>16:0u)+floor);
+    c.g=(uint8_t)((c.g?((uint32_t)c.g*factor)>>16:0u)+floor);
+    c.b=(uint8_t)((c.b?((uint32_t)c.b*factor)>>16:0u)+floor);
+    return c;
+}
+static void juggle_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                         ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);return;
+    }
+    const unsigned fade=192u-(3u*(unsigned)cfg->intensity/4u);
+    for(size_t i=0;i<count;i++)
+        pixels[i]=fx_scale256(pixels[i],(uint8_t)(255u-fade));
+    uint8_t hue=0u;
+    for(unsigned i=0u;i<8u;i++) {
+        const uint16_t bpm=(uint16_t)((16u+(uint32_t)cfg->speed)*(i+7u));
+        const size_t index=fx_beatsin88(bpm,(uint16_t)(count-1u),now);
+        const ot_wled_rgb_t c=fx_hsv220(hue);
+        pixels[index]=(ot_wled_rgb_t){
+            (uint8_t)(pixels[index].r | scaled(c,cfg->brightness).r),
+            (uint8_t)(pixels[index].g | scaled(c,cfg->brightness).g),
+            (uint8_t)(pixels[index].b | scaled(c,cfg->brightness).b)};
+        hue=(uint8_t)(hue+32u);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -2088,6 +2223,18 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_FIREWORKS) {
+        fireworks_frame(cfg,state,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_RAIN) {
+        rain_frame(cfg,state,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_JUGGLE) {
+        juggle_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_RIPPLE ||
        cfg->effect_id==OT_WLED_RIPPLE_RAINBOW)
         return ripple_frame(cfg,state,time_ms,call,pixels,count,
