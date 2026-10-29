@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=96u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=97u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -869,6 +869,47 @@ int main(void) {
     ot_wled_fx_reset(&s);
     ot_wled_fx_reset(&fairytwinkle_other);
     assert(s.scratch==NULL && fairytwinkle_other.scratch==NULL);
+
+    /* Bouncing Balls 91: original 16 source balls, per-zone owned state.
+     * Guard against out-of-zone drawing at all speeds and during bounce
+     * relaunch, verify byte-for-byte deterministic reset and single pixel
+     * source fallback. Pixel count comes only from caller, not GS400. */
+    c.effect_id=OT_WLED_BOUNCING_BALLS;c.brightness=255;
+    c.foreground=(ot_wled_rgb_t){210,45,10};
+    c.background=(ot_wled_rgb_t){0,4,30};
+    c.intensity=255;c.speed=128;
+    ot_wled_rgb_t balls_guard[33];
+    for(size_t i=0;i<33;i++)balls_guard[i]=(ot_wled_rgb_t){80,70,60};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,balls_guard+1,31));
+    assert(s.scratch && s.scratch_bytes>=16u*3u*sizeof(uint32_t));
+    assert(eq(balls_guard[0],(ot_wled_rgb_t){80,70,60}));
+    assert(eq(balls_guard[32],(ot_wled_rgb_t){80,70,60}));
+    ot_wled_rgb_t bounce_initial[31];
+    memcpy(bounce_initial,balls_guard+1,sizeof(bounce_initial));
+    ot_wled_fx_state_t balls_other={0};
+    ot_wled_rgb_t balls_other_pixels[31]={0};
+    assert(ot_wled_fx_render(&c,&balls_other,0,balls_other_pixels,31));
+    assert(!memcmp(bounce_initial,balls_other_pixels,sizeof(bounce_initial)));
+    for(uint32_t ms=23u;ms<5000u;ms+=23u) {
+        assert(ot_wled_fx_render(&c,&s,ms,balls_guard+1,31));
+        assert(eq(balls_guard[0],(ot_wled_rgb_t){80,70,60}));
+        assert(eq(balls_guard[32],(ot_wled_rgb_t){80,70,60}));
+    }
+    for(unsigned speed=0;speed<=255u;speed+=85u) {
+        c.speed=(uint8_t)speed;
+        for(unsigned intensity=0;intensity<=255u;intensity+=85u) {
+            c.intensity=(uint8_t)intensity;
+            ot_wled_fx_reset(&s);
+            assert(ot_wled_fx_render(&c,&s,0,balls_guard+1,31));
+            assert(ot_wled_fx_render(&c,&s,1500,balls_guard+1,31));
+        }
+    }
+    ot_wled_fx_reset(&s);ot_wled_fx_reset(&balls_other);
+    assert(s.scratch==NULL && balls_other.scratch==NULL);
+    assert(ot_wled_fx_render(&c,&s,0,balls_guard+1,1));
+    assert(eq(balls_guard[1],c.foreground));
+    assert(s.scratch==NULL);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
