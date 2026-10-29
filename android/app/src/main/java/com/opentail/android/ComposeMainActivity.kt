@@ -701,6 +701,16 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         if (editing) {
+            fun applyTriggerStyle() {
+                if (selections.isEmpty() ||
+                    !Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor) ||
+                    NativeEffectCatalog.all().none { it.name == chosenFx }) return
+                selections.forEach { key ->
+                    project.trigger(key).put("pattern", chosenFx).put("color", chosenColor)
+                }
+                project.save()
+                refresh()
+            }
             AlertDialog(onDismissRequest = { editing = false },
                 title = { Text("Edit " + selections.size + " triggers") },
                 text = {
@@ -712,10 +722,17 @@ class ComposeMainActivity : ComponentActivity() {
                         NativeEffectCatalog.all()
                             .filter { it.name.contains(searchFx, ignoreCase = true) }
                             .take(12).forEach { fx ->
-                                Pill(fx.name, t, chosenFx == fx.name) { chosenFx = fx.name }
+                                Pill(fx.name, t, chosenFx == fx.name) {
+                                    chosenFx = fx.name
+                                    applyTriggerStyle()
+                                }
                             }
                         Caption("Trigger color (hex #RRGGBB)", t)
-                        Field(chosenColor, "#ff0000", t) { chosenColor = it.take(7) }
+                        Field(chosenColor, "#ff0000", t) {
+                            chosenColor = it.take(7)
+                            applyTriggerStyle()
+                        }
+                        Caption("Changes apply immediately to the local design; DONE only closes this editor.", t)
                         Caption("Zone assignment (select to apply to all)", t)
                         for (i in 0 until project.zoneCount()) {
                             val z = project.zone(i) ?: continue
@@ -732,19 +749,11 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                 },
-                confirmButton = { Pill("Save", t, true) {
-                    val validColor = Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor)
-                    if (validColor && NativeEffectCatalog.all().any { it.name == chosenFx }) {
-                        selections.forEach { name ->
-                            project.trigger(name).put("pattern", chosenFx)
-                                .put("color", chosenColor)
-                        }
-                        project.save()
-                        editing = false
-                        refresh()
-                    }
+                confirmButton = { Pill("Done", t, true) {
+                    applyTriggerStyle()
+                    editing = false
                 } },
-                dismissButton = { Pill("Cancel", t) { editing = false } })
+                dismissButton = { Pill("Close", t) { editing = false } })
         }
     }
     @Composable
