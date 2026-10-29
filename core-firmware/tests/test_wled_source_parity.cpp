@@ -360,7 +360,16 @@ static CRGBPalette16 ref_palette(uint8_t id,uint32_t primary,uint32_t secondary,
  else if(id==0||id==6){
  const uint32_t colors[16]={0x9B00D5u,0xBD00B8u,0xDA0092u,0xF3005Cu,0xF45500u,0xDC8F00u,0xD5B400u,0xD5D500u,0xD59B00u,0xEF6600u,0xF90044u,0xE10086u,0xC400B0u,0xA300CFu,0x7600E8u,0x0032FCu};
  for(unsigned i=0;i<16;i++)pal[i]=CRGB(colors[i]);
- }else std::abort();
+ } else if(id==11u||id==12u) {
+ const uint32_t rainbow[16]={
+ 0xFF0000u,0xEB7000u,0xD59B00u,0xD5BA00u,0xD5D500u,0x9CEB00u,0x00FF00u,0x00EB70u,
+ 0x00D59Bu,0x009CD4u,0x0000FFu,0x7000EBu,0x9B00D5u,0xBA00BBu,0xD5009Bu,0xEB0072u};
+ const uint32_t bands[16]={
+ 0xFF0000u,0x000000u,0xD59B00u,0x000000u,0xD5D500u,0x000000u,0x00FF00u,0x000000u,
+ 0x00D59Bu,0x000000u,0x0000FFu,0x000000u,0x9B00D5u,0x000000u,0xD5009Bu,0x000000u};
+ for(unsigned i=0;i<16;i++)pal[i]=CRGB(id==11u?rainbow[i]:bands[i]);
+ }
+ else std::abort();
  return pal;
 }
 
@@ -2298,9 +2307,9 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,11u,12u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=pal;
+                    PinnedSeg seg(count);seg.palette=(fx.id==179u&&pal==0u)?11u:pal;
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
                     seg.colors[0]=0x007B3809u; // configured primary 123,56,9
