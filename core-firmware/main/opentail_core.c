@@ -1326,8 +1326,19 @@ static void frame_wake_callback(void *arg){
     TaskHandle_t target=(TaskHandle_t)arg;
     if(target)xTaskNotifyGive(target);
 }
+/* Do not panic/reboot all lighting when one RMT lane fails. The failed handle
+ * stays owned by the render task and is not reused or blindly destroyed.
+ * Hardware recovery and takeover require a separately verified failover path. */
+static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
+    ESP_LOGE(TAG,"RMT output %u %s failed: %s",ch,step,esp_err_to_name(error));
+    ot_st_set_fault("external pixel RMT runtime failure");
+    portENTER_CRITICAL(&state_lock);
+    native_outputs_ready=false;
+    portEXIT_CRITICAL(&state_lock);
+}
 static void led_task(void *p) {
     (void)p;
+    bool output_failed[OT_CHAIN_COUNT]={false};
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
@@ -1394,7 +1405,8 @@ static void led_task(void *p) {
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
-               frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+               if(!output_failed[ch])
+                   frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
                if(!frame_ready[ch])ot_frame_snapshot_unavailable((uint8_t)ch);
            }
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
@@ -1479,6 +1491,7 @@ static void led_task(void *p) {
                 * before driver color-order packing. No work in normal frames. */
                frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
                                         output->active_pixels,frame_index+1u);
+               bool pixel_write_failed=false;
                for(unsigned px=0;px<output->active_pixels;++px){
                    ot_rgb_t c={0,0,0};
                    int zone=ot_om_section_next(output,&zone_cursor,px);
@@ -1519,17 +1532,38 @@ static void led_task(void *p) {
                    if(frame_captured[ch])
                        ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
-                   ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
+                   esp_err_t e=led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b);
+                   if(e!=ESP_OK){
+                       output_runtime_fault((unsigned)ch,"pixel write",e);
+                       output_failed[ch]=true;
+                       if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                       pixel_write_failed=true;
+                       break;
+                   }
                }
+               if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
                // Hardware driver transmits only this output's configured active length.
-               ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
+               esp_err_t e=led_strip_refresh_async(strip[ch]);
+               if(e!=ESP_OK){
+                   output_runtime_fault((unsigned)ch,"transfer submit",e);
+                   output_failed[ch]=true;
+                   if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                   continue;
+               }
                frame_submitted[ch]=true;
            }
            /* Start both output transfers before waiting, so RMT lanes overlap.
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!frame_submitted[ch])continue;
-               ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
+               esp_err_t e=led_strip_refresh_async_done(strip[ch]);
+               if(e!=ESP_OK){
+                   output_runtime_fault((unsigned)ch,"transfer completion",e);
+                   output_failed[ch]=true;
+                   frame_submitted[ch]=false; /* No complete-frame/Stop/OTA credit. */
+                   if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                   continue;
+               }
                if(frame_captured[ch])ot_frame_snapshot_complete(true);
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
