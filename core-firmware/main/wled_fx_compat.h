@@ -88,7 +88,11 @@ enum {
     OT_WLED_DISSOLVE_RANDOM = 19,
     OT_WLED_CANDLE_MULTI = 102,
     OT_WLED_METEOR = 76,
-    OT_WLED_TWINKLEUP = 106
+    OT_WLED_TWINKLEUP = 106,
+    OT_WLED_RAILWAY = 78,
+    OT_WLED_WASHING_MACHINE = 113,
+    OT_WLED_FLOW = 110,
+    OT_WLED_SUNRISE = 104
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
