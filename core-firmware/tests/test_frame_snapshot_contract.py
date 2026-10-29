@@ -18,7 +18,7 @@ assert core.index("led_strip_refresh_async_done(strip[ch])") < core.index("ot_fr
 assert "frame_captured[ch]=ot_frame_snapshot_begin(" in core
 assert "ot_frame_snapshot.c" in cmake
 assert "portENTER_CRITICAL(&snap_mux)" in module
-assert "if(recording || record.pending)" in module
+assert "if(recording){UNLOCK();return false;}" in module
 assert "record.ready && !recording" in module
 assert "active_generation==generation" in module
 # BLE reset may clear shared record.count while the render task is capturing.
