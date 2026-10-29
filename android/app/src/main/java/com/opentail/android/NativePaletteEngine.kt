@@ -57,6 +57,17 @@ internal object NativePaletteEngine {
         return NativePalette(id, name, bounded)
     }
 
+    /**
+     * Confirmed by CORE's current ot_palette_1d_supported() contract.
+     * Palette 0 is default for all FX. Only Embers (0x8000) accepts 2–4.
+     * This is a protocol gate, NOT full palette rendering compatibility.
+     */
+    fun coreSupports(effectId: Int, paletteId: Int): Boolean =
+        paletteId == 0 || (effectId == 32768 && paletteId in 2..4)
+
+    fun corePreviewPalette(effectId: Int, selectedId: Int): Int =
+        if (coreSupports(effectId, selectedId)) selectedId else 0
+
     fun effectiveStepPalette(stepPalette: Int, sharedEnabled: Boolean, sharedPalette: Int): Int =
         (if (sharedEnabled) sharedPalette else stepPalette).coerceIn(0, MAX_ID)
 }
