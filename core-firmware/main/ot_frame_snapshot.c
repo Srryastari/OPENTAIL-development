@@ -39,7 +39,7 @@ bool ot_frame_snapshot_begin(uint8_t output,uint16_t count,uint32_t sequence){
     if(count==0 || count>OT_OM_MAX_PIXELS_PER_OUTPUT)return false;
     LOCK();
     if(!record.pending || recording || record.output!=output){UNLOCK();return false;}
-    record.pending=false;
+    record.pending=true; /* stays pending until RMT refresh completes */
     record.count=count;
     record.sequence=sequence;
     record.crc=0;
