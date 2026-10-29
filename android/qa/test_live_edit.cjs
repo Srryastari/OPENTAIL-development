@@ -55,8 +55,11 @@ for(const required of [
   'frame.brightness.coerceIn(0, 24)', '0, 5', 'ble.showFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
-assert(compose.includes('LaunchedEffect(effect, speed)') && compose.includes('delay(40L)'),
-  'Live animated pixel preview must refresh independently of 140 FX rows.');
+assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
+       compose.includes('frame.colorAt(first + i)') &&
+       compose.includes('First visible pixel') &&
+       compose.includes('NOT a simulated effect.'),
+  'Preview must show indexed project pixels rather than fabricated animation frames.');
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
   'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
