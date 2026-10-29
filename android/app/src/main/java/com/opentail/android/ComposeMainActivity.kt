@@ -979,7 +979,10 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill("Remove", t) {
                         val next = JSONArray()
                         for (j in 0 until presets.length()) if (j != i) next.put(presets.opt(j))
-                        project.setPresets(next);refresh()
+                        if (project.setPresets(next)) {
+                            presetStatus = ""
+                            refresh()
+                        } else presetStatus = "Could not remove preset"
                     }
                 }
             }
@@ -1014,8 +1017,8 @@ class ComposeMainActivity : ComponentActivity() {
             Field(name, "Project name", t) {
                 name = it
                 if (it.trim().isNotEmpty()) {
-                    project.name(it)
-                    refresh()
+                    if (project.name(it)) refresh()
+                    else name = project.name() // restore last committed value
                 }
             }
             Caption("Project name saves as you type. No separate edit mode.", t)
@@ -1246,8 +1249,7 @@ class ComposeMainActivity : ComponentActivity() {
                                     .any { assigned?.optString(it) == zoneId }
                             }
                             Pill(z.optString("name") + (if (checked) " ✓" else ""), t, checked) {
-                                selections.forEach { project.assign(it, zoneId, !checked) }
-                                refresh()
+                                if (project.assignMany(selections, zoneId, !checked)) refresh()
                             }
                         }
                     }
