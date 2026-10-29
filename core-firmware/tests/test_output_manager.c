@@ -76,6 +76,32 @@ int main(void){
  custom[0].rgb_gain[1]=190; custom[0].white_gain[2]=200;
  color(ot_om_calibrate((ot_rgb_t){32,0,0},&custom[0]),32,0,0);
  color(ot_om_calibrate((ot_rgb_t){20,20,20},&custom[0]),20,15,16);
+ /* Performance regression: sequential cursor must be pixel-identical to
+  * the validated random-access zone lookup for arbitrary zone sizes,
+  * including zero-sized intermediate zones and non-GS400 layouts. */
+ for(unsigned trial=0;trial<96u;trial++){
+    ot_om_output_t *o=&custom[0];
+    const unsigned total=1u+(trial*37u)%522u;
+    const unsigned zones=1u+(trial%OT_OM_ZONES);
+    o->active_pixels=(uint16_t)total;
+    o->zone_count=(uint8_t)zones;
+    unsigned remaining=total;
+    for(unsigned z=0;z<zones;z++){
+       snprintf(o->zones[z].name,OT_OM_NAME_LEN,"Zone %u",z+1u);
+       o->zones[z].role=OT_OM_DECORATIVE;
+       unsigned n=z+1u==zones?remaining:
+           (remaining?(trial*19u+z*47u)%(remaining+1u):0u);
+       o->zones[z].pixels=(uint16_t)n;
+       remaining-=n;
+    }
+    assert(remaining==0u&&ot_om_valid(o));
+    assert(ot_om_layout(o,&layout));
+    ot_om_zone_cursor_t cursor={0};
+    for(unsigned px=0;px<total;px++){
+       assert(ot_om_section_next(o,&cursor,px)==ot_om_section(o,px));
+    }
+    assert(ot_om_section_next(o,&cursor,total)==-1);
+ }
  custom[0].zone_count=0;assert(!ot_om_valid(&custom[0]));
  printf("output manager: inert universal defaults, user-configurable zones, validation, trigger priority and six color permutations passed\n");
  return 0;
