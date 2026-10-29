@@ -23,6 +23,7 @@ extern "C" {
 #define WLED_O2_ATTR
 #define IRAM_ATTR
 #define WHITE 0x00FFFFFFu
+#define BLACK 0u
 #define PALETTE_SOLID_WRAP true
 #define FRAMETIME 23u
 static long map(long x,long a,long b,long c,long d) {return (x-a)*(d-c)/(b-a)+c;}
@@ -192,6 +193,34 @@ uint16_t triwave16(uint16_t in) {
   return 0xFFFF - (in - 0x8000)*2;
 }
 
+uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
+  if (c1 == BLACK) return 0;           // fast path early exit
+  if (amount == 255) return c1;        // no change
+  else if (amount == 0) return BLACK;  // full fade (rarely used)
+  const uint32_t TWO_CHANNEL_MASK = 0x00FF00FF;
+  uint32_t rb = c1 & TWO_CHANNEL_MASK; // extract R and B channels
+  uint32_t wg = (c1 >> 8) & TWO_CHANNEL_MASK; // extract W and G channels (shifted for multiplication)
+
+  // video scaling: colors do not dim to zero if they started non-zero unless they distort the hue
+  if (video) {
+    uint8_t r = byte(rb>>16), g = byte(wg), b = byte(rb), w = byte(wg>>16); // extract r, g, b, w channels from original color (wg is shifted)
+    uint8_t maxc = (r > g) ? r : g;           // determine dominant channel for hue preservation
+    maxc = (maxc > b) ? maxc : b;
+    uint32_t thr = (uint32_t)((maxc>>1) + 1); // 50%, +1 to avoid wash-out of dark colors
+    thr |= (thr<<16); // threshold for both color lanes
+    // check threshold: set the MSB of each channel and if the subtraction is "negative" (channel < threshold) the MSB gets cleared
+    uint32_t domRB = (((rb | 0x80008000) - thr) & 0x80008000) >> 15; // after shifting, the LSB of each 16bit lane is set if the channel is dominant
+    uint32_t domWG = (((wg | 0x80008000) - thr) & 0x80008000) >> 7;  // wg use the upper bytes so dont shift all the way down
+    // scale and add dominant channel bit for color-biasing and rounding
+    uint32_t rb_scaled = (((rb * amount) >> 8) & TWO_CHANNEL_MASK) + domRB;
+    uint32_t wg_scaled = ((wg * amount) & ~TWO_CHANNEL_MASK) + domWG;
+    return (rb_scaled | wg_scaled);
+  }
+  uint32_t rb_scaled = ((rb * (amount + 1)) >> 8) & TWO_CHANNEL_MASK; // scale red and blue
+  uint32_t wg_scaled = ((wg * (amount + 1)) & ~TWO_CHANNEL_MASK);     // scale white and green
+  return (rb_scaled | wg_scaled);
+}
+
 // END UPSTREAM math/color functions.
 // Only this minimal adapter code is OpenTail-specific.
 // Small RGB structs replicate upstream class conversion (gamma disabled).
@@ -218,8 +247,8 @@ struct PinnedSeg {
         return ((uint32_t)bgrw[2]<<16)|((uint32_t)bgrw[1]<<8)|bgrw[0];
     }
     uint32_t color_from_palette(uint16_t,bool,bool,uint8_t slot,uint8_t pbri=255u) const {
-        if(palette!=0 || slot>2 || pbri!=255u) {std::fprintf(stderr,"Unsupported reference palette/slot/brightness\n");std::abort();}
-        return colors[slot];
+        if(palette!=0 || slot>2) {std::fprintf(stderr,"Unsupported reference palette/slot\n");std::abort();}
+        return color_fade(colors[slot],pbri,true);
     }
     void blendPixelColor(size_t i,CRGBW color,uint8_t b) {
         if(i<pixels.size()) pixels[i]=color_blend(pixels[i],color.color32,b);
@@ -882,6 +911,10 @@ void mode_pride_2015(void) {
   mode_colorwaves_pride_base(true);
 }
 
+void mode_colorwaves() {
+  mode_colorwaves_pride_base(false);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -919,7 +952,8 @@ static const RefCase refs[]={
     {27,mode_android,"Android"},
     {105,mode_phased,"Phased"},
     {109,mode_phased_noise,"Phased Noise"},
-    {63,mode_pride_2015,"Pride 2015"}
+    {63,mode_pride_2015,"Pride 2015"},
+    {67,mode_colorwaves,"Colorwaves"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
