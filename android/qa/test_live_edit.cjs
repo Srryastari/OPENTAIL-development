@@ -35,7 +35,7 @@ assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
 
 for(const required of [
-  'LaunchedEffect(effect, speed, view)', 'delay(40L)', 'previewCurrentEffect(effect)',
+  'EffectsPreview(', 'previewCurrentEffect(effect)',
   'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
 ]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
 
@@ -52,6 +52,14 @@ for(const required of [
   'frame.brightness.coerceIn(0, 24)', '0, 5', 'ble.showFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
+assert(compose.includes('LaunchedEffect(effect, speed)') && compose.includes('delay(40L)'),
+  'Live animated pixel preview must refresh independently of 140 FX rows.');
+assert(compose.includes('if (!livePreview.isArmed())') &&
+       compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
+  'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
+assert(!compose.includes('Preview live on CORE bench') &&
+       compose.includes('Every editor is live.'),
+  'No optional Live Edit Mode toggle permitted in Android.');
 assert(!preview.includes('saveOutput(') && !preview.includes('fxPreset('),
   'Live FX preview cannot use NVS config or preset writes.');
 assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview.stop()'),
