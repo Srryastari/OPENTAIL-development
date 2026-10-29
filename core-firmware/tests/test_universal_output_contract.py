@@ -41,11 +41,32 @@ assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NUL
 
 assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
 assert "if(!frame_submitted[ch])continue;" in core
-# Completion telemetry is incremented only AFTER the driver confirms its transfer.
-done_idx = core.index("ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));")
-refresh_idx = core.index("output_refreshes[ch]++;")
+# A single RMT lane fault must not reboot the whole controller or be counted
+# as a completed multi-lane frame. It must invalidate any pending snapshot.
+render = core.split("static void led_task(void *p) {",1)[1].split("void app_main(void) {",1)[0]
+assert "ESP_ERROR_CHECK(led_strip_set_pixel" not in render
+assert "ESP_ERROR_CHECK(led_strip_refresh_async(" not in render
+assert "ESP_ERROR_CHECK(led_strip_refresh_async_done(" not in render
+assert "bool output_failed[OT_CHAIN_COUNT]={false};" in render
+assert "if(!output_failed[ch])" in render
+assert 'output_runtime_fault((unsigned)ch,"pixel write",e)' in render
+assert 'output_runtime_fault((unsigned)ch,"transfer submit",e)' in render
+assert 'output_runtime_fault((unsigned)ch,"transfer completion",e)' in render
+assert "if(pixel_write_failed)continue;" in render
+assert "if(frame_captured[ch])ot_frame_snapshot_complete(false);" in render
+assert "frame_submitted[ch]=false;" in render
+assert render.index("frame_submitted[ch]=false;") < render.index("const bool full_frame=")
+assert "native_outputs_ready=false;" in core.split("static void output_runtime_fault(",1)[1].split("static void led_task",1)[0]
+assert "output_runtime_fault_mask|=(1u<<ch);" in core
+assert "faulted_outputs=output_runtime_fault_mask;" in status
+assert r'\"failed_output_mask\":%lu' in status
+# Completion telemetry is incremented only after the driver confirms success.
+done_idx = render.index("esp_err_t e=led_strip_refresh_async_done(strip[ch]);")
+refresh_idx = render.index("output_refreshes[ch]++;")
 assert done_idx < refresh_idx
-assert "output_refreshes[ch]++" not in core.split("ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));",1)[1].split("ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));",1)[0]
+assert "if(e!=ESP_OK){" in render[done_idx:refresh_idx]
+assert "continue;" in render[done_idx:refresh_idx]
+assert "output_refreshes[ch]++" not in render.split("esp_err_t e=led_strip_refresh_async(strip[ch]);",1)[1].split("esp_err_t e=led_strip_refresh_async_done(strip[ch]);",1)[0]
 assert "ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)" in core
 assert "if(!native_rendering && full_frame)" in core
 assert "if(full_frame)frame_window_frames++" in core
