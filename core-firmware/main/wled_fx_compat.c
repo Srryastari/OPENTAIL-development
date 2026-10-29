@@ -61,6 +61,8 @@ static const uint32_t ot_natural_colors[4][16]={
 };
 
 
+static void palette_gradient(ot_wled_palette16_t *p,unsigned start,
+                             ot_wled_rgb_t a,unsigned end,ot_wled_rgb_t b);
 /* Complete pinned built-in gradient catalog 13-72 from palettes.cpp.
  * Each entry is source [index,r,g,b], ending at index=255. Indexed in
  * original gGradientPalettes[] order. This is 1812B in read-only flash. */
