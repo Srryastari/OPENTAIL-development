@@ -3839,8 +3839,14 @@ int main() {
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
                     cfg.frame_time_ms=23;cfg.palette_id=pal;
-                    const ot_wled_audio_peak_t measured={220.0f,1800.0f};
+                    const ot_wled_audio_peak_t measured={
+                        speed==0u?110.0f:speed==16u?220.0f:speed==127u?440.0f:880.0f,
+                        (float)(intensity+40u)*16.0f};
                     cfg.audio_peak=fx.id==185u?&measured:nullptr;
+                    if(fx.id==185u){
+                        source_audio_major=measured.major_peak_hz;
+                        source_audio_mag=measured.magnitude;
+                    }
                     cfg.foreground={123,56,9};cfg.background={3,88,174};
                     ot_wled_fx_state_t state{};
                     std::vector<ot_wled_rgb_t> actual(count);
