@@ -52,7 +52,7 @@ for(const required of [
 for(const required of [
   'class LiveBlePreview', 'private val intervalMs = 120L', 'handler.postDelayed(drain',
   'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
-  'frame.brightness.coerceIn(0, 24)', '0, 5', 'ble.showFx(', 'fun stop()',
+  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId, 5', 'ble.showFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
@@ -68,6 +68,24 @@ assert(compose.includes('if (offlinePreview.value) return') &&
        compose.includes('offlinePreview.value = true') &&
        compose.includes('livePreview.stop()'),
        'Preview Offline must not issue effect or frame capture commands');
+// Only palette values actually implemented by current CORE may be sent.
+// Selecting a local-only palette must stop any stale physical palette demo.
+const palette=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
+assert(palette.includes('fun coreSupports(effectId: Int, paletteId: Int): Boolean') &&
+       palette.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+       palette.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)'),
+  'CORE palette support must remain a narrowly scoped protocol gate');
+assert(preview.includes('val paletteId: Int,') &&
+       preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)') &&
+       preview.includes('frame.paletteId, 5'),
+  'Unsupported palette IDs must never enter a physical BLE FX packet');
+assert(effectBlock.includes('if (NativePaletteEngine.coreSupports(effect, id))') &&
+       effectBlock.includes('previewCurrentEffect(effect)') &&
+       effectBlock.includes('livePreview.stop()') &&
+       effectBlock.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
+       compose.includes('NativePaletteEngine.corePreviewPalette('),
+  'Locked Effects editor must preview supported palettes and stop stale incompatible demos');
+
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
   'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
