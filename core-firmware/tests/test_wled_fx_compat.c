@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=104u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=105u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116 && ids[102]==218 && ids[103]==89);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116 && ids[102]==218 && ids[103]==89 && ids[104]==44);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -1109,6 +1109,36 @@ int main(void) {
     ot_wled_fx_reset(&burst_a);
     ot_wled_fx_reset(&burst_b);
     assert(!burst_a.scratch && !burst_b.scratch);
+
+
+    /* Tetrix: the single-zone 20-byte falling-stack state is independent,
+     * reuses persistent frames, and never reaches frame guard pixels. */
+    c.effect_id=OT_WLED_TETRIX;
+    c.speed=255u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t tetr_a={0},tetr_b={0};
+    ot_wled_rgb_t tetr_aa[33],tetr_bb[33];
+    for(size_t px=0;px<33u;px++) {
+        tetr_aa[px]=(ot_wled_rgb_t){99,88,77};
+        tetr_bb[px]=(ot_wled_rgb_t){99,88,77};
+    }
+    for(unsigned k=0u;k<240u;k++) {
+        const uint32_t ms=k*61u;
+        tetr_aa[0]=tetr_aa[32]=(ot_wled_rgb_t){99,88,77};
+        tetr_bb[0]=tetr_bb[32]=(ot_wled_rgb_t){99,88,77};
+        assert(ot_wled_fx_render(&c,&tetr_a,ms,&tetr_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&tetr_b,ms,&tetr_bb[1],31u));
+        assert(memcmp(tetr_aa,tetr_bb,sizeof(tetr_aa))==0);
+        assert(eq(tetr_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(tetr_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(tetr_aa[px].r<=99u &&
+                   tetr_aa[px].g<=88u &&
+                   tetr_aa[px].b<=77u);
+    }
+    assert(tetr_a.scratch && tetr_a.scratch_bytes==20u);
+    ot_wled_fx_reset(&tetr_a);
+    ot_wled_fx_reset(&tetr_b);
+    assert(!tetr_a.scratch && !tetr_b.scratch);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
