@@ -3051,6 +3051,147 @@ void mode_slow_transition(void) {
 #undef W
 #undef millis
 
+#define SPOT_TYPE_SOLID 0
+#define SPOT_TYPE_GRADIENT 1
+#define SPOT_TYPE_2X_GRADIENT 2
+#define SPOT_TYPE_2X_DOT 3
+#define SPOT_TYPE_3X_DOT 4
+#define SPOT_TYPE_4X_DOT 5
+#define SPOT_TYPES_COUNT 6
+#define SPOT_MAX_COUNT 49
+// BEGIN PINNED FX.cpp spotlight struct and Dancing Shadows function.
+typedef struct Spotlight {
+  float speed;
+  uint8_t colorIdx;
+  int16_t position;
+  unsigned long lastUpdateTime;
+  uint8_t width;
+  uint8_t type;
+} spotlight;
+
+/*
+ * Spotlights moving back and forth that cast dancing shadows.
+ * Shine this through tree branches/leaves or other close-up objects that cast
+ * interesting shadows onto a ceiling or tarp.
+ *
+ * By Steve Pomeroy @xxv
+ */
+void mode_dancing_shadows(void)
+{
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned numSpotlights = map(SEGMENT.intensity, 0, 255, 2, SPOT_MAX_COUNT);  // 49 on 32 segment ESP32, 17 on 16 segment ESP8266
+  bool initialize = SEGENV.aux0 != numSpotlights;
+  SEGENV.aux0 = numSpotlights;
+
+  unsigned dataSize = sizeof(spotlight) * numSpotlights;
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  Spotlight* spotlights = reinterpret_cast<Spotlight*>(SEGENV.data);
+
+  SEGMENT.fill(BLACK);
+
+  unsigned long time = strip.now;
+  bool respawn = false;
+
+  for (size_t i = 0; i < numSpotlights; i++) {
+    if (!initialize) {
+      // advance the position of the spotlight
+      int delta = (float)(time - spotlights[i].lastUpdateTime) *
+                  (spotlights[i].speed * ((1.0 + SEGMENT.speed)/100.0));
+
+      if (abs(delta) >= 1) {
+        spotlights[i].position += delta;
+        spotlights[i].lastUpdateTime = time;
+      }
+
+      respawn = (spotlights[i].speed > 0.0 && spotlights[i].position > (int)(SEGLEN + 2))
+             || (spotlights[i].speed < 0.0 && spotlights[i].position < -(spotlights[i].width + 2));
+    }
+
+    if (initialize || respawn) {
+      spotlights[i].colorIdx = hw_random8();
+      spotlights[i].width = hw_random8(1, 10);
+
+      spotlights[i].speed = 1.0/hw_random8(4, 50);
+
+      if (initialize) {
+        spotlights[i].position = hw_random16(SEGLEN);
+        spotlights[i].speed *= hw_random8(2) ? 1.0 : -1.0;
+      } else {
+        if (hw_random8(2)) {
+          spotlights[i].position = SEGLEN + spotlights[i].width;
+          spotlights[i].speed *= -1.0;
+        }else {
+          spotlights[i].position = -spotlights[i].width;
+        }
+      }
+
+      spotlights[i].lastUpdateTime = time;
+      spotlights[i].type = hw_random8(SPOT_TYPES_COUNT);
+    }
+
+    uint32_t color = SEGMENT.color_from_palette(spotlights[i].colorIdx, false, false, 255);
+    int start = spotlights[i].position;
+
+    if (spotlights[i].width <= 1) {
+      if (start >= 0 && start < (int)SEGLEN) {
+        SEGMENT.blendPixelColor(start, color, 128);
+      }
+    } else {
+      switch (spotlights[i].type) {
+        case SPOT_TYPE_SOLID:
+          for (size_t j = 0; j < spotlights[i].width; j++) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, 128);
+            }
+          }
+        break;
+
+        case SPOT_TYPE_GRADIENT:
+          for (size_t j = 0; j < spotlights[i].width; j++) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, cubicwave8(map(j, 0, spotlights[i].width - 1, 0, 255)));
+            }
+          }
+        break;
+
+        case SPOT_TYPE_2X_GRADIENT:
+          for (size_t j = 0; j < spotlights[i].width; j++) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, cubicwave8(2 * map(j, 0, spotlights[i].width - 1, 0, 255)));
+            }
+          }
+        break;
+
+        case SPOT_TYPE_2X_DOT:
+          for (size_t j = 0; j < spotlights[i].width; j += 2) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, 128);
+            }
+          }
+        break;
+
+        case SPOT_TYPE_3X_DOT:
+          for (size_t j = 0; j < spotlights[i].width; j += 3) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, 128);
+            }
+          }
+        break;
+
+        case SPOT_TYPE_4X_DOT:
+          for (size_t j = 0; j < spotlights[i].width; j += 4) {
+            if ((start + j) >= 0 && (start + j) < SEGLEN) {
+              SEGMENT.blendPixelColor(start + j, color, 128);
+            }
+          }
+        break;
+      }
+    }
+  }
+}
+
+// END PINNED Dancing Shadows.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3109,7 +3250,8 @@ static const RefCase refs[]={
     {81,mode_twinklecat,"Twinklecat"},
     {38,mode_aurora,"Aurora"},
     {74,mode_colortwinkle,"Colortwinkles"},
-    {219,mode_slow_transition,"Slow Transition"}
+    {219,mode_slow_transition,"Slow Transition"},
+    {112,mode_dancing_shadows,"Dancing Shadows"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3154,7 +3296,7 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
