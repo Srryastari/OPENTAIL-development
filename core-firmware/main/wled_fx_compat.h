@@ -97,7 +97,12 @@ enum {
     OT_WLED_RIPPLE_RAINBOW = 99,
     OT_WLED_FIREWORKS = 42,
     OT_WLED_RAIN = 43,
-    OT_WLED_JUGGLE = 64
+    OT_WLED_JUGGLE = 64,
+    OT_WLED_FILL_NOISE = 69,
+    OT_WLED_NOISE_1 = 70,
+    OT_WLED_NOISE_2 = 71,
+    OT_WLED_NOISE_3 = 72,
+    OT_WLED_NOISE_4 = 73
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
