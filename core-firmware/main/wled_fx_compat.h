@@ -17,7 +17,10 @@ enum {
     OT_WLED_BLINK = 1,      /* WLED FX_MODE_BLINK */
     OT_WLED_WIPE = 3,       /* WLED FX_MODE_COLOR_WIPE */
     OT_WLED_SWEEP = 6,      /* WLED FX_MODE_COLOR_SWEEP */
+    OT_WLED_SCAN = 10,      /* WLED FX_MODE_SCAN */
+    OT_WLED_DUAL_SCAN = 11, /* WLED FX_MODE_DUAL_SCAN */
     OT_WLED_FADE = 12,      /* WLED FX_MODE_FADE */
+    OT_WLED_THEATER = 13,   /* WLED FX_MODE_THEATER_CHASE */
     OT_WLED_STROBE = 23     /* WLED FX_MODE_STROBE */
 };
 
@@ -33,7 +36,8 @@ typedef struct {
     ot_wled_rgb_t background;
 } ot_wled_fx_config_t;
 typedef struct {
-    uint32_t step;          /* Mirrors WLED per-segment SEGENV.step for Blink/Strobe; other modes are time-derived */
+    uint32_t step;          /* Upstream per-segment SEGENV.step */
+    uint16_t aux0;          /* Upstream per-segment SEGENV.aux0 for Theater phase */
 } ot_wled_fx_state_t;
 
 typedef struct {
@@ -52,7 +56,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
  * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
- * Sweep, Fade and Strobe. Full upstream parity remains unverified.
+ * Sweep, Scan, Dual Scan, Fade, Theater and Strobe, with default
+ * direct colors and Overlay disabled. Full upstream parity remains unverified.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
