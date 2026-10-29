@@ -17,6 +17,8 @@ static uint8_t pixels[OT_OM_MAX_PIXELS_PER_OUTPUT*3u];
 static ot_frame_snapshot_info_t record={0};
 static bool recording=false;
 static uint32_t generation=0,active_generation=0;
+/* Render-task-owned bound: BLE reset may clear record.count concurrently. */
+static uint16_t active_count=0;
 static uint16_t crc16(const uint8_t *data,size_t length){
     uint16_t crc=0xffffu;
     for(size_t i=0;i<length;i++){
@@ -48,20 +50,21 @@ bool ot_frame_snapshot_begin(uint8_t output,uint16_t count,uint32_t sequence){
     record.ready=false;
     recording=true;
     active_generation=generation;
+    active_count=count;
     UNLOCK();
     return true;
 }
 void ot_frame_snapshot_pixel(uint16_t pixel,uint8_t r,uint8_t g,uint8_t b){
     /* Render-task-only: never read until complete. This branch is skipped
      * entirely for normal (uncaptured) frames by the caller. */
-    if(!recording || pixel>=record.count)return;
+    if(!recording || pixel>=active_count)return;
     const size_t offset=(size_t)pixel*3u;
     pixels[offset]=r;pixels[offset+1]=g;pixels[offset+2]=b;
 }
 void ot_frame_snapshot_complete(bool submitted){
     if(!recording)return;
     /* Capture a checksum before publishing the immutable frame. */
-    const uint16_t sum=submitted?crc16(pixels,(size_t)record.count*3u):0;
+    const uint16_t sum=submitted?crc16(pixels,(size_t)active_count*3u):0;
     LOCK();
     if(active_generation==generation && recording){
         record.crc=sum;
