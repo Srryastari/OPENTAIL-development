@@ -615,6 +615,88 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
 }
+/* Firmware-driven effect capability catalog for the CORE developer page.
+ * Only the renderer implementations compiled into this firmware are listed.
+ * Original and source-derived modes remain distinct from compatibility
+ * recipes: the catalog is NEVER evidence of upstream pixel parity.
+ */
+static esp_err_t fx_catalog_get(httpd_req_t *r){
+    uint16_t ids[128]={0};
+    const size_t total=ot_effects_1d_supported_ids(ids,128);
+    if(total>128u)return respond_err(r,500,"effect catalog exceeds firmware limit");
+    cJSON *root=cJSON_CreateObject();
+    if(!root)return respond_err(r,500,"out of memory");
+    cJSON_AddBoolToObject(root,"bench_only",true);
+    cJSON_AddNumberToObject(root,"count",(double)total);
+    cJSON *items=cJSON_AddArrayToObject(root,"effects");
+    if(!items){cJSON_Delete(root);return respond_err(r,500,"out of memory");}
+    for(size_t i=0;i<total;i++){
+        ot_wled_fx_metadata_t meta={0};
+        if(!ot_effects_1d_metadata(ids[i],&meta))continue;
+        cJSON *entry=cJSON_CreateObject();
+        if(!entry){cJSON_Delete(root);return respond_err(r,500,"out of memory");}
+        cJSON_AddNumberToObject(entry,"id",ids[i]);
+        cJSON_AddStringToObject(entry,"name",meta.name);
+        const char *kind=ids[i]>=OT_FX_EMBERS?"original":
+                ot_wled_fx_metadata(ids[i],&meta)?"source-derived":"compatibility";
+        cJSON_AddStringToObject(entry,"implementation",kind);
+        cJSON_AddBoolToObject(entry,"palette_supported",meta.supports_palette);
+        cJSON_AddItemToArray(items,entry);
+    }
+    char *data=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!data)return respond_err(r,500,"out of memory");
+    const esp_err_t result=send_json(r,data);
+    free(data);
+    return result;
+}
+/* HTTP effect preview is strictly for the WPA2 isolated bench AP and
+ * retains CORE's existing zone validation, software brightness limit,
+ * render state, physical-trigger arbitration and Stop path.
+ * It MUST NOT be exposed on production vehicle networks unchanged.
+ */
+static esp_err_t fx_preview_post(httpd_req_t *r){
+    cJSON *obj=NULL;
+    int status=recv_json(r,&obj);
+    if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
+    unsigned id,zone,bri,speed,intensity,palette,ttl;
+    unsigned fg[3],bg[3];
+    const char *names[]={"r","g","b","bg_r","bg_g","bg_b"};
+    unsigned values[6]={0};
+    bool valid=om_number(obj,"effect_id",&id,0,65535)&&
+        om_number(obj,"zone_mask",&zone,1,255)&&
+        om_number(obj,"brightness",&bri,0,OT_MAX_BRIGHTNESS)&&
+        om_number(obj,"speed",&speed,0,255)&&
+        om_number(obj,"intensity",&intensity,0,255)&&
+        om_number(obj,"palette_id",&palette,0,255)&&
+        om_number(obj,"ttl_sec",&ttl,1,60);
+    for(unsigned i=0;i<6&&valid;i++)
+        valid=om_number(obj,names[i],&values[i],0,255);
+    const cJSON *ch=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    const char *chain=cJSON_IsString(ch)?ch->valuestring:"both";
+    uint8_t chain_mask=3u;
+    if(!strcmp(chain,"left"))chain_mask=1u;
+    else if(!strcmp(chain,"right"))chain_mask=2u;
+    else if(strcmp(chain,"both"))valid=false;
+    if(!valid){cJSON_Delete(obj);return respond_err(r,400,"invalid effect preview parameters");}
+    for(unsigned i=0;i<3;i++){fg[i]=values[i];bg[i]=values[i+3];}
+    ot_ble_fx_packet_t req={
+        .effect_id=(uint16_t)id,.chain_mask=chain_mask,.zone_mask=(uint8_t)zone,
+        .r=(uint8_t)fg[0],.g=(uint8_t)fg[1],.b=(uint8_t)fg[2],
+        .bg_r=(uint8_t)bg[0],.bg_g=(uint8_t)bg[1],.bg_b=(uint8_t)bg[2],
+        .brightness=(uint8_t)bri,.speed=(uint8_t)speed,
+        .intensity=(uint8_t)intensity,.palette_id=(uint8_t)palette,
+        .ttl_sec=(uint8_t)ttl
+    };
+    cJSON_Delete(obj);
+    if(!ot_ble_apply_fx_internal(&req,false))
+        return respond_err(r,409,"unsupported effect, palette, or no configured zones");
+    char payload[152];
+    snprintf(payload,sizeof(payload),
+        "{\"ok\":true,\"effect_id\":%u,\"ttl_sec\":%u,\"bench_only\":true,\"trigger_priority_preserved\":true}",
+        id,ttl);
+    return send_json(r,payload);
+}
 
 /* Manual BENCH preview only. No ignition trigger registration, NVS event
  * enablement, external LED task or power-off path. Reuse the current CORE
@@ -622,37 +704,6 @@ bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
  * Like /show/start, this endpoint is available only to clients on the
  * controller's password-protected BENCH AP; it is not a road-ready API.
  */
-static esp_err_t auto_test_get(httpd_req_t *r){
-    static const char page[]=
-    "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-    "<title>OpenTail Startup / Shutdown Bench Test</title>\n"
-    "<style>body{background:#080808;color:#f0f2f4;font:15px system-ui,sans-serif;max-width:560px;margin:25px auto;padding:18px}h1{font-size:24px}p,small{color:#b9bec3}section{background:#18191b;padding:18px;border-radius:20px;margin:14px 0}button,select,input{border:0;border-radius:24px;background:#303235;color:white;padding:12px 17px;font:inherit;box-sizing:border-box}button{cursor:pointer;margin:5px;min-height:48px}button:active{background:#58605a}.primary{background:#306744}.danger{background:#772c34}label{display:block;margin:12px 0;font-size:13px}label input,select{width:100%;margin-top:6px}input[type=color]{height:45px;padding:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111;padding:13px;border-radius:12px}a{color:#8be4b0}</style>\n"
-    "<h1>OpenTail Auto Events</h1><p>BENCH PREVIEW ONLY. Manual startup/shutdown animations. No ignition automation or controller power-off.</p>\n"
-    "<section><label>Output <select id=\"out\"><option value=\"both\">Both configured outputs</option><option value=\"left\">Output 1</option><option value=\"right\">Output 2</option></select></label>\n"
-    "<label>Foreground <input id=\"color\" type=\"color\" value=\"#ff1f14\"></label>\n"
-    "<label>Bench brightness (0-32) <input id=\"bri\" type=\"number\" min=\"0\" max=\"32\" value=\"20\"></label>\n"
-    "<label>Animation speed (0-255) <input id=\"speed\" type=\"range\" min=\"0\" max=\"255\" value=\"180\"></label>\n"
-    "<label>Spark strength (0-255) <input id=\"density\" type=\"range\" min=\"0\" max=\"255\" value=\"220\"></label></section>\n"
-    "<section><b>Startup</b><p>Plays once, then holds foreground until the 6-second preview ends.</p>\n"
-    "<button class=\"primary\" onclick=\"play('materialize_sparks')\">Materialize Sparks</button>\n"
-    "<button class=\"primary\" onclick=\"play('random_materialize')\">Random Materialize</button>\n"
-    "<button onclick=\"play('smooth_fade')\">Smooth Fade In</button>\n"
-    "<button onclick=\"play('plasma_sweep')\">Plasma Sweep</button></section>\n"
-    "<section><b>Shutdown</b><p>Starts at foreground and fades to exact black. Does not cut controller power.</p>\n"
-    "<button class=\"danger\" onclick=\"play('smooth_fade_out')\">Smooth Fade Out</button>\n"
-    "<button onclick=\"stop()\">Stop / Restore</button></section>\n"
-    "<pre id=\"result\" role=\"status\">Ready. Verify both LED output maps in Layout before testing.</pre>\n"
-    "<p><small>Configured zones only. Active brake/turn/reverse inputs still take priority. Stop ends the show; physical parking/vehicle inputs may remain lit. Never use this build as the vehicle's only road lighting.</small></p>\n"
-    "<p><a href=\"/studio\">Back to OpenTail Studio</a></p>\n"
-    "<script>\n"
-    "async function send(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})});const body=await r.text();if(!r.ok)throw new Error('HTTP '+r.status+': '+body);return body}\n"
-    "async function play(effect){const c=document.getElementById('color').value;const n=parseInt(c.slice(1),16);const o={effect,chain:document.getElementById('out').value,r:(n>>16)&255,g:(n>>8)&255,b:n&255,brightness:Number(document.getElementById('bri').value),speed:Number(document.getElementById('speed').value),intensity:Number(document.getElementById('density').value)};const v=document.getElementById('result');v.textContent='Sending '+effect+'...';try{v.textContent=await send('/api/v1/auto-events/preview',o)}catch(e){v.textContent=e.message}}\n"
-    "async function stop(){const v=document.getElementById('result');try{v.textContent=await send('/api/v1/show/stop',{})}catch(e){v.textContent=e.message}}\n"
-    "</script></html>\n";
-    httpd_resp_set_type(r,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    return httpd_resp_sendstr(r,page);
-}
 static esp_err_t auto_preview_post(httpd_req_t *r){
     cJSON *obj=NULL;
     const int status=recv_json(r,&obj);
@@ -909,29 +960,6 @@ static esp_err_t status_self_test_post(httpd_req_t *r){
         "{\"ok\":true,\"self_test_active\":false,\"message\":\"normal status restored\"}":
         "{\"ok\":true,\"self_test_active\":true,\"duration_ms\":5000,\"message\":\"onboard RGB only; no real fault or show started\"}");
 }
-static const char status_self_test_page[]=
-"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-"<title>OpenTail RGB Self-Test</title><style>body{background:#000;color:#fff;font:15px system-ui,sans-serif;max-width:560px;margin:auto;padding:24px}"
-".card{border:1px solid #2b2b2b;border-radius:20px;padding:22px}h1{font-size:22px;margin:0 0 8px}p{color:#aaa;line-height:1.6}"
-"button{background:#161616;border:1px solid #363636;color:white;border-radius:13px;padding:13px 17px;margin:5px 5px 5px 0;min-height:48px;cursor:pointer}"
-"button:disabled{opacity:.5}a{color:#aaa}#info{font-size:13px;color:#ddd;background:#0a0a0a;border-radius:12px;padding:14px;white-space:pre-wrap}</style></head>"
-"<body><div class='card'><h1>CORE RGB Self-Test</h1><p>BENCH ONLY. Tests affect only the onboard RGB chip for 5 seconds."
-"No physical fault, Show Mode, or external LED output is activated.</p>"
-"<button onclick=\"run('rainbow')\">Rainbow · 5s</button>"
-"<button onclick=\"run('stop')\">Stop / Restore</button>"
-"<p id='info' role='status' aria-live='polite'>Reading status…</p>"
-"<p><a href='/studio'>Back to Studio</a></p></div><script>"
-"async function run(mode){try{const res=await fetch('/api/v1/status-led/self-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});"
-"const j=await res.json();if(!res.ok)throw Error(j.error||'Request failed');await update()}catch(e){document.getElementById('info').textContent='Error: '+e.message}}"
-"async function update(){try{const s=await(await fetch('/api/v1/status-led',{cache:'no-store'})).json();"
-"document.getElementById('info').textContent=s.self_test_active?('TEST: '+s.self_test_mode+' · '+(s.self_test_remaining_ms/1000).toFixed(1)+'s remaining')"
-":('NORMAL STATUS: '+s.mode+(s.available?'':' (RGB unavailable)'))}catch(e){document.getElementById('info').textContent='Status error: '+e.message}}"
-"setInterval(update,300);update()</script></body></html>";
-static esp_err_t status_self_test_get(httpd_req_t *r){
-    httpd_resp_set_type(r,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    return httpd_resp_sendstr(r,status_self_test_page);
-}
 static esp_err_t status_session_post(httpd_req_t *r){
     cJSON *obj=NULL;int status=recv_json(r,&obj);
     if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
@@ -996,46 +1024,33 @@ static esp_err_t stop_post(httpd_req_t *r) {
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
-static const char page[]=
-"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>OpenTail CORE Alpha</title><style>body{background:#0b0f0d;color:#f3fff4;font:16px system-ui;max-width:620px;margin:auto;padding:18px}"
-"button{background:#193924;border:1px solid #39ff70;border-radius:12px;color:white;padding:12px;margin:5px;min-height:45px}"
-"pre{white-space:pre-wrap;background:#171c19;padding:14px;border-radius:12px}h1{color:#39ff70}small{color:#afb9b1}</style></head><body>"
-"<h1>OpenTail CORE Alpha</h1><p>BENCH ONLY - no road lighting or failover</p>"
-"<p><a style=\"color:#39ff70;font-weight:bold\" href=\"/studio\">Open OpenTail Studio v0.19.118 →</a></p>"
-"<p><a style=\"color:#aaa\" href=\"/status-self-test\">Onboard RGB self-test (bench only) →</a></p>"
-"<h3>Inputs (2 second test)</h3><div id=signals></div>"
-"<h3>Color demos (3 second test)</h3><div id=colors></div>"
-"<p><button onclick=post('/api/v1/stop',{})>STOP DEMO</button></p>"
-"<h3>Controller Status</h3><pre id=status>Connecting...</pre><small>OpenTail Alpha uses its own API. Current Studio WLED connection mode is not compatible.</small>"
-"<script>async function post(p,b){try{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});"
-"if(!r.ok)alert(await r.text());await refresh()}catch(e){alert(e.message)}}"
-"async function refresh(){try{document.getElementById('status').textContent=JSON.stringify(await(await fetch('/api/v1/status')).json(),null,2)}catch(e){document.getElementById('status').textContent=e.message}}"
-"for(const n of ['park','brake','left','right','reverse']){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/simulate',{signals:[n],ttl_ms:2000});document.getElementById('signals').append(b)}"
-"for(const [n,c] of Object.entries({Red:[255,0,0],Green:[0,255,0],Blue:[0,0,255],White:[255,255,255]})){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/demo',{mode:'solid',r:c[0],g:c[1],b:c[2],brightness:24,ttl_ms:3000});document.getElementById('colors').append(b)}"
-"setInterval(refresh,1000);refresh()</script></body></html>";
-/* OpenTail Studio v0.19.118 is served locally from the CORE access point.
- * Gzip is embedded into the application at compile time; no filesystem or WLED needed.
- * Browser uses same-origin /api/v1/... and does not require broad CORS access. */
-extern const uint8_t studio_gz_start[] asm("_binary_studio_htm_gz_start");
-extern const uint8_t studio_gz_end[] asm("_binary_studio_htm_gz_end");
-static esp_err_t studio_get(httpd_req_t *r) {
+/* CORE ships only its own developer console. The approved Studio is
+ * distributed independently as web-studio/opentail.htm and via Android.
+ * CMake embeds this static page; no WLED runtime or browser network access
+ * beyond the CORE bench AP is needed.
+ */
+extern const uint8_t ot_dev_console_start[] asm("_binary_assets_dev_console_htm_start");
+static esp_err_t dev_get(httpd_req_t *r){
     httpd_resp_set_type(r,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(r,"Content-Encoding","gzip");
     httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    return httpd_resp_send(r,(const char *)studio_gz_start,(ssize_t)(studio_gz_end-studio_gz_start));
+    return httpd_resp_sendstr(r,(const char *)ot_dev_console_start);
 }
-static esp_err_t root_get(httpd_req_t *r) {httpd_resp_set_type(r,"text/html; charset=utf-8");return httpd_resp_sendstr(r,page);}
+static esp_err_t legacy_dev_redirect(httpd_req_t *r){
+    httpd_resp_set_status(r,"302 Found");
+    httpd_resp_set_hdr(r,"Location","/dev");
+    return httpd_resp_sendstr(r,"Controller tools have moved to /dev. OpenTail Studio is a separate design app.");
+}
 static void http_start(void) {
-    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=22;cfg.stack_size=8192;
+    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;
     httpd_handle_t server=NULL;
     ESP_ERROR_CHECK(httpd_start(&server,&cfg));
     const httpd_uri_t routes[]={
-        {.uri="/",.method=HTTP_GET,.handler=root_get},
-        {.uri="/studio",.method=HTTP_GET,.handler=studio_get},
+        {.uri="/",.method=HTTP_GET,.handler=dev_get},
+        {.uri="/dev",.method=HTTP_GET,.handler=dev_get},
+        {.uri="/studio",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status",.method=HTTP_GET,.handler=status_get},
         {.uri="/api/v1/status-led",.method=HTTP_GET,.handler=status_led_get},
-        {.uri="/status-self-test",.method=HTTP_GET,.handler=status_self_test_get},
+        {.uri="/status-self-test",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status-led/self-test",.method=HTTP_POST,.handler=status_self_test_post},
         {.uri="/api/v1/status-led/session",.method=HTTP_POST,.handler=status_session_post},
         {.uri="/api/v1/capabilities",.method=HTTP_GET,.handler=caps_get},
@@ -1046,8 +1061,10 @@ static void http_start(void) {
         {.uri="/api/v1/show",.method=HTTP_GET,.handler=show_get},
         {.uri="/api/v1/show/start",.method=HTTP_POST,.handler=show_start},
         {.uri="/api/v1/show/stop",.method=HTTP_POST,.handler=show_stop},
-        {.uri="/auto-events/test",.method=HTTP_GET,.handler=auto_test_get},
+        {.uri="/auto-events/test",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/auto-events/preview",.method=HTTP_POST,.handler=auto_preview_post},
+        {.uri="/api/v1/fx/catalog",.method=HTTP_GET,.handler=fx_catalog_get},
+        {.uri="/api/v1/fx/preview",.method=HTTP_POST,.handler=fx_preview_post},
         {.uri="/api/v1/outputs",.method=HTTP_GET,.handler=om_get},
         {.uri="/api/v1/triggers",.method=HTTP_GET,.handler=tm_get},
         {.uri="/api/v1/triggers",.method=HTTP_POST,.handler=tm_post},
