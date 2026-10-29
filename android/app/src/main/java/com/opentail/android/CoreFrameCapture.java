@@ -19,7 +19,7 @@ final class CoreFrameCapture {
     private final Listener listener;
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic command,reply;
-    private boolean busy=false;
+    private boolean busy=false,operationPending=false,abortRequested=false;
     private int output=0,count=0,offset=0,crc=0,polls=0,generation=0;
     private long sequence=0;
     private byte[] pixels;
@@ -31,24 +31,34 @@ final class CoreFrameCapture {
     boolean supported() {return gatt!=null && command!=null && reply!=null;}
     boolean busy() {return busy;}
     void cancel() {
-        busy=false;generation++;pixels=null;
+        busy=false;operationPending=false;abortRequested=false;generation++;pixels=null;
         gatt=null;command=null;reply=null;
+    }
+    /** STOP must not wait behind a long diagnostic transfer. Finish the
+     * current GATT operation, then release the queue without requesting more.
+     */
+    void abortForStop() {
+        if(!busy)return;
+        abortRequested=true;
+        if(!operationPending)fail("CORE snapshot canceled for STOP");
     }
     void request(int out) {
         if(busy || !supported() || out<0 || out>255) {
             listener.done(out,0,null,"CORE snapshot busy or unsupported");return;
         }
         output=out;count=0;offset=0;crc=0;sequence=0;polls=0;pixels=null;busy=true;
+        abortRequested=false;operationPending=false;
         send(new byte[]{1,1,(byte)out});
     }
     private void fail(String message) {
         if(!busy)return;
-        busy=false;generation++;pixels=null;
+        busy=false;operationPending=false;abortRequested=false;generation++;pixels=null;
         listener.done(output,sequence,null,message);
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
     private void send(byte[] data) {
         if(!busy || !supported()){fail("CORE snapshot disconnected");return;}
+        operationPending=true;
         int lease=++generation;
         handler.postDelayed(()->{if(busy && generation==lease)
             fail("CORE snapshot BLE operation timed out");},8000);
@@ -68,8 +78,10 @@ final class CoreFrameCapture {
     @SuppressWarnings("MissingPermission")
     void written(BluetoothGatt connection,int status) {
         if(!busy || connection!=gatt)return;
+        operationPending=false;
+        if(abortRequested){fail("CORE snapshot canceled for STOP");return;}
         if(status!=BluetoothGatt.GATT_SUCCESS){fail("CORE frame command rejected: "+status);return;}
-        try{if(!gatt.readCharacteristic(reply))fail("CORE frame response could not start");}
+        try{operationPending=true;if(!gatt.readCharacteristic(reply))fail("CORE frame response could not start");}
         catch(SecurityException e){fail("Bluetooth permission missing");}
     }
     private static int u16(byte[] a,int p) {return (a[p]&255)|((a[p+1]&255)<<8);}
@@ -79,6 +91,8 @@ final class CoreFrameCapture {
     @SuppressWarnings("MissingPermission")
     void read(BluetoothGatt connection,byte[] a,int status) {
         if(!busy || connection!=gatt)return;
+        operationPending=false;
+        if(abortRequested){fail("CORE snapshot canceled for STOP");return;}
         if(status!=BluetoothGatt.GATT_SUCCESS || a==null || a.length<11 || a[0]!=1) {
             fail("CORE returned an incomplete snapshot response");return;
         }
@@ -88,7 +102,7 @@ final class CoreFrameCapture {
                 final int lease=generation;
                 handler.postDelayed(()->{
                     if(!busy || generation!=lease || connection!=gatt)return;
-                    try {if(!gatt.readCharacteristic(reply))fail("Snapshot polling failed");}
+                    try {operationPending=true;if(!gatt.readCharacteristic(reply))fail("Snapshot polling failed");}
                     catch(SecurityException ex){fail("Bluetooth permission missing");}
                 },50);
                 return;
@@ -112,7 +126,7 @@ final class CoreFrameCapture {
         if(offset<count){next();return;}
         if(BleConfigCodec.crc16(pixels)!=crc){fail("CORE RGB888 checksum mismatch");return;}
         byte[] complete=Arrays.copyOf(pixels,pixels.length);
-        busy=false;pixels=null;generation++;
+        busy=false;operationPending=false;abortRequested=false;pixels=null;generation++;
         listener.done(output,sequence,complete,null);
     }
     private void next(){
