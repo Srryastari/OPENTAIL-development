@@ -1541,7 +1541,7 @@ static void led_task(void *p) {
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && ble_startup_ready && http_startup_ready &&
+           if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&
               ot_ble_radio_ever_ready() && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
@@ -1609,7 +1609,9 @@ void app_main(void) {
     const bool wifi_started=wifi_ap_init();
     if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
     om_write_mutex=xSemaphoreCreateMutex();
-    if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
+    /* Configuration writes already reject a missing mutex. Keep local
+     * trigger-driven rendering alive rather than rebooting on this fault. */
+    if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
     http_startup_ready=wifi_started&&http_start();
