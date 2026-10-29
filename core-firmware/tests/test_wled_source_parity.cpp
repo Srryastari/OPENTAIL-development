@@ -2017,6 +2017,92 @@ void mode_starburst(void) {
 static_assert(sizeof(star)==60u,"Pinned ESP32 10-fragment star must be 60 bytes");
 #pragma GCC diagnostic pop
 
+// BEGIN UPSTREAM FX.cpp Tetrix (verbatim).
+typedef struct Tetris {
+  float    pos;
+  float    speed;
+  uint8_t  col;   // color index
+  uint16_t brick; // brick size in pixels
+  uint16_t stack; // stack size in pixels
+  uint32_t step;  // 2D-fication of SEGENV.step (state)
+} tetris;
+
+void mode_tetrix(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned strips = SEGMENT.nrOfVStrips(); // allow running on virtual strips (columns in 2D segment)
+  unsigned dataSize = sizeof(tetris);
+  if (!SEGENV.allocateData(dataSize * strips)) FX_FALLBACK_STATIC; //allocation failed
+  Tetris* drops = reinterpret_cast<Tetris*>(SEGENV.data);
+
+  //if (SEGENV.call == 0) SEGMENT.fill(SEGCOLOR(1));  // will fill entire segment (1D or 2D), then use drop->step = 0 below
+
+  // virtualStrip idea by @ewowi (Ewoud Wijma)
+  // requires virtual strip # to be embedded into upper 16 bits of index in setPixelcolor()
+  // the following functions will not work on virtual strips: fill(), fade_out(), fadeToBlack(), blur()
+  struct virtualStrip {
+    static void runStrip(size_t stripNr, Tetris *drop) {
+      // initialize dropping on first call or segment full
+      if (SEGENV.call == 0) {
+        drop->stack = 0;                  // reset brick stack size
+        drop->step = strip.now + 2000;     // start by fading out strip
+        if (SEGMENT.check1) drop->col = 0;// use only one color from palette
+      }
+
+      if (drop->step == 0) {              // init brick
+        // speed calculation: a single brick should reach bottom of strip in X seconds
+        // if the speed is set to 1 this should take 5s and at 255 it should take 0.25s
+        // as this is dependant on SEGLEN it should be taken into account and the fact that effect runs every FRAMETIME s
+        int speed = SEGMENT.speed ? SEGMENT.speed : hw_random8(1,255);
+        speed = map(speed, 1, 255, 5000, 250); // time taken for full (SEGLEN) drop
+        drop->speed = float(SEGLEN * FRAMETIME) / float(speed); // set speed
+        drop->pos   = SEGLEN;             // start at end of segment (no need to subtract 1)
+        if (!SEGMENT.check1) drop->col = hw_random8(0,15)<<4;   // limit color choices so there is enough HUE gap
+        drop->step  = 1;                  // drop state (0 init, 1 forming, 2 falling)
+        drop->brick = (SEGMENT.intensity ? (SEGMENT.intensity>>5)+1 : hw_random8(1,5)) * (1+(SEGLEN>>6));  // size of brick
+      }
+
+      if (drop->step == 1) {              // forming
+        if (hw_random8()>>6) {               // random drop
+          drop->step = 2;                 // fall
+        }
+      }
+
+      if (drop->step == 2) {              // falling
+        if (drop->pos > drop->stack) {    // fall until top of stack
+          drop->pos -= drop->speed;       // may add gravity as: speed += gravity
+          if (int(drop->pos) < int(drop->stack)) drop->pos = drop->stack;
+          for (unsigned i = unsigned(drop->pos); i < SEGLEN; i++) {
+            uint32_t col = i < unsigned(drop->pos)+drop->brick ? SEGMENT.color_from_palette(drop->col, false, false, 0) : SEGCOLOR(1);
+            SEGMENT.setPixelColor(indexToVStrip(i, stripNr), col);
+          }
+        } else {                          // we hit bottom
+          drop->step = 0;                 // proceed with next brick, go back to init
+          drop->stack += drop->brick;     // increase the stack size
+          if (drop->stack >= SEGLEN) drop->step = strip.now + 2000; // fade out stack
+        }
+      }
+
+      if (drop->step > 2) {               // fade strip
+        drop->brick = 0;                  // reset brick size (no more growing)
+        if (drop->step > strip.now) {
+          // allow fading of virtual strip
+          for (unsigned i = 0; i < SEGLEN; i++) SEGMENT.blendPixelColor(indexToVStrip(i, stripNr), SEGCOLOR(1), 25); // 10% blend
+        } else {
+          drop->stack = 0;                // reset brick stack size
+          drop->step = 0;                 // proceed with next brick
+          if (SEGMENT.check1) drop->col += 8;   // gradually increase palette index
+        }
+      }
+    }
+  };
+
+  for (unsigned stripNr=0; stripNr<strips; stripNr++)
+    virtualStrip::runStrip(stripNr, &drops[stripNr]);
+}
+
+static_assert(sizeof(tetris)==20u,"Pinned Tetris C++ data must be 20 bytes");
+// END UPSTREAM FX.cpp Tetrix.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2065,7 +2151,8 @@ static const RefCase refs[]={
     {96,mode_drip,"Drip"},
     {116,mode_tv_simulator,"TV Simulator"},
     {218,mode_ColorClouds,"Color Clouds"},
-    {89,mode_starburst,"Fireworks Starburst"}
+    {89,mode_starburst,"Fireworks Starburst"},
+    {44,mode_tetrix,"Tetrix"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
