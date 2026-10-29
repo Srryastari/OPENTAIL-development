@@ -139,7 +139,7 @@ public final class MainActivity extends Activity {
     @Override protected void onStop(){
         super.onStop();
         previewPlaying=false;
-        if(preview!=null)preview.setPlaying(false);
+        if(preview!=null)preview.invalidate();
         if(ble!=null)ble.stopScan();
     }
     @Override protected void onDestroy(){
@@ -163,7 +163,7 @@ public final class MainActivity extends Activity {
     private void setTab(int next){
         if(next==tab)return;
         previewPlaying=false;
-        if(preview!=null)preview.setPlaying(false);
+        if(preview!=null)preview.invalidate();
         tab=next;render();
     }
     private void render() {
@@ -281,16 +281,14 @@ public final class MainActivity extends Activity {
         LinearLayout title=ui.horizontal();
         TextView h=ui.text("Preview engine",16,true);
         title.addView(h,new LinearLayout.LayoutParams(0,ui.dp(30),1));
-        title.addView(ui.chip("SIMULATED",false));c.addView(title);
-        preview=new NativeLedPreview(this);
+        title.addView(ui.chip("INDEXED",false));c.addView(title);
+        preview=new NativeLedPreview(this,project);
         preview.configure(effectId,foreground,background,whiteMode);
-        preview.setPlaying(previewPlaying);
         c.addView(preview,ui.lp(12,5));
-        secondary(c,"Visual approximation only · CORE generates final LED frames.");
+        secondary(c,"Exact zero-based design pixel map (64 per page). Not a rendered FX frame; CORE BLE does not return RGB frames.");
         if(includeTransport)
-            rowButtons(c,previewPlaying?"Pause preview":"Play preview",
-                    ()->{previewPlaying=!previewPlaying;preview.setPlaying(previewPlaying);render();},
-                    "Stop",()->{previewPlaying=false;preview.setPlaying(false);render();});
+            rowButtons(c,"Previous 64",()->preview.shift(-1),
+                    "Next 64",()->preview.shift(1));
         addCard(c);
     }
     private void showModes(){
