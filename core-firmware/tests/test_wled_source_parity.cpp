@@ -249,6 +249,7 @@ struct CRGBW {
 };
 struct CRGB : CRGBW {
     CRGB()=default;
+    CRGB(uint8_t red,uint8_t green,uint8_t blue) {r=red;g=green;b=blue;w=0u;}
     explicit CRGB(uint32_t color) { color32=color; }
     explicit CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
@@ -257,6 +258,111 @@ struct CRGB : CRGBW {
     }
 };
 static uint32_t gamma32inv(uint32_t color) { return color; }
+
+
+struct CRGBPalette16 {
+  CRGB entries[16];
+  CRGB& operator[](unsigned i){return entries[i];}
+  const CRGB& operator[](unsigned i)const{return entries[i];}
+};
+enum TBlendType { NOBLEND=0,LINEARBLEND=1,LINEARBLEND_NOWRAP=2 };
+static uint32_t RGBW32(uint8_t r,uint8_t g,uint8_t b,uint8_t w);
+// Original WLED/fastled_slim palette mathematics, verbatim.
+void fill_gradient_RGB(CRGB* colors, uint32_t startpos, CRGB startcolor, uint32_t endpos, CRGB endcolor) {
+  if(endpos < startpos) { // if the points are in the wrong order, flip them
+    unsigned t = endpos;
+    CRGB tc = endcolor;
+    endcolor = startcolor;
+    endpos = startpos;
+    startpos = t;
+    startcolor = tc;
+  }
+  int rdistance = endcolor.r - startcolor.r;
+  int gdistance = endcolor.g - startcolor.g;
+  int bdistance = endcolor.b - startcolor.b;
+
+  int divisor = endpos - startpos;
+  divisor = divisor == 0 ? 1 : divisor; // prevent division by zero
+
+  int rdelta = (rdistance << 16) / divisor;
+  int gdelta = (gdistance << 16) / divisor;
+  int bdelta = (bdistance << 16) / divisor;
+
+  int rshifted = startcolor.r << 16;
+  int gshifted = startcolor.g << 16;
+  int bshifted = startcolor.b << 16;
+
+  for (unsigned i = startpos; i <= endpos; i++) {
+    colors[i] = CRGB(rshifted >> 16, gshifted >> 16, bshifted >> 16);
+    rshifted += rdelta;
+    gshifted += gdelta;
+    bshifted += bdelta;
+  }
+}
+
+void fill_gradient_RGB(CRGB* colors, uint32_t num, const CRGB& c1, const CRGB& c2) {
+  uint32_t last = num - 1;
+  fill_gradient_RGB(colors, 0, c1, last, c2);
+}
+
+void fill_gradient_RGB(CRGB* colors, uint32_t num, const CRGB& c1, const CRGB& c2, const CRGB& c3) {
+  uint32_t half = (num / 2);
+  uint32_t last = num - 1;
+  fill_gradient_RGB(colors,    0, c1, half, c2);
+  fill_gradient_RGB(colors, half, c2, last, c3);
+}
+
+void fill_gradient_RGB(CRGB* colors, uint32_t num, const CRGB& c1, const CRGB& c2, const CRGB& c3, const CRGB& c4) {
+  uint32_t onethird = (num / 3);
+  uint32_t twothirds = ((num * 2) / 3);
+  uint32_t last = num - 1;
+  fill_gradient_RGB(colors,         0, c1,  onethird, c2);
+  fill_gradient_RGB(colors,  onethird, c2, twothirds, c3);
+  fill_gradient_RGB(colors, twothirds, c3,      last, c4);
+}
+
+uint32_t ColorFromPalette(const CRGBPalette16& pal, unsigned index, uint8_t brightness, TBlendType blendType) {
+  if (blendType == LINEARBLEND_NOWRAP) {
+    index = (index * 0xF0) >> 8; // Blend range is affected by lo4 blend of values, remap to avoid wrapping
+  }
+  unsigned hi4 = byte(index) >> 4;
+  unsigned lo4 = (index & 0x0F);
+  const CRGB* entry = (CRGB*)&(pal[0]) + hi4;
+  unsigned red1   = entry->r;
+  unsigned green1 = entry->g;
+  unsigned blue1  = entry->b;
+  if (lo4 && blendType != NOBLEND) {
+    if (hi4 == 15) entry = &(pal[0]);
+    else ++entry;
+    unsigned f2 = (lo4 << 4);
+    unsigned f1 = 256 - f2;
+    red1   = (red1   * f1 + (unsigned)entry->r * f2) >> 8; // note: using color_blend() is slower
+    green1 = (green1 * f1 + (unsigned)entry->g * f2) >> 8;
+    blue1  = (blue1  * f1 + (unsigned)entry->b * f2) >> 8;
+  }
+  if (brightness < 255) { // note: zero checking could be done to return black but that is hardly ever used so it is omitted
+    // actually same as color_fade(), using color_fade() is slower
+    uint32_t scale = brightness + 1; // adjust for rounding (bitshift)
+    red1   = (red1   * scale) >> 8;
+    green1 = (green1 * scale) >> 8;
+    blue1  = (blue1  * scale) >> 8;
+  }
+  return RGBW32(red1,green1,blue1,0);
+}
+
+
+static CRGBPalette16 ref_palette(uint8_t id,uint32_t primary,uint32_t secondary,uint32_t tertiary){
+ CRGBPalette16 pal{};const CRGB a(primary),b(secondary),c(tertiary);
+ if(id==2){for(auto& v:pal.entries)v=a;}
+ else if(id==3){fill_gradient_RGB(pal.entries,0u,a,5u,a);fill_gradient_RGB(pal.entries,5u,a,10u,b);fill_gradient_RGB(pal.entries,10u,b,15u,b);}
+ else if(id==4){fill_gradient_RGB(pal.entries,0u,c,8u,b);fill_gradient_RGB(pal.entries,8u,b,15u,a);}
+ else if(id==5){for(unsigned i=0;i<16;i++)pal[i]=tertiary?(i<5?a:i<10?b:i<15?c:a):(i<8?a:b);}
+ else if(id==0||id==6){
+ const uint32_t colors[16]={0x9B00D5u,0xBD00B8u,0xDA0092u,0xF3005Cu,0xF45500u,0xDC8F00u,0xD5B400u,0xD5D500u,0xD59B00u,0xEF6600u,0xF90044u,0xE10086u,0xC400B0u,0xA300CFu,0x7600E8u,0x0032FCu};
+ for(unsigned i=0;i<16;i++)pal[i]=CRGB(colors[i]);
+ }else std::abort();
+ return pal;
+}
 
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
@@ -274,8 +380,10 @@ struct PinnedSeg {
         hsv2rgb_rainbow((uint16_t)pos<<8,255,255,bgrw,true);
         return ((uint32_t)bgrw[2]<<16)|((uint32_t)bgrw[1]<<8)|bgrw[0];
     }
-    uint32_t color_from_palette(uint16_t,bool,bool,uint8_t slot,uint8_t pbri=255u) const {
-        if(palette!=0 || slot>2) {std::fprintf(stderr,"Unsupported reference palette/slot\n");std::abort();}
+    uint32_t color_from_palette(uint16_t i,bool mapping,bool moving,uint8_t slot,uint8_t pbri=255u) const {
+        (void)mapping;
+        if(palette!=0){const auto p=ref_palette(palette,colors[0],colors[1],colors[2]);return ColorFromPalette(p,i,pbri,moving?LINEARBLEND:LINEARBLEND_NOWRAP);}
+        if(slot>2)std::abort();
         return color_fade(colors[slot],pbri,true);
     }
     void blendPixelColor(size_t i,CRGBW color,uint8_t b) {
@@ -2168,7 +2276,9 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    PinnedSeg seg(count);
+                    const std::vector<uint8_t> palette_ids=fx.id==218u?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u}:std::vector<uint8_t>{0u};
+                    for(uint8_t pal:palette_ids) {
+                    PinnedSeg seg(count);seg.palette=pal;
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
                     seg.colors[0]=0x007B3809u; // configured primary 123,56,9
@@ -2179,7 +2289,7 @@ int main() {
                     ot_wled_fx_config_t cfg{};
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
-                    cfg.frame_time_ms=23;cfg.palette_id=0;
+                    cfg.frame_time_ms=23;cfg.palette_id=pal;
                     cfg.foreground={123,56,9};cfg.background={3,88,174};
                     ot_wled_fx_state_t state{};
                     std::vector<ot_wled_rgb_t> actual(count);
@@ -2202,13 +2312,14 @@ int main() {
                         for(size_t i=0;i<count;i++) {
                             if(pack(actual[i])!=(seg.pixels[i]&0xffffffu)) {
                                 std::fprintf(stderr,
-                                  "WLED 1:1 mismatch id=%u %s len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
-                                  fx.id,fx.name,count,speed,intensity,t,i,
+                                  "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
+                                  fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
                                 return 1;
                             }
                             checked++;
                         }
+                    }
                     }
                 }
             }
