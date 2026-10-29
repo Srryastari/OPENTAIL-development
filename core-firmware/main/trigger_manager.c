@@ -44,3 +44,18 @@ bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
     *out=candidate;
     return true;
 }
+
+bool ot_tm_ble_encode(const ot_tm_profile_t *profile,uint16_t revision,
+                      uint8_t raw,uint8_t effective,bool persisted,uint8_t status,
+                      uint8_t wire[OT_TM_BLE_READ_BYTES]){
+    if(!ot_tm_valid(profile)||!wire)return false;
+    wire[0]=OT_TM_BLE_VERSION;
+    wire[1]=status;
+    wire[2]=(uint8_t)revision;
+    wire[3]=(uint8_t)(revision>>8);
+    wire[4]=raw;
+    wire[5]=effective;
+    wire[6]=persisted?1u:0u;
+    memcpy(wire+7,profile->function,OT_IN_COUNT);
+    return true;
+}
