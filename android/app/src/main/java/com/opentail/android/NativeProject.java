@@ -187,9 +187,13 @@ final class NativeProject {
         // Pixel, layout, trigger and event editors mutate nested JSON before
         // calling save(). A failed commit must restore ALL those shared fields,
         // not leave a false in-memory success that leaks into exports/presets.
+        restoreCommitted();
+        return false;
+    }
+
+    private void restoreCommitted() {
         try { data = new JSONObject(committedJson); }
         catch (JSONException impossible) { throw new IllegalStateException("Corrupt committed project snapshot", impossible); }
-        return false;
     }
 
     synchronized String name() { return data.optString("projectName", "Untitled project"); }
@@ -271,7 +275,7 @@ final class NativeProject {
                     .put("offsetMode", "auto").put("reverse", false)
                     .put("functions", new JSONArray()).put("controllerId", "default");
             zones().put(z); reindex(); return save();
-        } catch (JSONException e) { return false; }
+        } catch (JSONException e) { restoreCommitted(); return false; }
     }
 
     /** Preview every dependent zero-based zone offset without mutating saved
@@ -320,7 +324,7 @@ final class NativeProject {
                 }
             }
             reindex();return save();
-        } catch (JSONException e) { return false; }
+        } catch (JSONException e) { restoreCommitted(); return false; }
     }
 
     synchronized boolean removeZone(String id) {
@@ -347,7 +351,7 @@ final class NativeProject {
                 if (sections != null) sections.remove(id);
             }
             reindex(); return save();
-        } catch (JSONException e) { return false; }
+        } catch (JSONException e) { restoreCommitted(); return false; }
     }
 
     synchronized boolean moveZone(int from, int to) {
@@ -359,7 +363,7 @@ final class NativeProject {
         JSONArray changed = new JSONArray();
         for (JSONObject zone : reordered) changed.put(zone);
         try { data.put("layout", changed); reindex();return save(); }
-        catch (JSONException e) { return false; }
+        catch (JSONException e) { restoreCommitted(); return false; }
     }
 
     synchronized JSONObject profiles() { return data.optJSONObject("profiles"); }
