@@ -12,7 +12,22 @@ enum {
     OT_FX_RANDOM_MATERIALIZE = 32770u,
     OT_FX_SMOOTH_FADE = 32771u,
     OT_FX_PLASMA_SWEEP = 32772u,
-    OT_FX_SMOOTH_FADE_OUT = 32773u
+    OT_FX_SMOOTH_FADE_OUT = 32773u,
+    /* Approved OpenTail originals; unique IDs never overlap borrowed FX. */
+    OT_FX_DIMENSIONAL_RIFT = 32774u,
+    OT_FX_METEOR_STORM = 32775u,
+    OT_FX_HELIX_DRIVE = 32776u,
+    OT_FX_CRYSTAL_GROWTH = 32777u,
+    OT_FX_FUSION_CORE = 32778u,
+    OT_FX_PORTAL_GATE = 32779u,
+    OT_FX_TIME_FRACTURE = 32780u,
+    OT_FX_AURORA_SURGE = 32781u,
+    OT_FX_CHROMATIC_SHATTER = 32782u,
+    OT_FX_VORTEX = 32783u,
+    OT_FX_QUANTUM_COLLAPSE = 32784u,
+    OT_FX_REALITY_BREAK = 32785u,
+    OT_FX_EVENT_HORIZON = 32786u,
+    OT_FX_SINGULARITY_SHUTDOWN = 32787u
 };
 bool ot_auto_fx_id(uint16_t id);
 size_t ot_auto_fx_ids(uint16_t *dst, size_t capacity);
