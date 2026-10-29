@@ -217,6 +217,9 @@ struct PinnedSeg {
 struct PinnedEnv {
     uint32_t call=0,step=0;
     uint16_t aux0=0,aux1=0;
+    uint32_t data_counter=0;       // upstream mode_android allocation
+    void* data=&data_counter;
+    bool allocateData(size_t bytes) {return bytes<=sizeof(data_counter);}
 };
 struct PinnedClock {uint32_t now=0;};
 static PinnedSeg* current_segment=nullptr;
@@ -669,6 +672,41 @@ void mode_heartbeat(void) {
   }
 }
 
+void mode_android(void) {
+  if (!SEGENV.allocateData(sizeof(uint32_t))) FX_FALLBACK_STATIC;
+  uint32_t* counter = reinterpret_cast<uint32_t*>(SEGENV.data);
+  unsigned size = SEGENV.aux1 >> 1; // upper 15 bit
+  unsigned shrinking = SEGENV.aux1 & 0x01; // lowest bit
+  if(strip.now >= SEGENV.step) {
+    SEGENV.step = strip.now + 3 + ((8 * (uint32_t)(255 - SEGMENT.speed)) / SEGLEN);
+    if (size > (SEGMENT.intensity * SEGLEN) / 255)
+      shrinking = 1;
+    else if (size < 2)
+      shrinking = 0;
+    if (!shrinking) { // growing
+      if ((*counter % 3) == 1)
+        SEGENV.aux0++; // advance start position
+      else
+        size++;
+    } else { // shrinking
+      SEGENV.aux0++;
+      if ((*counter % 3) != 1)
+        size--;
+    }
+    SEGENV.aux1 = size << 1 | shrinking; // save back
+    (*counter)++;
+    if (SEGENV.aux0 >= SEGLEN) SEGENV.aux0 = 0;
+  }
+  uint32_t start = SEGENV.aux0;
+  uint32_t end = (SEGENV.aux0 + size) % SEGLEN;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    if ((start < end && i >= start && i < end) || (start >= end && (i >= start || i < end)))
+      SEGMENT.setPixelColor(i, SEGCOLOR(0));
+    else
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -702,7 +740,8 @@ static const RefCase refs[]={
     {11,mode_dual_scan,"Scan Dual"},
     {85,mode_spots,"Spots"},
     {86,mode_spots_fade,"Spots Fade"},
-    {100,mode_heartbeat,"Heartbeat"}
+    {100,mode_heartbeat,"Heartbeat"},
+    {27,mode_android,"Android"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
