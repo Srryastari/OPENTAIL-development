@@ -42,10 +42,15 @@ Canvas illustration is NOT a pixel-identical rendering of the firmware.
 
 ## Current migration limitations
 
-Android's previous WebView-specific BLE Output Manager/NVS editor, Wi-Fi
-Studio bridge and injected hardware dashboards were intentionally removed
-from this designer. Their protocols remain in `BleDiscovery` but are not yet
-all exposed as native controls. Use CORE `/dev` for those developer functions.
+The previous WebView-specific Wi-Fi Studio bridge and injected hardware
+dashboards are removed. The Android app now has a **native optional Advanced
+BLE Output Manager** in Settings for both existing output channels. This
+editor reads firmware configurations, edits names/counts/color order/zone
+roles, validates the current 261-byte protocol and requires explicit Save
+with firmware readback. Its present 522-pixel and eight-zone limits are
+**firmware protocol limits**, not universal Studio design defaults.
+
+Hardware trigger-input mapping and diagnostics stay in CORE `/dev`.
 
 The phone appearance, project file picker, BLE enrollment, effect playback
 and actual LED behavior still require **on-device acceptance testing**. CI
