@@ -16,7 +16,7 @@ def section(start, end):
     assert start in core and end in core, f"Missing endpoint: {start}"
     return core.split(start, 1)[1].split(end, 1)[0]
 
-stop = section("static esp_err_t stop_post(httpd_req_t *r) {", "static const char page[]=")
+stop = section("static esp_err_t stop_post(httpd_req_t *r) {", "extern const uint8_t ot_dev_console_start[]")
 for required in (
     "demo.mode=OT_DEMO_OFF",
     "sim_mask=0",
@@ -44,6 +44,9 @@ assert caps["wled_renderer"] == "compatibility"
 assert caps["wled_pixel_parity_verified"] is False
 assert caps["native_wled_firmware_unified"] is False
 assert caps["hardware_failover"] is False and caps["bench_only"] is True
-assert "Open OpenTail Studio v0.19.118" in core
-assert "Open OpenTail Studio v0.19.51" not in core
-print("CORE Stop, source capability honesty, and embedded Studio version static checks passed")
+assert 'studio_gz_start' not in core, "CORE must not embed independent Studio"
+assert '"/dev"' in core and 'dev_get' in core
+assert 'fx_catalog_get' in core and 'fx_preview_post' in core
+assert caps["ble_effect_id_count"] == 126, "CORE catalog must report native Startup/Shutdown effects"
+assert caps["studio_embedded"] is False and caps["developer_console"] is True
+print("CORE Stop, bench console routing, capabilities and independent Studio contract passed")
