@@ -140,25 +140,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Validate Android WebView JavaScript syntax and output integration contract
+      - name: Validate native Android authoring architecture, project and BLE contracts
         run: |
-          node --check android/qa/test_unified_ble_fx.cjs
-          node android/qa/test_unified_ble_fx.cjs
-          node --check android/app/src/main/assets/ble-output-panel.js
-          node --check android/app/src/main/assets/output-control-motion.js
-          node --check android/app/src/main/assets/direct-ble-dashboard.js
-          node android/qa/test_ble_output_pending.cjs
-          node - <<'JS'
-          const fs=require('fs'),assert=require('assert');
-          const ble=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
-          const ui=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
-          assert(ble.includes("getSelectedIndex(){return selected;}"),'BLE selected index API missing');
-          assert(ble.includes("announceSelection();load(selected);"),'Selection event must precede reload');
-          assert(!ui.includes("manager.before(card)") && !ui.includes("let mode='independent',target='one';"),
-            'Unimplemented Output Control development card must not be injected');
-          assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
-          console.log('Android WebView integration contract checks passed (static checks only).');
-          JS
+          node --check android/qa/test_native_source.cjs
+          node android/qa/test_native_source.cjs
       - name: Run full Android release contract audit
         run: python3 android/qa/check_release.py
       - name: Compile debug APK
@@ -198,11 +183,11 @@ jobs:
           assert a == b, 'Stable and current web Studio release must match'
           old=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
           assert a != old, 'Previous Studio release must remain an unchanged rollback'
-          bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
-          assert b"const OT_VERSION='0.19.120'" in bundled, 'Pinned Android Studio version changed without an Android release'
-          assert a == bundled, 'Android and web Studio approved UI diverged'
           assert b"const OT_VERSION='0.19.120'" in a, 'Unexpected current web Studio version'
-          print('Web Studio 0.19.120 stable/release parity passed; Android packaged the identical approved UI.')
+          native=Path('android/app/src/main/java/com/opentail/android/MainActivity.java').read_text()
+          assert 'new WebView(' not in native, 'Android must be native, not HTML-backed'
+          assert not Path('android/app/src/main/assets/opentail.htm').exists(), 'Android cannot ship Studio HTML'
+          print('Web Studio 0.19.120 parity passed; separate native Android UI source verified.')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
         run: |
@@ -229,34 +214,10 @@ jobs:
           node web-studio/tests/exact-live-indexed.test.cjs
           node --check web-studio/tests/approved-chat-ui.test.cjs
           node web-studio/tests/approved-chat-ui.test.cjs
-          node --check android/app/src/main/assets/unified-shell.js
-          node android/qa/test_unified_shell.js
-          node - <<'JS'
-          const fs=require('node:fs'),assert=require('node:assert/strict');
-          const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
-          const studio=fs.readFileSync('web-studio/opentail.htm','utf8');
-          const gradle=fs.readFileSync('android/app/build.gradle','utf8');
-          assert(shell.includes("const showing=route==='home';"),'Android shell still hides approved Layout or Triggers behind a summary');
-          const route=studio.slice(studio.indexOf('function otStudioRoute(tab){'),studio.indexOf('function device(){',studio.indexOf('function otStudioRoute(tab){')));
-          assert(route.includes('scenes,') && route.includes('builder,') && route.includes('layout,'),
-            'CORE Studio must render the original authoring editors directly');
-          assert(!route.includes('otTriggerManagerCard()') && !route.includes('otOutputManagerCard()') && !route.includes('otCoreDiagnostics') && !route.includes('otCoreWorkspaceBanner'),
-            'Firmware bench diagnostics and saved hardware mapping belong only in CORE /dev');
-          const scene=studio.slice(studio.indexOf('function scenes(){'),studio.indexOf('let otPresetEditorId=null;'));
-          assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
-            scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
-            'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
-          assert(!scene.includes('otNativeShowPanel()') && scene.includes('otEffectLibrary()') &&
-              scene.includes("otSimStart('effect')"),
-            'One offline Show Modes editor must own effect design; no native picker');
-          const activity=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
-          assert(!activity.includes('injectUnifiedShell(view)') && !activity.includes('injectDirectBleDashboard(view)') &&
-                 !activity.includes('injectBleOutputControls(view)') && gradle.includes("versionName '0.1.30'"),
-            'Android must use approved bundled Studio rather than injecting legacy UI');
-          console.log('Android/web design-only editor routing, no overlay and version assertions passed (static).');
-          JS
+          node --check android/qa/test_native_source.cjs
+          node android/qa/test_native_source.cjs
 
-      - name: Upload standalone web Studio v0.19.119
+      - name: Upload standalone web Studio v0.19.120
         uses: actions/upload-artifact@v4
         with:
           name: opentail-studio-v0.19.120-web
