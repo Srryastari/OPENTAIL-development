@@ -39,6 +39,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Kotlin + Jetpack Compose migration candidate. The Java v4 document model,
@@ -256,7 +260,7 @@ class ComposeMainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 pages.forEachIndexed { i, title ->
-                    Pill(title, t, page == i) {
+                    NavigationPill(i, title, t, page == i) {
                         if (i != 1) offlinePreview.value = false
                         page = i
                     }
@@ -290,6 +294,66 @@ class ComposeMainActivity : ComponentActivity() {
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                  color = if (selected) t.bg else t.fg, maxLines = 1)
+        }
+    }
+    // Native vector glyphs preserve the approved icon meanings without
+    // emoji, downloaded fonts, WebView or an additional icon dependency.
+    @Composable
+    private fun NavigationPill(index: Int, label: String, t: Tone,
+                               selected: Boolean, action: () -> Unit) {
+        val fg = if (selected) t.bg else t.fg
+        Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
+                .background(if (selected) t.accent else t.raised)
+                .clickable(onClick = action).padding(horizontal = 14.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (index in 1..4) NavigationGlyph(index, fg)
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                color = fg, maxLines = 1)
+        }
+    }
+    @Composable
+    private fun NavigationGlyph(index: Int, color: Color) {
+        Canvas(Modifier.size(17.dp)) {
+            val u = size.minDimension / 24f
+            when (index) {
+                1 -> { // Show Modes: sparkle
+                    val sparkle = Path().apply {
+                        moveTo(12*u, 1*u); lineTo(15*u, 9*u)
+                        lineTo(23*u, 12*u); lineTo(15*u, 15*u)
+                        lineTo(12*u, 23*u); lineTo(9*u, 15*u)
+                        lineTo(1*u, 12*u); lineTo(9*u, 9*u); close()
+                    }
+                    drawPath(sparkle, color)
+                }
+                2 -> { // Layout: four squares
+                    for (row in 0..1) for (column in 0..1)
+                        drawRect(color,
+                            topLeft = Offset((2+column*11)*u, (2+row*11)*u),
+                            size = androidx.compose.ui.geometry.Size(9*u, 9*u),
+                            style = Stroke(2*u))
+                }
+                3 -> { // Triggers: lightning
+                    val bolt = Path().apply {
+                        moveTo(13*u, 1*u); lineTo(4*u, 13*u)
+                        lineTo(11*u, 13*u); lineTo(9*u, 23*u)
+                        lineTo(21*u, 9*u); lineTo(14*u, 9*u); close()
+                    }
+                    drawPath(bolt, color)
+                }
+                4 -> { // Auto Events: sun
+                    drawCircle(color, 4.5f*u, Offset(12*u, 12*u),
+                        style = Stroke(2*u))
+                    for (ray in 0 until 8) {
+                        val angle = ray * Math.PI / 4.0
+                        val x = cos(angle).toFloat()
+                        val y = sin(angle).toFloat()
+                        drawLine(color, Offset((12+8*x)*u, (12+8*y)*u),
+                            Offset((12+11*x)*u, (12+11*y)*u),
+                            strokeWidth = 2*u)
+                    }
+                }
+            }
         }
     }
     /** Preserve the single white Connect action from the approved UI. */
