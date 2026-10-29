@@ -1202,15 +1202,26 @@ static bool http_start(void) {
     }
     return true;
 }
-static void wifi_ap_init(void) {
+static bool wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
     size_t n=strlen(psk);
-    if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");abort();}
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
+    if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");return false;}
+    esp_err_t e=esp_netif_init();
+    if(e==ESP_OK)e=esp_event_loop_create_default();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi networking init failed: %s",esp_err_to_name(e));
+        return false;
+    }
+    if(!esp_netif_create_default_wifi_ap()){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed");
+        return false;
+    }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init));
+    e=esp_wifi_init(&init);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi driver init failed: %s",esp_err_to_name(e));
+        return false;
+    }
     wifi_config_t conf={0};
     strncpy((char*)conf.ap.ssid,OT_AP_SSID,sizeof(conf.ap.ssid)-1);
     conf.ap.ssid_len=strlen(OT_AP_SSID);
@@ -1218,11 +1229,16 @@ static void wifi_ap_init(void) {
     conf.ap.channel=1;
     conf.ap.max_connection=2;
     conf.ap.authmode=WIFI_AUTH_WPA2_PSK;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,&conf));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    e=esp_wifi_set_mode(WIFI_MODE_AP);
+    if(e==ESP_OK)e=esp_wifi_set_config(WIFI_IF_AP,&conf);
+    if(e==ESP_OK)e=esp_wifi_start();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s",esp_err_to_name(e));
+        return false;
+    }
     ot_st_wifi_ready();
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
+    return true;
 }
 static void input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
@@ -1586,12 +1602,13 @@ void app_main(void) {
     if(!sampler_ready)ot_st_set_fault("physical input sampler could not start");
     bool outputs_ready=sampler_ready&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
-    wifi_ap_init();
+    const bool wifi_started=wifi_ap_init();
+    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
     om_write_mutex=xSemaphoreCreateMutex();
     if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
-    http_startup_ready=http_start();
+    http_startup_ready=wifi_started&&http_start();
     if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
