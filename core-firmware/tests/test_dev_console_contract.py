@@ -43,6 +43,13 @@ assert fx_at < overlay_at < trigger_at, "FX overlays must occur between effect r
 slot_h=(root/"main/fx_zone_bank.h").read_text()
 assert 'ot_fx_overlay_config_t overlay;' in slot_h, "Overlay parameters must be per-zone, not global"
 assert 'fx_overlay_engine.c' in cmake, "CORE build must link the private flare/spark engine"
+assert 'ot_fx_bank_set_overlay(&fx_bank,om_outputs' in core, (
+    "Overlay-only preview must update live zone state, never restart the effect")
+assert 'phase_preserved' in core and 'overlay_only' in core, (
+    "Overlay-only request must report explicit non-restart semantics")
+assert 'if(native_outputs_ready&&ble_fx_enabled&&show_window(now))' in core, (
+    "Overlay-only edits must refuse inactive or expired previews")
+
 
 assert 'fx_bank.zones[o][z].spark=*spark' in core, "Spark style must remain volatile, not saved NVS"
 for control in ("eventSparkStyle","eventSparkPeak","eventSparkColor"):
