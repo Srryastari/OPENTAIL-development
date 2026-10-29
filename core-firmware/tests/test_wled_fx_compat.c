@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[38]={0};
-    assert(ot_wled_fx_supported_ids(ids,38)==38);
+    uint16_t ids[39]={0};
+    assert(ot_wled_fx_supported_ids(ids,39)==39);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -23,7 +23,8 @@ int main(void) {
            ids[25]==50 && ids[26]==54 && ids[27]==55 && ids[28]==56 &&
            ids[29]==2 && ids[30]==15 && ids[31]==16 &&
            ids[32]==52 && ids[33]==84 &&
-           ids[34]==34 && ids[35]==46 && ids[36]==47 && ids[37]==108);
+           ids[34]==34 && ids[35]==46 && ids[36]==47 &&
+           ids[37]==108 && ids[38]==27);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -456,16 +457,32 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&other,1001,p,31) && other.step==1u);
     assert(s.step==2u);
 
+    /* Android 27 holds its allocation-backed state within the CORE zone.
+     * The first frame extends one pixel, then independently tracks counter. */
+    c.effect_id=OT_WLED_ANDROID;c.speed=255;c.intensity=128;
+    c.brightness=255;c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background));
+    assert(s.data_counter==1u && s.aux1==2u);
+    assert(ot_wled_fx_render(&c,&s,4,p,31) && s.data_counter==2u);
+    ot_wled_fx_state_t separate={0};
+    assert(ot_wled_fx_render(&c,&separate,0,p,31));
+    assert(separate.data_counter==1u && s.data_counter==2u);
+    ot_wled_fx_reset(&s);
+    assert(s.data_counter==0u && s.aux0==0u && s.aux1==0u);
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<38;k++) {
+    for(size_t k=0;k<39;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 38 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 39 modes, timing, zone limits and validation passed.");
     return 0;
 }
