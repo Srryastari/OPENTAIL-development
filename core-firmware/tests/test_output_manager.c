@@ -76,46 +76,47 @@ int main(void){
  custom[0].rgb_gain[1]=190; custom[0].white_gain[2]=200;
  color(ot_om_calibrate((ot_rgb_t){32,0,0},&custom[0]),32,0,0);
  color(ot_om_calibrate((ot_rgb_t){20,20,20},&custom[0]),20,15,16);
- /* Temporary 1,246-pixel capacity is a generic two-lane allocation,
-  * not a vehicle profile. Boundaries must work at the byte/wire/NVS layer. */
- assert(OT_OM_OUTPUTS==2u);
- assert(OT_OM_MAX_PIXELS_PER_OUTPUT==623u);
- assert(OT_OM_MAX_TOTAL_PIXELS==1246u);
+ /* Capacity boundary tests derive values from the selected board budget,
+  * never from the physical bench geometry. */
+ const unsigned lane_cap=OT_OM_MAX_PIXELS_PER_OUTPUT;
+ assert(OT_OM_OUTPUTS==OT_CHAIN_COUNT);
+ assert(lane_cap>522u && lane_cap<65535u);
+ assert(OT_OM_MAX_TOTAL_PIXELS==OT_OM_OUTPUTS*lane_cap);
  ot_om_output_t capacity[OT_OM_OUTPUTS];ot_om_defaults(capacity);
  for(unsigned ch=0;ch<OT_OM_OUTPUTS;ch++){
    ot_om_output_t *o=&capacity[ch];
    snprintf(o->name,OT_OM_NAME_LEN,"Generic OUT %u",ch+1u);
-   o->active_pixels=OT_OM_MAX_PIXELS_PER_OUTPUT;
+   o->active_pixels=(uint16_t)lane_cap;
    o->zone_count=3;
    snprintf(o->zones[0].name,OT_OM_NAME_LEN,"Segment Alpha");
    snprintf(o->zones[1].name,OT_OM_NAME_LEN,"Segment Beta");
    snprintf(o->zones[2].name,OT_OM_NAME_LEN,"Segment Gamma");
-   o->zones[0].pixels=219;o->zones[1].pixels=250;o->zones[2].pixels=154;
+   const unsigned first=lane_cap/3u,second=lane_cap/3u,last=lane_cap-first-second;
+   o->zones[0].pixels=(uint16_t)first;
+   o->zones[1].pixels=(uint16_t)second;
+   o->zones[2].pixels=(uint16_t)last;
    o->zones[0].role=o->zones[1].role=o->zones[2].role=OT_OM_DECORATIVE;
    assert(ot_om_valid(o));
-   assert(ot_om_layout(o,&layout)&&layout.chain_pixels==623);
+   assert(ot_om_layout(o,&layout)&&layout.chain_pixels==lane_cap);
    assert(ot_om_section(o,0)==0);
-   assert(ot_om_section(o,218)==0&&ot_om_section(o,219)==1);
-   assert(ot_om_section(o,468)==1&&ot_om_section(o,469)==2);
-   assert(ot_om_section(o,622)==2&&ot_om_section(o,623)==-1);
+   assert(ot_om_section(o,first-1u)==0&&ot_om_section(o,first)==1);
+   assert(ot_om_section(o,first+second-1u)==1&&ot_om_section(o,first+second)==2);
+   assert(ot_om_section(o,lane_cap-1u)==2&&ot_om_section(o,lane_cap)==-1);
    ot_om_zone_cursor_t cursor={0};
-   for(unsigned px=0;px<623u;px++)
+   for(unsigned px=0;px<lane_cap;px++)
      assert(ot_om_section_next(o,&cursor,px)==ot_om_section(o,px));
-   assert(ot_om_section_next(o,&cursor,623u)==-1);
-   o->active_pixels=624;o->zones[2].pixels=155;
+   assert(ot_om_section_next(o,&cursor,lane_cap)==-1);
+   o->active_pixels=(uint16_t)(lane_cap+1u);
+   o->zones[2].pixels=(uint16_t)(last+1u);
    assert(!ot_om_valid(o)&&!ot_om_layout(o,&layout));
-   o->active_pixels=623;o->zones[2].pixels=154;
+   o->active_pixels=(uint16_t)lane_cap;o->zones[2].pixels=(uint16_t)last;
    assert(ot_om_valid(o));
  }
- /* Both independent lanes must fit simultaneously without a shared
-  * GS400-specific mapping. */
- assert(capacity[0].active_pixels+capacity[1].active_pixels==1246u);
- /* Saved older 522-pixel user layouts are still valid. */
- capacity[0].active_pixels=522;
- capacity[0].zones[2].pixels=53;
+ assert((unsigned)capacity[0].active_pixels+capacity[1].active_pixels==OT_OM_MAX_TOTAL_PIXELS);
+ /* Historical user-saved geometry belongs only in a regression fixture. */
+ capacity[0].active_pixels=522u;
+ capacity[0].zones[0].pixels=219u;capacity[0].zones[1].pixels=250u;capacity[0].zones[2].pixels=53u;
  assert(ot_om_valid(&capacity[0]));
- capacity[0].active_pixels=623;capacity[0].zones[2].pixels=154;
-
  /* Performance regression: sequential cursor must be pixel-identical to
   * the validated random-access zone lookup for arbitrary zone sizes,
   * including zero-sized intermediate zones and non-GS400 layouts. */
