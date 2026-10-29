@@ -24,6 +24,8 @@ extern "C" {
 #define IRAM_ATTR
 #define WHITE 0x00FFFFFFu
 #define PALETTE_SOLID_WRAP true
+#define FRAMETIME 23u
+static long map(long x,long a,long b,long c,long d) {return (x-a)*(d-c)/(b-a)+c;}
 // Tests use lengths >=2; upstream's 1-pixel mode_static fallback is excluded.
 #define FX_FALLBACK_STATIC { return; }
 using std::min;
@@ -173,6 +175,16 @@ uint32_t WLED_O2_ATTR IRAM_ATTR color_blend(uint32_t color1, uint32_t color2, ui
   uint32_t rb3 = ((((rb1 << 8) | rb2) + (rb2 * blend) - (rb1 * blend)) >> 8) &  TWO_CHANNEL_MASK; // blend red and blue
   uint32_t wg3 = ((((wg1 << 8) | wg2) + (wg2 * blend) - (wg1 * blend)))      & ~TWO_CHANNEL_MASK; // negated mask for white and green
   return rb3 | wg3;
+}
+
+uint8_t sin8_t(uint8_t theta) {
+  int32_t sin16 = sin16_t((uint16_t)theta * 257); // 255 * 257 = 0xFFFF
+  sin16 += 0x7FFF + 128; //shift result to range 0-0xFFFF, +128 for rounding
+  return min(sin16, int32_t(0xFFFF)) >> 8; // min performs saturation, and prevents overflow
+}
+static uint8_t sin_gap(uint16_t in) {
+  if (in & 0x100) return 0;
+  return sin8_t(in + 192); // correct phase shift of sine so that it starts and stops at 0
 }
 
 // END UPSTREAM math/color functions.
@@ -421,6 +433,140 @@ void mode_sinewave(void) {             // Adjustable sinewave. By Andrew Tuline
   }
 }
 
+void blink(uint32_t color1, uint32_t color2, bool strobe, bool do_palette) {
+  uint32_t cycleTime = (255 - SEGMENT.speed)*20;
+  uint32_t onTime = FRAMETIME;
+  if (!strobe) onTime += ((cycleTime * SEGMENT.intensity) >> 8);
+  cycleTime += FRAMETIME*2;
+  uint32_t it = strip.now / cycleTime;
+  uint32_t rem = strip.now % cycleTime;
+
+  bool on = false;
+  if (it != SEGENV.step //new iteration, force on state for one frame, even if set time is too brief
+      || rem <= onTime) {
+    on = true;
+  }
+
+  SEGENV.step = it; //save previous iteration
+
+  uint32_t color = on ? color1 : color2;
+  if (color == color1 && do_palette)
+  {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    }
+  } else SEGMENT.fill(color);
+}
+
+void mode_blink(void) {
+  blink(SEGCOLOR(0), SEGCOLOR(1), false, true);
+}
+
+void mode_blink_rainbow(void) {
+  blink(SEGMENT.color_wheel(SEGENV.call & 0xFF), SEGCOLOR(1), false, false);
+}
+
+void mode_strobe(void) {
+  return blink(SEGCOLOR(0), SEGCOLOR(1), true, true);
+}
+
+void mode_strobe_rainbow(void) {
+  return blink(SEGMENT.color_wheel(SEGENV.call & 0xFF), SEGCOLOR(1), true, false);
+}
+
+static void running(uint32_t color1, uint32_t color2, bool theatre = false) {
+  int width = (theatre ? 3 : 1) + (SEGMENT.intensity >> 4);  // window
+  uint32_t cycleTime = 50 + (255 - SEGMENT.speed);
+  uint32_t it = strip.now / cycleTime;
+  bool usePalette = color1 == SEGCOLOR(0);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint32_t col = color2;
+    if (usePalette) color1 = SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0);
+    if (theatre) {
+      if ((i % width) == SEGENV.aux0) col = color1;
+    } else {
+      int pos = (i % (width<<1));
+      if ((pos < SEGENV.aux0-width) || ((pos >= SEGENV.aux0) && (pos < SEGENV.aux0+width))) col = color1;
+    }
+    SEGMENT.setPixelColor(i,col);
+  }
+
+  if (it != SEGENV.step) {
+    SEGENV.aux0 = (SEGENV.aux0 +1) % (theatre ? width : (width<<1));
+    SEGENV.step = it;
+  }
+}
+
+void mode_theater_chase(void) {
+  running(SEGCOLOR(0), SEGCOLOR(1), true);
+}
+
+void mode_theater_chase_rainbow(void) {
+  running(SEGMENT.color_wheel(SEGENV.step), SEGCOLOR(1), true);
+}
+
+static void running_base(bool saw, bool dual=false) {
+  unsigned x_scale = SEGMENT.intensity >> 2;
+  uint32_t counter = (strip.now * SEGMENT.speed) >> 9;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned a = i*x_scale - counter;
+    if (saw) {
+      a &= 0xFF;
+      if (a < 16)
+      {
+        a = 192 + a*8;
+      } else {
+        a = map(a,16,255,64,192);
+      }
+      a = 255 - a;
+    }
+    uint8_t s = dual ? sin_gap(a) : sin8_t(a);
+    uint32_t ca = color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), s);
+    if (dual) {
+      unsigned b = (SEGLEN-1-i)*x_scale - counter;
+      uint8_t t = sin_gap(b);
+      uint32_t cb = color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 2), t);
+      ca = color_blend(ca, cb, uint8_t(127));
+    }
+    SEGMENT.setPixelColor(i, ca);
+  }
+}
+
+void mode_running_dual(void) {
+  running_base(false, true);
+}
+
+void mode_running_lights(void) {
+  running_base(false);
+}
+
+void mode_saw(void) {
+  running_base(true);
+}
+
+void mode_running_color(void) {
+  running(SEGCOLOR(0), SEGCOLOR(1));
+}
+
+void mode_static_pattern()
+{
+  unsigned lit = 1 + SEGMENT.speed;
+  unsigned unlit = 1 + SEGMENT.intensity;
+  bool drawingLit = true;
+  unsigned cnt = 0;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, (drawingLit) ? SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0) : SEGCOLOR(1));
+    cnt++;
+    if (cnt >= ((drawingLit) ? lit : unlit)) {
+      cnt = 0;
+      drawingLit = !drawingLit;
+    }
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -438,7 +584,18 @@ static const RefCase refs[]={
     {55,mode_tricolor_wipe,"Tri Wipe"},
     {56,mode_tricolor_fade,"Tri Fade"},
     {84,mode_tri_static_pattern,"Solid Pattern Tri"},
-    {108,mode_sinewave,"Sine"}
+    {108,mode_sinewave,"Sine"},
+    {1,mode_blink,"Blink"},
+    {23,mode_strobe,"Strobe"},
+    {26,mode_blink_rainbow,"Blink Rainbow"},
+    {24,mode_strobe_rainbow,"Strobe Rainbow"},
+    {13,mode_theater_chase,"Theater"},
+    {14,mode_theater_chase_rainbow,"Theater Rainbow"},
+    {37,mode_running_color,"Chase 2"},
+    {15,mode_running_lights,"Running"},
+    {16,mode_saw,"Saw"},
+    {52,mode_running_dual,"Running Dual"},
+    {83,mode_static_pattern,"Solid Pattern"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
