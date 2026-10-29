@@ -4,6 +4,7 @@
  */
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -15,6 +16,7 @@
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_app_format.h"
+#include "esp_image_format.h"
 #include "ot_version.h"
 #include "ot_ota_update.h"
 static const char *TAG="OT_OTA";
