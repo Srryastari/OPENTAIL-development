@@ -85,9 +85,9 @@ assert "mask|=(uint8_t)(1u<<i)" in raw
 commit = core.split("static int tm_commit(",1)[1].split(
     "bool ot_ble_trigger_get(",1)[0]
 assert "const bool raw_active=tm_gpio_input_mask()!=0;" in commit
-assert "const bool busy=tm_deferred.pending || raw_active || live_input_mask!=0" in commit
+assert "const bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in commit
 assert commit.index("tm_gpio_input_mask()") < commit.index("portENTER_CRITICAL(&state_lock)")
-assert commit.index("const bool busy=tm_deferred.pending") < commit.index("tm_save(next)")
+assert commit.index("const bool busy=om_deferred.pending") < commit.index("tm_save(next)")
 assert "if(!tm_save(next))code=4" in commit
 assert commit.index("if(!tm_save(next))code=4") < commit.index("ot_tm_saved_apply(")
 assert "const uint8_t pins_after=tm_gpio_input_mask();" in commit
@@ -105,15 +105,19 @@ output_ble = core.split("int ot_ble_config_save(",1)[1].split(
     "/* Normalized instantaneous GPIO levels",1)[0]
 for save_path in (output_http, output_ble):
     assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save_path
-    assert "bool busy=raw_active || live_input_mask ||" in save_path
+    assert "bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask ||" in save_path
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
-    assert save_path.index("bool busy=raw_active") < save_path.index("om_save(")
+    assert save_path.index("bool busy=om_deferred.pending") < save_path.index("om_save(")
+    assert save_path.index("om_save(") < save_path.index("ot_om_saved_apply(")
+    assert "const uint8_t pins_after=tm_gpio_input_mask();" in save_path
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
 get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
     "static esp_err_t tm_post(",1)[0]
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in get
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," in sampler
+assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert 'cJSON_AddNumberToObject(root,"raw_input_mask",physical)' in get
 assert 'cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask())' in get
 assert 'cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical))' in get
