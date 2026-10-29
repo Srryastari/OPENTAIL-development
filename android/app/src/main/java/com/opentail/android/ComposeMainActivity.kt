@@ -267,7 +267,7 @@ class ComposeMainActivity : ComponentActivity() {
                         prefs.edit().putInt("effectId", effectId).apply()
                         page = 1
                     }
-                    5 -> SettingsPage(t)
+                    5 -> SettingsPage(t) { page = it }
                 }
                 Spacer(Modifier.height(24.dp))
             }
@@ -1045,14 +1045,21 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun SettingsPage(t: Tone) {
+    private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
         Title("Settings", t)
         Panel(t) {
             Text("Bluetooth · " + bleMessage.value, color = t.fg)
             Caption("Authorize only on a physically present CORE bench controller.", t)
-            ConnectPill {
-                foundDevices.clear()
-                ble.scanHeadless()
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConnectPill {
+                    foundDevices.clear()
+                    ble.scanHeadless()
+                }
+                Pill("Preview Offline", t) {
+                    coreFrame.value = null
+                    changePage(1)
+                }
             }
             foundDevices.forEach { (address, label) ->
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
