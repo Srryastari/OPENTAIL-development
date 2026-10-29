@@ -50,6 +50,7 @@
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
 extern bool ot_ble_start(void);
+extern bool ot_ble_radio_ever_ready(void);
 extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
@@ -1019,6 +1020,7 @@ static esp_err_t status_get(httpd_req_t *r) {
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
     partial_frames=incomplete_frames;
     portEXIT_CRITICAL(&state_lock);
+    const bool ble_radio_ready=ot_ble_radio_ever_ready();
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
@@ -1046,8 +1048,9 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used++]=']';
     active_pixels_json[used]=0;
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
-       OT_FW,ble_startup_ready?"true":"false",outputs_ready?"true":"false","user-configured",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+       OT_FW,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
+       outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
@@ -1538,7 +1541,8 @@ static void led_task(void *p) {
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && ble_startup_ready && http_startup_ready && !boot_frame_verified)
+           if(full_frame && ble_startup_ready && http_startup_ready &&
+              ot_ble_radio_ever_ready() && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
