@@ -71,7 +71,7 @@ if (-not $VerifyOnly) {
     }
     if ($run.headSha -ne $currentHead) {
         $parents = @(& gh api "repos/$repo/commits/$($run.headSha)" --jq '.parents[].sha')
-        if ($LASTEXITCODE -ne 0 -or $parents -notcontains $currentHead) {
+        if ($LASTEXITCODE -ne 0 -or $parents.Count -ne 2 -or $parents[1] -ne $currentHead) {
             throw "GitHub run $RunId does not test the current firmware branch head. Nothing was flashed."
         }
     }
