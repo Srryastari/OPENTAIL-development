@@ -29,6 +29,7 @@
 #include "ble_command.h"
 #include "ble_fx_command.h"
 #include "effects_1d.h"
+#include "ot_auto_effects.h"
 #include "ot_transition.h"
 #include "fx_preset_record.h"
 #include "fx_zone_bank.h"
@@ -614,6 +615,92 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
     return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
 }
+
+/* Manual BENCH preview only. No ignition trigger registration, NVS event
+ * enablement, external LED task or power-off path. Reuse the current CORE
+ * authenticated-BLE effect renderer's validated zone bank/physical arbitration.
+ * Like /show/start, this endpoint is available only to clients on the
+ * controller's password-protected BENCH AP; it is not a road-ready API.
+ */
+static esp_err_t auto_test_get(httpd_req_t *r){
+    static const char page[]=
+    "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+    "<title>OpenTail Startup / Shutdown Bench Test</title>\n"
+    "<style>body{background:#080808;color:#f0f2f4;font:15px system-ui,sans-serif;max-width:560px;margin:25px auto;padding:18px}h1{font-size:24px}p,small{color:#b9bec3}section{background:#18191b;padding:18px;border-radius:20px;margin:14px 0}button,select,input{border:0;border-radius:24px;background:#303235;color:white;padding:12px 17px;font:inherit;box-sizing:border-box}button{cursor:pointer;margin:5px;min-height:48px}button:active{background:#58605a}.primary{background:#306744}.danger{background:#772c34}label{display:block;margin:12px 0;font-size:13px}label input,select{width:100%;margin-top:6px}input[type=color]{height:45px;padding:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111;padding:13px;border-radius:12px}a{color:#8be4b0}</style>\n"
+    "<h1>OpenTail Auto Events</h1><p>BENCH PREVIEW ONLY. Manual startup/shutdown animations. No ignition automation or controller power-off.</p>\n"
+    "<section><label>Output <select id=\"out\"><option value=\"both\">Both configured outputs</option><option value=\"left\">Output 1</option><option value=\"right\">Output 2</option></select></label>\n"
+    "<label>Foreground <input id=\"color\" type=\"color\" value=\"#ff1f14\"></label>\n"
+    "<label>Bench brightness (0-32) <input id=\"bri\" type=\"number\" min=\"0\" max=\"32\" value=\"20\"></label>\n"
+    "<label>Animation speed (0-255) <input id=\"speed\" type=\"range\" min=\"0\" max=\"255\" value=\"180\"></label>\n"
+    "<label>Spark strength (0-255) <input id=\"density\" type=\"range\" min=\"0\" max=\"255\" value=\"220\"></label></section>\n"
+    "<section><b>Startup</b><p>Plays once, then holds foreground until the 6-second preview ends.</p>\n"
+    "<button class=\"primary\" onclick=\"play('materialize_sparks')\">Materialize Sparks</button>\n"
+    "<button class=\"primary\" onclick=\"play('random_materialize')\">Random Materialize</button>\n"
+    "<button onclick=\"play('smooth_fade')\">Smooth Fade In</button>\n"
+    "<button onclick=\"play('plasma_sweep')\">Plasma Sweep</button></section>\n"
+    "<section><b>Shutdown</b><p>Starts at foreground and fades to exact black. Does not cut controller power.</p>\n"
+    "<button class=\"danger\" onclick=\"play('smooth_fade_out')\">Smooth Fade Out</button>\n"
+    "<button onclick=\"stop()\">Stop / Restore</button></section>\n"
+    "<pre id=\"result\" role=\"status\">Ready. Verify both LED output maps in Layout before testing.</pre>\n"
+    "<p><small>Configured zones only. Active brake/turn/reverse inputs still take priority. Stop ends the show; physical parking/vehicle inputs may remain lit. Never use this build as the vehicle's only road lighting.</small></p>\n"
+    "<p><a href=\"/studio\">Back to OpenTail Studio</a></p>\n"
+    "<script>\n"
+    "async function send(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})});const body=await r.text();if(!r.ok)throw new Error('HTTP '+r.status+': '+body);return body}\n"
+    "async function play(effect){const c=document.getElementById('color').value;const n=parseInt(c.slice(1),16);const o={effect,chain:document.getElementById('out').value,r:(n>>16)&255,g:(n>>8)&255,b:n&255,brightness:Number(document.getElementById('bri').value),speed:Number(document.getElementById('speed').value),intensity:Number(document.getElementById('density').value)};const v=document.getElementById('result');v.textContent='Sending '+effect+'...';try{v.textContent=await send('/api/v1/auto-events/preview',o)}catch(e){v.textContent=e.message}}\n"
+    "async function stop(){const v=document.getElementById('result');try{v.textContent=await send('/api/v1/show/stop',{})}catch(e){v.textContent=e.message}}\n"
+    "</script></html>\n";
+    httpd_resp_set_type(r,"text/html; charset=utf-8");
+    httpd_resp_set_hdr(r,"Cache-Control","no-store");
+    return httpd_resp_sendstr(r,page);
+}
+static esp_err_t auto_preview_post(httpd_req_t *r){
+    cJSON *obj=NULL;
+    const int status=recv_json(r,&obj);
+    if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
+    cJSON *fx=cJSON_GetObjectItemCaseSensitive(obj,"effect");
+    if(!cJSON_IsString(fx)){cJSON_Delete(obj);return respond_err(r,400,"effect is required");}
+    uint16_t id=0;
+    const char *key=fx->valuestring;
+    if(!strcmp(key,"materialize_sparks"))id=OT_FX_MATERIALIZE_SPARKS;
+    else if(!strcmp(key,"random_materialize"))id=OT_FX_RANDOM_MATERIALIZE;
+    else if(!strcmp(key,"smooth_fade"))id=OT_FX_SMOOTH_FADE;
+    else if(!strcmp(key,"plasma_sweep"))id=OT_FX_PLASMA_SWEEP;
+    else if(!strcmp(key,"smooth_fade_out"))id=OT_FX_SMOOTH_FADE_OUT;
+    else{cJSON_Delete(obj);return respond_err(r,400,"unsupported automatic event preview");}
+    const cJSON *ch=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    const char *chain=cJSON_IsString(ch)?ch->valuestring:"both";
+    uint8_t chain_mask=3u;
+    if(!strcmp(chain,"left"))chain_mask=1u;
+    else if(!strcmp(chain,"right"))chain_mask=2u;
+    else if(strcmp(chain,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
+    const char *keys[]={"r","g","b","brightness","speed","intensity"};
+    for(unsigned i=0;i<6;i++){
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,keys[i]);
+        if(v&&(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint)){
+            cJSON_Delete(obj);return respond_err(r,400,"integer parameters required");
+        }
+    }
+    const uint8_t speed=(uint8_t)bounded_int(obj,"speed",180,0,255);
+    const ot_ble_fx_packet_t req={
+        .effect_id=id,.chain_mask=chain_mask,.zone_mask=255,
+        .r=(uint8_t)bounded_int(obj,"r",255,0,255),
+        .g=(uint8_t)bounded_int(obj,"g",31,0,255),
+        .b=(uint8_t)bounded_int(obj,"b",20,0,255),
+        .bg_r=0,.bg_g=0,.bg_b=0,
+        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
+        .speed=speed,
+        .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
+        .palette_id=0,.ttl_sec=6
+    };
+    cJSON_Delete(obj);
+    if(!ot_ble_apply_fx_internal(&req,false))
+        return respond_err(r,409,"no configured active output zones or outputs not ready");
+    char payload[185];
+    snprintf(payload,sizeof(payload),
+       "{\"ok\":true,\"event\":\"%s\",\"duration_ms\":%lu,\"preview_ttl_sec\":6,\"brightness_cap\":%u,\"bench_only\":true}",
+       key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
+    return send_json(r,payload);
+}
 void ot_ble_stop_show(void){
     const TickType_t now=xTaskGetTickCount();
     bool stopped=false;
@@ -956,6 +1043,8 @@ static void http_start(void) {
         {.uri="/api/v1/show",.method=HTTP_GET,.handler=show_get},
         {.uri="/api/v1/show/start",.method=HTTP_POST,.handler=show_start},
         {.uri="/api/v1/show/stop",.method=HTTP_POST,.handler=show_stop},
+        {.uri="/auto-events/test",.method=HTTP_GET,.handler=auto_test_get},
+        {.uri="/api/v1/auto-events/preview",.method=HTTP_POST,.handler=auto_preview_post},
         {.uri="/api/v1/outputs",.method=HTTP_GET,.handler=om_get},
         {.uri="/api/v1/triggers",.method=HTTP_GET,.handler=tm_get},
         {.uri="/api/v1/triggers",.method=HTTP_POST,.handler=tm_post},
