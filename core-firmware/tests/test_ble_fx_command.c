@@ -32,7 +32,7 @@ int main(void){
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   cmd[2]=87;cmd[15]=11;
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
-  cmd[15]=13;
+  cmd[15]=73;
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   cmd[2]=3;cmd[15]=11;
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
