@@ -61,6 +61,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
+    private val selectedEffect = mutableIntStateOf(0)
     private val liveChainMask = mutableIntStateOf(3)
     private val liveZoneMask = mutableIntStateOf(255)
 
@@ -117,6 +118,7 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         project = NativeProject(this)
+        selectedEffect.intValue = prefs.getInt("effectId", 0)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
@@ -210,6 +212,7 @@ class ComposeMainActivity : ComponentActivity() {
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
                     4 -> AutoEventsPage(t) { effectId ->
+                        selectedEffect.intValue = effectId
                         prefs.edit().putInt("effectId", effectId).apply()
                         page = 1
                     }
@@ -376,7 +379,7 @@ class ComposeMainActivity : ComponentActivity() {
         Title("Show Modes", t)
         var view by rememberSaveable { mutableStateOf("Effects") }
         var query by rememberSaveable { mutableStateOf("") }
-        var effect by rememberSaveable { mutableIntStateOf(prefs.getInt("effectId", 0)) }
+        val effect = selectedEffect.intValue
         var speed by rememberSaveable { mutableIntStateOf(prefs.getInt("speed", 128)) }
         var intensity by rememberSaveable { mutableIntStateOf(prefs.getInt("intensity", 128)) }
         var brightness by rememberSaveable { mutableIntStateOf(prefs.getInt("brightness", 160)) }
@@ -415,8 +418,8 @@ class ComposeMainActivity : ComponentActivity() {
                     .forEach { item ->
                         Panel(t) {
                             Pill(item.name, t, item.id == effect) {
-                                effect = item.id
-                                prefs.edit().putInt("effectId", effect).apply()
+                                selectedEffect.intValue = item.id
+                                prefs.edit().putInt("effectId", item.id).apply()
                                 previewCurrentEffect(effect)
                             }
                         }
@@ -640,19 +643,19 @@ class ComposeMainActivity : ComponentActivity() {
                                    valueRange = 1f..10000f)
                             Caption(project.previewZoneOffsets(id, n), t)
                             val pixelLimit = (n.coerceAtLeast(1) - 1)
-                            selectedPixel = selectedPixel.coerceIn(0, pixelLimit)
+                            val activePixel = selectedPixel.coerceIn(0, pixelLimit)
                             Caption("Pixel editor · zero-based index (saved locally immediately)", t)
-                            ValueSlider("Pixel", selectedPixel, pixelLimit.coerceAtLeast(1), t) {
+                            ValueSlider("Pixel", activePixel, pixelLimit.coerceAtLeast(1), t) {
                                 selectedPixel = it.coerceIn(0, pixelLimit)
                             }
-                            val painted = project.pixelColor(id, selectedPixel)
+                            val painted = project.pixelColor(id, activePixel)
                             val liveColor = android.graphics.Color.parseColor(painted)
-                            PaletteEditor("Pixel " + selectedPixel, liveColor, t) { color ->
+                            PaletteEditor("Pixel " + activePixel, liveColor, t) { color ->
                                 val hex = String.format("#%06X", color and 0xFFFFFF)
-                                if (project.setPixelColor(id, selectedPixel, hex)) refresh()
+                                if (project.setPixelColor(id, activePixel, hex)) refresh()
                             }
                             Pill("Clear this pixel", t) {
-                                if (project.clearPixelColor(id, selectedPixel)) refresh()
+                                if (project.clearPixelColor(id, activePixel)) refresh()
                             }
                             Caption("Live per-pixel color is included in the v4 design export. " +
                                 "The existing CORE BLE protocol cannot stream individual pixel writes.", t)
