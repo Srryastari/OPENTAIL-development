@@ -24,6 +24,8 @@ extern "C" {
 #define IRAM_ATTR
 #define WHITE 0x00FFFFFFu
 #define PALETTE_SOLID_WRAP true
+// Tests use lengths >=2; upstream's 1-pixel mode_static fallback is excluded.
+#define FX_FALLBACK_STATIC { return; }
 using std::min;
 using std::abs;
 using byte = uint8_t;
