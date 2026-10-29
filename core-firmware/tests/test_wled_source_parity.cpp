@@ -508,6 +508,7 @@ struct PinnedSeg {
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
+    uint32_t getPixelColor(unsigned i) const {return pixels.at(i);}
     uint32_t color_wheel(uint8_t pos) const {
         if(palette!=0u)return ColorFromPalette(ref_palette(palette,colors[0],colors[1],colors[2]),pos,255u,LINEARBLEND);
         uint8_t bgrw[4]={0,0,0,0};
@@ -554,6 +555,7 @@ struct PinnedClock {
     uint32_t now=0;
     unsigned getActiveSegmentsNum() const {return 1u;}
     unsigned getMaxSegments() const {return 64u;}
+    unsigned getBrightness() const {return 255u;}
     bool isMatrix=false;
     uint16_t getCurrSegmentId() const {return 0u;}
 };
@@ -2832,6 +2834,74 @@ void mode_aurora(void) {
 #undef gamma8inv
 // END pinned Aurora source.
 
+/* Bit ownership and fixed frame time are host adapters; the function
+ * below is the exact pinned FX.cpp body. */
+#define FRAMETIME_FIXED 23u
+#define bitRead(x,n) (((x)>>(n))&1u)
+#define bitWrite(x,n,v) do { if(v)(x)|=(uint8_t)(1u<<(n)); else (x)&=(uint8_t)~(1u<<(n)); } while(0)
+#define gamma8inv(x) ref_gamma8inv((uint8_t)(x))
+#define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
+// BEGIN PINNED mode_colortwinkle original body.
+void mode_colortwinkle() {
+  unsigned dataSize = (SEGLEN+7) >> 3; //1 bit per LED
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  //limit update rate
+  if (strip.now - SEGENV.step < FRAMETIME_FIXED) return;
+  SEGENV.step = strip.now;
+
+  CRGBW col, prev;
+  uint8_t fadeUpAmount = strip.getBrightness()>28 ? 8 + (SEGMENT.speed>>2) : 68-strip.getBrightness();
+  uint8_t fadeDownAmount = strip.getBrightness()>28 ? 8 + (SEGMENT.speed>>3) : 68-strip.getBrightness();
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    CRGBW cur = SEGMENT.getPixelColor(i);
+    prev = cur;
+    unsigned index = i >> 3;
+    unsigned  bitNum = i & 0x07;
+    bool fadeUp = bitRead(SEGENV.data[index], bitNum);
+
+    if (fadeUp) {
+      CRGBW incrementalColor = color_fade(cur, fadeUpAmount, true);
+      col = color_add(cur, incrementalColor);
+
+      if (col.r == 255 || col.g == 255 || col.b == 255) {
+        bitWrite(SEGENV.data[index], bitNum, false);
+      }
+
+      if (col == cur) {  // color_add did nothing, fix "stuck" pixels by adding the color to itself
+        col = color_add(col, col);
+      }
+      SEGMENT.setPixelColor(i, col);
+    }
+    else {
+      col = color_fade(cur, 255 - fadeDownAmount, false);
+      SEGMENT.setPixelColor(i, col);
+    }
+  }
+
+  for (unsigned j = 0; j <= SEGLEN / 50; j++) {
+    if (hw_random8() <= SEGMENT.intensity) {
+      for (unsigned times = 0; times < 5; times++) { //attempt to spawn a new pixel 5 times
+        int i = hw_random16(SEGLEN);
+        if (SEGMENT.getPixelColor(i) == 0) {
+          unsigned index = i >> 3;
+          unsigned  bitNum = i & 0x07;
+          bitWrite(SEGENV.data[index], bitNum, true);
+          SEGMENT.setPixelColor(i, ColorFromPalette(SEGPALETTE, hw_random8(), gamma8inv(64), NOBLEND));  // note on gamma8inv: inverting results in non-linear brightness fade as originally designed
+          break; //only spawn 1 new pixel per frame per 50 LEDs
+        }
+      }
+    }
+  }
+}
+
+// END PINNED Colortwinkles.
+#undef FRAMETIME_FIXED
+#undef bitRead
+#undef bitWrite
+#undef gamma8inv
+#undef SEGPALETTE
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2888,7 +2958,8 @@ static const RefCase refs[]={
     {65,mode_palette,"Palette"},
     {80,mode_twinklefox,"Twinklefox"},
     {81,mode_twinklecat,"Twinklecat"},
-    {38,mode_aurora,"Aurora"}
+    {38,mode_aurora,"Aurora"},
+    {74,mode_colortwinkle,"Colortwinkles"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2933,7 +3004,7 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
