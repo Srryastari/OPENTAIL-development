@@ -127,7 +127,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_BPM, "Bpm", "Bpm@!,!;;!",
      true, false, true, false, false},
     {OT_WLED_LAKE, "Lake", "Lake@!,!;;!",
-     true, false, true, true, false}
+     true, false, true, true, false},
+    {OT_WLED_PLASMA, "Plasma", "Plasma@!,!;;!",
+     true, false, true, true, false},
+    {OT_WLED_OSCILLATE, "Oscillate", "Oscillate",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1266,6 +1270,73 @@ static void lake_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+/* Pinned FX.cpp mode_plasma(): independently phased cubic/cosine wave
+ * channels; the palette=0 fallback consumes brightness of SEGCOLOR(0). */
+static void plasma_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         uint32_t old_call,ot_wled_rgb_t *pixels,
+                         size_t count) {
+    if(old_call==0u)state->aux0=fx_rand8(state,2u);
+    const uint8_t phase1=fx_beatsin8((uint16_t)(6u+state->aux0),192u,64u,now);
+    const uint8_t phase2=fx_beatsin8((uint16_t)(7u+state->aux0),192u,64u,now);
+    const uint8_t threshold=fx_beatsin8(7u,0u,
+                        (uint8_t)(128u-(cfg->intensity>>1)),now);
+    const unsigned frequency=(unsigned)cfg->speed>>5;
+    for(size_t i=0;i<count;i++) {
+        const uint8_t wave1=wled_cubicwave8((uint8_t)(i*(2u+3u*frequency)+phase1));
+        const uint8_t wave2=fx_cos8((uint8_t)(i*(1u+2u*frequency)+phase2));
+        const unsigned index=(unsigned)wave1/2u+(unsigned)wave2/2u;
+        const uint8_t brightness=(uint8_t)(index>threshold?index-threshold:0u);
+        pixels[i]=scaled(scaled(cfg->foreground,brightness),cfg->brightness);
+    }
+}
+/* Pinned FX.cpp mode_oscillate(), including signed two's-complement
+ * position wrap, per-bar source speed changes and RGB black third slot. */
+static void oscillate_frame(const ot_wled_fx_config_t *cfg,
+                             ot_wled_fx_state_t *state,uint32_t now,
+                             uint32_t old_call,ot_wled_rgb_t *pixels,
+                             size_t count) {
+    if(old_call==0u) {
+        state->oscillators[0]=(ot_wled_oscillator_t){
+            (uint16_t)(count/4u),(uint8_t)(count/8u),1,1};
+        state->oscillators[1]=(ot_wled_oscillator_t){
+            (uint16_t)((count/4u)*3u),(uint8_t)(count/8u),1,2};
+        state->oscillators[2]=(ot_wled_oscillator_t){
+            (uint16_t)((count/4u)*2u),(uint8_t)(count/8u),-1,1};
+    }
+    const uint32_t iteration=now/(20u+2u*(255u-(uint32_t)cfg->speed));
+    for(unsigned j=0;j<3u;j++) {
+        ot_wled_oscillator_t *o=&state->oscillators[j];
+        if(iteration!=state->step)
+            o->pos=(uint16_t)((int32_t)o->pos+(int32_t)o->dir*o->speed);
+        o->size=(uint8_t)(count/(3u+(uint32_t)cfg->intensity/8u));
+        if(o->dir==-1 && (uint32_t)o->pos>2u*(uint32_t)count) {
+            o->pos=0;o->dir=1;
+            o->speed=(uint8_t)((cfg->speed>100u?2u:1u)+
+                 fx_rand8(state,2u));
+        }
+        if(o->dir==1 && o->pos>=count-1u) {
+            o->pos=(uint16_t)(count-1u);o->dir=-1;
+            o->speed=(uint8_t)((cfg->speed>100u?2u:1u)+
+                 fx_rand8(state,2u));
+        }
+    }
+    const ot_wled_rgb_t cols[3]={cfg->foreground,cfg->background,{0,0,0}};
+    for(size_t i=0;i<count;i++) {
+        ot_wled_rgb_t c={0,0,0};
+        for(unsigned j=0;j<3u;j++) {
+            const ot_wled_oscillator_t *o=&state->oscillators[j];
+            if((int32_t)i>=(int32_t)o->pos-o->size &&
+               i<=(uint32_t)o->pos+o->size) {
+                const bool black=(c.r|c.g|c.b)==0u;
+                c=black?cols[j]:blend_colors(c,cols[j],128u);
+            }
+        }
+        pixels[i]=scaled(c,cfg->brightness);
+    }
+    state->step=iteration;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1277,6 +1348,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_PLASMA) {
+        plasma_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_OSCILLATE) {
+        oscillate_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_BPM) {
         bpm_frame(cfg,time_ms,pixels,count);
         return true;
