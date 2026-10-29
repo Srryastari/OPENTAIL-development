@@ -224,7 +224,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TV_SIMULATOR, "TV Simulator", "TV Simulator@!,!;;!;01",
      false, false, true, true, false},
     {OT_WLED_COLOR_CLOUDS, "Color Clouds", "Color Clouds@!,!,Clouds,Colors,Distance,,,Cozy;;!;;sx=24,ix=32,c1=48,c2=64,c3=12,pal=0",
-     false, false, true, true, false}
+     false, false, true, true, false},
+    {OT_WLED_STARBURST, "Fireworks Starburst", "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
+     false, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2537,6 +2539,115 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 }
 
 
+
+/* Exact pinned 1D mode_starburst structure and frame evolution.
+ * ESP32 max active-star budget on one zone is min(1+N/8,2560/60).
+ * The original uses uint32_t color/float fragment[10] with 60B/star.
+ * Off-strip floating point positions are explicitly discarded instead of
+ * performing upstream's undefined negative-float -> unsigned cast. */
+typedef struct {
+    uint32_t color;
+    uint32_t birth,last;
+    float vel;
+    uint16_t pos;
+    float fragment[10];
+} ot_fx_star_t;
+_Static_assert(sizeof(ot_fx_star_t)==60u,"Pinned ESP32 star state layout");
+
+static void starburst_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    if(count<=1u) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    const unsigned max_stars=2560u/(unsigned)sizeof(ot_fx_star_t);
+    unsigned num_stars=1u+((unsigned)count>>3);
+    if(num_stars>max_stars)num_stars=max_stars;
+    ot_fx_star_t *stars=(ot_fx_star_t*)fx_zone_scratch(
+        state,num_stars*sizeof(ot_fx_star_t));
+    if(!stars) {
+        const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    for(unsigned j=0;j<num_stars;j++) {
+        if(fx_rand8(state,144u-((unsigned)cfg->speed>>1))==0u &&
+           stars[j].birth==0u) {
+            const unsigned start_pos=(unsigned)fx_rand_index(state,count-1u);
+            const float multiplier=(float)fx_rand8(state,256u)/255.0f;
+            const ot_wled_rgb_t rgb=wheel_rgb(fx_rand8(state,256u));
+            stars[j].color=((uint32_t)rgb.r<<16)|((uint32_t)rgb.g<<8)|rgb.b;
+            stars[j].pos=(uint16_t)start_pos;
+            stars[j].vel=375.0f*(float)fx_rand8(state,256u)/255.0f*
+                         multiplier;
+            stars[j].birth=now;
+            stars[j].last=now;
+            const int num=3+(int)fx_rand8(state,3u+((unsigned)cfg->intensity>>5));
+            for(int i=0;i<10;i++)
+                stars[j].fragment[i]=i<num?(float)start_pos:-1.0f;
+        }
+    }
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    const ot_wled_rgb_t white={255u,255u,255u};
+    for(unsigned j=0;j<num_stars;j++) {
+        if(stars[j].birth!=0u) {
+            const float dt=(float)(now-stars[j].last)/1000.0f;
+            for(int i=0;i<10;i++) {
+                const int var=i>>1;
+                if(stars[j].fragment[i]>0.0f)
+                    stars[j].fragment[i]+=
+                        stars[j].vel*dt*(float)var/3.0f;
+            }
+            stars[j].last=now;
+            stars[j].vel-=3.0f*stars[j].vel*dt;
+        }
+        ot_wled_rgb_t color={
+            (uint8_t)(stars[j].color>>16),
+            (uint8_t)(stars[j].color>>8),
+            (uint8_t)stars[j].color
+        };
+        float fade=0.0f;
+        float age=(float)(now-stars[j].birth);
+        if(age<250.0f) {
+            color=blend_colors(white,color,
+                 (uint8_t)(254.5f*(age/250.0f)));
+        } else if(age>1750.0f) {
+            fade=1.0f;
+            stars[j].birth=0u;
+            color=cfg->background;
+        } else {
+            age-=250.0f;
+            fade=age/1500.0f;
+            color=blend_colors(color,cfg->background,
+                (uint8_t)(254.5f*fade));
+        }
+        color=scaled(color,cfg->brightness);
+        const float particle_size=(1.0f-fade)*2.0f;
+        for(unsigned index=0u;index<20u;index++) {
+            const bool mirrored=(index&1u)!=0u;
+            const unsigned i=index>>1;
+            if(stars[j].fragment[i]<=0.0f)continue;
+            float loc=stars[j].fragment[i];
+            if(mirrored)
+                loc-=(loc-(float)stars[j].pos)*2.0f;
+            const float start_float=loc-particle_size;
+            const float end_float=loc+particle_size;
+            /* Source converts start/end to unsigned and does not draw
+             * when start wraps above the zone length. Never invoke UB. */
+            if(!(start_float>=0.0f && start_float<=(float)count))
+                continue;
+            unsigned start=(unsigned)start_float;
+            unsigned end=end_float>=0.0f?(unsigned)end_float:0u;
+            if(start==end)end++;
+            if(end>count)end=(unsigned)count;
+            for(unsigned p=start;p<end;p++)pixels[p]=color;
+        }
+    }
+}
+
 /* Direct default-options 1D source port of pinned FX.cpp mode_tv_simulator.
  * No global scene, renderer allocation, tertiary colors or vehicle assumptions.
  * C layout preserves source TvSim fields; all timing/RNG is zone-owned. */
@@ -3452,6 +3563,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_STARBURST) {
+        starburst_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_TV_SIMULATOR) {
