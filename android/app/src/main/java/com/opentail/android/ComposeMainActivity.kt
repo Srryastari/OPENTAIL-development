@@ -16,6 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
@@ -202,7 +204,8 @@ class ComposeMainActivity : ComponentActivity() {
             )
         }
         MaterialTheme(colorScheme = scheme) {
-        Column(Modifier.fillMaxSize().background(t.bg).padding(top = 14.dp)) {
+        Column(Modifier.fillMaxSize().background(t.bg)
+            .windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 14.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("OpenTail", color = t.fg, fontSize = 23.sp, fontWeight = FontWeight.Bold,
                      modifier = Modifier.weight(1f))
@@ -439,8 +442,16 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                     Caption("Offline illustration only. Exact timing and palettes are rendered by CORE.", t)
                 }
-                NativeEffectCatalog.all().filter { it.name.contains(query, ignoreCase = true) }
-                    .forEach { item ->
+                // Only compose visible effect rows; never eagerly render 140
+                // cards inside the parent scroll (expensive on entry devices).
+                val matches = remember(query) {
+                    NativeEffectCatalog.all().filter {
+                        it.name.contains(query, ignoreCase = true)
+                    }
+                }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    items(matches, key = { it.id }) { item ->
                         Panel(t) {
                             Pill(item.name, t, item.id == effect) {
                                 selectedEffect.intValue = item.id
@@ -449,6 +460,7 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
             }
             "Sequences" -> SequencePage(t, effect)
             else -> PresetsPage(t)
