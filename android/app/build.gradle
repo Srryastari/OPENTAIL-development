@@ -10,8 +10,8 @@ android {
         applicationId 'com.opentail.android'
         minSdk 26
         targetSdk 35
-        versionCode 30
-        versionName '0.1.30'
+        versionCode 31
+        versionName '0.2.0-alpha1'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -20,5 +20,5 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.webkit:webkit:1.13.0'
+    // Native Android Views only; no WebView or AndroidX WebKit dependency.
 }
