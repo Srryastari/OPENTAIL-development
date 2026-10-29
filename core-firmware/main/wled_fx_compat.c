@@ -123,6 +123,10 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FIRE_FLICKER, "Fire Flicker", "Fire Flicker@!,!;!,!;!",
      true, false, true, true, false},
     {OT_WLED_WAVESINS, "Wavesins", "Wavesins@!,!;;!",
+     true, false, true, true, false},
+    {OT_WLED_BPM, "Bpm", "Bpm@!,!;;!",
+     true, false, true, false, false},
+    {OT_WLED_LAKE, "Lake", "Lake@!,!;;!",
      true, false, true, true, false}
 };
 
@@ -1216,6 +1220,52 @@ static void wavesins_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+/*
+ * Pinned util.cpp beat8 / beatsin8_t and fastled_slim scale8, used by
+ * WLED FX.cpp BPM and Lake. Integer wrap behavior matches upstream.
+ */
+static uint8_t fx_beatsin8(uint16_t bpm,uint8_t lowest,
+                           uint8_t highest,uint32_t now) {
+    const uint16_t beat16=(uint16_t)(
+         ((uint32_t)(now*(uint32_t)(bpm<<8)*280u))>>16);
+    const uint8_t wave=wled_sin8((uint8_t)(beat16>>8));
+    const uint8_t range=(uint8_t)(highest-lowest);
+    const uint8_t scaled_wave=(uint8_t)(((uint16_t)wave*(1u+(unsigned)range))>>8);
+    return (uint8_t)(lowest+scaled_wave);
+}
+static uint8_t fx_cos8(uint8_t phase) {
+    return wled_sin8((uint8_t)(phase+64u));
+}
+/* Source mode_bpm() palette=0: beat index is ignored and WLED uses
+ * primary (SEGCOLOR0) with its per-pixel beat-derived brightness. */
+static void bpm_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                      ot_wled_rgb_t *pixels,size_t count) {
+    const uint8_t phase=(uint8_t)(now/20u);
+    const uint8_t beat=fx_beatsin8(cfg->speed,64u,255u,now);
+    for(size_t i=0;i<count;i++) {
+        const uint8_t intensity=(uint8_t)((uint32_t)beat-phase+i*10u);
+        pixels[i]=scaled(scaled(cfg->foreground,intensity),cfg->brightness);
+    }
+}
+/* Source mode_lake() palette=0: keep WLED's signed-range beatsin8
+ * casts, cosine/cubic wave summation, and per-index brightness threshold. */
+static void lake_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                       ot_wled_rgb_t *pixels,size_t count) {
+    const uint16_t sp=(uint16_t)(cfg->speed/10u);
+    const uint8_t wave1=fx_beatsin8((uint16_t)(sp+2u),
+                       (uint8_t)192u,(uint8_t)64u,now);
+    const uint8_t wave2=fx_beatsin8((uint16_t)(sp+1u),
+                       (uint8_t)192u,(uint8_t)64u,now);
+    const uint8_t wave3=fx_beatsin8((uint16_t)(sp+2u),0u,80u,now);
+    for(size_t i=0;i<count;i++) {
+        const uint8_t a=fx_cos8((uint8_t)(i*15u+wave1));
+        const uint8_t b=wled_cubicwave8((uint8_t)(i*23u+wave2));
+        const unsigned idx=(unsigned)a/2u+(unsigned)b/2u;
+        const uint8_t intensity=(uint8_t)(idx>wave3?idx-wave3:0u);
+        pixels[i]=scaled(scaled(cfg->foreground,intensity),cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1227,6 +1277,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_BPM) {
+        bpm_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_LAKE) {
+        lake_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_FIRE_FLICKER) {
         fire_flicker_frame(cfg,state,time_ms,pixels,count);
         return true;
