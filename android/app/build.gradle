@@ -28,6 +28,7 @@ android {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     // Kotlin Compose UI, preserve existing Java BLE transport and v4 document model.
     implementation platform('androidx.compose:compose-bom:2025.01.00')
     implementation 'androidx.activity:activity-compose:1.9.3'
