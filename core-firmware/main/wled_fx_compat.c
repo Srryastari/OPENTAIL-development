@@ -25,6 +25,94 @@
 #include <stdlib.h>
 #include <math.h>
 
+
+/* 16-color palette construction and sampling: pinned WLED colors.cpp
+ * ColorFromPalette(), FX_fcn.cpp loadPalette(), and fastled_slim.cpp
+ * fill_gradient_RGB(). Values are literal source RGB; gamma correction
+ * remains a separate output-stage feature. */
+static const uint32_t ot_party_colors[16]={
+    0x9B00D5u,0xBD00B8u,0xDA0092u,0xF3005Cu,
+    0xF45500u,0xDC8F00u,0xD5B400u,0xD5D500u,
+    0xD59B00u,0xEF6600u,0xF90044u,0xE10086u,
+    0xC400B0u,0xA300CFu,0x7600E8u,0x0032FCu
+};
+static ot_wled_rgb_t palette_unpack(uint32_t color) {
+    return (ot_wled_rgb_t){(uint8_t)(color>>16),
+                            (uint8_t)(color>>8),(uint8_t)color};
+}
+static void palette_gradient(ot_wled_palette16_t *p,unsigned start,
+                             ot_wled_rgb_t a,unsigned end,ot_wled_rgb_t b) {
+    const int divisor=end==start?1:(int)(end-start);
+    const int dr=((int)b.r-(int)a.r)*65536/divisor;
+    const int dg=((int)b.g-(int)a.g)*65536/divisor;
+    const int db=((int)b.b-(int)a.b)*65536/divisor;
+    int r=(int)a.r*65536,g=(int)a.g*65536,blue=(int)a.b*65536;
+    for(unsigned i=start;i<=end;i++) {
+        p->entries[i]=(ot_wled_rgb_t){(uint8_t)(r>>16),
+                    (uint8_t)(g>>16),(uint8_t)(blue>>16)};
+        r+=dr;g+=dg;blue+=db;
+    }
+}
+bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
+                           ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
+                           ot_wled_palette16_t *out) {
+    if(!out)return false;
+    ot_wled_palette16_t next={0};
+    if(id==0u || id==6u) {
+        for(unsigned i=0;i<16u;i++)
+            next.entries[i]=palette_unpack(ot_party_colors[i]);
+    } else if(id==2u) {
+        for(unsigned i=0;i<16u;i++)next.entries[i]=primary;
+    } else if(id==3u) {
+        /* CRGBPalette16(primary,primary,secondary,secondary), four
+         * FastLED RGB gradients split at 0, 5, 10 and 15. */
+        palette_gradient(&next,0u,primary,5u,primary);
+        palette_gradient(&next,5u,primary,10u,secondary);
+        palette_gradient(&next,10u,secondary,15u,secondary);
+    } else if(id==4u) {
+        palette_gradient(&next,0u,tertiary,8u,secondary);
+        palette_gradient(&next,8u,secondary,15u,primary);
+    } else if(id==5u) {
+        const bool has_third=tertiary.r||tertiary.g||tertiary.b;
+        for(unsigned i=0;i<16u;i++) {
+            next.entries[i]=i<5u?primary:
+                            i<10u?secondary:
+                            has_third?(i<15u?tertiary:primary):
+                            i<16u?secondary:primary;
+        }
+        if(!has_third)for(unsigned i=0;i<16u;i++)
+            next.entries[i]=i<8u?primary:secondary;
+    } else return false; /* Explicit fail-closed, no invented palettes. */
+    *out=next;
+    return true;
+}
+ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *pal,
+                                    uint8_t index,uint8_t brightness,
+                                    ot_wled_palette_blend_t blend) {
+    if(!pal)return (ot_wled_rgb_t){0,0,0};
+    uint8_t ix=index;
+    if(blend==OT_WLED_PALETTE_NOWRAP)
+        ix=(uint8_t)(((unsigned)ix*0xf0u)>>8);
+    const unsigned hi=ix>>4,lo=ix&15u;
+    ot_wled_rgb_t out=pal->entries[hi];
+    if(lo!=0u && blend!=OT_WLED_PALETTE_NOBLEND) {
+        const ot_wled_rgb_t other=pal->entries[(hi+1u)&15u];
+        const unsigned f2=lo<<4,f1=256u-f2;
+        out=(ot_wled_rgb_t){
+            (uint8_t)(((unsigned)out.r*f1+(unsigned)other.r*f2)>>8),
+            (uint8_t)(((unsigned)out.g*f1+(unsigned)other.g*f2)>>8),
+            (uint8_t)(((unsigned)out.b*f1+(unsigned)other.b*f2)>>8)
+        };
+    }
+    if(brightness<255u) {
+        const unsigned scale=(unsigned)brightness+1u;
+        out.r=(uint8_t)(((unsigned)out.r*scale)>>8);
+        out.g=(uint8_t)(((unsigned)out.g*scale)>>8);
+        out.b=(uint8_t)(((unsigned)out.b*scale)>>8);
+    }
+    return out;
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
