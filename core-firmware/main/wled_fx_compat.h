@@ -21,7 +21,9 @@ enum {
     OT_WLED_DUAL_SCAN = 11, /* WLED FX_MODE_DUAL_SCAN */
     OT_WLED_FADE = 12,      /* WLED FX_MODE_FADE */
     OT_WLED_THEATER = 13,   /* WLED FX_MODE_THEATER_CHASE */
-    OT_WLED_STROBE = 23     /* WLED FX_MODE_STROBE */
+    OT_WLED_STROBE = 23,    /* WLED FX_MODE_STROBE */
+    OT_WLED_SOLID_PATTERN = 83, /* WLED FX_MODE_STATIC_PATTERN */
+    OT_WLED_HEARTBEAT = 100     /* WLED FX_MODE_HEARTBEAT */
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -37,7 +39,8 @@ typedef struct {
 } ot_wled_fx_config_t;
 typedef struct {
     uint32_t step;          /* Upstream per-segment SEGENV.step */
-    uint16_t aux0;          /* Upstream per-segment SEGENV.aux0 for Theater phase */
+    uint16_t aux0;          /* Upstream per-segment SEGENV.aux0 */
+    uint16_t aux1;          /* Upstream per-segment SEGENV.aux1 for Heartbeat */
 } ot_wled_fx_state_t;
 
 typedef struct {
@@ -56,7 +59,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
 /* Render ONE frame for a contiguous 1D zone. Call exactly once per frame,
  * never once per pixel, so that SEGENV.step advances at the right cadence.
  * Supports source-pinned 1D timing/position adaptations for Solid, Blink, Wipe,
- * Sweep, Scan, Dual Scan, Fade, Theater and Strobe, with default
+ * Sweep, Scan, Dual Scan, Fade, Theater, Strobe, Solid Pattern and
+ * Heartbeat, with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
  * WLED palette modes, gamma and global brightness handling are NOT ported.
  * Returns false for unknown effects, invalid config or zero-sized zones.
