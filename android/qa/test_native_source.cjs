@@ -247,12 +247,19 @@ for (const required of ['private String committedJson;',
 }
 // Pre-commit JSON/reindex errors must restore state too, not only failed
 // SharedPreferences writes after mutation.
-for (const method of ['addZone', 'editZone', 'removeZone', 'moveZone']) {
+for (const method of ['addZoneAt', 'editZone', 'removeZone', 'moveZone']) {
   const block=model.split('synchronized boolean '+method+'(')[1]
     ?.split('synchronized ')[0];
   assert(block && block.includes('catch (JSONException e) { restoreCommitted(); return false; }'),
     'Zone '+method+' must restore last committed state when reindex fails');
 }
+assert(model.includes('return addZoneAt(label, length, zoneCount());') &&
+       model.includes('synchronized boolean addZoneAt(String label, int length, int insertAt)') &&
+       model.includes('if (i == insertAt) layout.put(z);') &&
+       model.includes('if (i < zoneCount()) layout.put(zone(i));') &&
+       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1)') &&
+       !compose.includes('project.moveZone(project.zoneCount() - 1, index + 1)'),
+       'Add next zone must insert and reindex with one persisted transaction');
 assert(compose.includes('if (project.assignMany(selections, zoneId, !checked)) refresh()') &&
        compose.includes('if (project.name(it)) refresh()') &&
        compose.includes('else name = project.name() // restore last committed value') &&
