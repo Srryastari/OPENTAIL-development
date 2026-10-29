@@ -483,7 +483,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_TWINKLECAT, "Twinklecat", "Twinklecat@!,Twinkle rate,,,,Cool,Reverse;!,!;!",
      false, true, true, true, true},
     {OT_WLED_AURORA, "Aurora", "Aurora@!,!;1,2,3;!;;sx=24,pal=50",
-     true, true, true, true, true}
+     true, true, true, true, true},
+    {OT_WLED_COLORTWINKLE, "Colortwinkles", "Colortwinkles@Fade speed,Spawn speed;;!;;m12=0",
+     false, true, true, true, true}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2805,6 +2807,68 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 static const uint8_t ot_inv_gamma22[256];
+
+/* Pinned mode_colortwinkle() 1D source, bit-per-pixel fade direction
+ * and retained RGB frame. The source operates at FRAMETIME_FIXED=23ms
+ * on the pinned target profile; global bus brightness is 255 in this
+ * RGB renderer, while configured CORE brightness is capped after draw. */
+static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    uint8_t *bits=fx_zone_scratch(state,(count+7u)/8u);
+    if(!bits)return;
+    if(now-state->step<23u)return;
+    state->step=now;
+    ot_wled_palette16_t pal;
+    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                  cfg->background,(ot_wled_rgb_t){0,0,0},&pal))return;
+    const uint8_t rise=(uint8_t)(8u+(cfg->speed>>2));
+    const uint8_t fall=(uint8_t)(8u+(cfg->speed>>3));
+    for(size_t i=0;i<count;i++) {
+        const ot_wled_rgb_t old=pixels[i];
+        const unsigned slot=i>>3;
+        const uint8_t mask=(uint8_t)(1u<<(i&7u));
+        if((bits[slot]&mask)!=0u) {
+            const ot_wled_rgb_t inc=fox_video_fade(old,rise);
+            ot_wled_rgb_t out={
+                (uint8_t)((unsigned)old.r+inc.r>255u?255u:(unsigned)old.r+inc.r),
+                (uint8_t)((unsigned)old.g+inc.g>255u?255u:(unsigned)old.g+inc.g),
+                (uint8_t)((unsigned)old.b+inc.b>255u?255u:(unsigned)old.b+inc.b)
+            };
+            if(out.r==255u||out.g==255u||out.b==255u)
+                bits[slot]&=(uint8_t)~mask;
+            if(out.r==old.r&&out.g==old.g&&out.b==old.b) {
+                out.r=(uint8_t)((unsigned)out.r*2u>255u?255u:(unsigned)out.r*2u);
+                out.g=(uint8_t)((unsigned)out.g*2u>255u?255u:(unsigned)out.g*2u);
+                out.b=(uint8_t)((unsigned)out.b*2u>255u?255u:(unsigned)out.b*2u);
+            }
+            pixels[i]=out;
+        } else {
+            const unsigned scale=256u-(unsigned)fall;
+            pixels[i]=(ot_wled_rgb_t){
+                (uint8_t)(((unsigned)old.r*scale)>>8),
+                (uint8_t)(((unsigned)old.g*scale)>>8),
+                (uint8_t)(((unsigned)old.b*scale)>>8)
+            };
+        }
+    }
+    for(size_t j=0;j<=count/50u;j++) {
+        if(fx_rand8(state,256u)<=cfg->intensity) {
+            for(unsigned attempt=0;attempt<5u;attempt++) {
+                const size_t i=fx_rand_index(state,count);
+                if((pixels[i].r|pixels[i].g|pixels[i].b)==0u) {
+                    bits[i>>3]|=(uint8_t)(1u<<(i&7u));
+                    pixels[i]=ot_wled_palette_sample(&pal,fx_rand8(state,256u),
+                                  ot_inv_gamma22[64u],OT_WLED_PALETTE_NOBLEND);
+                    break;
+                }
+            }
+        }
+    }
+    for(size_t i=0;i<count;i++)
+        pixels[i]=scaled(pixels[i],cfg->brightness);
+}
+
 /* AuroraWave source fields, per-zone scratch; fixed-point AW_SHIFT=16.
  * Avoid global wave arrays and preserve source wave lifetime and RNG order.
  * RGB-only default is the source's Aurora fixed palette ID 50. */
@@ -4076,7 +4140,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_PALETTE &&
             cfg->effect_id!=OT_WLED_TWINKLEFOX &&
             cfg->effect_id!=OT_WLED_TWINKLECAT &&
-            cfg->effect_id!=OT_WLED_AURORA) ||
+            cfg->effect_id!=OT_WLED_AURORA &&
+            cfg->effect_id!=OT_WLED_COLORTWINKLE) ||
            (cfg->palette_id<2u || cfg->palette_id>72u))return false;
     }
     ot_wled_fx_metadata_t meta;
@@ -4270,6 +4335,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_COLORTWINKLE) {
+        colortwinkle_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_AURORA) {
