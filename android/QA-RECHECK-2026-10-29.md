@@ -131,3 +131,12 @@ Scope: **Android code, UI data model, BLE client, QA only.** Read CORE FX/palett
 - Invalid project-name saves restore the last committed displayed value; removing a preset only refreshes on successful persistence.
 
 **Release verdict:** static/source contracts can pass; **visual 1:1 styling, full upstream palette names/rendering, device BLE timing, live physical zone editing, complete trigger/effect integration, and measured performance are not yet accepted.** Do not merge Android PR #21 solely on a green APK build.
+
+
+## Android completion push — executable persistence and palette fidelity (October 29)
+
+- Introduced a small package-private SharedPreferences constructor for deterministic Android model testing. Production construction still uses the existing Context and key; no UI or on-device storage schema change.
+- Added Android JVM tests using an actual `org.json` implementation and a controllable in-memory SharedPreferences editor. Tests inject `commit() == false` and verify **identical exported JSON** after rejected zone, pixel, name and multi-trigger operations; an out-of-range manual offset proves rollback when reindex rejects a layout **before** a disk write. Multi-select commits exactly once.
+- Added native palette metadata tests that assert source-provided fixed RGB stops (including fractional stop positions) match their input and that missing, dynamic or malformed palette metadata cannot produce invented color swatches. Project-supplied palette names override only their specified IDs.
+- Sent a read-only, cross-team handoff to effects/palette PR #23 asking for a pinned, versioned machine-readable palette catalog and effect support map. Its draft source port of fixed palettes 2–72 does **not** prove those IDs are accepted by the user's currently installed CORE; Android's BLE gate remains conservative until a deployed protocol/capability contract is verified.
+- **Outstanding:** latest-head Android CI, phone screenshot comparison, physical BLE and optical parity, and the effects team's metadata delivery. Neither unit tests nor draft palette code certify optical 1:1 playback.
