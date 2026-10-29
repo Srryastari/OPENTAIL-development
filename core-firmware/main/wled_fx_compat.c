@@ -177,6 +177,10 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FLOW, "Flow", "Flow@!,Zones;;!;;m12=1",
      true, true, true, true, false},
     {OT_WLED_SUNRISE, "Sunrise", "Sunrise@Time [min],Width;;!;;pal=35,sx=60",
+     true, true, true, true, false},
+    {OT_WLED_RIPPLE, "Ripple", "Ripple@!,Frequency;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_RIPPLE_RAINBOW, "Ripple Rainbow", "Ripple Rainbow@!,Frequency;!,!;!",
      true, true, true, true, false}
 };
 
@@ -1983,6 +1987,88 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/* Pinned FX.cpp ripple_base() particle cells (4 bytes each), max 100 on
+ * ESP32: independent per-zone heap backing, no fixed vehicle LED geometry. */
+typedef struct {
+    uint8_t ripple_state;
+    uint8_t color;
+    uint16_t pos;
+} ot_fx_ripple_t;
+static uint8_t fx_triwave8(uint8_t x) {
+    if(x&0x80u)x=(uint8_t)(255u-x);
+    return (uint8_t)(x<<1);
+}
+static void fx_ripple_blend(ot_wled_rgb_t *pixels,size_t count,
+                            int32_t pos,ot_wled_rgb_t color,
+                            uint8_t magnitude,uint8_t brightness) {
+    if(pos<0 || (size_t)pos>=count)return;
+    const ot_wled_rgb_t next=blend_colors(pixels[pos],color,magnitude);
+    pixels[pos]=scaled(next,brightness);
+}
+/* Upstream mode_ripple() and mode_ripple_rainbow() with the original
+ * 1D four-tap propagation, wave birth, amplitude and lifetime. WLED
+ * nonzero palette selection is still outside the current RGB-only profile. */
+static bool ripple_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         uint32_t old_call,ot_wled_rgb_t *pixels,
+                         size_t count,bool rainbow) {
+    (void)now;
+    if(count<=1u){
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return true;
+    }
+    const size_t max_ripples=(1u+count/4u)<100u?(1u+count/4u):100u;
+    ot_fx_ripple_t *ripples=(ot_fx_ripple_t*)fx_zone_scratch(
+                                    state,max_ripples*sizeof(ot_fx_ripple_t));
+    if(!ripples)return false;
+    ot_wled_rgb_t bg=cfg->background;
+    if(rainbow) {
+        if(old_call==0u) {
+            state->aux0=fx_rand8(state,256u);
+            state->aux1=fx_rand8(state,256u);
+        }
+        if(state->aux0==state->aux1)state->aux1=fx_rand8(state,256u);
+        else if(state->aux1>state->aux0)state->aux0++;
+        else state->aux0--;
+        bg=blend_colors(wheel_rgb((uint8_t)state->aux0),
+                        (ot_wled_rgb_t){0,0,0},235u);
+    }
+    const ot_wled_rgb_t base=scaled(bg,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=base;
+    for(size_t i=0;i<max_ripples;i++) {
+        uint32_t ripple_state=ripples[i].ripple_state;
+        if(ripple_state) {
+            const uint32_t decay=(uint32_t)(cfg->speed>>4)+1u;
+            const uint32_t propagation=((ripple_state/decay-1u)*
+                                     ((uint32_t)cfg->speed+1u));
+            const int32_t distance=(int32_t)(propagation>>8);
+            const uint32_t fraction=propagation&255u;
+            const uint32_t amplitude=ripple_state<17u?
+                      fx_triwave8((uint8_t)((ripple_state-1u)*8u)):
+                      255u-(ripple_state-17u)*253u/238u;
+            const ot_wled_rgb_t color=scaled(
+                    wheel_rgb(ripples[i].color),cfg->brightness);
+            const int32_t left=(int32_t)ripples[i].pos-distance-1;
+            const int32_t right=(int32_t)ripples[i].pos+distance+2;
+            for(int v=0;v<4;v++) {
+                const uint8_t wave=wled_cubicwave8((uint8_t)((fraction>>2)+
+                                                                (uint32_t)v*64u));
+                const uint8_t magnitude=(uint8_t)(
+                              ((uint16_t)wave*(1u+amplitude))>>8);
+                fx_ripple_blend(pixels,count,left+v,color,magnitude,255u);
+                fx_ripple_blend(pixels,count,right-v,color,magnitude,255u);
+            }
+            ripple_state+=decay;
+            ripples[i].ripple_state=(uint8_t)(ripple_state>254u?0u:ripple_state);
+        } else if(fx_rand_index(state,15100u)<=cfg->intensity) {
+            ripples[i].ripple_state=1u;
+            ripples[i].pos=(uint16_t)fx_rand_index(state,count);
+            ripples[i].color=fx_rand8(state,256u);
+        }
+    }
+    return true;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -2002,6 +2088,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_RIPPLE ||
+       cfg->effect_id==OT_WLED_RIPPLE_RAINBOW)
+        return ripple_frame(cfg,state,time_ms,call,pixels,count,
+                            cfg->effect_id==OT_WLED_RIPPLE_RAINBOW);
     if(cfg->effect_id==OT_WLED_RAILWAY) {
         railway_frame(cfg,state,pixels,count);
         return true;
