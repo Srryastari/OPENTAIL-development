@@ -496,44 +496,116 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun TriggersPage(t: Tone) {
         Title("Triggers", t)
-        Caption("Offline assignments. CORE alone handles physical arbitration.", t)
+        Caption("Universal offline trigger assignments. Physical inputs and arbitration are authoritative in CORE.", t)
         var selections by remember { mutableStateOf(setOf<String>()) }
+        var testing by remember { mutableStateOf(setOf<String>()) }
         var editing by remember { mutableStateOf(false) }
+        var newTrigger by remember { mutableStateOf("") }
+        var searchFx by remember { mutableStateOf("") }
+        var chosenFx by remember { mutableStateOf("Solid") }
+        var chosenColor by remember { mutableStateOf("#ff0000") }
+        val profiles = project.profiles()
+        val names = profiles.names()
+        val keys = (0 until (names?.length() ?: 0))
+            .mapNotNull { names?.optString(it) }
+            .filterNot { it == "Startup" || it == "Shutdown" || it == "Show" }
         Panel(t) {
-            val profiles = project.profiles()
-            val keys = (0 until (profiles.names()?.length() ?: 0))
-                .mapNotNull { profiles.names()?.optString(it) }
-                .filterNot { it == "Startup" || it == "Shutdown" || it == "Show" }
-            keys.forEach { name ->
-                Pill(name, t, name in selections) {
-                    selections = if (name in selections) selections - name else selections + name
+            Caption("Multiple triggers can be selected and edited together. Nothing on this page sends BLE commands.", t)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(newTrigger, "Custom trigger name", t) { newTrigger = it.take(32) }
+            }
+            Pill("+ Add trigger", t) {
+                if (project.customTrigger(newTrigger)) {
+                    selections = setOf(newTrigger)
+                    newTrigger = ""
+                    refresh()
                 }
             }
-            Pill("Edit " + selections.size + " selected", t, selections.isNotEmpty()) {
-                if (selections.isNotEmpty()) editing = true
+            Pill("Edit selected · " + selections.size, t, selections.isNotEmpty()) {
+                if (selections.isNotEmpty()) {
+                    val p = project.trigger(selections.first())
+                    chosenFx = p.optString("pattern", "Solid")
+                    chosenColor = p.optString("color", "#ff0000")
+                    searchFx = ""
+                    editing = true
+                }
+            }
+        }
+        keys.forEach { name ->
+            val profile = project.trigger(name)
+            val selected = name in selections
+            val active = name in testing
+            Panel(t) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, modifier = Modifier.weight(1f),
+                        color = t.fg, fontWeight = FontWeight.SemiBold)
+                    Pill(if (selected) "Selected ✓" else "Select", t, selected) {
+                        selections = if (selected) selections - name else selections + name
+                    }
+                }
+                Caption("Effect: " + profile.optString("pattern", "Solid") +
+                    " · zones: " + (profile.optJSONArray("zones")?.length() ?: 0), t)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Pill(if (active) "Stop" else "Start", t, active) {
+                        testing = if (active) testing - name else testing + name
+                    }
+                    if (profile.optString("kind") == "trigger-custom")
+                        Pill("Remove", t) {
+                            if (project.deleteTrigger(name)) {
+                                selections = selections - name
+                                testing = testing - name
+                                refresh()
+                            }
+                        }
+                }
+                if (active) Caption("Local trigger preview active. CORE output unchanged.", t)
             }
         }
         if (editing) {
             AlertDialog(onDismissRequest = { editing = false },
-                title = { Text("Assigned zones") },
+                title = { Text("Edit " + selections.size + " triggers") },
                 text = {
-                    Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Caption("Effect (applies to every selected trigger)", t)
+                        Field(searchFx, "Search effects", t) { searchFx = it }
+                        Caption("Selected: " + chosenFx, t)
+                        NativeEffectCatalog.all()
+                            .filter { it.name.contains(searchFx, ignoreCase = true) }
+                            .take(12).forEach { fx ->
+                                Pill(fx.name, t, chosenFx == fx.name) { chosenFx = fx.name }
+                            }
+                        Caption("Trigger color (hex #RRGGBB)", t)
+                        Field(chosenColor, "#ff0000", t) { chosenColor = it.take(7) }
+                        Caption("Zone assignment (select to apply to all)", t)
                         for (i in 0 until project.zoneCount()) {
                             val z = project.zone(i) ?: continue
                             val zoneId = z.optString("id")
                             val checked = selections.all { name ->
                                 val assigned = project.trigger(name).optJSONArray("zones")
-                                (0 until (assigned?.length() ?: 0)).any { assigned?.optString(it) == zoneId }
+                                (0 until (assigned?.length() ?: 0))
+                                    .any { assigned?.optString(it) == zoneId }
                             }
                             Pill(z.optString("name") + (if (checked) " ✓" else ""), t, checked) {
                                 selections.forEach { project.assign(it, zoneId, !checked) }
                                 refresh()
                             }
-                            Spacer(Modifier.height(6.dp))
                         }
                     }
                 },
-                confirmButton = { Pill("Done", t, true) { editing = false } })
+                confirmButton = { Pill("Save", t, true) {
+                    val validColor = Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor)
+                    if (validColor && NativeEffectCatalog.all().any { it.name == chosenFx }) {
+                        selections.forEach { name ->
+                            project.trigger(name).put("pattern", chosenFx)
+                                .put("color", chosenColor)
+                        }
+                        project.save()
+                        editing = false
+                        refresh()
+                    }
+                } },
+                dismissButton = { Pill("Cancel", t) { editing = false } })
         }
     }
     @Composable
