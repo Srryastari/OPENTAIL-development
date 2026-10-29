@@ -203,7 +203,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_PHASED_NOISE, "Phased Noise", "Phased Noise@!,!;!,!;!",
      true, true, true, true, false},
     {OT_WLED_PRIDE_2015, "Pride 2015", "Pride 2015@!;;",
-     false, false, true, false, false}
+     false, false, true, false, false},
+    {OT_WLED_COLORWAVES, "Colorwaves", "Colorwaves@!,Hue;!;!;;pal=26",
+     true, false, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2250,32 +2252,62 @@ static ot_wled_rgb_t fx_hsv_rgb(uint8_t hue,uint8_t sat,uint8_t value) {
     return c;
 }
 
-/* FX.cpp mode_colorwaves_pride_base(true), no palette path, RGB gamma-off.
- * Existing state->step/aux0 preserve WLED's per-zone pseudotime and hue.
- * No random seed, buffers or external controller engine is introduced. */
-static void pride2015_frame(const ot_wled_fx_config_t *cfg,
+/* WLED colors.cpp color_fade(color, amount, true), packed RGB.
+ * The source's dominant-channel rounding is intentional: replacing this
+ * with linear scaling visibly changes the default-color Colorwaves path. */
+static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount) {
+    const uint32_t c=((uint32_t)input.r<<16)|((uint32_t)input.g<<8)|input.b;
+    if(c==0u || amount==0u)return (ot_wled_rgb_t){0u,0u,0u};
+    if(amount==255u)return input;
+    const uint32_t mask=0x00ff00ffu;
+    const uint32_t rb=c&mask,wg=(c>>8)&mask;
+    uint8_t maxc=input.r>input.g?input.r:input.g;
+    if(input.b>maxc)maxc=input.b;
+    uint32_t threshold=(uint32_t)((maxc>>1)+1u);
+    threshold|=threshold<<16;
+    const uint32_t dominant_rb=(((rb|0x80008000u)-threshold)&0x80008000u)>>15;
+    const uint32_t dominant_wg=(((wg|0x80008000u)-threshold)&0x80008000u)>>7;
+    const uint32_t scaled_rb=((((uint32_t)rb*amount)>>8)&mask)+dominant_rb;
+    const uint32_t scaled_wg=(((uint32_t)wg*amount)&~mask)+dominant_wg;
+    const uint32_t out=scaled_rb|scaled_wg;
+    return (ot_wled_rgb_t){(uint8_t)(out>>16),(uint8_t)(out>>8),(uint8_t)out};
+}
+
+/* Pinned FX.cpp mode_colorwaves_pride_base(true/false), with per-zone
+ * pseudotime/hue state. Palette=0 Colorwaves uses source video-fade FG.
+ * This routine is shared rather than duplicating two almost identical
+ * 1D animation engines. */
+static void colorwaves_pride_frame(const ot_wled_fx_config_t *cfg,
                             ot_wled_fx_state_t *state,uint32_t now,
-                            ot_wled_rgb_t *pixels,size_t count) {
+                            ot_wled_rgb_t *pixels,size_t count,bool pride) {
     const uint32_t duration=10u+(uint32_t)cfg->speed;
-    const uint8_t sat=(uint8_t)(220u+fx_beatsin88(87u,30u,now));
+    const uint8_t sat=pride?(uint8_t)(220u+fx_beatsin88(87u,30u,now)):255u;
     const unsigned depth=96u+fx_beatsin88(341u,128u,now);
     const unsigned theta_inc=25u*256u+fx_beatsin88(203u,15u*256u,now);
     const unsigned multiplier=23u+fx_beatsin88(147u,37u,now);
     unsigned hue=state->aux0;
-    const unsigned hue_inc=1u+fx_beatsin88(113u,2999u,now);
+    const unsigned hue_inc=pride?(1u+fx_beatsin88(113u,2999u,now)):
+       ((unsigned)fx_beatsin88(113u,240u,now)*(unsigned)cfg->intensity*10u/255u+((unsigned)60u*cfg->intensity*10u/255u));
     uint32_t pseudo=state->step+duration*multiplier;
     state->aux0=(uint16_t)((uint32_t)state->aux0+
                            duration*(5u+fx_beatsin88(400u,4u,now)));
     unsigned theta=pseudo;
     for(size_t i=0;i<count;i++) {
         hue+=hue_inc;
+        uint8_t hue8;
+        if(pride) hue8=(uint8_t)(hue>>8);
+        else {
+            const unsigned h128=hue>>7;
+            hue8=(uint8_t)((h128&0x100u)?(255u-(h128>>1)):(h128>>1));
+        }
         theta+=theta_inc;
         const uint32_t sine=(uint32_t)((int32_t)wled_sin16((uint16_t)theta)+32768);
         const uint32_t bright16=(sine*sine)>>16;
         uint8_t bri=(uint8_t)((bright16*(uint32_t)depth)>>16);
         bri=(uint8_t)(bri+255u-depth);
-        const ot_wled_rgb_t next=fx_hsv_rgb((uint8_t)(hue>>8),sat,bri);
-        pixels[i]=scaled(blend_colors(pixels[i],next,64u),cfg->brightness);
+        const ot_wled_rgb_t next=pride?fx_hsv_rgb(hue8,sat,bri):
+                                          fx_video_fade(cfg->foreground,bri);
+        pixels[i]=scaled(blend_colors(pixels[i],next,pride?64u:128u),cfg->brightness);
     }
     state->step=pseudo;
 }
@@ -2729,8 +2761,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         android_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
-    if(cfg->effect_id==OT_WLED_PRIDE_2015) {
-        pride2015_frame(cfg,state,time_ms,pixels,count);
+    if(cfg->effect_id==OT_WLED_PRIDE_2015 ||
+       cfg->effect_id==OT_WLED_COLORWAVES) {
+        colorwaves_pride_frame(cfg,state,time_ms,pixels,count,
+                              cfg->effect_id==OT_WLED_PRIDE_2015);
         return true;
     }
     if(cfg->effect_id==OT_WLED_PHASED ||
