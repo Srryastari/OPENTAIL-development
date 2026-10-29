@@ -9,6 +9,13 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1] / "main"
 output = (root / "output_manager.h").read_text(encoding="utf-8")
 board = (root / "board_config.h").read_text(encoding="utf-8")
+output_impl = (root / "output_manager.c").read_text(encoding="utf-8")
+# One board-selected bench brightness limit controls the layout, triggers,
+# and optional gamma path; do not fork another magic 32-channel ceiling.
+assert '#include "board_config.h"' in output_impl
+assert '.brightness_cap=OT_MAX_BRIGHTNESS' in output_impl
+assert 'if(brightness>OT_MAX_BRIGHTNESS)' in output_impl
+assert 'if(n>OT_MAX_BRIGHTNESS)' in output_impl
 core = (root / "opentail_core.c").read_text(encoding="utf-8")
 kconfig = (root / "Kconfig.projbuild").read_text(encoding="utf-8")
 
