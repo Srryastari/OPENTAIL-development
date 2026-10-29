@@ -1418,6 +1418,12 @@ static void led_task(void *p) {
                    frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
                if(!frame_ready[ch])ot_frame_snapshot_unavailable((uint8_t)ch);
            }
+           /* A saved mapping can fail to reconfigure its RMT lane at runtime.
+            * Keep good lanes rendering, but do not advertise all outputs ready. */
+           const bool all_configured=ot_frame_all_submitted(frame_ready,OT_CHAIN_COUNT);
+           portENTER_CRITICAL(&state_lock);
+           native_outputs_ready=all_configured && output_runtime_fault_mask==0u;
+           portEXIT_CRITICAL(&state_lock);
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
            uint32_t elapsed=(uint32_t)(frame_ms-show_started);
            uint32_t frame_delta_ms=previous_frame_ms?(uint32_t)(frame_ms-previous_frame_ms):8u;
