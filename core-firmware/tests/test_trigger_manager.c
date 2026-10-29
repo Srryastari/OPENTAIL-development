@@ -320,6 +320,54 @@ static void test_mapping_save_deferred_until_release(void){
     assert(!ot_tm_saved_apply(NULL,&pending,&previous,0u,0u));
     assert(!ot_tm_apply_if_released(NULL,&pending,0u,0u));
 }
+/* Geometry is not allowed to change underneath an asserted input even
+ * when NVS already contains the new layout. All outputs move together only
+ * after BOTH instantaneous and debounced levels have released. */
+static void test_output_zone_save_deferred_until_release(void){
+    ot_om_output_t previous[OT_OM_OUTPUTS],candidate[OT_OM_OUTPUTS];
+    ot_om_defaults(previous);
+    memcpy(candidate,previous,sizeof(candidate));
+    assert(OT_OM_OUTPUTS>=2u);
+    previous[0].zones[0].role=OT_OM_BRAKE;
+    previous[1].zones[0].role=OT_OM_LEFT;
+    candidate[0].zones[0].role=OT_OM_REVERSE;
+    candidate[1].zones[0].role=OT_OM_RIGHT;
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        assert(ot_om_valid(&previous[i]));
+        assert(ot_om_valid(&candidate[i]));
+    }
+    ot_om_output_t active[OT_OM_OUTPUTS];
+    ot_om_pending_t pending={0};
+    memcpy(active,previous,sizeof(active));
+    assert(ot_om_saved_apply(active,&pending,candidate,0u,0u));
+    assert(!pending.pending && !memcmp(active,candidate,sizeof(active)));
+    assert(!ot_om_apply_if_released(active,&pending,0u,0u));
+
+    for(unsigned m=1;m<256u;m++){
+        memcpy(active,previous,sizeof(active));
+        pending=(ot_om_pending_t){0};
+        assert(!ot_om_saved_apply(active,&pending,candidate,(uint8_t)m,0u));
+        assert(pending.pending && !memcmp(active,previous,sizeof(active)));
+        assert(!ot_om_apply_if_released(active,&pending,(uint8_t)m,0u));
+        assert(!ot_om_apply_if_released(active,&pending,0u,(uint8_t)m));
+        assert(ot_om_apply_if_released(active,&pending,0u,0u));
+        assert(!pending.pending && !memcmp(active,candidate,sizeof(active)));
+    }
+    memcpy(active,previous,sizeof(active));
+    pending=(ot_om_pending_t){0};
+    assert(!ot_om_saved_apply(active,&pending,candidate,0u,2u));
+    assert(!ot_om_apply_if_released(active,&pending,0u,2u));
+    assert(ot_om_apply_if_released(active,&pending,0u,0u));
+
+    /* Invalid geometry cannot stage a partially overwritten output. */
+    candidate[1].zones[0].role=255u;
+    memcpy(active,previous,sizeof(active));
+    pending=(ot_om_pending_t){0};
+    assert(!ot_om_saved_apply(active,&pending,candidate,2u,0u));
+    assert(!pending.pending && !memcmp(active,previous,sizeof(active)));
+    assert(!ot_om_saved_apply(NULL,&pending,previous,0u,0u));
+    assert(!ot_om_apply_if_released(NULL,&pending,0u,0u));
+}
 int main(void){
     test_sampler_transitions();
     test_prior_individual_input_sequences();
@@ -328,6 +376,7 @@ int main(void){
     test_ble_snapshot_matrix();
     test_ble_rejected_write_matrix();
     test_mapping_save_deferred_until_release();
+    test_output_zone_save_deferred_until_release();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
     assert(ot_tm_valid(&p));
