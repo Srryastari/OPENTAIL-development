@@ -1,7 +1,8 @@
 /*
  * Isolated adaptation of WLED wled00/FX.cpp:
  * mode_static(), blink(), mode_blink(), mode_strobe(),
- * color_wipe(), mode_color_wipe(), mode_color_sweep() and mode_fade().
+ * color_wipe(), mode_color_wipe(), mode_color_sweep(), mode_fade(),
+ * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -16,7 +17,10 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
     {OT_WLED_WIPE,   "Wipe",   "Wipe@!,!;!,!;!",                true, true, true, true, false},
     {OT_WLED_SWEEP,  "Sweep",  "Sweep@!,!;!,!;!",              true, true, true, true, false},
+    {OT_WLED_SCAN,   "Scan",   "Scan@!,# of dots,,,,,Overlay;!,!,!;!", true, true, true, true, false},
+    {OT_WLED_DUAL_SCAN, "Scan Dual", "Scan Dual@!,# of dots,,,,,Overlay;!,!,!;!", true, true, true, true, false},
     {OT_WLED_FADE,   "Fade",   "Fade@!;!,!;!;01",              true, true, true, false, false},
+    {OT_WLED_THEATER, "Theater", "Theater@!,Gap size;!,!;!", true, true, true, true, false},
     {OT_WLED_STROBE, "Strobe", "Strobe@!;!,!;!;01",            true, true, true, false, false}
 };
 
@@ -35,7 +39,7 @@ size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids){
 }
 
 void ot_wled_fx_reset(ot_wled_fx_state_t *state) {
-    if (state) state->step=0;
+    if (state) { state->step=0; state->aux0=0; }
 }
 
 static ot_wled_rgb_t scaled(ot_wled_rgb_t c, uint8_t brightness) {
@@ -93,6 +97,47 @@ static void wipe_frame(const ot_wled_fx_config_t *cfg, uint32_t time_ms,
     }
 }
 
+/*
+ * Source adaptation: pinned upstream FX.cpp scan(bool dual).
+ * The OpenTail zone buffer is a WLED virtual 1D segment (not a physical bus);
+ * only the upstream default Overlay=false and palette=0 cases are supported.
+ */
+static void scan_frame(const ot_wled_fx_config_t *cfg, uint32_t now,
+                       ot_wled_rgb_t *pixels, size_t count, bool dual) {
+    if (count==1u) { pixels[0]=scaled(cfg->foreground,cfg->brightness); return; }
+    const uint32_t cycle=750u+(255u-(uint32_t)cfg->speed)*150u;
+    const uint32_t progress=(uint32_t)(((uint64_t)(now%cycle)*65535u)/cycle);
+    const size_t size=1u+(((size_t)cfg->intensity*count)>>9);
+    const size_t travel=count-size;
+    const size_t index=(size_t)(((uint64_t)progress*(2u*travel))>>16);
+    const size_t offset=index>travel?index-travel:travel-index;
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    for (size_t i=0;i<count;i++) pixels[i]=bg;
+    for (size_t j=offset;j<offset+size && j<count;j++) {
+        pixels[j]=fg;
+        if (dual) pixels[count-1u-j]=fg;
+    }
+}
+
+/*
+ * Source adaptation: pinned upstream FX.cpp running(..., theatre=true).
+ * WLED renders with the OLD aux0, then increments it once when the cycle
+ * advances. This matters when frames skip cycles.
+ */
+static void theater_frame(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
+                          uint32_t now, ot_wled_rgb_t *pixels, size_t count) {
+    const uint32_t width=3u+((uint32_t)cfg->intensity>>4);
+    const uint32_t iteration=now/(50u+255u-(uint32_t)cfg->speed);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for (size_t i=0;i<count;i++) pixels[i]=(i%width)==state->aux0?fg:bg;
+    if (iteration!=state->step) {
+        state->aux0=(uint16_t)((state->aux0+1u)%width);
+        state->step=iteration;
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -103,6 +148,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     if (count>65535u) return false; /* 16-bit WLED segment indexing boundary */
     if (cfg->effect_id==OT_WLED_WIPE || cfg->effect_id==OT_WLED_SWEEP) {
         wipe_frame(cfg,time_ms,pixels,count,cfg->effect_id==OT_WLED_SWEEP);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_SCAN || cfg->effect_id==OT_WLED_DUAL_SCAN) {
+        scan_frame(cfg,time_ms,pixels,count,cfg->effect_id==OT_WLED_DUAL_SCAN);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_THEATER) {
+        theater_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if (cfg->effect_id==OT_WLED_FADE) {
