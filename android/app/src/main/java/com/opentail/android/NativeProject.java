@@ -197,6 +197,34 @@ final class NativeProject {
         } catch (JSONException e) { return false; }
     }
 
+    /** Preview every dependent zero-based zone offset without mutating saved
+     * layouts. Keep identical manual-gap rules to reindex(); neither slider
+     * dragging nor typing can send BLE commands or persist a draft. */
+    synchronized String previewZoneOffsets(String id, int suggestedLength) {
+        int selected=indexOfZone(id);
+        if(selected<0 || suggestedLength<1 || suggestedLength>10000)
+            return "Pixel count must be between 1 and 10,000";
+        long end=0;
+        StringBuilder summary=new StringBuilder();
+        for(int i=0;i<zoneCount();i++){
+            JSONObject zone=zone(i);
+            if(zone==null)continue;
+            int len=i==selected?suggestedLength:zone.optInt("length",0);
+            boolean manual="manual".equals(zone.optString("offsetMode"));
+            long start=manual?Math.max(end,zone.optLong("start",end)):end;
+            if(start+len>1000000)return "Pixel index ceiling exceeded";
+            if(i>=selected&&i<selected+5){
+                if(summary.length()>0)summary.append("\\n");
+                summary.append(zone.optString("name","Zone "+(i+1)))
+                       .append(": ").append(start).append("–")
+                       .append(start+len-1).append(" · next ").append(start+len);
+            }
+            end=start+len;
+        }
+        if(zoneCount()>selected+5)summary.append("\\n…additional zones reindex on Save");
+        return summary.toString();
+    }
+
     synchronized boolean editZone(String id, String label, int length, boolean reverse) {
         int index = indexOfZone(id);
         if (index < 0 || length < 1 || length > 10000 || label.trim().isEmpty()
