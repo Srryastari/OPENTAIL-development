@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <vector>
 extern "C" {
 #include "wled_fx_compat.h"
@@ -1026,6 +1027,64 @@ void mode_fairy() {
   }
 }
 
+/* gamma8() is the WLED effect-domain lookup even when physical bus gamma
+ * correction is disabled. Reconstruct the pinned default gamma=2.2 table
+ * independently from the original source's powf-based initializer. */
+static uint8_t ref_gamma8(uint8_t input) {
+    static bool ready=false;
+    static uint8_t gamma_table[256]={0};
+    if(!ready) {
+        for(size_t i=1;i<256u;i++)
+            gamma_table[i]=(uint8_t)(std::pow((float)i/255.0f,2.2f)*255.0f+0.5f);
+        ready=true;
+    }
+    return gamma_table[input];
+}
+#define gamma8(x) ref_gamma8((x))
+void mode_fairytwinkle() {
+  unsigned dataSize = sizeof(flasher) * SEGLEN;
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  Flasher* flashers = reinterpret_cast<Flasher*>(SEGENV.data);
+  unsigned now16 = strip.now & 0xFFFF;
+  uint16_t PRNG16 = 5100 + strip.getCurrSegmentId();
+
+  unsigned riseFallTime = 400 + (255-SEGMENT.speed)*3;
+  unsigned maxDur = riseFallTime/100 + ((255 - SEGMENT.intensity) >> 2) + 13 + ((255 - SEGMENT.intensity) >> 1);
+
+  for (unsigned f = 0; f < SEGLEN; f++) {
+    uint16_t stateTime = now16 - flashers[f].stateStart;
+    //random on/off time reached, switch state
+    if (stateTime > flashers[f].stateDur * 100) {
+      flashers[f].stateOn = !flashers[f].stateOn;
+      bool init = !flashers[f].stateDur;
+      if (flashers[f].stateOn) {
+        flashers[f].stateDur = riseFallTime/100 + ((255 - SEGMENT.intensity) >> 2) + hw_random8(12 + ((255 - SEGMENT.intensity) >> 1)) +1;
+      } else {
+        flashers[f].stateDur = riseFallTime/100 + hw_random8(3 + ((255 - SEGMENT.speed) >> 6)) +1;
+      }
+      flashers[f].stateStart = now16;
+      stateTime = 0;
+      if (init) {
+        flashers[f].stateStart -= riseFallTime; //start lit
+        flashers[f].stateDur = riseFallTime/100 + hw_random8(12 + ((255 - SEGMENT.intensity) >> 1)) +5; //fire up a little quicker
+        stateTime = riseFallTime;
+      }
+    }
+    if (flashers[f].stateOn && flashers[f].stateDur > maxDur) flashers[f].stateDur = maxDur; //react more quickly on intensity change
+    if (stateTime > riseFallTime) stateTime = riseFallTime; //for flasher brightness calculation, fades in first 255 ms of state
+    unsigned fadeprog = 255 - ((stateTime * 255) / riseFallTime);
+    uint8_t flasherBri = (flashers[f].stateOn) ? 255-gamma8(fadeprog) : gamma8(fadeprog);
+    unsigned lastR = PRNG16;
+    unsigned diff = 0;
+    while (diff < 0x4000) { //make sure colors of two adjacent LEDs differ enough
+      PRNG16 = (uint16_t)(PRNG16 * 2053) + 1384; //next 'random' number
+      diff = (PRNG16 > lastR) ? PRNG16 - lastR : lastR - PRNG16;
+    }
+    SEGMENT.setPixelColor(f, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(PRNG16 >> 8, false, false, 0), flasherBri));
+  }
+}
+#undef gamma8
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1065,7 +1124,8 @@ static const RefCase refs[]={
     {109,mode_phased_noise,"Phased Noise"},
     {63,mode_pride_2015,"Pride 2015"},
     {67,mode_colorwaves,"Colorwaves"},
-    {49,mode_fairy,"Fairy"}
+    {49,mode_fairy,"Fairy"},
+    {51,mode_fairytwinkle,"Fairytwinkle"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -1116,7 +1176,7 @@ int main() {
             }
         }
     }
-    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (palette=0, RGB, no gamma; Fairy uses synchronized test RNG)\n",
+    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (palette=0, RGB, no gamma; Fairy/Fairytwinkle use synchronized test RNG and default gamma=2.2)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
     return 0;
 }
