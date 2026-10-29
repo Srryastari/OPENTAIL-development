@@ -245,7 +245,8 @@ static uint32_t gamma32inv(uint32_t color) { return color; }
 
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
-    bool check2=false;
+    bool check1=false,check2=false,check3=false;
+    void fade_out(uint8_t) { std::abort(); } // unsupported controls fail closed
     uint16_t offset=0u;
     unsigned nrOfVStrips() const {return 1u;}
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
@@ -294,6 +295,9 @@ static PinnedSeg* current_segment=nullptr;
 static PinnedEnv* current_environment=nullptr;
 static PinnedClock strip;
 #define millis() strip.now
+static inline uint8_t scale8(uint8_t i,uint8_t scale) {
+    return (uint8_t)(((uint16_t)i*(1u+(uint16_t)scale))>>8);
+}
 static inline uint16_t scale16(uint16_t i,uint16_t scale) {
     return (uint16_t)(((uint32_t)i*(1u+(uint32_t)scale))>>16);
 }
@@ -1338,6 +1342,100 @@ void mode_halloween_eyes()
   }
 }
 
+// BEGIN UPSTREAM FX.cpp Rolling Balls, unchanged source body.
+typedef struct RollingBall {
+  unsigned long lastBounceUpdate;
+  float mass; // could fix this to be = 1. if memory is an issue
+  float velocity;
+  float height;
+} rball_t;
+
+static void mode_rolling_balls(void) {
+  //allocate segment data
+  const unsigned maxNumBalls = 16; // 255/16 + 1
+  unsigned dataSize = sizeof(rball_t) * maxNumBalls;
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  rball_t *balls = reinterpret_cast<rball_t *>(SEGENV.data);
+
+  // number of balls based on intensity setting to max of 16 (cycles colors)
+  // non-chosen color is a random color
+  unsigned numBalls = SEGMENT.intensity/16 + 1;
+  bool hasCol2 = SEGCOLOR(2);
+
+  if (SEGENV.call == 0) {
+    SEGMENT.fill(hasCol2 ? BLACK : SEGCOLOR(1));                    // start clean
+    for (unsigned i = 0; i < maxNumBalls; i++) {
+      balls[i].lastBounceUpdate = strip.now;
+      balls[i].velocity = 20.0f * float(hw_random16(1000, 10000))/10000.0f;  // number from 1 to 10
+      if (hw_random8()<128) balls[i].velocity = -balls[i].velocity;    // 50% chance of reverse direction
+      balls[i].height = (float(hw_random16(0, 10000)) / 10000.0f);     // from 0. to 1.
+      balls[i].mass   = (float(hw_random16(1000, 10000)) / 10000.0f);  // from .1 to 1.
+    }
+  }
+
+  float cfac = float(scale8(8, 255-SEGMENT.speed) +1)*20000.0f; // this uses the Aircoookie conversion factor for scaling time using speed slider
+
+  if (SEGMENT.check3) SEGMENT.fade_out(250); // 2-8 pixel trails (optional)
+  else {
+  	if (!SEGMENT.check2) SEGMENT.fill(hasCol2 ? BLACK : SEGCOLOR(1)); // don't fill with background color if user wants to see trails
+  }
+
+  for (unsigned i = 0; i < numBalls; i++) {
+    float timeSinceLastUpdate = float((strip.now - balls[i].lastBounceUpdate))/cfac;
+    float thisHeight = balls[i].height + balls[i].velocity * timeSinceLastUpdate; // this method keeps higher resolution
+    // test if intensity level was increased and some balls are way off the track then put them back
+    if (thisHeight < -0.5f || thisHeight > 1.5f) {
+      thisHeight = balls[i].height = (float(hw_random16(0, 10000)) / 10000.0f); // from 0. to 1.
+      balls[i].lastBounceUpdate = strip.now;
+    }
+    // check if reached ends of the strip
+    if ((thisHeight <= 0.0f && balls[i].velocity < 0.0f) || (thisHeight >= 1.0f && balls[i].velocity > 0.0f)) {
+      balls[i].velocity = -balls[i].velocity; // reverse velocity
+      balls[i].lastBounceUpdate = strip.now;
+      balls[i].height = thisHeight;
+    }
+    // check for collisions
+    if (SEGMENT.check1) {
+      for (unsigned j = i+1; j < numBalls; j++) {
+        if (balls[j].velocity != balls[i].velocity) {
+          //  tcollided + balls[j].lastBounceUpdate is acutal time of collision (this keeps precision with long to float conversions)
+          float tcollided = (cfac*(balls[i].height - balls[j].height) +
+                balls[i].velocity*float(balls[j].lastBounceUpdate - balls[i].lastBounceUpdate))/(balls[j].velocity - balls[i].velocity);
+
+          if ((tcollided > 2.0f) && (tcollided < float(strip.now - balls[j].lastBounceUpdate))) { // 2ms minimum to avoid duplicate bounces
+            balls[i].height = balls[i].height + balls[i].velocity*(tcollided + float(balls[j].lastBounceUpdate - balls[i].lastBounceUpdate))/cfac;
+            balls[j].height = balls[i].height;
+            balls[i].lastBounceUpdate = (unsigned long)(tcollided + 0.5f) + balls[j].lastBounceUpdate;
+            balls[j].lastBounceUpdate = balls[i].lastBounceUpdate;
+            float vtmp = balls[i].velocity;
+            balls[i].velocity = ((balls[i].mass - balls[j].mass)*vtmp              + 2.0f*balls[j].mass*balls[j].velocity)/(balls[i].mass + balls[j].mass);
+            balls[j].velocity = ((balls[j].mass - balls[i].mass)*balls[j].velocity + 2.0f*balls[i].mass*vtmp)             /(balls[i].mass + balls[j].mass);
+            thisHeight = balls[i].height + balls[i].velocity*(strip.now - balls[i].lastBounceUpdate)/cfac;
+          }
+        }
+      }
+    }
+
+    uint32_t color = SEGCOLOR(0);
+    if (SEGMENT.palette) {
+      //color = SEGMENT.color_wheel(i*(256/MAX(numBalls, 8)));
+      color = SEGMENT.color_from_palette(i*255/numBalls, false, PALETTE_SOLID_WRAP, 0);
+    } else if (hasCol2) {
+      color = SEGCOLOR(i % NUM_COLORS);
+    }
+
+    if (thisHeight < 0.0f) thisHeight = 0.0f;
+    if (thisHeight > 1.0f) thisHeight = 1.0f;
+    unsigned pos = round(thisHeight * (SEGLEN - 1));
+    SEGMENT.setPixelColor(pos, color);
+    balls[i].lastBounceUpdate = strip.now;
+    balls[i].height = thisHeight;
+  }
+}
+
+// END UPSTREAM FX.cpp Rolling Balls.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1380,7 +1478,8 @@ static const RefCase refs[]={
     {49,mode_fairy,"Fairy"},
     {51,mode_fairytwinkle,"Fairytwinkle"},
     {91,mode_bouncing_balls,"Bouncing Balls"},
-    {82,mode_halloween_eyes,"Halloween Eyes"}
+    {82,mode_halloween_eyes,"Halloween Eyes"},
+    {48,mode_rolling_balls,"Rolling Balls"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
