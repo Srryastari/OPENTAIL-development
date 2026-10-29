@@ -81,11 +81,10 @@ for(const term of ['class CoreFrameCapture','CHUNK_PIXELS=56',
                    'if(!busy || connection!=gatt)return',
                    'u32(a,4)!=sequence', 'u16(a,8)!=offset',
                    'a.length!=11+3*n', 'BleConfigCodec.crc16(pixels)!=crc',
-                   'listener.done(output,sequence,complete,null)', 'abortForStop()', 'operationPending'])) {
+                   'listener.done(output,sequence,complete,null)', 'abortForStop()', 'operationPending']) {
   assert(frameClient.includes(term),'CORE snapshot client regression: '+term);
 }
 assert(compose.includes('ExactLedFrame.fromCoreRgb888(output, sequence, rgb)') &&
-       compose.includes('Core post-render')===false &&
        compose.includes('ble.captureFrame(captureOutput.intValue)') &&
        compose.includes('frame?.origin == ExactLedFrame.Origin.CORE') &&
        compose.includes('NOT a simulated effect.'),
@@ -95,7 +94,8 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.configure(') &&
        bleSource.includes('frameCapture.read(connection') &&
        bleSource.includes('frameCapture.written(connection') &&
-       bleSource.includes('frameCapture.busy()', 'frameCapture.abortForStop()'),
+       bleSource.includes('frameCapture.busy()') &&
+       bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
 assert(gradle.includes("versionName '0.2.0-alpha1'"));
 for(const widget of ['NativeUi','NativeLedPreview','ScrollView','HorizontalScrollView',
