@@ -76,7 +76,11 @@ enum {
     OT_WLED_SCANNER_DUAL = 60,
     OT_WLED_SINELON = 92,
     OT_WLED_SINELON_DUAL = 93,
-    OT_WLED_SINELON_RAINBOW = 94
+    OT_WLED_SINELON_RAINBOW = 94,
+    OT_WLED_TWINKLE = 17,
+    OT_WLED_CHASE_FLASH_RANDOM = 32,
+    OT_WLED_MULTI_COMET = 59,
+    OT_WLED_CHUNCHUN = 111
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -113,6 +117,7 @@ typedef struct {
     uint32_t rng_state;     /* Software RNG state for source-driven random modes */
     uint32_t held_rng_seed; /* Reproduce Fire Flicker frame between WLED updates */
     ot_wled_oscillator_t oscillators[3]; /* 3 source-owned bars, per zone */
+    uint16_t comet_positions[8];  /* WLED MAX_COMETS 1D source-owned */
 } ot_wled_fx_state_t;
 
 typedef struct {
