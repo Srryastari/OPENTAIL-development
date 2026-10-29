@@ -251,6 +251,35 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
+// A completed BLE frame can arrive after a palette/effect/zone edit or after
+// output switching. Prevent that older frame from being displayed as current.
+const captureCallback=compose.split('ble.setFrameListener { output, sequence, rgb, error ->')[1]
+  ?.split('ble.setScanResultListener')[0];
+assert(captureCallback && captureCallback.includes('pendingFrameRevision != frameRevision') &&
+       captureCallback.includes('pendingFrameOutput != output') &&
+       captureCallback.includes('offlinePreview.value') &&
+       captureCallback.includes('!ble.canCaptureFrame()') &&
+       captureCallback.includes('return@runOnUiThread') &&
+       captureCallback.includes('pendingFrameRevision = -1L'),
+       'Stale or unauthorized asynchronous RGB frames must be rejected before display');
+for (const expected of ['private fun invalidateCoreFrame()', 'pendingFrameRevision = -1L',
+  'pendingFrameOutput = -1', 'frameRevision++', 'invalidateCoreFrame() // local design changes',
+  'invalidateCoreFrame() // any parameter change', 'invalidateCoreFrame() // palette is NOT',
+  'invalidateCoreFrame() // the saved/readback output may have changed',
+  'if (ble.captureFrame(captureOutput.intValue))', 'pendingFrameRevision = frameRevision',
+  'pendingFrameOutput = captureOutput.intValue']) {
+  assert(compose.includes(expected),'CORE frame invalidation or capture admission regressed: '+expected);
+}
+assert(compose.includes('captureOutput.intValue = 0; invalidateCoreFrame()') &&
+       compose.includes('captureOutput.intValue = 1; invalidateCoreFrame()') &&
+       compose.includes('private fun enterOfflinePreview()') &&
+       compose.includes('invalidateCoreFrame()\n        if (liveArmed.value)') &&
+       bleSource.includes('private volatile boolean frameCallbackPending=false;') &&
+       bleSource.includes('boolean captureFrame(int output)') &&
+       bleSource.includes('frameCapture.busy() || frameCallbackPending') &&
+       bleSource.includes('finally {frameCallbackPending=false;}'),
+       'Capture completion must serialize with new requests and STOP/output/offline changes');
+
 assert(!compose.includes('ble.setPalette(') && !compose.includes('ble.sendPalette(') &&
        !palettes.includes('WLED firmware'), 'Unadvertised firmware palette writes or branding');
 assert(compose.includes('Preview unavailable') && compose.includes('shared option is off') &&
