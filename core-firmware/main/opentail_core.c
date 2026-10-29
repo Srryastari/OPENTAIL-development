@@ -49,7 +49,7 @@
  * actual pixel length, transfer backend and render processing time. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
-extern void ot_ble_start(void);
+extern bool ot_ble_start(void);
 extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
@@ -78,6 +78,7 @@ static ot_show_t native_show={0};
 static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
+static bool ble_startup_ready=false; /* Set once before render task creation. */
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
@@ -1492,7 +1493,7 @@ static void led_task(void *p) {
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && !boot_frame_verified)
+           if(full_frame && ble_startup_ready && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
@@ -1559,7 +1560,8 @@ void app_main(void) {
     wifi_ap_init();
     om_write_mutex=xSemaphoreCreateMutex();
     if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
-    ot_ble_start();
+    ble_startup_ready=ot_ble_start();
+    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
     http_start();
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
