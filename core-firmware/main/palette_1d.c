@@ -10,7 +10,8 @@ bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette){
     effect_id==OT_WLED_PALETTE||effect_id==OT_WLED_TWINKLEFOX||
     effect_id==OT_WLED_TWINKLECAT||effect_id==OT_WLED_AURORA||
     effect_id==OT_WLED_COLORTWINKLE||
-    effect_id==OT_WLED_SLOW_TRANSITION)
+    effect_id==OT_WLED_SLOW_TRANSITION||
+    effect_id==OT_WLED_DANCING_SHADOWS)
    return palette>=2u&&palette<=72u;
  return effect_id==OT_FX_EMBERS&&(palette==2u||palette==3u||palette==4u);
 }
