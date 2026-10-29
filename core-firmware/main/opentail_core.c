@@ -89,7 +89,7 @@ static ot_ble_fx_packet_t ble_fx_request={0};
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
-static uint16_t om_revision[OT_OM_OUTPUTS]={1,1};
+static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
 static bool tm_persistent=false;
@@ -1546,6 +1546,7 @@ static void led_task(void *p) {
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
     om_load();
     tm_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
