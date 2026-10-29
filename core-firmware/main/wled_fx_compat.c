@@ -212,6 +212,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FAIRYTWINKLE, "Fairytwinkle", "Fairytwinkle@!,!;!,!;!;;m12=0",
      true, true, true, true, false},
     {OT_WLED_BOUNCING_BALLS, "Bouncing Balls", "Bouncing Balls@Gravity,# of balls,,,,,Overlay;!,!,!;!;1;m12=1",
+     true, true, true, true, false},
+    {OT_WLED_HALLOWEEN_EYES, "Halloween Eyes", "Halloween Eyes@Duration,Gap,,,,,Overlay;!,!;!",
      true, true, true, true, false}
 };
 
@@ -2324,6 +2326,102 @@ static void bouncing_balls_frame(const ot_wled_fx_config_t *cfg,
     }
 }
 
+/* FX.cpp mode_halloween_eyes(): source 1D eye positions, fade, blink,
+ * and on/off transitions. The RGB profile uses palette=0 (primary eye
+ * color), no matrix or overlay options. Eye state belongs to the zone's
+ * existing scratch storage; random draws use CORE's seeded zone stream. */
+typedef struct {
+    uint8_t state;
+    uint8_t color;
+    uint16_t start_pos;
+    uint16_t duration;
+    uint32_t start_time;
+    uint32_t blink_end_time;
+} ot_halloween_eyes_data_t;
+_Static_assert(sizeof(ot_halloween_eyes_data_t)==16u,
+               "Pinned WLED EyeData must remain 16 bytes");
+
+static void halloween_eyes_frame(const ot_wled_fx_config_t *cfg,
+                                  ot_wled_fx_state_t *state,uint32_t now,
+                                  ot_wled_rgb_t *pixels,size_t count) {
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    unsigned eye_space=(unsigned)(count>>5);
+    if(eye_space<2u)eye_space=2u;
+    const unsigned eye_width=eye_space/2u;
+    const unsigned eye_length=2u*eye_width+eye_space;
+    if(count<=1u || eye_length>=count) {
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    ot_halloween_eyes_data_t *data=
+       (ot_halloween_eyes_data_t*)fx_zone_scratch(state,sizeof(*data));
+    if(!data) {
+        for(size_t i=0;i<count;i++)pixels[i]=fg;
+        return;
+    }
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    data->state=(uint8_t)(data->state%5u);
+    unsigned duration=data->duration?data->duration:1u;
+    const uint32_t elapsed=(uint32_t)(now-data->start_time);
+    switch(data->state) {
+      case 0u: /* initializeOn, then immediately render on */
+        data->start_pos=(uint16_t)fx_rand_index(
+                            state,count-(size_t)eye_length-1u);
+        data->color=fx_rand8(state,256u);
+        duration=128u+fx_rand_index(state,(size_t)cfg->intensity*64u);
+        data->duration=(uint16_t)duration;
+        data->state=1u;
+        /* fall through */
+      case 1u: { /* on */
+        const unsigned second=(unsigned)data->start_pos+eye_width+eye_space;
+        const unsigned limit=128u+(unsigned)cfg->intensity*64u;
+        if(duration>limit)duration=limit;
+        const uint32_t fade=((uint32_t)(elapsed*2048u))/duration;
+        ot_wled_rgb_t c=fg;
+        if(fade<256u)c=scaled(blend_colors(cfg->background,cfg->foreground,
+                                          (uint8_t)fade),cfg->brightness);
+        else if(elapsed>1024u) {
+            const uint32_t remaining=elapsed>=duration?0u:duration-elapsed;
+            if(remaining>1024u && fx_rand8(state,256u)<4u) {
+                c=bg;data->state=2u;
+                data->blink_end_time=now+8u+fx_rand8(state,120u);
+            }
+        }
+        if(c.r!=bg.r||c.g!=bg.g||c.b!=bg.b) {
+            for(unsigned i=0;i<eye_width;i++) {
+                pixels[data->start_pos+i]=c;
+                pixels[second+i]=c;
+            }
+        }
+        break;
+      }
+      case 2u: /* blink */
+        if(now>=data->blink_end_time)data->state=1u;
+        break;
+      case 3u: { /* initializeOff, then fall through */
+        const unsigned base=(unsigned)cfg->speed*128u;
+        duration=base+fx_rand_index(state,base);
+        data->duration=(uint16_t)duration;
+        data->state=4u;
+        /* fall through */
+      }
+      case 4u: { /* off */
+        const unsigned limit=(unsigned)cfg->speed*256u;
+        if(duration>limit)duration=limit;
+        break;
+      }
+      default:
+        data->state=0u;
+        break;
+    }
+    if(elapsed>duration) {
+        data->state=(data->state==0u||data->state==1u||data->state==2u)
+                    ?3u:0u;
+        data->start_time=now;
+    }
+}
+
 static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
 
 /* WLED FX.cpp Fairy uses a four-byte flasher per active sparkle. Reuse
@@ -2996,6 +3094,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_ANDROID) {
         android_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
+        halloween_eyes_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_BOUNCING_BALLS) {
