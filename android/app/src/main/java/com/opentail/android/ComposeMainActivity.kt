@@ -962,6 +962,34 @@ class ComposeMainActivity : ComponentActivity() {
                 draftText = updated.toString()
             }.onFailure { outputMessage.value = "Invalid draft: " + (it.message ?: "input") }
         }
+        // Generic live zone cursor logic. Updating any zone recomputes the
+        // output's active allocation and every downstream start automatically.
+        // This changes draft RAM only; NVS still requires confirmed Save.
+        fun adjustZone(zoneIndex: Int, newLength: Int) {
+            if (newLength !in 0..623) return
+            edit { next ->
+                val arr = next.getJSONArray("zones")
+                if (zoneIndex !in 0 until arr.length()) return@edit
+                val others = (0 until arr.length())
+                    .filter { it != zoneIndex }.sumOf { arr.getJSONObject(it).getInt("pixels") }
+                val total = others + newLength
+                if (total !in 1..623) return@edit
+                arr.getJSONObject(zoneIndex).put("pixels", newLength)
+                next.put("pixels", total)
+            }
+        }
+        fun adjustOutput(newTotal: Int) {
+            if (newTotal !in 1..623) return
+            edit { next ->
+                val arr = next.getJSONArray("zones")
+                if (arr.length() == 0) return@edit
+                val others = (0 until arr.length() - 1)
+                    .sumOf { arr.getJSONObject(it).getInt("pixels") }
+                if (newTotal < others) return@edit
+                arr.getJSONObject(arr.length() - 1).put("pixels", newTotal - others)
+                next.put("pixels", newTotal)
+            }
+        }
 
         Panel(t) {
             Title("CORE Output Manager", t)
@@ -982,17 +1010,22 @@ class ComposeMainActivity : ComponentActivity() {
         val zones = draft.optJSONArray("zones") ?: JSONArray()
         val pixelCount = draft.optInt("pixels", 0)
         val assigned = (0 until zones.length()).sumOf { zones.optJSONObject(it)?.optInt("pixels", 0) ?: 0 }
+        var outputCountText by remember(index, outputs[index]) {
+            mutableStateOf(outputs[index]?.optInt("pixels", 1)?.toString() ?: "1")
+        }
         Panel(t) {
             Text("Output " + (index + 1), color = t.fg, fontWeight = FontWeight.Bold)
             Field(draft.optString("name"), "Output name", t) { value ->
                 edit { it.put("name", value) }
             }
             Caption("Pixel allocation (1–623; temporary firmware limit)", t)
-            Field(pixelCount.toString(), "Pixel count", t) { value ->
-                edit { it.put("pixels", value.toIntOrNull() ?: -1) }
+            Field(outputCountText, "Pixel count", t) { value ->
+                outputCountText = value.filter(Char::isDigit).take(3)
+                outputCountText.toIntOrNull()?.let(::adjustOutput)
             }
-            ValueSlider("Pixels", pixelCount.coerceIn(1, 623), 623, t) { n ->
-                edit { it.put("pixels", n.coerceAtLeast(1)) }
+            ValueSlider("Total output pixels", pixelCount.coerceIn(1, 623), 623, t) { newCount ->
+                adjustOutput(newCount.coerceAtLeast(1))
+                outputCountText = newCount.coerceAtLeast(1).toString()
             }
             Caption("Color order · set this for the actual connected LED strips", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -1010,6 +1043,9 @@ class ComposeMainActivity : ComponentActivity() {
             val from = cursor
             val count = zone.optInt("pixels", 0)
             cursor += count
+            var zoneCountText by remember(index, i, outputs[index]) {
+                mutableStateOf(zone.optInt("pixels", 0).toString())
+            }
             Panel(t) {
                 Text("Zone " + (i + 1), color = t.fg, fontWeight = FontWeight.SemiBold)
                 Caption("Start " + from + " · end " + (if (count > 0) cursor - 1 else "empty") +
@@ -1017,9 +1053,18 @@ class ComposeMainActivity : ComponentActivity() {
                 Field(zone.optString("name"), "Zone name", t) { value ->
                     edit { it.getJSONArray("zones").getJSONObject(i).put("name", value) }
                 }
-                Field(count.toString(), "Zone pixel count", t) { value ->
-                    edit { it.getJSONArray("zones").getJSONObject(i)
-                        .put("pixels", value.toIntOrNull() ?: -1) }
+                Field(zoneCountText, "Zone pixel count", t) { value ->
+                    zoneCountText = value.filter(Char::isDigit).take(3)
+                    zoneCountText.toIntOrNull()?.let { n ->
+                        adjustZone(i, n)
+                        outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
+                    }
+                }
+                ValueSlider("Next start · zero-based", cursor.coerceIn(0, 623), 623, t) { nextStart ->
+                    val n = (nextStart - from).coerceAtLeast(0)
+                    adjustZone(i, n)
+                    zoneCountText = n.toString()
+                    outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
                 Caption("Lighting role (only CORE assigns trigger priority)", t)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
