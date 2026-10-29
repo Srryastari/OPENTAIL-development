@@ -187,7 +187,17 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_RAIN, "Rain", "Rain@,Frequency;!,!;!;12;ix=192,pal=11",
      true, true, true, true, false},
     {OT_WLED_JUGGLE, "Juggle", "Juggle@!,Trail;;!;;sx=64,ix=128",
-     true, true, true, true, false}
+     true, true, true, true, false},
+    {OT_WLED_FILL_NOISE, "Fill Noise", "Fill Noise@!,Scale;;!",
+     true, false, true, true, false},
+    {OT_WLED_NOISE_1, "Noise 1", "Noise 1@!,Scale;;!",
+     true, false, true, true, false},
+    {OT_WLED_NOISE_2, "Noise 2", "Noise 2@!,Scale;;!",
+     true, false, true, true, false},
+    {OT_WLED_NOISE_3, "Noise 3", "Noise 3@!,Scale;;!",
+     true, false, true, true, false},
+    {OT_WLED_NOISE_4, "Noise 4", "Noise 4@!,Scale;;!",
+     true, false, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2210,6 +2220,233 @@ static void juggle_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
 }
 
+
+/*
+ * Verbatim integer Perlin gradient/smoothing algorithms from pinned WLED
+ * util.cpp, renamed to avoid C++ overloads. Shared by five FX.cpp modes.
+ * Source EUPL-1.2-or-later (see upstream copyright notice).
+ * Core palette=0 still uses primary FG; colored gradients come later.
+ */
+#define PERLIN_SHIFT 1
+static inline int32_t hashToGradient(uint32_t h) {
+  // using more steps yields more "detailed" perlin noise but looks less like the original fastled version (adjust PERLIN_SHIFT to compensate, also changes range and needs proper adustment)
+  // return (h & 0xFF) - 128; // use PERLIN_SHIFT 7
+  // return (h & 0x0F) - 8; // use PERLIN_SHIFT 3
+  // return (h & 0x07) - 4; // use PERLIN_SHIFT 2
+  return (h & 0x03) - 2; // use PERLIN_SHIFT 1 -> closest to original fastled version
+}
+
+static inline int32_t gradient1D(uint32_t x0, int32_t dx) {
+  uint32_t h = x0 * 0x27D4EB2D;
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  h ^= h >> 7;
+  return (hashToGradient(h) * dx) >> PERLIN_SHIFT;
+}
+
+static inline int32_t gradient2D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy) {
+  uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D);
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  return (hashToGradient(h) * dx + hashToGradient(h>>PERLIN_SHIFT) * dy) >> (1 + PERLIN_SHIFT);
+}
+
+static inline int32_t gradient3D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy, uint32_t z0, int32_t dz) {
+  // fast and good entropy hash from corner coordinates
+  uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D) ^ (z0 * 0x1B56C4E9);
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  return ((hashToGradient(h) * dx + hashToGradient(h>>(1+PERLIN_SHIFT)) * dy + hashToGradient(h>>(1 + 2*PERLIN_SHIFT)) * dz) * 85) >> (8 + PERLIN_SHIFT); // scale to 16bit, x*85 >> 8 = x/3
+}
+
+static uint32_t smoothstep(const uint32_t t) {
+  uint32_t t_squared = (t * t) >> 16;
+  uint32_t factor = (3 << 16) - ((t << 1));
+  return (t_squared * factor) >> 18; // scale to avoid overflows and give best resolution
+}
+
+static inline int32_t lerpPerlin(int32_t a, int32_t b, int32_t t) {
+    return a + (((b - a) * t) >> 14); // match scaling with smoothstep to yield 16.16bit values
+}
+
+static int32_t fx_perlin1D_raw(uint32_t x, bool is16bit) {
+  // integer and fractional part coordinates
+  int32_t x0 = x >> 16;
+  int32_t x1 = x0 + 1;
+  if(is16bit) x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  // gradient values for the two corners
+  int32_t g0 = gradient1D(x0, dx0);
+  int32_t g1 = gradient1D(x1, dx1);
+  // interpolate and smooth function
+  int32_t tx = smoothstep(dx0);
+  int32_t noise = lerpPerlin(g0, g1, tx);
+  return noise;
+}
+
+static int32_t fx_perlin2D_raw(uint32_t x, uint32_t y, bool is16bit) {
+  int32_t x0 = x >> 16;
+  int32_t y0 = y >> 16;
+  int32_t x1 = x0 + 1;
+  int32_t y1 = y0 + 1;
+
+  if(is16bit) {
+    x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+    y1 = y1 & 0xFF;
+  }
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dy0 = y & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  int32_t dy1 = dy0 - 0x10000;
+
+  int32_t g00 = gradient2D(x0, dx0, y0, dy0);
+  int32_t g10 = gradient2D(x1, dx1, y0, dy0);
+  int32_t g01 = gradient2D(x0, dx0, y1, dy1);
+  int32_t g11 = gradient2D(x1, dx1, y1, dy1);
+
+  uint32_t tx = smoothstep(dx0);
+  uint32_t ty = smoothstep(dy0);
+
+  int32_t nx0 = lerpPerlin(g00, g10, tx);
+  int32_t nx1 = lerpPerlin(g01, g11, tx);
+
+  int32_t noise = lerpPerlin(nx0, nx1, ty);
+  return noise;
+}
+
+static int32_t fx_perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit) {
+  int32_t x0 = x >> 16;
+  int32_t y0 = y >> 16;
+  int32_t z0 = z >> 16;
+  int32_t x1 = x0 + 1;
+  int32_t y1 = y0 + 1;
+  int32_t z1 = z0 + 1;
+
+  if(is16bit) {
+    x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+    y1 = y1 & 0xFF;
+    z1 = z1 & 0xFF;
+  }
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dy0 = y & 0xFFFF;
+  int32_t dz0 = z & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  int32_t dy1 = dy0 - 0x10000;
+  int32_t dz1 = dz0 - 0x10000;
+
+  int32_t g000 = gradient3D(x0, dx0, y0, dy0, z0, dz0);
+  int32_t g001 = gradient3D(x0, dx0, y0, dy0, z1, dz1);
+  int32_t g010 = gradient3D(x0, dx0, y1, dy1, z0, dz0);
+  int32_t g011 = gradient3D(x0, dx0, y1, dy1, z1, dz1);
+  int32_t g100 = gradient3D(x1, dx1, y0, dy0, z0, dz0);
+  int32_t g101 = gradient3D(x1, dx1, y0, dy0, z1, dz1);
+  int32_t g110 = gradient3D(x1, dx1, y1, dy1, z0, dz0);
+  int32_t g111 = gradient3D(x1, dx1, y1, dy1, z1, dz1);
+
+  uint32_t tx = smoothstep(dx0);
+  uint32_t ty = smoothstep(dy0);
+  uint32_t tz = smoothstep(dz0);
+
+  int32_t nx0 = lerpPerlin(g000, g100, tx);
+  int32_t nx1 = lerpPerlin(g010, g110, tx);
+  int32_t nx2 = lerpPerlin(g001, g101, tx);
+  int32_t nx3 = lerpPerlin(g011, g111, tx);
+  int32_t ny0 = lerpPerlin(nx0, nx1, ty);
+  int32_t ny1 = lerpPerlin(nx2, nx3, ty);
+
+  int32_t noise = lerpPerlin(ny0, ny1, tz);
+  return noise;
+}
+
+static uint16_t fx_perlin16_1(uint32_t x) {
+  return ((fx_perlin1D_raw(x, false) * 1159) >> 10) + 32803; //scale to 16bit and offset (fastled range: about 4838 to 60766)
+}
+
+static uint16_t fx_perlin16_2(uint32_t x, uint32_t y) {
+ return ((fx_perlin2D_raw(x, y, false) * 1537) >> 10) + 32725; //scale to 16bit and offset (fastled range: about 1748 to 63697)
+}
+
+static uint16_t fx_perlin16_3(uint32_t x, uint32_t y, uint32_t z) {
+  return ((fx_perlin3D_raw(x, y, z, false) * 1731) >> 10) + 33147; //scale to 16bit and offset (fastled range: about 4766 to 60840)
+}
+
+static uint8_t fx_perlin8_1(uint16_t x) {
+  return (((fx_perlin1D_raw((uint32_t)x << 8, true) * 1353) >> 10) + 32769) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+
+static uint8_t fx_perlin8_2(uint16_t x, uint16_t y) {
+  return (((fx_perlin2D_raw((uint32_t)x << 8, (uint32_t)y << 8, true) * 1620) >> 10) + 32771) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+#undef PERLIN_SHIFT
+
+/* Upstream FX.cpp Fill Noise, Noise 1–4 1D source animations. No WLED
+ * runtime, Arduino global state or external LED bus is linked. */
+static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               uint32_t old_call,ot_wled_rgb_t *pixels,
+                               size_t count) {
+    if(cfg->effect_id==OT_WLED_FILL_NOISE) {
+        if(old_call==0u)state->step=fx_prng(state);
+        for(size_t i=0;i<count;i++) {
+            const uint8_t index=fx_perlin8_2((uint16_t)((uint32_t)i*count),
+                                   (uint16_t)(state->step+(uint32_t)i*count));
+            (void)index;
+            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        }
+        state->step+=fx_beatsin8(cfg->speed,1u,6u,now);
+        return;
+    }
+    if(cfg->effect_id==OT_WLED_NOISE_1) {
+        state->step+=(uint32_t)(1u+cfg->speed/16u);
+        const uint32_t shift_x=fx_beatsin8(11u,0u,255u,now);
+        for(size_t i=0;i<count;i++) {
+            const uint32_t sx=((uint32_t)i+shift_x)*320u;
+            const uint32_t sy=((uint32_t)i+state->step/42u)*320u;
+            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step)>>8);
+            const uint8_t index=wled_sin8((uint8_t)(noise*3u));
+            (void)index;
+            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        }
+        return;
+    }
+    if(cfg->effect_id==OT_WLED_NOISE_2) {
+        state->step+=1u+((uint32_t)cfg->speed>>1);
+        for(size_t i=0;i<count;i++) {
+            const uint32_t sx=((uint32_t)i+(state->step>>6))*1000u;
+            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,0u,4223u)>>8);
+            const uint8_t index=wled_sin8((uint8_t)(noise*3u));
+            (void)index;
+            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
+        }
+        return;
+    }
+    if(cfg->effect_id==OT_WLED_NOISE_3) {
+        state->step+=1u+(uint32_t)cfg->speed;
+        for(size_t i=0;i<count;i++) {
+            const uint32_t sx=((uint32_t)i+4223u)*800u;
+            const uint32_t sy=((uint32_t)i+1234u)*800u;
+            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step*8u)>>8);
+            const uint8_t index=wled_sin8((uint8_t)(noise*3u));
+            (void)index;
+            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
+        }
+        return;
+    }
+    const uint32_t phase=(now*(uint32_t)cfg->speed)>>7;
+    for(size_t i=0;i<count;i++) {
+        const uint16_t index=fx_perlin16_2((uint32_t)i<<12,phase);
+        (void)index;
+        pixels[i]=scaled(cfg->foreground,cfg->brightness);
+    }
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -2229,6 +2466,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_FILL_NOISE ||
+       cfg->effect_id==OT_WLED_NOISE_1 ||
+       cfg->effect_id==OT_WLED_NOISE_2 ||
+       cfg->effect_id==OT_WLED_NOISE_3 ||
+       cfg->effect_id==OT_WLED_NOISE_4) {
+        perlin_noise_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_FIREWORKS) {
         fireworks_frame(cfg,state,call,pixels,count);
         return true;
