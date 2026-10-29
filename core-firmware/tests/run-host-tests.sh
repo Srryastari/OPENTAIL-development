@@ -26,6 +26,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/tes
 
 python3 tests/test_wled_catalog.py
 python3 tests/test_version_identity.py
+python3 tests/test_http_stop_contract.py
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
 
