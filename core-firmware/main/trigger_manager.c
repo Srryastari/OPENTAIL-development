@@ -18,6 +18,11 @@ int ot_tm_from_name(const char *s){
     for(int i=0;i<=OT_TM_AUX3;i++)if(strcmp(s,names[i])==0)return i;
     return -1;
 }
+uint8_t ot_tm_signal_mask_of(const char *name){
+    const int function=ot_tm_from_name(name);
+    return function>OT_TM_DISABLED && function<=OT_TM_AUX3
+        ? (uint8_t)(1u<<((unsigned)function-1u)):0u;
+}
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
     if(!ot_tm_valid(p))return 0;
     uint8_t mask=0;
