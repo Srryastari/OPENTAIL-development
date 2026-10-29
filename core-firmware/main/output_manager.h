@@ -5,10 +5,13 @@
 
 /* Two present physical RMT outputs. Twelve outputs are NOT implemented. */
 #define OT_OM_OUTPUTS 2
-/* Current prototype: two RMT outputs with up to 522 allocated pixels each.
- * These are tested-development hardware limits, not vehicle-specific zone
- * boundaries; the output manager never assumes a particular lighting shape.
- */
+/* Temporary prototype allocation: 623 addressable pixels per physical lane,
+ * 1246 pixels combined, with wholly user-configurable zones. This is NOT a
+ * permanent architectural ceiling and must never encode a vehicle layout.
+ * Capacity is a build constraint, NOT evidence of optical/FPS validation. */
+#define OT_OM_MAX_PIXELS_PER_OUTPUT 623u
+#define OT_OM_MAX_TOTAL_PIXELS (OT_OM_OUTPUTS * OT_OM_MAX_PIXELS_PER_OUTPUT)
+
 /* Inert one-pixel placeholder until an installer explicitly configures output.
  * This is not a vehicle layout nor the capacity of the hardware. */
 #define OT_OM_UNCONFIGURED_PIXELS 1u
@@ -29,7 +32,7 @@ typedef struct {
 } ot_om_zone_t;
 typedef struct {
     char name[OT_OM_NAME_LEN];
-    uint16_t active_pixels; /* 1..522 allocated per physical output in this prototype */
+    uint16_t active_pixels; /* 1..OT_OM_MAX_PIXELS_PER_OUTPUT; saved profiles preserved */
     uint8_t color_order;
     uint8_t zone_count; /* 1..8 configured zones; newly initialized device has one neutral zone */
     uint8_t rgb_gain[3]; /* per-output decorative RGB calibration, 0..255 */
