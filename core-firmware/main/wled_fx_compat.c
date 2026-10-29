@@ -226,7 +226,9 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_COLOR_CLOUDS, "Color Clouds", "Color Clouds@!,!,Clouds,Colors,Distance,,,Cozy;;!;;sx=24,ix=32,c1=48,c2=64,c3=12,pal=0",
      false, false, true, true, false},
     {OT_WLED_STARBURST, "Fireworks Starburst", "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
-     false, true, true, true, false}
+     false, true, true, true, false},
+    {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -2540,6 +2542,81 @@ static void drip_frame(const ot_wled_fx_config_t *cfg,
 
 
 
+
+/* Pinned mode_tetrix(), one virtual strip/zone. Palette=0 resolves
+ * slot zero directly to the primary color. Source's persistent frame
+ * buffer is retained for fade and partially painted brick stacks. */
+typedef struct {
+    float pos,speed;
+    uint8_t col;
+    uint16_t brick,stack;
+    uint32_t step;
+} ot_fx_tetris_t;
+_Static_assert(sizeof(ot_fx_tetris_t)==20u,"Pinned 1D Tetris state layout");
+
+static void tetrix_frame(const ot_wled_fx_config_t *cfg,
+                         ot_wled_fx_state_t *state,uint32_t now,
+                         uint32_t old_call,ot_wled_rgb_t *pixels,
+                         size_t count) {
+    if(count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    ot_fx_tetris_t *drop=(ot_fx_tetris_t*)fx_zone_scratch(
+        state,sizeof(ot_fx_tetris_t));
+    if(!drop) {
+        for(size_t i=0;i<count;i++)
+            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    if(old_call==0u) {
+        drop->stack=0u;
+        drop->step=now+2000u;
+    }
+    if(drop->step==0u) {
+        int speed=cfg->speed?
+                   (int)cfg->speed:1+(int)fx_rand8(state,254u);
+        speed=(speed-1)*(250-5000)/(255-1)+5000;
+        drop->speed=((float)count*23.0f)/(float)speed;
+        drop->pos=(float)count;
+        drop->col=(uint8_t)(fx_rand8(state,15u)<<4);
+        drop->step=1u;
+        drop->brick=(uint16_t)((cfg->intensity?
+            (((unsigned)cfg->intensity>>5)+1u):
+            (1u+fx_rand8(state,4u)))*(1u+((unsigned)count>>6)));
+    }
+    if(drop->step==1u) {
+        if((fx_rand8(state,256u)>>6)!=0u)
+            drop->step=2u;
+    }
+    if(drop->step==2u) {
+        if(drop->pos>(float)drop->stack) {
+            drop->pos-=drop->speed;
+            if((int)drop->pos<(int)drop->stack)
+                drop->pos=(float)drop->stack;
+            const unsigned start=drop->pos<0.0f?0u:(unsigned)drop->pos;
+            for(unsigned i=start;i<count;i++)
+                pixels[i]=i<start+(unsigned)drop->brick?fg:bg;
+        } else {
+            drop->step=0u;
+            drop->stack=(uint16_t)(drop->stack+drop->brick);
+            if(drop->stack>=count)drop->step=now+2000u;
+        }
+    }
+    if(drop->step>2u) {
+        drop->brick=0u;
+        if(drop->step>now) {
+            for(size_t i=0;i<count;i++)
+                pixels[i]=blend_colors(pixels[i],bg,25u);
+        } else {
+            drop->stack=0u;
+            drop->step=0u;
+        }
+    }
+}
+
 /* Exact pinned 1D mode_starburst structure and frame evolution.
  * ESP32-S3 PSRAM source star budget on a single active zone is
  * min(1+N/8,4096/60).
@@ -3568,6 +3645,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if(cfg->effect_id==OT_WLED_HALLOWEEN_EYES) {
         halloween_eyes_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_TETRIX) {
+        tetrix_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_STARBURST) {
