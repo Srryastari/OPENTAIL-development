@@ -1,4 +1,4 @@
-/* OpenTail CORE Alpha 0.1.27 — 522-pixel + status semantics, NOT vehicle lighting firmware.
+/* OpenTail CORE Alpha — universal 623-pixel/lane temporary bench cap, not road firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
  * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
  */
@@ -42,7 +42,7 @@
 #include "esp_timer.h"
 
 #define OT_FW OT_FW_VERSION
-#define OT_TARGET_FPS 62u
+#define OT_TARGET_FPS 50u /* 623 WS2815 pixels require 18.69 ms on-wire; 53.5 FPS is ideal-only */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
 extern void ot_ble_start(void);
@@ -301,6 +301,7 @@ static esp_err_t om_get(httpd_req_t *r){
     cJSON_AddNumberToObject(obj,"physical_outputs",2);
     cJSON_AddNumberToObject(obj,"future_outputs_target",12);
     cJSON_AddNumberToObject(obj,"allocated_pixels_per_output",OT_CHAIN_PIXELS);
+    cJSON_AddNumberToObject(obj,"max_total_pixels",OT_OM_MAX_TOTAL_PIXELS);
     cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES);
     cJSON_AddBoolToObject(obj,"dynamic_zones",true);
     cJSON_AddNumberToObject(obj,"effective_mask",mask);
@@ -356,7 +357,7 @@ static esp_err_t om_post(httpd_req_t *r){
     }
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
-    if(!valid)return respond_err(r,400,"invalid output mapping: 1-8 zones must sum to 1..522 active pixels");
+    if(!valid)return respond_err(r,400,"invalid output mapping: 1-8 zones must sum to 1..623 active pixels");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
     TickType_t now=xTaskGetTickCount();
@@ -957,14 +958,14 @@ static esp_err_t status_get(httpd_req_t *r) {
       ot_zone_mode_name(ot_arb_zone(&arb,1,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)));
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
     snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
-       OT_FW,OT_SMALL_BENCH_LAYOUT?"30-pixel-bench":"universal-522-bench",
+       OT_FW,OT_SMALL_BENCH_LAYOUT?"30-pixel-bench":"universal-1246-bench",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)measured_fps,(unsigned)OT_TARGET_FPS,(unsigned)layout.chain_pixels,(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":62,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":50,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -1140,7 +1141,7 @@ static bool strip_init(void) {
         const led_strip_rmt_config_t rmt={
             .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
             /* ESP32-S3 DMA uses this as its DMA buffer size. 64 symbols forced
-             * frequent refills on a 522-pixel stream; 1024 is Espressif's
+             * frequent refills on long pixel streams; 1024 is Espressif's
              * documented example for lower CPU overhead and better throughput.
              * Output 2 stays on its independently tested non-DMA setting. */
             .mem_block_symbols=(ch==0?1024:64),
@@ -1282,7 +1283,7 @@ static void led_task(void *p) {
                    c=ot_om_swizzle(c,output->color_order);
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }
-               // Driver reserves 522 pixels per channel; unused pixels remain black.
+               // Driver reserves 623 pixels per channel; unused pixels remain black.
                ESP_ERROR_CHECK(led_strip_refresh_async(strip[ch]));
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
