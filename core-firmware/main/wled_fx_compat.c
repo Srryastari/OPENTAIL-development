@@ -222,6 +222,8 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_DRIP, "Drip", "Drip@Gravity,# of drips,,,,,Overlay;!,!;!;;m12=1",
      true, true, true, true, false},
     {OT_WLED_TV_SIMULATOR, "TV Simulator", "TV Simulator@!,!;;!;01",
+     false, false, true, true, false},
+    {OT_WLED_COLOR_CLOUDS, "Color Clouds", "Color Clouds@!,!,Clouds,Colors,Distance,,,Cozy;;!;;sx=24,ix=32,c1=48,c2=64,c3=12,pal=0",
      false, false, true, true, false}
 };
 
@@ -3154,6 +3156,46 @@ static uint8_t fx_perlin8_2(uint16_t x, uint16_t y) {
 }
 #undef PERLIN_SHIFT
 
+
+/* Pinned mode_ColorClouds() for 1D RGB, palette=0, default custom
+ * c1=48,c2=64,c3=12, Cozy=false. Reuses the original integer Perlin2D
+ * helper, FastLED HSV conversion and per-zone seeded scene offsets.
+ * Additional custom settings require a separately versioned CORE config. */
+static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               uint32_t old_call,ot_wled_rgb_t *pixels,
+                               size_t count) {
+    if(old_call==0u) {
+        state->aux0=(uint16_t)fx_prng(state);
+        state->aux1=(uint16_t)fx_prng(state);
+    }
+    const uint32_t vol_x0=state->aux0, hue_x0=state->aux1;
+    const uint8_t hue_offset0=(uint8_t)(vol_x0+hue_x0);
+    const uint32_t vol_speed=1u+(uint32_t)cfg->speed;
+    const uint32_t hue_speed=1u+(uint32_t)cfg->intensity;
+    const uint32_t vol_squeeze=8u+48u, hue_squeeze=64u;
+    const int32_t vol_cutoff=12500+12*900;
+    const int32_t vol_saturate=52000;
+    const uint32_t vol_t=now*vol_speed/8u;
+    const uint32_t hue_t=now*hue_speed/8u;
+    const uint8_t hue_offset=(uint8_t)(
+        (uint16_t)((now*64u*280u)>>16)>>8);
+    for(size_t i=0;i<count;i++) {
+        const uint32_t vol_x=(uint32_t)i*vol_squeeze*64u;
+        int32_t vol=(int32_t)fx_perlin16_2(vol_x0+vol_x,vol_t);
+        vol=(vol-vol_cutoff)*255/(vol_saturate-vol_cutoff);
+        if(vol<0)vol=0;
+        if(vol>255)vol=255;
+        const uint32_t hue_x=(uint32_t)i*hue_squeeze*8u;
+        uint8_t hue=(uint8_t)(fx_perlin16_2(hue_x0+hue_x,hue_t)>>7);
+        hue=(uint8_t)(hue+hue_offset0+hue_offset);
+        ot_wled_rgb_t rgb=fx_hsv_rgb(hue,255u,(uint8_t)vol);
+        if((int)rgb.r+(int)rgb.g+(int)rgb.b<=2)
+            rgb=(ot_wled_rgb_t){0,0,0};
+        pixels[i]=scaled(rgb,cfg->brightness);
+    }
+}
+
 /* Upstream FX.cpp Fill Noise, Noise 1–4 1D source animations. No WLED
  * runtime, Arduino global state or external LED bus is linked. */
 static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
@@ -3234,6 +3276,10 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_COLOR_CLOUDS) {
+        color_clouds_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_FILL_NOISE ||
        cfg->effect_id==OT_WLED_NOISE_1 ||
        cfg->effect_id==OT_WLED_NOISE_2 ||
