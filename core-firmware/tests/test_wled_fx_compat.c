@@ -11,8 +11,17 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[93]={0};
-    assert(ot_wled_fx_supported_ids(ids,93)==93);
+    /* The catalog grows toward 120 source-derived modes; test all registered
+     * IDs without forcing CI changes for every newly ported mode. */
+    uint16_t ids[120]={0};
+    const size_t count=ot_wled_fx_supported_ids(NULL,0);
+    assert(count>=93u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
+    for(size_t i=0;i<count;i++){
+        ot_wled_fx_metadata_t entry={0};
+        assert(ot_wled_fx_metadata(ids[i],&entry) && entry.id==ids[i]);
+        for(size_t j=0;j<i;j++)assert(ids[i]!=ids[j]);
+    }
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -785,13 +794,13 @@ int main(void) {
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<93;k++) {
+    for(size_t k=0;k<count;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 93 modes, timing, zone limits and validation passed.");
+    printf("CORE source-derived effects: %zu modes, timing, zone limits and validation passed.\n",count);
     return 0;
 }
