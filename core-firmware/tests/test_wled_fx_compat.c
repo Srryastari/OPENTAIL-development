@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=95u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=96u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -840,6 +840,35 @@ int main(void) {
     ot_wled_fx_reset(&fairy_other);
     ot_wled_fx_reset(&s);
     assert(s.scratch==NULL);
+
+    /* Fairytwinkle 51 shares the upstream 4-byte Flasher record but keeps
+     * one instance per LED; guard output boundaries, repeat initial state
+     * deterministically, and check no state leaks between two zones. */
+    c.effect_id=OT_WLED_FAIRYTWINKLE;c.brightness=255;
+    c.speed=64;c.intensity=192;
+    ot_wled_rgb_t fairy_guard[33];
+    for(size_t i=0;i<33u;i++)fairy_guard[i]=(ot_wled_rgb_t){77u,88u,99u};
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,fairy_guard+1u,31u));
+    assert(s.scratch!=NULL && s.scratch_bytes>=31u*4u);
+    assert(eq(fairy_guard[0],(ot_wled_rgb_t){77u,88u,99u}));
+    assert(eq(fairy_guard[32],(ot_wled_rgb_t){77u,88u,99u}));
+    ot_wled_rgb_t fairytwinkle_first[31];
+    memcpy(fairytwinkle_first,fairy_guard+1u,sizeof(fairytwinkle_first));
+    ot_wled_fx_state_t fairytwinkle_other={0};
+    ot_wled_rgb_t fairytwinkle_pixels[31]={0};
+    assert(ot_wled_fx_render(&c,&fairytwinkle_other,0,
+                             fairytwinkle_pixels,31u));
+    assert(!memcmp(fairytwinkle_first,fairytwinkle_pixels,
+                   sizeof(fairytwinkle_first)));
+    for(uint32_t ms=23u;ms<1900u;ms+=23u) {
+        assert(ot_wled_fx_render(&c,&s,ms,fairy_guard+1u,31u));
+        assert(eq(fairy_guard[0],(ot_wled_rgb_t){77u,88u,99u}));
+        assert(eq(fairy_guard[32],(ot_wled_rgb_t){77u,88u,99u}));
+    }
+    ot_wled_fx_reset(&s);
+    ot_wled_fx_reset(&fairytwinkle_other);
+    assert(s.scratch==NULL && fairytwinkle_other.scratch==NULL);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
