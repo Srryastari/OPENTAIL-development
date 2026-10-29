@@ -365,8 +365,17 @@ final class NativeProject {
     synchronized JSONArray presets() { return data.optJSONArray("savedPresets"); }
     synchronized boolean setPresets(JSONArray presets) {
         if (presets.length() > MAX_PRESETS) return false;
-        try { data.put("savedPresets", presets);return save(); }
-        catch (JSONException e) { return false; }
+        JSONArray previous = data.optJSONArray("savedPresets");
+        try {
+            data.put("savedPresets", new JSONArray(presets.toString()));
+            if (save()) return true;
+            // A failed storage commit must not leave unsaved presets in RAM.
+            data.put("savedPresets", previous == null ? new JSONArray() : previous);
+        } catch (JSONException e) {
+            try { data.put("savedPresets", previous == null ? new JSONArray() : previous); }
+            catch (JSONException ignored) { }
+        }
+        return false;
     }
     synchronized JSONObject raw() {return data;}
 }
