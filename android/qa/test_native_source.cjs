@@ -6,6 +6,8 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+// ComposeMainActivity is the shipped UI; Java Views are historical reference only.
+const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const main=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
 const ui=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeUi.java','utf8');
@@ -26,7 +28,38 @@ assert(!fs.existsSync('android/app/src/main/assets/unified-shell.js'),
   'No JS navigation overlay may be bundled in the native APK');
 assert(!manifest.includes('android.permission.INTERNET')&&!manifest.includes('usesCleartextTraffic="true"'),
   'Native offline designer must not request arbitrary network access');
-assert(manifest.includes('android:name=".MainActivity"'));
+// Check the actual launch contract, not merely the retained Java source.
+assert(manifest.includes('android:name=".ComposeMainActivity"'), 'Compose is not registered');
+assert(!manifest.includes('android:name=".MainActivity"'), 'Legacy Java UI remains launchable');
+assert.equal((manifest.match(/android.intent.category.LAUNCHER/g)||[]).length,1,
+  'Exactly one Compose launcher is required');
+assert(compose.includes('class ComposeMainActivity : ComponentActivity()') &&
+       compose.includes('setContent { OpenTailShell() }') &&
+       !compose.includes('MainActivity::class.java') &&
+       !compose.includes('startActivity('),
+  'Only the Compose activity may own navigation');
+const composePages=['Home','Show Modes','Layout','Triggers','Auto Events','Settings'];
+const pageList=compose.match(/private val pages = listOf\(([^)]*)\)/);
+assert(pageList,'Compose page navigation missing');
+assert.deepEqual([...pageList[1].matchAll(/"([^"]+)"/g)].map(x=>x[1]),composePages,
+  'Active Compose navigation diverged from approved six-page order');
+for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(',
+                    'AutoEventsPage(', 'SettingsPage(']) {
+  assert(compose.includes(route),'Active Compose route missing: '+route);
+}
+for(const required of ['MaterialTheme(colorScheme = scheme)',
+  'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
+  'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
+  'frame.colorAt(first + i)', 'NOT a simulated effect.', 'onValueChangeFinished = { applyLiveZone() }',
+  'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id, activePixel, hex)',
+  'project.assign(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
+  'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
+  'BleConfigCodec.encode(JSONObject(draftText))']) {
+  assert(compose.includes(required),'Active Compose implementation regressed: '+required);
+}
+assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
+  'Active Compose must have no WebView or bottom navigation');
+
 assert(gradle.includes("versionName '0.2.0-alpha1'"));
 for(const widget of ['NativeUi','NativeLedPreview','ScrollView','HorizontalScrollView',
                      'SeekBar','EditText','AlertDialog','TextView','CheckBox']) {
@@ -139,4 +172,4 @@ assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 623')&&
        codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
        codec.includes('static byte[] encode(')&&codec.includes('static JSONObject decode('),
  'Native hardware output safety and codec validation regressed');
-console.log('PASS: Native Android UI, 6 pages, 140 effects, v4 project, no bundled WebView, guarded BLE, universal zones and NVS output editor (static).');
+console.log('PASS: shipped Kotlin/Compose six-page UI, source-level live-edit/LED map, plus retained Java reference, project, BLE and output codec contracts (static only).');
