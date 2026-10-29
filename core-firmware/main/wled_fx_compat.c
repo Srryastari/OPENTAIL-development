@@ -227,7 +227,7 @@ static const ot_wled_fx_metadata_t supported[] = {
      false, false, true, true, false},
     {OT_WLED_STARBURST, "Fireworks Starburst", "Fireworks Starburst@Chance,Fragments,,,,,Overlay;,!;!;;pal=11,m12=0",
      false, true, true, true, false},
-    {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11",
+    {OT_WLED_TETRIX, "Tetrix", "Tetrix@!,Width,,,,One color;!,!;!;;sx=0,ix=0,pal=11,m12=1",
      true, true, true, true, false}
 };
 
