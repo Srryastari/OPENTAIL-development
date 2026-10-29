@@ -7,70 +7,64 @@ import android.graphics.Paint;
 import android.view.View;
 
 /**
- * Canvas-only OFFLINE design illustration. Not a copy of firmware's renderer
- * and never wired to real LED outputs or BLE commands.
+ * Native 1D pixel-address inspector for the Java fallback launcher.
+ * Exactly one drawn segment per configured LED index. Not an effect renderer.
+ * CORE BLE does not supply frames, so never invent effect motion.
  */
 final class NativeLedPreview extends View {
-    private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final int count=32;
-    private int effectId=0;
-    private int foreground=0xfff7f7f7,background=0xff000000;
-    private boolean playing=false;
-    private long started=0;
+    private static final int PAGE = 64;
+    private final Paint paint=new Paint();
+    private final NativeProject project;
+    private ExactLedFrame frame=ExactLedFrame.fromProject(new int[0]);
     private boolean light=false;
-    NativeLedPreview(Context context){super(context);setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
-    void configure(int id,int fg,int bg,boolean lightTheme){
-        effectId=id;foreground=fg;background=bg;light=lightTheme;invalidate();
+    private int first=0;
+
+    NativeLedPreview(Context context,NativeProject project){
+        super(context);
+        this.project=project;
+        paint.setAntiAlias(false);
     }
-    void setPlaying(boolean active) {
-        playing=active;
-        started=android.os.SystemClock.uptimeMillis();
+
+    void configure(int effectId,int fg,int bg,boolean lightTheme){
+        light=lightTheme;
+        try {
+            frame=ExactLedFrame.fromProjectModel(project);
+        } catch(IllegalArgumentException e) {
+            frame=ExactLedFrame.fromProject(new int[0]);
+            setContentDescription("Pixel map unavailable: invalid or oversized layout");
+        }
+        first=Math.min(first,Math.max(0,frame.size()-PAGE));
+        setContentDescription("Exact local LED index map, "+frame.size()+
+                " pixels. Not an effect animation.");
         invalidate();
     }
-    boolean isPlaying(){return playing;}
-    @Override protected void onMeasure(int w,int h) {
-        setMeasuredDimension(MeasureSpec.getSize(w),Math.round(96*getResources().getDisplayMetrics().density));
+
+    void shift(int direction){
+        int limit=Math.max(0,frame.size()-PAGE);
+        first=Math.max(0,Math.min(limit,first+direction*PAGE));
+        invalidate();
     }
-    private static int lerp(int a,int b,float f) {
-        int r=(int)(Color.red(a)*(1f-f)+Color.red(b)*f);
-        int g=(int)(Color.green(a)*(1f-f)+Color.green(b)*f);
-        int bb=(int)(Color.blue(a)*(1f-f)+Color.blue(b)*f);
-        return Color.rgb(r,g,bb);
+
+    @Override protected void onMeasure(int w,int h){
+        setMeasuredDimension(MeasureSpec.getSize(w),
+                Math.round(96*getResources().getDisplayMetrics().density));
     }
-    private static int rainbow(float v) {
-        return Color.HSVToColor(new float[]{(v*360f)%360f,1f,1f});
-    }
+
     @Override protected void onDraw(Canvas canvas){
         super.onDraw(canvas);
-        float w=getWidth(),h=getHeight();
+        final float width=getWidth(),height=getHeight();
         paint.setColor(light?0xffe7e7e7:0xff0b0b0b);
-        canvas.drawRoundRect(0,0,w,h,18,18,paint);
-        float gap=Math.max(4f,w/(count/2+3f));
-        float radius=Math.max(3f,Math.min(8f,(w-42f)/(count/2*3f)));
-        float first=22f,step=(w-44f)/16f;
-        float t=playing?(android.os.SystemClock.uptimeMillis()-started)/1000f:0f;
-        for(int i=0;i<count;i++){
-            int row=i/16,col=i%16;
-            float x=first+(col+.5f)*step,y=h*(row==0?.32f:.68f);
-            float index=(float)i/count;
-            int color=foreground;
-            String label=NativeEffectCatalog.byId(effectId).name.toLowerCase(java.util.Locale.ROOT);
-            if(label.contains("rainbow")||label.contains("plasma"))color=rainbow(index+t*.12f);
-            else if(label.contains("wipe")||label.contains("sweep")||label.contains("materialize"))
-                color=index<((t*.3f)%1f)?foreground:background;
-            else if(label.contains("chase")||label.contains("running"))
-                color=((i+(int)(t*9))%8<3)?foreground:background;
-            else if(label.contains("blink")||label.contains("strobe"))
-                color=((int)(t*4)%2==0)?foreground:background;
-            else if(label.contains("fade")||label.contains("breathe"))
-                color=lerp(background,foreground,(float)(.5+.5*Math.sin(t*2)));
-            else color=foreground;
-            if(!playing)color=lerp(background,color,.65f);
-            paint.setColor(color);
-            paint.setShadowLayer(playing?Math.max(3f,radius*.9f):0,0,0,color);
-            canvas.drawCircle(x,y,radius,paint);
-            paint.clearShadowLayer();
+        canvas.drawRoundRect(0,0,width,height,18,18,paint);
+        int visible=Math.min(PAGE,Math.max(0,frame.size()-first));
+        if(visible==0)return;
+        float pitch=width/visible;
+        for(int i=0;i<visible;i++){
+            // Do not downsample, interpolate, fake a color or wrap zone edges.
+            paint.setColor(frame.colorAt(first+i));
+            float left=i*pitch;
+            canvas.drawRect(left,height*.2f,
+                    Math.min(width,left+Math.max(.5f,pitch-1f)),
+                    height*.8f,paint);
         }
-        if(playing)postInvalidateDelayed(33);
     }
 }
