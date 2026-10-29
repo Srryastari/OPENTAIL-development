@@ -55,13 +55,26 @@ final class ExactLedFrame {
             int length=zone.optInt("length");
             boolean reverse=zone.optBoolean("reverse",false);
             String id=zone.optString("id");
+            int[] localColors=new int[length];
             for(int local=0;local<length;local++) {
-                int address=start+(reverse?(length-1-local):local);
                 String hex=project.pixelColor(id,local);
-                colors[address]=0xff000000|Integer.parseInt(hex.substring(1),16);
+                localColors[local]=0xff000000|Integer.parseInt(hex.substring(1),16);
             }
+            paintZone(colors,start,localColors,reverse);
         }
         return fromProject(colors);
+    }
+
+    /** Pure mapping used by both project import and host regression tests.
+     * Reverse changes physical LED address order, never pixel color values.
+     * Gaps stay black because only explicitly addressed pixels are touched. */
+    static void paintZone(int[] destination,int start,int[] local,boolean reverse) {
+        if(destination==null||local==null||start<0||
+           (long)start+local.length>destination.length)
+            throw new IllegalArgumentException("invalid zone bounds");
+        for(int i=0;i<local.length;i++)
+            destination[start+(reverse?local.length-1-i:i)]=
+                0xff000000|(local[i]&0xffffff);
     }
 
     /** Accept only complete, validated, RGB888 renderer frame snapshots.
