@@ -1173,13 +1173,19 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
     if(ch>=OT_CHAIN_COUNT||pixels<1u||pixels>OT_CHAIN_PIXELS)return false;
     if(strip[ch]&&strip_capacity[ch]==pixels)return true;
     if(strip[ch]){
-        (void)led_strip_clear(strip[ch]);
-        esp_err_t e=led_strip_del(strip[ch]);
-        strip[ch]=NULL;strip_capacity[ch]=0;
+        /* Never replace a running output unless its old pixels were
+         * successfully cleared. A failed clear must not be ignored. */
+        esp_err_t e=led_strip_clear(strip[ch]);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"RMT output %u clear before resize failed: %s",ch,esp_err_to_name(e));
+            ot_st_set_fault("external pixel RMT clear failed");return false;
+        }
+        e=led_strip_del(strip[ch]);
         if(e!=ESP_OK){
             ESP_LOGE(TAG,"RMT output %u teardown failed: %s",ch,esp_err_to_name(e));
             ot_st_set_fault("external pixel RMT teardown failed");return false;
         }
+        strip[ch]=NULL;strip_capacity[ch]=0;
     }
     const led_strip_config_t cfg={
         .strip_gpio_num=out_pin[ch],.max_leds=pixels,
