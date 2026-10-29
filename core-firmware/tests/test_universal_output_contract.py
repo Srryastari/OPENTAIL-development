@@ -30,6 +30,8 @@ assert "pixel_buffer_budget_per_output" in core
 assert "max_configurable_pixels_per_output" in core
 assert "configured_output_zones" in core
 assert 'active_pixels_per_output' in core
+assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target FPS"
+assert 'fps_policy' in core and 'uncapped_measured' in core
 assert 'output_mask' in core
 assert 'unknown legacy chain name' in core
 assert "legacy_example_zone_local" not in core
