@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $Firmware = $PSScriptRoot
 $Version = '0.1.27-alpha'
-$StudioVersion = '0.19.62'
+$StudioVersion = '0.19.118'
 
 Write-Host "OpenTail CORE v$Version / Studio v$StudioVersion — build, verify, back up, then flash app only."
 Write-Host "Target: $Port · expected ESP32-S3 MAC: $ExpectedMac"
@@ -15,7 +15,7 @@ Write-Host "Target: $Port · expected ESP32-S3 MAC: $ExpectedMac"
 if($LASTEXITCODE -ne 0){throw 'Build failed. No flash was attempted.'}
 
 $build = Join-Path $Firmware 'build'
-$app = Join-Path $Firmware 'releases\opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin'
+$app = Join-Path $Firmware 'releases\opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin'
 $part = Join-Path $build 'partition_table\partition-table.bin'
 $flashArgs = Join-Path $build 'flash_args'
 if(-not (Test-Path -LiteralPath $app)){throw "Versioned app binary missing: $app"}
