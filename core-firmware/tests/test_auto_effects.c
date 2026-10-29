@@ -55,6 +55,33 @@ int main(void){
     assert(same(p[0],(ot_wled_rgb_t){0,0,0}));
     assert(!ot_auto_fx_render(&c,99,0,p,0));
     assert(!ot_auto_fx_render(&c,99,0,NULL,64));
+    /* Materialize sparks must visibly outshine same-hue bodies at low
+     * brightness while respecting the 32/255 bench cap. No sparkle may
+     * illuminate pixels if the requested brightness is zero. */
+    c.effect_id=OT_FX_MATERIALIZE_SPARKS;
+    c.brightness=16;c.intensity=255;
+    int saw_brighter_spark=0;
+    for(uint32_t t=0;t<dur;t+=20u){
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++){
+            assert(p[i].r<=32&&p[i].g<=32&&p[i].b<=32);
+            if(p[i].r>16u)saw_brighter_spark=1;
+        }
+    }
+    assert(saw_brighter_spark);
+    c.effect_id=OT_FX_RANDOM_MATERIALIZE;
+    for(uint32_t t=0;t<dur;t+=20u){
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++)
+            assert(p[i].r<=32&&p[i].g<=32&&p[i].b<=32);
+    }
+    c.brightness=0;
+    for(uint32_t t=0;t<dur;t+=47u){
+        assert(ot_auto_fx_render(&c,99,t,p,64));
+        for(unsigned i=0;i<64;i++)
+            assert(same(p[i],(ot_wled_rgb_t){0,0,0}));
+    }
+    c.brightness=24;c.effect_id=OT_FX_SMOOTH_FADE_OUT;
     c.palette_id=2;assert(!ot_auto_fx_render(&c,99,0,p,64));c.palette_id=0;
     c.frame_time_ms=0;assert(!ot_auto_fx_render(&c,99,0,p,64));c.frame_time_ms=23;
 
@@ -72,7 +99,10 @@ int main(void){
         assert(memcmp(p,out,sizeof(p))==0);
         assert(ot_effects_1d_render(&c,&state,dur/2,p,64));
         for(unsigned i=0;i<64;i++){
-            assert(p[i].r<=24&&p[i].g<=24&&p[i].b<=24);
+            const unsigned max_channel=
+                (c.effect_id==OT_FX_MATERIALIZE_SPARKS||
+                 c.effect_id==OT_FX_RANDOM_MATERIALIZE)?32u:24u;
+            assert(p[i].r<=max_channel&&p[i].g<=max_channel&&p[i].b<=max_channel);
         }
         assert(ot_effects_1d_render(&c,&state,dur,p,64));
         for(unsigned i=0;i<64;i++){
