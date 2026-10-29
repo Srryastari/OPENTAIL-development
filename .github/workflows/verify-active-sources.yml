@@ -194,14 +194,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.119.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.120.htm').read_bytes()
           assert a == b, 'Stable and current web Studio release must match'
           old=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
           assert a != old, 'Previous Studio release must remain an unchanged rollback'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
-          assert b"const OT_VERSION='0.19.118'" in bundled, 'Pinned Android Studio version changed without an Android release'
-          assert b"const OT_VERSION='0.19.119'" in a, 'Unexpected current web Studio version'
-          print('Web Studio 0.19.119 stable/release parity passed; Android independently pinned to 0.19.118.')
+          assert b"const OT_VERSION='0.19.120'" in bundled, 'Pinned Android Studio version changed without an Android release'
+          assert a == bundled, 'Android and web Studio approved UI diverged'
+          assert b"const OT_VERSION='0.19.120'" in a, 'Unexpected current web Studio version'
+          print('Web Studio 0.19.120 stable/release parity passed; Android packaged the identical approved UI.')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
         run: |
@@ -255,9 +256,9 @@ jobs:
       - name: Upload standalone web Studio v0.19.119
         uses: actions/upload-artifact@v4
         with:
-          name: opentail-studio-v0.19.119-web
+          name: opentail-studio-v0.19.120-web
           path: |
             web-studio/opentail.htm
-            web-studio/opentail-v0.19.119.htm
+            web-studio/opentail-v0.19.120.htm
           if-no-files-found: error
           retention-days: 14
