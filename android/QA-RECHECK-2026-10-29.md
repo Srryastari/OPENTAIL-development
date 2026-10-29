@@ -41,6 +41,15 @@
 - The locked LED viewer remains the zero-based design strip or an authenticated single CORE RGB888 frame. A palette swatch is **not** a CORE-rendered animation; end-to-end physical palette application requires CORE palette protocol support and bench proof.
 - Native palette source/shape regression guards were added. **Current-head Kotlin build, Android unit tests, screenshots, TalkBack, BLE, and real palette parity require independent acceptance.** Keep Android PR #21 draft; no cross-domain merges.
 
+## Palette import fidelity and immediate sequence redraw (October 29 continuation)
+
+- No changes to approved screen structure, navigation, controls, fonts, colors, or capsule styling. No generated UI interpretation was used.
+- Sequence model explicitly observes its Compose revision on the active screen, so saved step palettes and shared-palette toggle/readback immediately update without changing the editor's appearance.
+- v4 imported and newly saved sequence steps reject invalid palette IDs rather than rendering a clamped number while exporting bad data. `sequenceOptions.sharedPaletteId` uses the same integer 0–255 validation. Rejection leaves the existing local project unchanged.
+- Only genuine supplied fixed stop data can produce palette swatches. The parser rejects malformed/fractional RGB values instead of silently truncating them into different colors.
+- Added executable JVM coverage of palette-byte boundaries, plus Android source contract regressions for v4 import, Compose model revision and exact palette stop parsing. Verify latest-head CI separately.
+- Existing limitations remain: full actual effect animation parity requires CORE frames; the current BLE command does not carry palette IDs; Android cannot claim palette playback on physical LEDs from local selections.
+
 ## CORE logical-frame preview race regression (October 29 continuation)
 
 - **Root cause:** the native RGB888 frame listener could publish a previously requested capture after an effect/color/palette/layout edit, offline-preview switch, disconnection, hardware output readback or explicit STOP had cleared the prior frame. A stale frame could thus be displayed under a current-state label.
