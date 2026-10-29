@@ -3391,7 +3391,7 @@ int main() {
                      (uint8_t)ix,(uint8_t)brightness,(ot_wled_palette_blend_t)blend));
             if(expected!=actual) {
               std::fprintf(stderr,
-                "WLED random palette mismatch seed=%u ix=%u bri=%u blend=%u upstream=%06X CORE=%06X\\n",
+                "WLED random palette mismatch seed=%u ix=%u bri=%u blend=%u upstream=%06X CORE=%06X\n",
                 seed,ix,brightness,blend,(unsigned)expected,(unsigned)actual);
               return 1;
             }
@@ -3401,7 +3401,7 @@ int main() {
       }
     }
     if(ot_wled_palette_from_hsv4(nullptr,nullptr))std::abort();
-    std::printf("WLED random HSV construction parity passed: %u RGB samples across 32 source-derived four-color palettes.\\n",random_palette_samples);
+    std::printf("WLED random HSV construction parity passed: %u RGB samples across 32 source-derived four-color palettes.\n",random_palette_samples);
 
     /* Exhaustively compare all 60 pinned gradient tables against source
      * loadDynamicGradientPalette and verbatim ColorFromPalette sampling. */
