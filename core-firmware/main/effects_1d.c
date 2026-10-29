@@ -65,8 +65,19 @@ bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
         /* Catalog names alone are not a claim of
          * pixel-identical parity with the complete upstream WLED renderer. */
         ot_wled_fx_metadata_t source_meta;
-        if(ot_wled_fx_metadata(cfg->effect_id,&source_meta))
-            return ot_wled_fx_render(cfg,&s->wled,ms,frame,count);
+        if(ot_wled_fx_metadata(cfg->effect_id,&source_meta)){
+            const bool rendered=ot_wled_fx_render(cfg,&s->wled,ms,frame,count);
+            if(!rendered)return false;
+            /* Effect-local scaling must not allow additive/OR/trail sources
+             * to exceed the absolute configured CORE brightness ceiling.
+             * This is a clamp, not a second multiplicative brightness pass. */
+            for(size_t i=0;i<count;i++){
+                if(frame[i].r>cfg->brightness)frame[i].r=cfg->brightness;
+                if(frame[i].g>cfg->brightness)frame[i].g=cfg->brightness;
+                if(frame[i].b>cfg->brightness)frame[i].b=cfg->brightness;
+            }
+            return true;
+        }
         const ot_wled_1d_meta_t *compat=ot_wled_1d_by_id(cfg->effect_id);
         if(!compat||cfg->palette_id!=0u)return false;
         for(size_t px=0;px<count;px++){
