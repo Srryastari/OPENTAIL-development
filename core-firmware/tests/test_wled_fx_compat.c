@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[58]={0};
-    assert(ot_wled_fx_supported_ids(ids,58)==58);
+    uint16_t ids[64]={0};
+    assert(ot_wled_fx_supported_ids(ids,64)==64);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -29,7 +29,9 @@ int main(void) {
            ids[43]==22 && ids[44]==35 && ids[45]==36 && ids[46]==103 &&
            ids[47]==29 && ids[48]==39 && ids[49]==61 &&
            ids[50]==57 && ids[51]==58 && ids[52]==45 && ids[53]==184 &&
-           ids[54]==68 && ids[55]==75 && ids[56]==97 && ids[57]==62);
+           ids[54]==68 && ids[55]==75 && ids[56]==97 && ids[57]==62 &&
+           ids[58]==40 && ids[59]==41 && ids[60]==60 &&
+           ids[61]==92 && ids[62]==93 && ids[63]==94);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -589,16 +591,30 @@ int main(void) {
         for(uint32_t ms=35;ms<=1200;ms+=115)
             assert(ot_wled_fx_render(&c,&s,ms,p,31));
     }
+    /* Trailing modes receive a retained caller frame (matching CORE render
+     * lifecycle); remain bounded when presented with a fresh frame. */
+    for(size_t k=58;k<64;k++) {
+        c.effect_id=ids[k];c.intensity=120;c.speed=170;c.brightness=255;
+        c.background=(ot_wled_rgb_t){0,0,0};
+        ot_wled_fx_reset(&s);
+        memset(p,0,sizeof(p));
+        assert(ot_wled_fx_render(&c,&s,0,p,31));
+        for(uint32_t ms=17u;ms<=400u;ms+=17u)
+            assert(ot_wled_fx_render(&c,&s,ms,p,31));
+        ot_wled_fx_reset(&s);
+        memset(p,0,sizeof(p));
+        assert(ot_wled_fx_render(&c,&s,0,p,31));
+    }
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<58;k++) {
+    for(size_t k=0;k<64;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 58 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 64 modes, timing, zone limits and validation passed.");
     return 0;
 }
