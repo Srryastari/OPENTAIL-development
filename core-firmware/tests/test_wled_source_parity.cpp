@@ -897,6 +897,8 @@ uint8_t perlin8(uint16_t x) {
 #undef PERLIN_SHIFT
 // END UPSTREAM 1D Perlin source.
 
+// Host adapter restores util.h's omitted default is16bit=false argument.
+int32_t perlin2D_raw(uint32_t x,uint32_t y,bool is16bit=false);
 // BEGIN UPSTREAM util.cpp 2D Perlin source (verbatim).
 #define PERLIN_SHIFT 1
 static inline __attribute__((always_inline)) int32_t gradient2D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy) {
@@ -1790,6 +1792,10 @@ void mode_tv_simulator(void) {
 // END UPSTREAM TV Simulator.
 
 
+// Host declaration for the pinned math cos8_t helper.
+static uint8_t cos8_t(uint8_t phase) {return sin8_t((uint8_t)(phase+64u));}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare" // unchanged upstream loops int < unsigned SEGLEN
 // BEGIN UPSTREAM FX.cpp Color Clouds (verbatim), RGB/palette 0 profile.
 #define R(c) (uint8_t)(((uint32_t)(c)>>16)&255u)
 #define G(c) (uint8_t)(((uint32_t)(c)>>8)&255u)
@@ -1863,6 +1869,7 @@ void mode_ColorClouds()
 #undef G
 #undef B
 // END UPSTREAM FX.cpp Color Clouds.
+#pragma GCC diagnostic pop
 
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
