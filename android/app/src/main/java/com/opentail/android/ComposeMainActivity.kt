@@ -519,8 +519,14 @@ class ComposeMainActivity : ComponentActivity() {
         var editingId by remember { mutableStateOf<String?>(null) }
         var deleteId by remember { mutableStateOf<String?>(null) }
         Panel(t) {
-            Field(name, "Project name", t) { name = it }
-            Pill("Save name", t) { project.name(name);refresh() }
+            Field(name, "Project name", t) {
+                name = it
+                if (it.trim().isNotEmpty()) {
+                    project.name(it)
+                    refresh()
+                }
+            }
+            Caption("Project name saves as you type. No separate edit mode.", t)
             Caption(project.zoneCount().toString() + " zones · " + project.pixelCount() + " design pixels", t)
             if (project.zoneCount() == 0) Pill("+ Add zone", t, true) { addZoneAfter(-1) }
         }
@@ -551,6 +557,7 @@ class ComposeMainActivity : ComponentActivity() {
                 var label by remember(id) { mutableStateOf(zone.optString("name")) }
                 var count by remember(id) { mutableStateOf(zone.optInt("length").toString()) }
                 var reverse by remember(id) { mutableStateOf(zone.optBoolean("reverse")) }
+                var selectedPixel by remember(id) { mutableIntStateOf(0) }
                 fun applyLiveZone() {
                     val n = count.toIntOrNull() ?: return
                     if (n in 1..10000 && label.trim().isNotEmpty() &&
@@ -580,6 +587,23 @@ class ComposeMainActivity : ComponentActivity() {
                                    onValueChangeFinished = { applyLiveZone() },
                                    valueRange = 1f..10000f)
                             Caption(project.previewZoneOffsets(id, n), t)
+                            val pixelLimit = (n.coerceAtLeast(1) - 1)
+                            selectedPixel = selectedPixel.coerceIn(0, pixelLimit)
+                            Caption("Pixel editor · zero-based index (saved locally immediately)", t)
+                            ValueSlider("Pixel", selectedPixel, pixelLimit.coerceAtLeast(1), t) {
+                                selectedPixel = it.coerceIn(0, pixelLimit)
+                            }
+                            val painted = project.pixelColor(id, selectedPixel)
+                            val liveColor = android.graphics.Color.parseColor(painted)
+                            PaletteEditor("Pixel " + selectedPixel, liveColor, t) { color ->
+                                val hex = String.format("#%06X", color and 0xFFFFFF)
+                                if (project.setPixelColor(id, selectedPixel, hex)) refresh()
+                            }
+                            Pill("Clear this pixel", t) {
+                                if (project.clearPixelColor(id, selectedPixel)) refresh()
+                            }
+                            Caption("Live per-pixel color is included in the v4 design export. " +
+                                "The existing CORE BLE protocol cannot stream individual pixel writes.", t)
                             Pill(if (reverse) "Reverse pixels ✓" else "Reverse pixels", t, reverse) {
                                 reverse = !reverse
                                 applyLiveZone()
