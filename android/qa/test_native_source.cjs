@@ -50,7 +50,7 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
   'frame.colorAt(first + i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id, activePixel, hex)',
-  'project.assign(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
+  'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
   'BleConfigCodec.encode(JSONObject(draftText))']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
@@ -178,7 +178,7 @@ for(const required of ['project.previewZoneOffsets(id, n)',
 assert(!layout.includes('ble.saveOutput(') && !layout.includes('ble.showFx('),
  'Local layout authoring must not persist or command physical outputs');
 for(const required of ['selections =', 'testing =', 'project.customTrigger(',
-  'project.deleteTrigger(', 'project.assign(', 'applyTriggerStyle()']) {
+  'project.deleteTrigger(', 'project.assignMany(', 'applyTriggerStyle()']) {
   assert(triggers.includes(required),'Compose trigger regression: '+required);
 }
 assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
@@ -232,6 +232,25 @@ assert(model.includes('data = previous; // a failed disk commit') &&
        'Project import must be atomic and pixel editing must respect zone bounds');
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
   'Native project is universal, not specific to bench vehicle');
+// Local editor mutations must not masquerade as saved after a failed
+// SharedPreferences commit, including multi-selected trigger zone assignments.
+for (const required of ['private String committedJson;',
+  'committedJson = data.toString();', 'committedJson = next;',
+  'data = new JSONObject(committedJson);',
+  'catch (RuntimeException ex) { persisted = false; }',
+  'synchronized boolean assignMany(Set<String> triggers, String zoneId, boolean enabled)',
+  'JSONObject draft = new JSONObject(data.toString());',
+  'data = draft;', 'return save();',
+  'synchronized boolean name(String name)']) {
+  assert(model.includes(required), 'Shared native project rollback/atomic-edit contract regressed: '+required);
+}
+assert(compose.includes('if (project.assignMany(selections, zoneId, !checked)) refresh()') &&
+       compose.includes('if (project.name(it)) refresh()') &&
+       compose.includes('else name = project.name() // restore last committed value') &&
+       compose.includes('if (project.setPresets(next))') &&
+       compose.includes('Could not remove preset'),
+       'Multi-trigger, name, and preset failure handling must not show false saved state');
+
 // Palette engine: native data-only catalog, exact stop-data swatches, and
 // separate effect, sequence-step and shared-sequence state. No invented
 // gradient preview or unadvertised CORE palette commands are allowed.
