@@ -1627,6 +1627,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     if (!ot_wled_fx_metadata(cfg->effect_id, &meta)) return false;
 
     if (count>65535u) return false; /* 16-bit WLED segment indexing boundary */
+    /* Absolute-off is a CORE controller invariant, not an upstream FX
+     * animation output. Retained trails must never leak light at zero
+     * brightness; no source state or prior frame can bypass this. */
+    if(cfg->brightness==0u) {
+        for(size_t i=0;i<count;i++)pixels[i]=(ot_wled_rgb_t){0,0,0};
+        state->call++;
+        return true;
+    }
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
