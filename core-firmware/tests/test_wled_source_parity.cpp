@@ -638,6 +638,23 @@ uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t hig
   return result;
 }
 // END PINNED beat timing.
+
+/* Direct pinned util.cpp beat16/beat8/beatsin16_t/beatsin8_t for Pacifica. */
+static uint16_t source_beat16(uint16_t bpm,uint32_t timebase=0u) {
+    if(bpm<256u)bpm<<=8;
+    return beat88(bpm,timebase);
+}
+static uint8_t source_beat8(uint16_t bpm,uint32_t timebase=0u) {
+    return (uint8_t)(source_beat16(bpm,timebase)>>8);
+}
+static uint16_t source_beatsin16(uint16_t bpm,uint16_t lo,uint16_t hi) {
+    uint16_t wave=(uint16_t)(sin16_t(source_beat16(bpm))+32768);
+    return (uint16_t)(lo+scale16(wave,(uint16_t)(hi-lo)));
+}
+static uint8_t source_beatsin8(uint16_t bpm,uint8_t lo,uint8_t hi) {
+    uint8_t wave=sin8_t(source_beat8(bpm));
+    return (uint8_t)(lo+scale8(wave,(uint8_t)(hi-lo)));
+}
 #undef millis
 
 #define SEGMENT (*current_segment)
@@ -3265,6 +3282,89 @@ void mode_fire_2012() {
 // END PINNED 1D Fire 2012.
 #undef SEGPALETTE
 
+
+/* Source-pinned FX.cpp Pacifica one_layer and four-layer wave equations.
+ * The source's CRGB palette initializer is expanded into explicit packed
+ * RGB fixtures to avoid Arduino-only aggregate constructor assumptions. */
+static CRGB source_pacifica_layer(uint16_t i,const CRGBPalette16& pal,
+                                uint16_t ci,uint16_t scale,uint8_t bri,uint16_t off) {
+    unsigned angle=off;
+    unsigned half=(scale>>1)+20u;
+    angle+=(120u+SEGMENT.intensity)*i;
+    unsigned sine=(unsigned)(sin16_t((uint16_t)angle)+32768);
+    unsigned cs=scale16((uint16_t)sine,(uint16_t)half)+half;
+    ci=(uint16_t)(ci+cs*i);
+    unsigned second=(unsigned)(sin16_t(ci)+32768);
+    unsigned ix=scale16((uint16_t)second,240u);
+    return CRGB(ColorFromPalette(pal,ix,bri,LINEARBLEND));
+}
+static void source_pacifica() {
+    const uint32_t colors[3][16]={
+     {0x002229u,0x001E2Fu,0x001934u,0x001938u,0x00143Fu,0x001443u,0x00B047u,0x00B04Cu,
+      0x00004Fu,0x000054u,0x000062u,0x00006Fu,0x00007Au,0x000085u,0x47938Au,0x64D08Eu},
+     {0x002229u,0x001E2Fu,0x001934u,0x001938u,0x00143Fu,0x001443u,0x00B047u,0x00B04Cu,
+      0x00004Fu,0x000054u,0x000062u,0x00006Fu,0x00007Au,0x000085u,0x369B90u,0x4FDC9Bu},
+     {0x00142Cu,0x00193Bu,0x002247u,0x002551u,0x002C5Au,0x002F63u,0x00346Bu,0x003671u,
+      0x003B78u,0x003F7Fu,0x00478Eu,0x004D9Cu,0x0054A9u,0x005AB4u,0x3F7FDCu,0x5A9CFFu}
+    };
+    CRGBPalette16 pal[3]{};
+    for(unsigned k=0;k<3u;k++) {
+        for(unsigned ix=0;ix<16u;ix++)pal[k][ix]=CRGB(colors[k][ix]);
+        if(SEGMENT.palette)
+            pal[k]=ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2]);
+    }
+    unsigned c1=SEGENV.aux0,c2=SEGENV.aux1,c3=SEGENV.step&0xffffu,c4=SEGENV.step>>16;
+    const uint32_t old=strip.now;
+    const unsigned delta=(FRAMETIME>>2)+((FRAMETIME*SEGMENT.speed)>>7);
+    const uint64_t dt=(strip.now>>2)+(((uint64_t)strip.now*SEGMENT.speed)>>7);
+    strip.now=(uint32_t)dt;
+    unsigned factor1=source_beatsin16(3u,179u,269u);
+    unsigned factor2=source_beatsin16(4u,179u,269u);
+    uint32_t d1=delta*factor1/256u;
+    uint32_t d2=delta*factor2/256u;
+    uint32_t d21=(d1+d2)/2u;
+    c1+=(d1*beatsin88_t(1011u,10u,13u));
+    c2-=(d21*beatsin88_t(777u,8u,11u));
+    c3-=(d1*beatsin88_t(501u,5u,7u));
+    c4-=(d2*beatsin88_t(257u,4u,6u));
+    SEGENV.aux0=(uint16_t)c1;SEGENV.aux1=(uint16_t)c2;
+    SEGENV.step=(c4<<16)|(c3&0xffffu);
+    unsigned threshold_base=source_beatsin8(9u,55u,65u);
+    unsigned wave=source_beat8(7u);
+    for(unsigned i=0;i<SEGLEN;i++) {
+        CRGB c(2,6,10);
+        const CRGB waves[4]={
+           source_pacifica_layer((uint16_t)i,pal[0],(uint16_t)c1,
+                source_beatsin16(3u,2816u,3584u),source_beatsin8(10u,70u,130u),
+                (uint16_t)(0-source_beat16(301u))),
+           source_pacifica_layer((uint16_t)i,pal[1],(uint16_t)c2,
+                source_beatsin16(4u,1536u,2304u),source_beatsin8(17u,40u,80u),
+                source_beat16(401u)),
+           source_pacifica_layer((uint16_t)i,pal[2],(uint16_t)c3,
+                1536u,source_beatsin8(9u,10u,38u),
+                (uint16_t)(0-source_beat16(503u))),
+           source_pacifica_layer((uint16_t)i,pal[2],(uint16_t)c4,
+                1280u,source_beatsin8(8u,10u,28u),
+                source_beat16(601u))
+        };
+        for(const auto& layer:waves){
+            c.r=qadd8(c.r,layer.r);c.g=qadd8(c.g,layer.g);c.b=qadd8(c.b,layer.b);
+        }
+        unsigned threshold=scale8(sin8_t((uint8_t)wave),20u)+threshold_base;
+        wave=(wave+7u)&0xffu;
+        unsigned light=(((unsigned)c.r+c.g+c.b)*21846u)>>16;
+        if(light>threshold){
+            unsigned over=light-threshold;
+            uint8_t twice=qadd8((uint8_t)over,(uint8_t)over);
+            c.r=qadd8(c.r,(uint8_t)over);
+            c.g=qadd8(c.g,twice);
+            c.b=qadd8(c.b,qadd8(twice,twice));
+        }
+        SEGMENT.setPixelColor(i,c.color32);
+    }
+    strip.now=old;
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3325,7 +3425,8 @@ static const RefCase refs[]={
     {74,mode_colortwinkle,"Colortwinkles"},
     {219,mode_slow_transition,"Slow Transition"},
     {112,mode_dancing_shadows,"Dancing Shadows"},
-    {66,mode_fire_2012,"Fire 2012"}
+    {66,mode_fire_2012,"Fire 2012"},
+    {101,source_pacifica,"Pacifica"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -3442,7 +3543,7 @@ int main() {
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
