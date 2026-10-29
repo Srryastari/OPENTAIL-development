@@ -96,7 +96,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
            "project.assign(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
            "ble.showFx(", "BleConfigCodec.encode(next)", "ble.saveOutput(",
-           "AlertDialog(onDismissRequest")))
+           "AlertDialog(onDismissRequest"))
       and 'android:name=".MainActivity"' in manifest_xml)
 print("Compose status: compilation candidate; still NOT launcher. No UI parity or device test claimed.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
