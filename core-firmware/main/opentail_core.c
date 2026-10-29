@@ -89,6 +89,7 @@ static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect ass
 static ot_ble_fx_packet_t ble_fx_request={0};
 
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
+static ot_om_pending_t om_deferred; /* Saved zones wait for physical release. */
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS];
@@ -300,7 +301,7 @@ static esp_err_t om_get(httpd_req_t *r){
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent;tm=tm_profile;
+    memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent&&!om_deferred.pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -319,6 +320,7 @@ static esp_err_t om_get(httpd_req_t *r){
     if(!obj)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
     cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
+    cJSON_AddBoolToObject(obj,"config_apply_pending",om_deferred.pending);
     cJSON_AddBoolToObject(obj,"bench_only",true);
     cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT);
     cJSON_AddNumberToObject(obj,"future_outputs_target",12);
@@ -389,7 +391,7 @@ static esp_err_t om_post(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
@@ -397,8 +399,11 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
+    const uint8_t pins_after=tm_gpio_input_mask();
     portENTER_CRITICAL(&state_lock);
-    memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+    (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                            pins_after,live_input_mask);
+    om_persistent=true;om_revision[index]++;
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return om_get(r);
@@ -422,7 +427,7 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
@@ -432,8 +437,11 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
+            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+            (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                                    pins_after,live_input_mask);
+            om_persistent=true;om_revision[index]++;
             portEXIT_CRITICAL(&state_lock);
         }
     }
@@ -465,7 +473,7 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     const bool raw_active=tm_gpio_input_mask()!=0;
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    const bool busy=tm_deferred.pending || raw_active || live_input_mask!=0 ||
+    const bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0 ||
         (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
         show_window(now);
@@ -1348,6 +1356,8 @@ static void input_sampler_task(void *arg){
         /* This is the only deferred activation point. Do not swap mappings
          * while either a raw pin or its settled level is asserted. */
         if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
+                                   instantaneous,physical))target=render_task_handle;
+        if(ot_om_apply_if_released(om_outputs,&om_deferred,
                                    instantaneous,physical))target=render_task_handle;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
