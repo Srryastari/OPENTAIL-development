@@ -580,7 +580,7 @@ struct PinnedEnv {
     uint16_t aux0=0,aux1=0;
     uint32_t data_counter=0;       // upstream mode_android allocation
     std::vector<uint8_t> allocation;
-    void* data=&data_counter;
+    uint8_t* data=reinterpret_cast<uint8_t*>(&data_counter);
     bool allocateData(size_t bytes) {
         if(bytes<=sizeof(data_counter) && allocation.empty()) return true;
         if(allocation.size()<bytes) allocation.resize(bytes,0u);
