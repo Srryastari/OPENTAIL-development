@@ -899,6 +899,13 @@ public final class MainActivity extends Activity {
         LinearLayout build=ui.card();
         build.addView(ui.caption("OpenTail Android v0.2.0-alpha1 · Native Android Views"));
         secondary(build,"No WebView or bundled HTML. Preview and authoring never send device commands.");
+        // Debug-only, explicit side-by-side Compose evaluation. Never auto-run
+        // or expose a second launcher before parity and physical BLE acceptance.
+        if((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0){
+            action(build,"Preview Kotlin + Compose · Developer",false,()->
+                    startActivity(new Intent(this,ComposeMainActivity.class)));
+            secondary(build,"Compose screen preview is experimental; current approved app remains the launcher.");
+        }
         addCard(build);
     }
     private void confirmBleTest(){
