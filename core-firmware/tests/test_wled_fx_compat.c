@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=93u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=94u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -790,6 +790,20 @@ int main(void) {
     ot_wled_fx_state_t pride_other={0};
     assert(ot_wled_fx_render(&c,&pride_other,0,p,31));
     assert(pride_other.step==pride_first_step);
+
+    /* Colorwaves shares the upstream phase/hue engine but uses video-faded
+     * foreground with a different blend strength. Keep zones isolated. */
+    c.effect_id=OT_WLED_COLORWAVES;c.speed=80;c.intensity=128;
+    c.brightness=255;
+    memset(p,0,sizeof(p));ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    const uint32_t waves_first_step=s.step;
+    assert(waves_first_step!=0u);
+    assert(ot_wled_fx_render(&c,&s,23,p,31));
+    assert(s.step!=waves_first_step);
+    ot_wled_fx_state_t waves_other={0};
+    assert(ot_wled_fx_render(&c,&waves_other,0,p,31));
+    assert(waves_other.step==waves_first_step);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
