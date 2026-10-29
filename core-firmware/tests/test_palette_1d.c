@@ -14,6 +14,7 @@ int main(void){
    assert(ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,palette));
    assert(ot_palette_1d_supported(OT_WLED_FLOW_STRIPE,palette));
    assert(ot_palette_1d_supported(OT_WLED_GLITTER,palette));
+   assert(ot_palette_1d_supported(OT_WLED_BLENDS,palette));
    assert(!ot_palette_1d_supported(OT_WLED_WIPE,palette));
  }
  assert(!ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,1u));
