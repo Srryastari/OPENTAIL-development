@@ -74,6 +74,26 @@ final class NativeProject {
                 .put("sectionAnimations", new JSONObject());
     }
 
+    // Palette IDs are unsigned bytes in the shared v4 sequence schema.
+    // Reject malformed imported values instead of displaying a clamped ID
+    // while silently exporting a different, invalid value.
+    private static boolean validPaletteId(Object value) {
+        if (!(value instanceof Number)) return false;
+        double number = ((Number)value).doubleValue();
+        return number >= 0 && number <= 255 && number == Math.floor(number);
+    }
+
+    private static void validateSequenceStep(JSONObject step) throws JSONException {
+        if (step.optString("fx", "").isEmpty()
+                || step.optInt("ms", 0) < 50 || step.optInt("ms", 0) > 600000)
+            throw new JSONException("Invalid sequence step");
+        JSONObject settings = step.optJSONObject("settings");
+        if (step.has("settings") && settings == null)
+            throw new JSONException("Invalid sequence settings");
+        if (settings != null && settings.has("pal") && !validPaletteId(settings.opt("pal")))
+            throw new JSONException("Invalid sequence palette ID");
+    }
+
     private static JSONObject validated(JSONObject candidate) throws JSONException {
         if (candidate.optInt("version", 0) < 1 || candidate.optInt("version", 0) > 4)
             throw new JSONException("Unsupported project format (expected OpenTail v1-v4)");
@@ -104,12 +124,15 @@ final class NativeProject {
         JSONArray steps = candidate.optJSONArray("sequence");
         if (steps != null) {
             for (int i = 0; i < steps.length(); i++) {
-                JSONObject step = steps.getJSONObject(i);
-                if (step.optString("fx", "").isEmpty()
-                        || step.optInt("ms", 0) < 50 || step.optInt("ms", 0) > 600000)
-                    throw new JSONException("Invalid sequence step");
+                validateSequenceStep(steps.getJSONObject(i));
             }
         }
+        JSONObject options = candidate.optJSONObject("sequenceOptions");
+        if (candidate.has("sequenceOptions") && options == null)
+            throw new JSONException("Invalid sequence options");
+        if (options != null && options.has("sharedPaletteId")
+                && !validPaletteId(options.opt("sharedPaletteId")))
+            throw new JSONException("Invalid shared palette ID");
         JSONArray presets = candidate.optJSONArray("savedPresets");
         if (presets != null && presets.length() > MAX_PRESETS)
             throw new JSONException("Too many presets");
@@ -361,6 +384,8 @@ final class NativeProject {
         if (steps.length() > MAX_SEQUENCE) return false;
         JSONArray previous = data.optJSONArray("sequence");
         try {
+            for (int i = 0; i < steps.length(); i++)
+                validateSequenceStep(steps.getJSONObject(i));
             data.put("sequence", new JSONArray(steps.toString()));
             if (save()) return true;
         } catch (JSONException ignored) { }
