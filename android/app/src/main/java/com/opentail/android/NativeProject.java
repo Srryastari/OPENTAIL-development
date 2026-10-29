@@ -428,6 +428,23 @@ final class NativeProject {
         } catch (JSONException e) { return false; }
     }
 
+    /** Multi-trigger style updates are one validated local transaction.
+     * CORE arbitration is unaffected; this only persists the v4 designer. */
+    synchronized boolean styleTriggers(Set<String> triggers, String effect, String color) {
+        if (triggers == null || triggers.isEmpty() || effect == null || effect.isEmpty()
+                || color == null || !color.matches("#[0-9A-Fa-f]{6}")) return false;
+        for (String name : triggers)
+            if (name == null || profiles().optJSONObject(name) == null) return false;
+        try {
+            JSONObject draft = new JSONObject(data.toString());
+            JSONObject all = draft.getJSONObject("profiles");
+            for (String name : triggers)
+                all.getJSONObject(name).put("pattern", effect).put("color", color);
+            data = draft;
+            return save();
+        } catch (JSONException e) { return false; }
+    }
+
     synchronized boolean deleteTrigger(String name) {
         JSONObject p = profiles().optJSONObject(name);
         if (p == null || !"trigger-custom".equals(p.optString("kind"))) return false;
