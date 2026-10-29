@@ -79,7 +79,9 @@ int main(void){
   for(size_t mode_index=0;mode_index<source_total;mode_index++){
     ot_effects_1d_state_t actual={0};
     ot_wled_fx_state_t source={0};
+    const ot_wled_audio_peak_t measured_audio={220.0f,1800.0f};
     cfg.effect_id=source_ids[mode_index];cfg.palette_id=0u;
+    cfg.audio_peak=source_ids[mode_index]==OT_WLED_ROCKTAVES?&measured_audio:NULL;
     cfg.brightness=255u;cfg.speed=127u;cfg.intensity=192u;
     cfg.foreground=(ot_wled_rgb_t){123u,56u,9u};
     cfg.background=(ot_wled_rgb_t){3u,88u,174u};
@@ -99,6 +101,7 @@ int main(void){
     ot_effects_1d_reset(&actual,1u);
     ot_wled_fx_reset(&source);
   }
+  cfg.audio_peak=NULL; /* Never retain a pointer to a loop-local audio frame. */
   printf("CORE unified dispatch: %zu source-derived effects match direct renderer.\\n",source_total);
 
 
