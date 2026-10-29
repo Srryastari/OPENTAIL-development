@@ -121,12 +121,29 @@ enum {
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
+/* Source-accurate 16-entry RGB palette sampler. No global state, allocations,
+ * UI styling or WLED runtime. Dynamic and custom IDs are not yet supported.
+ * ID 0 is the WLED source default Party palette for palette-only callers;
+ * it does not change existing direct-color render paths. */
+typedef struct { ot_wled_rgb_t entries[16]; } ot_wled_palette16_t;
+typedef enum {
+    OT_WLED_PALETTE_NOBLEND=0,
+    OT_WLED_PALETTE_LINEAR=1,
+    OT_WLED_PALETTE_NOWRAP=2
+} ot_wled_palette_blend_t;
+bool ot_wled_palette_build(uint8_t id, ot_wled_rgb_t primary,
+                           ot_wled_rgb_t secondary, ot_wled_rgb_t tertiary,
+                           ot_wled_palette16_t *out);
+ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
+                                    uint8_t index, uint8_t brightness,
+                                    ot_wled_palette_blend_t blend);
+
 typedef struct {
     uint16_t effect_id;     /* Preserve WLED's numeric effect ID */
     uint8_t speed;          /* WLED 0..255 */
     uint8_t intensity;      /* WLED 0..255 (Blink duty-cycle) */
     uint8_t brightness;     /* 0..255 post-effect linear cap; WLED bus brightness is separate */
-    uint8_t palette_id;     /* Only 0 (direct solid colors) is implemented */
+    uint8_t palette_id;     /* 0=legacy direct color; 2/3/5/6 on explicitly palette-enabled effects */
     uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
     ot_wled_rgb_t foreground;
     ot_wled_rgb_t background;
