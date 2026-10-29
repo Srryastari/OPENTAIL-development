@@ -58,6 +58,27 @@ class ComposeMainActivity : ComponentActivity() {
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
+    private lateinit var livePreview: LiveBlePreview
+    private val liveArmed = mutableStateOf(false)
+    private val liveChainMask = mutableIntStateOf(3)
+    private val liveZoneMask = mutableIntStateOf(255)
+
+    // A single gesture updates the on-screen design immediately. When the
+    // owner has explicitly armed a physical bench preview, the same gesture
+    // also coalesces an ephemeral BLE FX update to the already-saved zones.
+    private fun previewCurrentEffect(effectOverride: Int? = null) {
+        if (!liveArmed.value) return
+        livePreview.update(LiveBlePreview.Frame(
+            effectId = effectOverride ?: prefs.getInt("effectId", 0),
+            chainMask = liveChainMask.intValue,
+            zoneMask = liveZoneMask.intValue,
+            foreground = prefs.getInt("foreground", -1),
+            background = prefs.getInt("background", 0xff000000.toInt()),
+            brightness = prefs.getInt("brightness", 160),
+            speed = prefs.getInt("speed", 128),
+            intensity = prefs.getInt("intensity", 128)
+        ))
+    }
 
     private val importer = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -88,7 +109,16 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         project = NativeProject(this)
-        ble = BleDiscovery(this) { status -> runOnUiThread { bleMessage.value = status } }
+        ble = BleDiscovery(this) { status -> runOnUiThread {
+            bleMessage.value = status
+            if (!ble.canControl() && liveArmed.value) {
+                livePreview.stop()
+                liveArmed.value = false
+            }
+        } }
+        livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
+            runOnUiThread { bleMessage.value = message }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -116,9 +146,17 @@ class ComposeMainActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         ble.handlePermissions(requestCode, grantResults)
     }
-    override fun onStop() { super.onStop(); ble.stopScan() }
+    override fun onStop() {
+        if (liveArmed.value) {
+            livePreview.stop()
+            liveArmed.value = false
+        }
+        ble.stopScan()
+        super.onStop()
+    }
     override fun onDestroy() {
         unregisterReceiver(adapterReceiver)
+        if (liveArmed.value) livePreview.stop()
         ble.shutdown()
         super.onDestroy()
     }
@@ -302,17 +340,17 @@ class ComposeMainActivity : ComponentActivity() {
                 Panel(t) {
                     Field(query, "Search effects", t) { query = it }
                     Caption("Selected: " + NativeEffectCatalog.byId(effect).name, t)
-                    ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply() }
-                    ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply() }
-                    ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply() }
+                    ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
+                    ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
+                    ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply(); previewCurrentEffect(effect) }
                     PaletteEditor("Foreground", foreground, t) {
-                        foreground = it; prefs.edit().putInt("foreground", it).apply()
+                        foreground = it; prefs.edit().putInt("foreground", it).apply(); previewCurrentEffect(effect)
                     }
                     PaletteEditor("Background", background, t) {
-                        background = it; prefs.edit().putInt("background", it).apply()
+                        background = it; prefs.edit().putInt("background", it).apply(); previewCurrentEffect(effect)
                     }
                     PaletteEditor("Accent", accent, t) {
-                        accent = it; prefs.edit().putInt("accent", it).apply()
+                        accent = it; prefs.edit().putInt("accent", it).apply(); previewCurrentEffect(effect)
                     }
                     Caption("Offline illustration only. Exact timing and palettes are rendered by CORE.", t)
                 }
@@ -322,6 +360,7 @@ class ComposeMainActivity : ComponentActivity() {
                             Pill(item.name, t, item.id == effect) {
                                 effect = item.id
                                 prefs.edit().putInt("effectId", effect).apply()
+                                previewCurrentEffect(effect)
                             }
                         }
                     }
@@ -751,12 +790,39 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("Authorize saved key", t) { ble.authorizeStored() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
+            Caption("All edits are live on screen. Optional physical preview needs authorized CORE; it is temporary and never changes saved output mapping.", t)
+            Pill(if (liveArmed.value) "Stop live CORE preview" else "Preview live on CORE bench",
+                t, liveArmed.value) {
+                if (liveArmed.value) {
+                    livePreview.stop()
+                    liveArmed.value = false
+                } else if (livePreview.arm()) {
+                    liveArmed.value = true
+                    previewCurrentEffect()
+                }
+            }
+            if (liveArmed.value) {
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    listOf("Both" to 3, "OUT 1" to 1, "OUT 2" to 2)
+                        .forEach { (label, mask) ->
+                            Pill(label, t, liveChainMask.intValue == mask) {
+                                liveChainMask.intValue = mask
+                                previewCurrentEffect()
+                            }
+                        }
+                }
+                Caption("Hardware preview uses saved CORE zone boundaries. New geometry needs a future volatile-config firmware command; Android never repeatedly writes NVS on drag.", t)
+            }
         }
         var confirm by remember { mutableStateOf(false) }
         Panel(t) {
             Caption("Explicit short bench effect demo. Never sent during authoring.", t)
             Pill("Test a supported effect", t) { confirm = true }
-            Pill("Stop CORE show", t) { ble.stopShow() }
+            Pill("Stop CORE show", t) {
+                livePreview.stop()
+                liveArmed.value = false
+                ble.stopShow()
+            }
         }
         if (confirm) AlertDialog(onDismissRequest = { confirm = false },
             title = { Text("Test CORE LEDs on isolated bench?") },
