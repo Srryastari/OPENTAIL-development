@@ -1124,11 +1124,8 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     private fun addZoneAfter(index: Int) {
-        if (project.addZone("Zone " + (project.zoneCount() + 1), 30)) {
-            if (index >= 0 && index < project.zoneCount() - 2)
-                project.moveZone(project.zoneCount() - 1, index + 1)
+        if (project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1))
             refresh()
-        }
     }
     @Composable
     private fun TriggersPage(t: Tone) {
