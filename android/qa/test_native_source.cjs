@@ -56,6 +56,31 @@ assert(model.includes('static final int MAX_ZONES = 200')&&
        model.includes('"offsetMode", "auto"')&&
        model.includes('reordered.add(to, selected)'),
  'Universal zone indexing or both-direction reorder regressed');
+// Issue #14: approved zone slider/offset parity. Live previews must be
+// calculated from universal project state, stay unsaved until confirmation,
+// and cascade through later zones without sending any hardware commands.
+const previewOffsets=model.slice(model.indexOf('synchronized String previewZoneOffsets('),
+  model.indexOf('synchronized boolean editZone('));
+assert(previewOffsets.includes('int selected=indexOfZone(id)')&&
+       previewOffsets.includes('i==selected?suggestedLength:zone.optInt("length",0)')&&
+       previewOffsets.includes('Math.max(end,zone.optLong("start",end))')&&
+       previewOffsets.includes('long start=manual?')&&
+       !previewOffsets.includes('save();')&&!previewOffsets.includes('ble.')&&
+       !previewOffsets.includes('z.put('),
+  'Native live dependent-zone preview must match zero-based indexing with no persistence or BLE writes');
+const zoneEditor=main.slice(main.indexOf('private void editZone(String id)'),
+                            main.indexOf('private int number(',main.indexOf('private void editZone(String id)')));
+assert(zoneEditor.includes('count.addTextChangedListener(new TextWatcher()')&&
+       zoneEditor.includes('project.previewZoneOffsets(id,length)')&&
+       zoneEditor.includes('range.setProgress(length)')&&
+       zoneEditor.includes('count.setText(String.valueOf(Math.max(1,n)))')&&
+       zoneEditor.includes('project.editZone(id,'),
+  'Android zone pixel-count slider and typed value must preview every dependent offset before Save');
+assert(ui.includes('bar.setProgressDrawable(track)')&&
+       ui.includes('bar.setProgressTintList(')&&
+       !ui.slice(ui.indexOf('SeekBar slider('),ui.indexOf('LinearLayout.LayoutParams lp(')).includes('setStroke('),
+  'Approved slider must use a borderless rounded capsule track');
+
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
  'Universal project model must never hardcode one car/bench wiring layout');
 assert(model.includes('"version", 4')&&model.includes('validated(new JSONObject(input))')&&
