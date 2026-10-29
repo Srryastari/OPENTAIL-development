@@ -31,6 +31,7 @@ static long map(long x,long a,long b,long c,long d) {return (x-a)*(d-c)/(b-a)+c;
 // Tests use lengths >=2; upstream's 1-pixel mode_static fallback is excluded.
 #define FX_FALLBACK_STATIC { return; }
 using std::min;
+using std::max;
 using std::abs;
 using byte = uint8_t;
 
@@ -245,7 +246,9 @@ static uint32_t gamma32inv(uint32_t color) { return color; }
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
     bool check2=false;
+    uint16_t offset=0u;
     unsigned nrOfVStrips() const {return 1u;}
+    void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
@@ -284,6 +287,7 @@ struct PinnedEnv {
 };
 struct PinnedClock {
     uint32_t now=0;
+    bool isMatrix=false;
     uint16_t getCurrSegmentId() const {return 0u;}
 };
 static PinnedSeg* current_segment=nullptr;
@@ -314,6 +318,8 @@ uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t hig
 #define SEGMENT (*current_segment)
 #define SEGENV (*current_environment)
 #define SEGLEN (static_cast<unsigned>(current_segment->pixels.size()))
+#define SEG_W SEGLEN
+#define SEG_H 1u
 #define SEGCOLOR(i) (current_segment->colors[(i)])
 #define NUM_COLORS 3u
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -335,6 +341,12 @@ static uint8_t hw_random8(uint32_t max=256u) {
 }
 static uint8_t hw_random8(uint32_t min,uint32_t max) {
     return max>min?(uint8_t)(min+(ref_random32()%(max-min))):(uint8_t)min;
+}
+static uint16_t hw_random16(uint32_t max) {
+    return max?(uint16_t)(ref_random32()%max):0u;
+}
+static uint16_t hw_random16(uint32_t min,uint32_t max) {
+    return max>min?(uint16_t)(min+(ref_random32()%(max-min))):(uint16_t)min;
 }
 
 // BEGIN UPSTREAM FX.cpp functions, unchanged source bodies.
@@ -1173,6 +1185,159 @@ void mode_bouncing_balls(void) {
     virtualStrip::runStrip(stripNr, &balls[stripNr * maxNumBalls]);
 }
 
+void mode_halloween_eyes()
+{
+  enum eyeState : uint8_t {
+    initializeOn = 0,
+    on,
+    blink,
+    initializeOff,
+    off,
+
+    count
+  };
+  struct EyeData {
+    eyeState state;
+    uint8_t color;
+    uint16_t startPos;
+    // duration + endTime could theoretically be replaced by a single endTime, however we would lose
+    // the ability to end the animation early when the user reduces the animation time.
+    uint16_t duration;
+    uint32_t startTime;
+    uint32_t blinkEndTime;
+  };
+
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const unsigned maxWidth = strip.isMatrix ? SEG_W : SEGLEN;
+  const unsigned HALLOWEEN_EYE_SPACE = MAX(2, strip.isMatrix ? SEG_W>>4: SEGLEN>>5);
+  const unsigned HALLOWEEN_EYE_WIDTH = HALLOWEEN_EYE_SPACE/2;
+  unsigned eyeLength = (2*HALLOWEEN_EYE_WIDTH) + HALLOWEEN_EYE_SPACE;
+  if (eyeLength >= maxWidth) FX_FALLBACK_STATIC; //bail if segment too short
+
+  if (!SEGENV.allocateData(sizeof(EyeData))) FX_FALLBACK_STATIC; //allocation failed
+  EyeData& data = *reinterpret_cast<EyeData*>(SEGENV.data);
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1)); //fill background
+
+  data.state = static_cast<eyeState>(data.state % eyeState::count);
+  unsigned duration = max(uint16_t{1u}, data.duration);
+  const uint32_t elapsedTime = strip.now - data.startTime;
+
+  switch (data.state) {
+    case eyeState::initializeOn: {
+      // initialize the eyes-on state:
+      // - select eye position and color
+      // - select a duration
+      // - immediately switch to eyes on state.
+
+      data.startPos = hw_random16(0, maxWidth - eyeLength - 1);
+      data.color = hw_random8();
+      if (strip.isMatrix) SEGMENT.offset = hw_random16(SEG_H-1); // a hack: reuse offset since it is not used in matrices
+      duration = 128u + hw_random16(SEGMENT.intensity*64u);
+      data.duration = duration;
+      data.state = eyeState::on;
+      [[fallthrough]];
+    }
+    case eyeState::on: {
+      // eyes-on steate:
+      // - fade eyes in for some time
+      // - keep eyes on until the pre-selected duration is over
+      // - randomly switch to the blink (sub-)state, and initialize it with a blink duration (more precisely, a blink end time stamp)
+      // - never switch to the blink state if the animation just started or is about to end
+
+      unsigned start2ndEye = data.startPos + HALLOWEEN_EYE_WIDTH + HALLOWEEN_EYE_SPACE;
+      // If the user reduces the input while in this state, limit the duration.
+      duration = min(duration, (128u + (SEGMENT.intensity * 64u)));
+
+      constexpr uint32_t minimumOnTimeBegin = 1024u;
+      constexpr uint32_t minimumOnTimeEnd = 1024u;
+      const uint32_t fadeInAnimationState = elapsedTime * uint32_t{256u * 8u} / duration;
+      const uint32_t backgroundColor = SEGCOLOR(1);
+      const uint32_t eyeColor = SEGMENT.color_from_palette(data.color, false, false, 0);
+      uint32_t c = eyeColor;
+      if (fadeInAnimationState < 256u) {
+        c = color_blend(backgroundColor, eyeColor, uint8_t(fadeInAnimationState));
+      } else if (elapsedTime > minimumOnTimeBegin) {
+        const uint32_t remainingTime = (elapsedTime >= duration) ? 0u : (duration - elapsedTime);
+        if (remainingTime > minimumOnTimeEnd) {
+          if (hw_random8() < 4u)
+          {
+            c = backgroundColor;
+            data.state = eyeState::blink;
+            data.blinkEndTime = strip.now + hw_random8(8, 128);
+          }
+        }
+      }
+
+      if (c != backgroundColor) {
+        // render eyes
+        for (unsigned i = 0; i < HALLOWEEN_EYE_WIDTH; i++) {
+          if (strip.isMatrix) {
+            SEGMENT.setPixelColorXY(data.startPos + i, (unsigned)SEGMENT.offset, c);
+            SEGMENT.setPixelColorXY(start2ndEye   + i, (unsigned)SEGMENT.offset, c);
+          } else {
+            SEGMENT.setPixelColor(data.startPos + i, c);
+            SEGMENT.setPixelColor(start2ndEye   + i, c);
+          }
+        }
+      }
+      break;
+    }
+    case eyeState::blink: {
+      // eyes-on but currently blinking state:
+      // - wait until the blink time is over, then switch back to eyes-on
+
+      if (strip.now >= data.blinkEndTime) {
+        data.state = eyeState::on;
+      }
+      break;
+    }
+    case eyeState::initializeOff: {
+      // initialize eyes-off state:
+      // - select a duration
+      // - immediately switch to eyes-off state
+
+      const unsigned eyeOffTimeBase = SEGMENT.speed*128u;
+      duration = eyeOffTimeBase + hw_random16(eyeOffTimeBase);
+      data.duration = duration;
+      data.state = eyeState::off;
+      [[fallthrough]];
+    }
+    case eyeState::off: {
+      // eyes-off state:
+      // - not much to do here
+
+      // If the user reduces the input while in this state, limit the duration.
+      const unsigned eyeOffTimeBase = SEGMENT.speed*128u;
+      duration = min(duration, (2u * eyeOffTimeBase));
+      break;
+    }
+    case eyeState::count: {
+      // Can't happen, not an actual state.
+      data.state = eyeState::initializeOn;
+      break;
+    }
+  }
+
+  if (elapsedTime > duration) {
+    // The current state duration is over, switch to the next state.
+    switch (data.state) {
+      case eyeState::initializeOn:
+      case eyeState::on:
+      case eyeState::blink:
+        data.state = eyeState::initializeOff;
+        break;
+      case eyeState::initializeOff:
+      case eyeState::off:
+      case eyeState::count:
+      default:
+        data.state = eyeState::initializeOn;
+        break;
+    }
+    data.startTime = strip.now;
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1214,7 +1379,8 @@ static const RefCase refs[]={
     {67,mode_colorwaves,"Colorwaves"},
     {49,mode_fairy,"Fairy"},
     {51,mode_fairytwinkle,"Fairytwinkle"},
-    {91,mode_bouncing_balls,"Bouncing Balls"}
+    {91,mode_bouncing_balls,"Bouncing Balls"},
+    {82,mode_halloween_eyes,"Halloween Eyes"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -1223,6 +1389,7 @@ int main() {
     unsigned checked=0;
     for(const RefCase& fx:refs) {
         for(unsigned count: {2u,3u,7u,16u,31u}) {
+            if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
                     PinnedSeg seg(count);
