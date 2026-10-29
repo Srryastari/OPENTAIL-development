@@ -2250,6 +2250,36 @@ void mode_FlowStripe(void) {
 
 // END UPSTREAM FX.cpp Flow Stripe.
 
+// BEGIN UPSTREAM FX.cpp Glitter (verbatim), default paletteBlend=0.
+#define ULTRAWHITE 0x00FFFFFFu
+static uint8_t paletteBlend=0u;
+void glitter_base(uint8_t intensity, uint32_t col = ULTRAWHITE) {
+  if (intensity > hw_random8()) SEGMENT.setPixelColor(hw_random16(SEGLEN), col);
+}
+
+//Glitter with palette background, inspired by https://gist.github.com/kriegsman/062e10f7f07ba8518af6
+void mode_glitter()
+{
+  if (!SEGMENT.check2) { // use "* Color 1" palette for solid background (replacing "Solid glitter")
+    unsigned counter = 0;
+    if (SEGMENT.speed != 0) {
+      counter = (strip.now * ((SEGMENT.speed >> 3) +1)) & 0xFFFF;
+      counter = counter >> 8;
+    }
+
+    bool noWrap = (paletteBlend == 2 || (paletteBlend == 0 && SEGMENT.speed == 0));
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      unsigned colorIndex = (i * 255 / SEGLEN) - counter;
+      if (noWrap) colorIndex = map(colorIndex, 0, 255, 0, 240); //cut off blend at palette "end"
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(colorIndex, false, true, 255));
+    }
+  }
+  glitter_base(SEGMENT.intensity, SEGCOLOR(2) ? SEGCOLOR(2) : ULTRAWHITE);
+}
+
+#undef ULTRAWHITE
+// END UPSTREAM FX.cpp Glitter.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -2300,7 +2330,8 @@ static const RefCase refs[]={
     {218,mode_ColorClouds,"Color Clouds"},
     {89,mode_starburst,"Fireworks Starburst"},
     {44,mode_tetrix,"Tetrix"},
-    {179,mode_FlowStripe,"Flow Stripe"}
+    {179,mode_FlowStripe,"Flow Stripe"},
+    {87,mode_glitter,"Glitter"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -2316,9 +2347,9 @@ int main() {
             if(fx.id==82u && count<5u)continue; // upstream FX_FALLBACK_STATIC for short eyes
             for(unsigned speed:{0u,16u,127u,255u}) {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}:std::vector<uint8_t>{0u};
+                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=(fx.id==179u&&pal==0u)?11u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:pal;
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
                     seg.colors[0]=0x007B3809u; // configured primary 123,56,9
