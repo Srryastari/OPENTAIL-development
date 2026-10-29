@@ -567,7 +567,9 @@ class ComposeMainActivity : ComponentActivity() {
                     PaletteEditor("Accent", accent, t) {
                         accent = it; prefs.edit().putInt("accent", it).apply(); previewCurrentEffect(effect)
                     }
-                    Caption("Edits update the design and authorized CORE effect immediately. " +
+                    Caption(if (offlinePreview.value)
+                        "Offline mode: edits update only this local design; no CORE LED commands."
+                    else "Edits update the design and authorized CORE effect immediately. " +
                         "Exact animation preview requires a CORE frame snapshot capability.", t)
                 }
                 // Only compose visible effect rows; never eagerly render 140
