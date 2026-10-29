@@ -1510,6 +1510,95 @@ void mode_popcorn(void) {
 
 // END UPSTREAM FX.cpp Spark and Popcorn.
 
+// Host-only stand-in for Arduino constrain() with 1D unsigned indices.
+template<typename T,typename L,typename H>
+static unsigned constrain(T value,L lo,H hi) {
+    const unsigned x=static_cast<unsigned>(value);
+    const unsigned low=static_cast<unsigned>(lo),high=static_cast<unsigned>(hi);
+    return x<low?low:(x>high?high:x);
+}
+// BEGIN UPSTREAM FX.cpp Drip, unchanged source body.
+void mode_drip(void)
+{
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  //allocate segment data
+  unsigned strips = SEGMENT.nrOfVStrips();
+  const int maxNumDrops = 4;
+  unsigned dataSize = sizeof(spark) * maxNumDrops;
+  if (!SEGENV.allocateData(dataSize * strips)) FX_FALLBACK_STATIC; //allocation failed
+  Spark* drops = reinterpret_cast<Spark*>(SEGENV.data);
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1));
+
+  struct virtualStrip {
+    static void runStrip(uint16_t stripNr, Spark* drops) {
+
+      unsigned numDrops = 1 + (SEGMENT.intensity >> 6); // 255>>6 = 3
+
+      float gravity = -0.0005f - (SEGMENT.speed/50000.0f);
+      gravity *= max(1, (int)SEGLEN-1);
+      int sourcedrop = 12;
+
+      for (unsigned j=0;j<numDrops;j++) {
+        if (drops[j].colIndex == 0) { //init
+          drops[j].pos = SEGLEN-1;    // start at end
+          drops[j].vel = 0;           // speed
+          drops[j].col = sourcedrop;  // brightness
+          drops[j].colIndex = 1;      // drop state (0 init, 1 forming, 2 falling, 5 bouncing)
+        }
+
+        SEGMENT.setPixelColor(indexToVStrip(SEGLEN-1, stripNr), color_blend(BLACK,SEGCOLOR(0), uint8_t(sourcedrop)));// water source
+        if (drops[j].colIndex==1) {
+          if (drops[j].col>255) drops[j].col=255;
+          SEGMENT.setPixelColor(indexToVStrip(uint16_t(drops[j].pos), stripNr), color_blend(BLACK,SEGCOLOR(0),uint8_t(drops[j].col)));
+
+          drops[j].col += map(SEGMENT.speed, 0, 255, 1, 6); // swelling
+
+          if (hw_random8() < drops[j].col/10) {               // random drop
+            drops[j].colIndex=2;               //fall
+            drops[j].col=255;
+          }
+        }
+        if (drops[j].colIndex > 1) {           // falling
+          if (drops[j].pos > 0) {              // fall until end of segment
+            drops[j].pos += drops[j].vel;
+            if (drops[j].pos < 0) drops[j].pos = 0;
+            drops[j].vel += gravity;           // gravity is negative
+
+            for (int i=1;i<7-drops[j].colIndex;i++) { // some minor math so we don't expand bouncing droplets
+              unsigned pos = constrain(unsigned(drops[j].pos) +i, 0, SEGLEN-1); //this is BAD, returns a pos >= SEGLEN occasionally
+              SEGMENT.setPixelColor(indexToVStrip(pos, stripNr), color_blend(BLACK,SEGCOLOR(0),uint8_t(drops[j].col/i))); //spread pixel with fade while falling
+            }
+
+            if (drops[j].colIndex > 2) {       // during bounce, some water is on the floor
+              SEGMENT.setPixelColor(indexToVStrip(0, stripNr), color_blend(SEGCOLOR(0),BLACK,uint8_t(drops[j].col)));
+            }
+          } else {                             // we hit bottom
+            if (drops[j].colIndex > 2) {       // already hit once, so back to forming
+              drops[j].colIndex = 0;
+              drops[j].col = sourcedrop;
+
+            } else {
+
+              if (drops[j].colIndex==2) {      // init bounce
+                drops[j].vel = -drops[j].vel/4;// reverse velocity with damping
+                drops[j].pos += drops[j].vel;
+              }
+              drops[j].col = sourcedrop*2;
+              drops[j].colIndex = 5;           // bouncing
+            }
+          }
+        }
+      }
+    }
+  };
+
+  for (unsigned stripNr=0; stripNr<strips; stripNr++)
+    virtualStrip::runStrip(stripNr, &drops[stripNr*maxNumDrops]);
+}
+
+// END UPSTREAM FX.cpp Drip.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1554,7 +1643,8 @@ static const RefCase refs[]={
     {91,mode_bouncing_balls,"Bouncing Balls"},
     {82,mode_halloween_eyes,"Halloween Eyes"},
     {48,mode_rolling_balls,"Rolling Balls"},
-    {95,mode_popcorn,"Popcorn"}
+    {95,mode_popcorn,"Popcorn"},
+    {96,mode_drip,"Drip"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
