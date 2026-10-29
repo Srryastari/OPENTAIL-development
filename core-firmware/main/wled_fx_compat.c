@@ -2689,7 +2689,7 @@ static void glitter_frame(const ot_wled_fx_config_t *cfg,
         if(nowrap)
             color_index=(unsigned)((uint32_t)color_index*240u/255u);
         pixels[i]=scaled(ot_wled_palette_sample(&palette,(uint8_t)color_index,
-            255u,nowrap?OT_WLED_PALETTE_NOWRAP:OT_WLED_PALETTE_LINEAR),
+            255u,OT_WLED_PALETTE_LINEAR),
             cfg->brightness);
     }
     if(cfg->intensity>fx_rand8(state,256u)) {
