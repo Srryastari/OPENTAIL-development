@@ -14,6 +14,9 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.OpenTail">
+        <!-- Internal-only Kotlin Compose candidate; never exposed to other apps.
+             The approved launcher stays intact pending device acceptance. -->
+        <activity android:name=".ComposeMainActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
