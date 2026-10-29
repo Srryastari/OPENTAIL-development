@@ -21,6 +21,7 @@ int main(void){
     ot_frame_snapshot_complete(true);
     assert(ot_frame_snapshot_info(&i) && i.ready && !i.pending);
     assert(i.output==0 && i.count==3 && i.sequence==23);
+    assert(i.crc==52984u); /* Independent CRC-16/CCITT-FALSE RGB888 vector */
     assert(ot_frame_snapshot_chunk(0,23,0,3,data));
     const uint8_t expected[]={255,0,7,0,0,0,4,5,6};
     assert(memcmp(data,expected,sizeof expected)==0);
