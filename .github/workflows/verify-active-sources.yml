@@ -33,6 +33,8 @@ jobs:
         run: python3 scripts/check_regressions.py --mode audit
       - name: Verify OTA layout and local-update contract without asserting hardware success
         run: python3 core-firmware/tests/test_ota_contract.py
+      - name: Test that missing hardware proof, stale commits and unclassified changes are rejected
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
   core-host-tests:
     runs-on: ubuntu-latest
