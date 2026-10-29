@@ -37,6 +37,12 @@ bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
 bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
  uint32_t now_ms,bool standalone);
+/* Adjust only an already-playing zone's overlay. Do not change FX packet,
+ * start time, lifetime, generation or another zone. Atomic on validation
+ * failure; caller owns render state_lock and session authorization. */
+bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS], uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms);
 void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank);
