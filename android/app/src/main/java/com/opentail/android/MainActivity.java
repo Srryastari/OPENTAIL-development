@@ -168,8 +168,8 @@ public final class MainActivity extends Activity {
         haptics = new HapticController(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(12, 19, 16));
-        root.setPadding(0, dp(4), 0, 0);
+        root.setBackgroundColor(Color.BLACK);
+        root.setPadding(0, 0, 0, 0);
 
         // Unified WebView shell owns the header, connection cards and bottom navigation.
         // Keep labels for existing state transitions, but do not add duplicate native controls.
@@ -180,7 +180,7 @@ public final class MainActivity extends Activity {
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
         web = new WebView(this);
-        web.setBackgroundColor(Color.rgb(12, 19, 16));
+        web.setBackgroundColor(Color.BLACK);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
@@ -212,16 +212,17 @@ public final class MainActivity extends Activity {
                 if (OFFLINE_URL.equals(url) && offlineSelected) {
                     coreMode = false;
                     CoreConnection.releaseWifi(MainActivity.this);
-                    connectionLabel.setText("Offline Studio v0.19.47 · Local design only, no device sync");
+                    connectionLabel.setText("OpenTail Studio · Local design workspace");
                 }
                 if (allowedPage(url)) {
                     // Intercept Studio's project export to use Android's user-chosen document picker.
                     view.evaluateJavascript("window.download=function(name,text){window.OpenTailApp.exportJson(String(name),String(text));};", null);
                     view.evaluateJavascript(STUDIO_HAPTIC_JS, null);
-                    injectBleOutputControls(view);
-                    injectUnifiedShell(view);
-                    injectDirectBleDashboard(view);
-                    injectOutputControlMotion(view);
+                    // The packaged web Studio IS the approved Android interface.
+                    // Do not inject a second header, navigation, connection
+                    // dashboard, BLE Output Manager, or alternate theme over it.
+                    // Native BLE, export and haptic bridges remain available,
+                    // but are not used by offline authoring controls.
                 }
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request,
@@ -272,11 +273,10 @@ public final class MainActivity extends Activity {
         });
         appReady = true;
         openOffline(false);
-        if (preferences.getBoolean(USE_CORE, false) && preferences.getBoolean(AUTO_WIFI, false)) {
-            // The user must already have joined the CORE Wi-Fi AP using Android settings.
-            connectCore(true);
-        }
-        if (preferences.getBoolean(AUTO_BLE, true)) {
+        // CORE firmware no longer serves Studio (its /studio URL redirects
+        // to /dev). Never auto-navigate away from bundled authoring UI.
+        // Hardware inspection stays exclusively in CORE /dev.
+        if (preferences.getBoolean(AUTO_BLE, false)) {
             ble.tryReconnect(preferences.getString("preferred_ble_address", null));
         }
     }
@@ -365,7 +365,7 @@ public final class MainActivity extends Activity {
         }
         coreMode = false;
         CoreConnection.releaseWifi(this);
-        connectionLabel.setText("Offline Studio v0.19.47 · Local design only, no device sync");
+        connectionLabel.setText("OpenTail Studio · Local design workspace");
         if (!OFFLINE_URL.equals(web.getUrl())) web.loadUrl(OFFLINE_URL);
     }
 
