@@ -235,8 +235,11 @@ uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
 struct CHSV {uint8_t h,s,v;CHSV(uint8_t a,uint8_t b,uint8_t c):h(a),s(b),v(c){}};
 struct CHSV32 {uint8_t h,s,v;CHSV32(uint8_t a,uint8_t b,uint8_t c):h(a),s(b),v(c){}};
 struct CRGBW {
-    uint32_t color32=0u;
-    CRGBW()=default;
+    union {
+        uint32_t color32;
+        struct {uint8_t b,g,r,w;};
+    };
+    CRGBW():color32(0u){}
     explicit CRGBW(CHSV32 c) {
         uint8_t rgb[4]={0,0,0,0};
         hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
@@ -245,6 +248,8 @@ struct CRGBW {
     operator uint32_t() const {return color32;}
 };
 struct CRGB : CRGBW {
+    CRGB()=default;
+    explicit CRGB(uint32_t color) { color32=color; }
     explicit CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
         hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
@@ -302,6 +307,8 @@ struct PinnedEnv {
 };
 struct PinnedClock {
     uint32_t now=0;
+    unsigned getActiveSegmentsNum() const {return 1u;}
+    unsigned getMaxSegments() const {return 32u;}
     bool isMatrix=false;
     uint16_t getCurrSegmentId() const {return 0u;}
 };
@@ -1871,6 +1878,145 @@ void mode_ColorClouds()
 // END UPSTREAM FX.cpp Color Clouds.
 #pragma GCC diagnostic pop
 
+
+/* Reference adapter: ESP32 budget and source RGBW constructor, no edits to
+ * the upstream starburst function body or particle struct. */
+#define FAIR_DATA_PER_SEG 640u
+static uint32_t RGBW32(uint8_t r,uint8_t g,uint8_t b,uint8_t w) {
+    (void)w;
+    return ((uint32_t)r<<16)|((uint32_t)g<<8)|b;
+}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits" // upstream unsigned start < 0
+// BEGIN UPSTREAM FX.cpp starburst (verbatim).
+#ifdef ESP8266
+  #define STARBURST_MAX_FRAG   8 //52 bytes / star
+#else
+  #define STARBURST_MAX_FRAG  10 //60 bytes / star
+#endif
+//each needs 20+STARBURST_MAX_FRAG*4 bytes
+typedef struct particle {
+  CRGB     color;
+  uint32_t birth  =0;
+  uint32_t last   =0;
+  float    vel    =0;
+  uint16_t pos    =-1;
+  float    fragment[STARBURST_MAX_FRAG];
+} star;
+
+void mode_starburst(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned maxData = FAIR_DATA_PER_SEG; //ESP8266: 256 ESP32: 640
+  unsigned segs = strip.getActiveSegmentsNum();
+  if (segs <= (strip.getMaxSegments() /2)) maxData *= 2; //ESP8266: 512 if <= 8 segs ESP32: 1280 if <= 16 segs
+  if (segs <= (strip.getMaxSegments() /4)) maxData *= 2; //ESP8266: 1024 if <= 4 segs ESP32: 2560 if <= 8 segs
+  unsigned maxStars = maxData / sizeof(star); //ESP8266: max. 4/9/19 stars/seg, ESP32: max. 10/21/42 stars/seg
+
+  unsigned numStars = 1 + (SEGLEN >> 3);
+  if (numStars > maxStars) numStars = maxStars;
+  unsigned dataSize = sizeof(star) * numStars;
+
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  uint32_t it = strip.now;
+
+  star* stars = reinterpret_cast<star*>(SEGENV.data);
+
+  float          maxSpeed                = 375.0f;  // Max velocity
+  float          particleIgnition        = 250.0f;  // How long to "flash"
+  float          particleFadeTime        = 1500.0f; // Fade out time
+
+  for (unsigned j = 0; j < numStars; j++)
+  {
+    // speed to adjust chance of a burst, max is nearly always.
+    if (hw_random8((144-(SEGMENT.speed >> 1))) == 0 && stars[j].birth == 0)
+    {
+      // Pick a random color and location.
+      unsigned startPos = hw_random16(SEGLEN-1);
+      float multiplier = (float)(hw_random8())/255.0f * 1.0f;
+
+      stars[j].color = CRGB(SEGMENT.color_wheel(hw_random8()));
+      stars[j].pos = startPos;
+      stars[j].vel = maxSpeed * (float)(hw_random8())/255.0f * multiplier;
+      stars[j].birth = it;
+      stars[j].last = it;
+      // more fragments means larger burst effect
+      int num = hw_random8(3,6 + (SEGMENT.intensity >> 5));
+
+      for (int i=0; i < STARBURST_MAX_FRAG; i++) {
+        if (i < num) stars[j].fragment[i] = startPos;
+        else stars[j].fragment[i] = -1;
+      }
+    }
+  }
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1));
+
+  for (unsigned j=0; j<numStars; j++)
+  {
+    if (stars[j].birth != 0) {
+      float dt = (it-stars[j].last)/1000.0;
+
+      for (int i=0; i < STARBURST_MAX_FRAG; i++) {
+        int var = i >> 1;
+
+        if (stars[j].fragment[i] > 0) {
+          //all fragments travel right, will be mirrored on other side
+          stars[j].fragment[i] += stars[j].vel * dt * (float)var/3.0;
+        }
+      }
+      stars[j].last = it;
+      stars[j].vel -= 3*stars[j].vel*dt;
+    }
+
+    CRGB c = stars[j].color;
+
+    // If the star is brand new, it flashes white briefly.
+    // Otherwise it just fades over time.
+    float fade = 0.0f;
+    float age = it-stars[j].birth;
+
+    if (age < particleIgnition) {
+      c = CRGB(color_blend(WHITE, RGBW32(c.r,c.g,c.b,0), uint8_t(254.5f*((age / particleIgnition)))));
+    } else {
+      // Figure out how much to fade and shrink the star based on
+      // its age relative to its lifetime
+      if (age > particleIgnition + particleFadeTime) {
+        fade = 1.0f;                  // Black hole, all faded out
+        stars[j].birth = 0;
+        c = CRGB(SEGCOLOR(1));
+      } else {
+        age -= particleIgnition;
+        fade = (age / particleFadeTime);  // Fading star
+        c = CRGB(color_blend(RGBW32(c.r,c.g,c.b,0), SEGCOLOR(1), uint8_t(254.5f*fade)));
+      }
+    }
+
+    float particleSize = (1.0f - fade) * 2.0f;
+
+    for (size_t index=0; index < STARBURST_MAX_FRAG*2; index++) {
+      bool mirrored = index & 0x1;
+      unsigned i = index >> 1;
+      if (stars[j].fragment[i] > 0) {
+        float loc = stars[j].fragment[i];
+        if (mirrored) loc -= (loc-stars[j].pos)*2;
+        unsigned start = loc - particleSize;
+        unsigned end = loc + particleSize;
+        if (start < 0) start = 0;
+        if (start == end) end++;
+        if (end > SEGLEN) end = SEGLEN;
+        for (unsigned p = start; p < end; p++) {
+          SEGMENT.setPixelColor(p, c);
+        }
+      }
+    }
+  }
+}
+#undef STARBURST_MAX_FRAG
+
+// END UPSTREAM FX.cpp starburst.
+#pragma GCC diagnostic pop
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1918,7 +2064,8 @@ static const RefCase refs[]={
     {95,mode_popcorn,"Popcorn"},
     {96,mode_drip,"Drip"},
     {116,mode_tv_simulator,"TV Simulator"},
-    {218,mode_ColorClouds,"Color Clouds"}
+    {218,mode_ColorClouds,"Color Clouds"},
+    {89,mode_starburst,"Fireworks Starburst"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
