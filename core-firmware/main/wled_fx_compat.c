@@ -4,7 +4,8 @@
  * color_wipe(), mode_color_wipe(), mode_color_sweep(), mode_fade(),
  * scan(), mode_scan(), mode_dual_scan(), running(), mode_theater_chase(),
  * mode_static_pattern(), mode_heartbeat(), spots_base(),
- * mode_spots(), mode_spots_fade(), and mode_percent().
+ * mode_spots(), mode_spots_fade(), mode_percent(),
+ * mode_chase_flash(), and mode_running_color().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -24,6 +25,10 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_FADE,   "Fade",   "Fade@!;!,!;!;01",              true, true, true, false, false},
     {OT_WLED_THEATER, "Theater", "Theater@!,Gap size;!,!;!", true, true, true, true, false},
     {OT_WLED_STROBE, "Strobe", "Strobe@!;!,!;!;01",            true, true, true, false, false},
+    {OT_WLED_CHASE_FLASH, "Chase Flash", "Chase Flash@!;Bg,Fx;!",
+     true, true, true, false, false},
+    {OT_WLED_RUNNING_COLOR, "Chase 2", "Chase 2@!,Width;!,!;!",
+     true, true, true, true, false},
     {OT_WLED_SOLID_PATTERN, "Solid Pattern", "Solid Pattern@Fg size,Bg size;Fg,!;!;;pal=0",
      true, true, true, true, false},
     {OT_WLED_SPOTS, "Spots", "Spots@Spread,Width,,,,,Overlay;!,!;!", 
@@ -252,6 +257,63 @@ static void percent_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *sta
     }
 }
 
+/*
+ * Pinned FX.cpp running(..., theatre=false), mode_running_color().
+ * Uses the same SEGENV step/aux0 phase as Theater; the width differs.
+ * Only WLED's palette=0/direct-color case is supported.
+ */
+static void running_color_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *state,
+                                uint32_t now,ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t width=1u+((uint32_t)cfg->intensity>>4);
+    const uint32_t cycle=50u+255u-(uint32_t)cfg->speed;
+    const uint32_t iteration=now/cycle;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for (size_t i=0;i<count;i++) {
+        const int32_t pos=(int32_t)(i%(width<<1));
+        const int32_t phase=(int32_t)state->aux0;
+        const int32_t w=(int32_t)width;
+        pixels[i]=(pos<phase-w || (pos>=phase && pos<phase+w))?fg:bg;
+    }
+    if (iteration!=state->step) {
+        state->aux0=(uint16_t)((state->aux0+1u)%(width<<1));
+        state->step=iteration;
+    }
+}
+
+/*
+ * Pinned FX.cpp mode_chase_flash(): draw the current flash_step BEFORE
+ * incrementing aux1; the current position advances only after eight flashes.
+ * No segment or LED bus is owned by this source adaptation.
+ */
+static void chase_flash_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *state,
+                              uint32_t now,ot_wled_rgb_t *pixels,size_t count) {
+    if (count<=1u) {
+        pixels[0]=scaled(cfg->foreground,cfg->brightness);
+        return;
+    }
+    const bool advance=now>=state->step;
+    const uint32_t flash_step=state->aux1%9u; /* 4 on/off flashes + move */
+    if (advance) state->aux1++;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for (size_t i=0;i<count;i++) pixels[i]=fg;
+    const size_t n=state->aux0%count;
+    const size_t m=(n+1u)%count;
+    uint32_t delay=10u+((30u*(255u-(uint32_t)cfg->speed))/(uint32_t)count);
+    if (flash_step<8u) {
+        if ((flash_step&1u)==0u) {
+            pixels[n]=bg; pixels[m]=bg;
+            delay=20u;
+        } else {
+            delay=30u;
+        }
+    } else if (advance) {
+        state->aux0=(uint16_t)m;
+    }
+    if (advance) state->step=now+delay;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -266,6 +328,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     }
     if (cfg->effect_id==OT_WLED_SCAN || cfg->effect_id==OT_WLED_DUAL_SCAN) {
         scan_frame(cfg,time_ms,pixels,count,cfg->effect_id==OT_WLED_DUAL_SCAN);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_CHASE_FLASH) {
+        chase_flash_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_RUNNING_COLOR) {
+        running_color_frame(cfg,state,time_ms,pixels,count);
         return true;
     }
     if (cfg->effect_id==OT_WLED_THEATER) {
