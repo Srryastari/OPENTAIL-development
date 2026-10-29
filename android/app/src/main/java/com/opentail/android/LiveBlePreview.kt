@@ -30,6 +30,7 @@ internal class LiveBlePreview(
         val brightness: Int,
         val speed: Int,
         val intensity: Int,
+        val paletteId: Int,
     )
 
     private val handler = Handler(Looper.getMainLooper())
@@ -62,7 +63,7 @@ internal class LiveBlePreview(
             frame.brightness.coerceIn(0, 24),
             frame.speed.coerceIn(0, 255),
             frame.intensity.coerceIn(0, 255),
-            0, 5
+            frame.paletteId, 5
         )
     }
 
@@ -82,6 +83,10 @@ internal class LiveBlePreview(
         if (!armed) return
         if (frame.effectId !in supportedIds()) {
             report("Effect is not supported by the connected CORE firmware")
+            return
+        }
+        if (!NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)) {
+            report("Palette unavailable for this CORE effect; selection stays local")
             return
         }
         if (frame.chainMask !in 1..3 || frame.zoneMask !in 1..255) return
