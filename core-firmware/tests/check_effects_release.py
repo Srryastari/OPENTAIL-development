@@ -13,6 +13,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--release", action="store_true")
+parser.add_argument("--audit", action="store_true", help="Report and guard the effect inventory without claiming parity")
 args = parser.parse_args()
 
 compat = (root / "main/wled_1d.c").read_text()
