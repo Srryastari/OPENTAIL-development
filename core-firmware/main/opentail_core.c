@@ -59,6 +59,7 @@ static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGH
 static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
+static uint8_t tm_gpio_input_mask(void);
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -382,10 +383,12 @@ static esp_err_t om_post(httpd_req_t *r){
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
+    /* A freshly asserted optocoupler pin is busy even before debounce. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
@@ -414,9 +417,11 @@ bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
 int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
     if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
+    /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
