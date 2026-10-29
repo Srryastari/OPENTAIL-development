@@ -145,7 +145,7 @@ typedef struct {
     uint8_t speed;          /* WLED 0..255 */
     uint8_t intensity;      /* WLED 0..255 (Blink duty-cycle) */
     uint8_t brightness;     /* 0..255 post-effect linear cap; WLED bus brightness is separate */
-    uint8_t palette_id;     /* 0=mode default; explicit 2-12 on palette-enabled effects */
+    uint8_t palette_id;     /* 0=mode default; 2-72 built-in on palette-enabled effects */
     uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
     ot_wled_rgb_t foreground;
     ot_wled_rgb_t background;
