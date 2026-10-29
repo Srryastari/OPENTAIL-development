@@ -10,6 +10,8 @@ const main=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainA
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
 const ui=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeUi.java','utf8');
 const preview=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeLedPreview.java','utf8');
+const output=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeOutputManager.java','utf8');
+const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
 const gradle=fs.readFileSync('android/app/build.gradle','utf8');
@@ -89,4 +91,17 @@ const ble=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDis
 assert(ble.includes('pairWithBoot()')&&ble.includes('authorizeStored()')&&
        ble.includes('HmacSHA256')&&ble.includes('canControl()'),
  'Secure BLE authorization flow must remain available in native code');
-console.log('PASS: Native Android UI, 6 pages, 126 effects, v4 project, no bundled WebView, guarded BLE and universal zones (static).');
+assert(main.includes('new NativeOutputManager(this,ble,ui)')&&main.includes('outputManager.onBleResult(result)'),
+ 'Advanced native BLE output editor must connect to existing readback protocol');
+assert(output.includes('class NativeOutputManager')&&output.includes('ble.readOutput(selected)')&&
+       output.includes('ble.saveOutput(index,draft.toString())')&&
+       output.includes('BleConfigCodec.encode(draft)')&&output.includes('ble.canConfigure()')&&
+       output.includes('setTitle("Save physical output?")'),
+ 'Native BLE output editor must read first, validate and explicitly confirm writes');
+assert(output.includes('new JSONObject(result.getJSONObject("output").toString())')&&
+       output.includes('drafts[index]')&&output.includes('for(int i=0;i<2;i++)'),
+ 'Per-output independent drafts and verified hardware readback required');
+assert(codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
+       codec.includes('static byte[] encode(')&&codec.includes('static JSONObject decode('),
+ 'Native hardware output safety and codec validation regressed');
+console.log('PASS: Native Android UI, 6 pages, 126 effects, v4 project, no bundled WebView, guarded BLE, universal zones and NVS output editor (static).');
