@@ -1,19 +1,8 @@
 name: Verify OpenTail active sources
 on:
   push:
-    branches: [work/extract-active-sources]
+    branches: [main, work/extract-active-sources, 'integration/**', 'work/**']
   pull_request:
-    paths:
-      - 'core-firmware/**'
-      - 'scripts/**'
-      - 'docs/**'
-      - '.github/workflows/**'
-      - 'wled-native/**'
-      - 'android/**'
-      - 'web-studio/**'
-      - 'docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md'
-      - 'docs/verified-bench-regression-matrix.md'
-      - '.github/workflows/verify-active-sources.yml'
   workflow_dispatch:
 permissions:
   contents: read
