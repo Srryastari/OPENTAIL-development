@@ -120,6 +120,21 @@ int main(void){
             }
         }
     }
+    /* Exactly one default-ATT-MTU-sized readback; no dynamic allocation,
+     * byte-swapping, struct-padding, or dependence on ESP32/NimBLE runtime. */
+    uint8_t response[OT_TM_BLE_READ_BYTES]={0};
+    ot_tm_defaults(&p);
+    assert(sizeof(response)==15u);
+    assert(ot_tm_ble_encode(&p,0x1234,0xA5,0xDE,true,3,response));
+    const uint8_t expected_response[OT_TM_BLE_READ_BYTES]={
+        1,3,0x34,0x12,0xA5,0xDE,1,1,2,3,4,5,6,7,8};
+    assert(memcmp(response,expected_response,sizeof(response))==0);
+    assert(ot_tm_ble_encode(&p,0,0,0,false,0,response));
+    assert(response[2]==0 && response[3]==0 && response[6]==0);
+    assert(!ot_tm_ble_encode(NULL,0,0,0,false,0,response));
+    assert(!ot_tm_ble_encode(&p,0,0,0,false,0,NULL));
+    p.function[0]=255;
+    assert(!ot_tm_ble_encode(&p,0,0,0,false,0,response));
     /* Reject malformed profiles and unsupported values. */
     assert(ot_tm_from_name("park_brake")==-1);
     assert(ot_tm_from_name("")==-1);
