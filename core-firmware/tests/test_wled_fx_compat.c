@@ -717,6 +717,15 @@ int main(void) {
         ot_wled_fx_reset(&s);
         assert(ot_wled_fx_render(&c,&s,0,p,31));
     }
+    /* Juggle overlaps OR-composited dots. Individual pre-scaled colors must
+     * not combine into channels brighter than the requested output cap. */
+    c.effect_id=OT_WLED_JUGGLE;c.brightness=32;c.intensity=255;c.speed=120;
+    memset(p,0,sizeof(p));ot_wled_fx_reset(&s);
+    for(uint32_t ms=0;ms<1800u;ms+=23u){
+        assert(ot_wled_fx_render(&c,&s,ms,p,31));
+        for(size_t i=0;i<31;i++)
+            assert(p[i].r<=32u && p[i].g<=32u && p[i].b<=32u);
+    }
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
