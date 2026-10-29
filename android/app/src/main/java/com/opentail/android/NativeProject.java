@@ -30,7 +30,13 @@ final class NativeProject {
     private String committedJson;
 
     NativeProject(Context context) {
-        prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        this(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
+    }
+
+    // Package-private injection permits real JSON and storage-failure tests
+    // without Android UI or a connected controller.
+    NativeProject(SharedPreferences preferences) {
+        prefs = preferences;
         try { data = validated(new JSONObject(prefs.getString(KEY, "{}"))); }
         catch (Exception ignored) { data = empty(); }
         committedJson = data.toString();
