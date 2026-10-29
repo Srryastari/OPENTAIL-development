@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=99u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=100u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -973,6 +973,34 @@ int main(void) {
     ot_wled_fx_reset(&rolling_a);
     ot_wled_fx_reset(&rolling_b);
     assert(!rolling_a.scratch && !rolling_b.scratch);
+
+
+    /* Popcorn source mode: 21 independent Spark records per active zone,
+     * deterministic per-zone RNG, guard bytes and complete scratch cleanup. */
+    c.effect_id=OT_WLED_POPCORN;
+    c.speed=243u;c.intensity=240u;c.brightness=32u;
+    ot_wled_fx_state_t popcorn_a={0},popcorn_b={0};
+    ot_wled_rgb_t popcorn_aa[33],popcorn_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*839u;
+        for(size_t px=0;px<33u;px++) {
+            popcorn_aa[px]=(ot_wled_rgb_t){99,88,77};
+            popcorn_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&popcorn_a,ms,&popcorn_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&popcorn_b,ms,&popcorn_bb[1],31u));
+        assert(memcmp(popcorn_aa,popcorn_bb,sizeof(popcorn_aa))==0);
+        assert(eq(popcorn_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(popcorn_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(popcorn_aa[px].r<=32u &&
+                   popcorn_aa[px].g<=32u &&
+                   popcorn_aa[px].b<=32u);
+    }
+    assert(popcorn_a.scratch && popcorn_a.scratch_bytes>=420u);
+    ot_wled_fx_reset(&popcorn_a);
+    ot_wled_fx_reset(&popcorn_b);
+    assert(!popcorn_a.scratch && !popcorn_b.scratch);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
