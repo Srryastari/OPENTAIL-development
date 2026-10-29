@@ -100,6 +100,12 @@ assert(settingsSection.includes('Pill("Preview Offline", t)') &&
        settingsSection.includes('changePage(1)') &&
        settingsSection.includes('ConnectPill {'),
        'Locked Settings Connect and offline preview regression');
+assert(homeSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
+       settingsSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
+       homeSection.includes('Caption(bleMessage.value, t)') &&
+       settingsSection.includes('Caption(bleMessage.value, t)') &&
+       bleSource.includes('String connectionPhase()'),
+       'Bluetooth status pill must reflect actual connection state, not transient messages');
 assert(homeSection.includes('Bluetooth · ') &&
        homeSection.includes('Pill("Authorize / Pair with BOOT"') &&
        settingsSection.includes('Pill("Authorize / Pair with BOOT"') &&
