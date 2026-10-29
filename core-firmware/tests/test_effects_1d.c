@@ -4,10 +4,10 @@
 #include "effects_1d.h"
 #include "wled_1d.h"
 int main(void){
-  uint16_t ids[128]={0};
-  size_t total=ot_effects_1d_supported_ids(ids,128);
-  assert(total==ot_wled_1d_count()+6u);
-  assert(total==126u);
+  uint16_t ids[160]={0};
+  size_t total=ot_effects_1d_supported_ids(ids,160);
+  assert(total==ot_wled_1d_count()+20u);
+  assert(total==140u);
   assert(ids[0]==0&&ids[1]==1&&ids[120]==OT_FX_EMBERS);
   bool has_strobe=false;
   for(size_t i=0;i<total;i++)if(ids[i]==23u)has_strobe=true;
