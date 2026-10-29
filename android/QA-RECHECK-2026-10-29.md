@@ -23,6 +23,13 @@
 9. Added a local trigger-color swatch to Start/Stop instead of a misleading simulated animation; the test explicitly says CORE LEDs are unchanged.
 10. Added a confirmation before a local preset replaces the active project. Restored Settings **Preview Offline** beside the locked white Connect action. This opens a local-only Show Modes session, clears old CORE frames, suppresses new effect/snapshot BLE commands, and issues STOP only when a previous temporary hardware preview was already armed. Leaving Show Modes restores normal authorized preview behavior.
 11. Expanded active Compose regression checks for unified slider, touch targets, screen-scroll reset, zoom, preview isolation, and destructive-action confirmation.
+12. Serialized CORE output reads and writes against BLE owner pairing/authorization and effect-capability reads. A disabled adapter explicitly cancels frame capture, and connection teardown clears pending authorization/writes.
+13. Cleared cached CORE output readbacks and rendered pixel snapshots when controller authorization ends; disconnected devices can no longer appear to have a fresh output draft in the editor.
+14. Added native vector top-navigation glyphs using the locked four meanings: sparkle (Show Modes), squares (Layout), lightning (Triggers), sun (Auto Events). No third-party icon font, emoji, or additional Android dependency.
+15. Corrected the Home/Settings Bluetooth status pill to use the real BLE connection phase; transient diagnostic messages remain separate explanatory text.
+16. Made Auto Events' **Preview offline** enter the same explicitly BLE-isolated session as Settings' **Preview Offline**, and accurately described that offline pixel inspection does not generate CORE animation.
+17. Stopped preset snapshots from recursively embedding the entire saved preset collection. Loading an old design preserves today's preset library, including newer saved presets; malformed presets now show a local error instead of silently doing nothing.
+18. Closed a GATT race by guarding owner pairing/authentication against other active BLE operations and resetting pending authentication on disconnect/reconnect.
 
 ## Not yet accepted; do NOT label these complete
 
