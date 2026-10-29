@@ -29,6 +29,21 @@ int ot_tm_from_name(const char *name);
 uint8_t ot_tm_signal_mask_of(const char *name);
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t physical_bits);
 
+/* A successful NVS write must not change the mapping of a physical input
+ * which asserted during that write. Keep the old active profile until both
+ * instantaneous GPIO and debounced inputs are released. Call under CORE's
+ * state_lock; no flash writes or GPIO reads occur inside these pure helpers. */
+typedef struct {
+    ot_tm_profile_t profile;
+    bool pending;
+} ot_tm_pending_t;
+
+bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                       const ot_tm_profile_t *saved,uint8_t instantaneous,
+                       uint8_t debounced);
+bool ot_tm_apply_if_released(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced);
+
 /* Authenticated BLE trigger-profile v1: one 11-byte write fits default ATT MTU.
  * [version, expected_revision LE16, IN1..IN8 logical function IDs].
  * No GPIO numbers, LED geometry, or vehicle-specific function assumptions. */
