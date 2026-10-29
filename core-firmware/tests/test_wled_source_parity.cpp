@@ -707,6 +707,36 @@ void mode_android(void) {
   }
 }
 
+// Phased Noise not enabled in this reference table. Abort instead of
+// silently replacing upstream Perlin semantics if that code is called.
+static uint8_t perlin8(uint16_t) { std::abort(); }
+static void phased_base(uint8_t moder) {                  // We're making sine waves here. By Andrew Tuline.
+
+  unsigned allfreq = 16;                                          // Base frequency.
+  float *phase = reinterpret_cast<float*>(&SEGENV.step);         // Phase change value gets calculated (float fits into unsigned long).
+  unsigned cutOff = (255-SEGMENT.intensity);                      // You can change the number of pixels.  AKA INTENSITY (was 192).
+  unsigned modVal = 5;//SEGMENT.fft1/8+1;                         // You can change the modulus. AKA FFT1 (was 5).
+
+  unsigned index = strip.now/64;                                  // Set color rotation speed
+  *phase += SEGMENT.speed/32.0;                                  // You can change the speed of the wave. AKA SPEED (was .4)
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    if (moder == 1) modVal = (perlin8(i*10 + i*10) /16);         // Let's randomize our mod length with some Perlin noise.
+    unsigned val = (i+1) * allfreq;                              // This sets the frequency of the waves. The +1 makes sure that led 0 is used.
+    if (modVal == 0) modVal = 1;
+    val += *phase * (i % modVal +1) /2;                          // This sets the varying phase change of the waves. By Andrew Tuline.
+    unsigned b = cubicwave8(val);                                 // Now we make an 8 bit sinewave.
+    b = (b > cutOff) ? (b - cutOff) : 0;                         // A ternary operator to cutoff the light.
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(index, false, false, 0), uint8_t(b)));
+    index += 256 / SEGLEN;
+    if (SEGLEN > 256) index ++;                                  // Correction for segments longer than 256 LEDs
+  }
+}
+
+void mode_phased(void) {
+  phased_base(0);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -741,7 +771,8 @@ static const RefCase refs[]={
     {85,mode_spots,"Spots"},
     {86,mode_spots_fade,"Spots Fade"},
     {100,mode_heartbeat,"Heartbeat"},
-    {27,mode_android,"Android"}
+    {27,mode_android,"Android"},
+    {105,mode_phased,"Phased"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
