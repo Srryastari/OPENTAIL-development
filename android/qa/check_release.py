@@ -68,7 +68,7 @@ check("Active Compose bench test requires BLE auth, capability and confirmation"
       'Text("Test CORE LEDs on isolated bench?")' in compose and
       'if (ble.canControl() && id in supportedIds.value)' in compose and
       'ble.showFx(id, 3, 255' in compose and
-      'confirm = false' in compose))
+      'confirm = false' in compose)
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Active Compose output save uses authenticated BLE revision/readback path",
