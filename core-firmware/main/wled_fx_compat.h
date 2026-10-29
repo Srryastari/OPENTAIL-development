@@ -46,7 +46,10 @@ enum {
     OT_WLED_RUNNING_LIGHTS = 15,
     OT_WLED_SAW = 16,
     OT_WLED_RUNNING_DUAL = 52,
-    OT_WLED_SOLID_PATTERN_TRI = 84
+    OT_WLED_SOLID_PATTERN_TRI = 84,
+    OT_WLED_COLORFUL = 34,
+    OT_WLED_GRADIENT = 46,
+    OT_WLED_LOADING = 47
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
@@ -95,7 +98,7 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
  * Theater Rainbow, Blink Rainbow, Strobe Rainbow, Multi Strobe,
  * Chase, Chase Rainbow, Rainbow Runner, Two Dots, Chase 3, Tri Wipe,
  * Tri Fade, Breathe, Running, Saw, Running Dual, Solid Pattern Tri,
- * Solid Pattern and
+ * Colorful, Gradient, Loading, Solid Pattern and
  * Heartbeat, Spots, Spots Fade, Percent, Chase Flash and Running Color,
  * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
