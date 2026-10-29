@@ -11,8 +11,8 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 }
 
 int main(void) {
-    uint16_t ids[92]={0};
-    assert(ot_wled_fx_supported_ids(ids,92)==92);
+    uint16_t ids[93]={0};
+    assert(ot_wled_fx_supported_ids(ids,93)==93);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
            ids[4]==10 && ids[5]==11 && ids[6]==12 &&
            ids[7]==13 && ids[8]==23 && ids[9]==31 && ids[10]==37 && ids[11]==83 &&
@@ -39,7 +39,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -767,16 +767,31 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&noise_independent,0,p,31));
     assert(noise_independent.step==noise_first_phase);
 
+    /* Pride 2015 must animate its own pseudotime/hue state rather than
+     * borrow another zone's frame counter or allocations. */
+    c.effect_id=OT_WLED_PRIDE_2015;c.speed=96;c.intensity=200;
+    c.brightness=255;
+    memset(p,0,sizeof(p));
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    const uint32_t pride_first_step=s.step;
+    assert(pride_first_step!=0u);
+    assert(ot_wled_fx_render(&c,&s,23,p,31));
+    assert(s.step!=pride_first_step);
+    ot_wled_fx_state_t pride_other={0};
+    assert(ot_wled_fx_render(&c,&pride_other,0,p,31));
+    assert(pride_other.step==pride_first_step);
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
-    for(size_t k=0;k<92;k++) {
+    for(size_t k=0;k<93;k++) {
         c.effect_id=ids[k];
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));
         for(size_t i=0;i<31;i++)assert(eq(p[i],(ot_wled_rgb_t){0,0,0}));
     }
-    puts("CORE source-derived effects: 92 modes, timing, zone limits and validation passed.");
+    puts("CORE source-derived effects: 93 modes, timing, zone limits and validation passed.");
     return 0;
 }
