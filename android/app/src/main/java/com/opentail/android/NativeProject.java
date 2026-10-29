@@ -266,7 +266,15 @@ final class NativeProject {
     }
 
     synchronized boolean addZone(String label, int length) {
-        if (zoneCount() >= MAX_ZONES || length < 1 || length > 10000) return false;
+        return addZoneAt(label, length, zoneCount());
+    }
+
+    /** Insert and reindex once. An "Add next" edit must not commit an
+     * appended zone and then fail during a second reorder transaction. */
+    synchronized boolean addZoneAt(String label, int length, int insertAt) {
+        if (zoneCount() >= MAX_ZONES || length < 1 || length > 10000
+                || insertAt < 0 || insertAt > zoneCount() || label == null
+                || label.length() > 48) return false;
         try {
             JSONObject z = new JSONObject()
                     .put("id", "zone_" + UUID.randomUUID().toString().replace("-", ""))
@@ -274,7 +282,14 @@ final class NativeProject {
                     .put("start", 0).put("length", length)
                     .put("offsetMode", "auto").put("reverse", false)
                     .put("functions", new JSONArray()).put("controllerId", "default");
-            zones().put(z); reindex(); return save();
+            JSONArray layout = new JSONArray();
+            for (int i = 0; i <= zoneCount(); i++) {
+                if (i == insertAt) layout.put(z);
+                if (i < zoneCount()) layout.put(zone(i));
+            }
+            data.put("layout", layout);
+            reindex();
+            return save();
         } catch (JSONException e) { restoreCommitted(); return false; }
     }
 
