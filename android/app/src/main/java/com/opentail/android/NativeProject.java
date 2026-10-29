@@ -202,7 +202,7 @@ final class NativeProject {
         String n = name.trim();
         if (n.isEmpty()) n = "Untitled project";
         try { data.put("projectName", n.substring(0, Math.min(64, n.length()))); return save(); }
-        catch (JSONException ignored) { return false; }
+        catch (JSONException ignored) { restoreCommitted(); return false; }
     }
 
     /** v4 Studio-compatible per-zone zero-based colors, local-only (never BLE). */
@@ -225,7 +225,7 @@ final class NativeProject {
             if(entries==null){entries=new JSONObject();all.put(id,entries);}
             entries.put(Integer.toString(pixel),hex);
             return save();
-        }catch(JSONException e){return false;}
+        }catch(JSONException e){restoreCommitted();return false;}
     }
     synchronized boolean clearPixelColor(String id,int pixel) {
         int zoneIndex=indexOfZone(id);
@@ -379,7 +379,7 @@ final class NativeProject {
         String n=name.trim();
         if (!n.matches("[a-zA-Z0-9 _-]{1,32}") || profiles().has(n)) return false;
         try { profiles().put(n, defaultTrigger(n).put("kind", "trigger-custom")); return save(); }
-        catch (JSONException e) { return false; }
+        catch (JSONException e) { restoreCommitted(); return false; }
     }
 
     synchronized boolean assign(String trigger, String zoneId, boolean enabled) {
