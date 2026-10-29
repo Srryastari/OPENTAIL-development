@@ -76,6 +76,11 @@ check("Native source and verified project regression tests pass",
 # Retain the earlier working Java launcher until Compose reaches functional parity.
 compose = (source / "ComposeMainActivity.kt").read_text()
 root_gradle = read("build.gradle")
+check("Compose migration is explicitly internal and only debug-reachable",
+      'android:name=".ComposeMainActivity" android:exported="false"' in manifest_xml
+      and "FLAG_DEBUGGABLE" in main
+      and "Preview Kotlin + Compose · Developer" in main
+      and "startActivity(new Intent(this,ComposeMainActivity.class))" in main)
 check("Kotlin + Compose toolchain is present (not a WebView replacement)",
       "org.jetbrains.kotlin.android" in root_gradle and
       "org.jetbrains.kotlin.plugin.compose" in root_gradle and
