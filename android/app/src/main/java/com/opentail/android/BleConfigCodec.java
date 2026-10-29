@@ -7,8 +7,9 @@ import org.json.JSONArray;
 
 /** Cross-platform fixed-size, independently validated BLE output configuration encoding. */
 final class BleConfigCodec {
-    // Temporary current CORE output allocation, not a vehicle-specific limit.
-    static final int MAX_LEDS_PER_OUTPUT = 623;
+    // On-wire uint16_t representation limit, NOT the board's actual capacity.
+    // CORE validates its current resource budget before accepting a save.
+    static final int MAX_LEDS_PER_OUTPUT = 65535;
     static final int LENGTH = 261;
     static final String[] ORDERS = {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR"};
     static final String[] ROLES = {"off", "park_brake", "parking", "brake", "left_turn", "right_turn", "reverse", "aux1", "aux2", "aux3", "decorative"};
@@ -73,7 +74,7 @@ final class BleConfigCodec {
         int pixels=(bytes[1]&255)|((bytes[2]&255)<<8),order=bytes[3]&255,count=bytes[4]&255;
         if(pixels<1||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
         JSONObject result=new JSONObject();
-        result.put("index",index);result.put("pin",index==0?16:17);
+        result.put("index",index); // Physical pin is board-owned, not encoded in v1.
         result.put("pixels",pixels);result.put("name",readName(bytes,5));
         result.put("color_order",ORDERS[order]);result.put("zone_count",count);
         JSONObject cal=new JSONObject();JSONArray rgb=new JSONArray(),white=new JSONArray();
