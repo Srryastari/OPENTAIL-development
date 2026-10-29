@@ -126,7 +126,12 @@ assert(output.includes('class NativeOutputManager')&&output.includes('ble.readOu
 assert(output.includes('new JSONObject(result.getJSONObject("output").toString())')&&
        output.includes('drafts[index]')&&output.includes('for(int i=0;i<2;i++)'),
  'Per-output independent drafts and verified hardware readback required');
-assert(codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
+assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 623')&&
+       codec.includes('pixels>MAX_LEDS_PER_OUTPUT')&&
+       codec.includes('length>MAX_LEDS_PER_OUTPUT')&&
+       output.includes('Active pixels (1–623)')&&
+       output.includes('1,246 total')&&
+       codec.includes('int pixelCount=json.getInt("pixels")')&&codec.includes('if(sum!=pixelCount)')&&
        codec.includes('static byte[] encode(')&&codec.includes('static JSONObject decode('),
  'Native hardware output safety and codec validation regressed');
 console.log('PASS: Native Android UI, 6 pages, 126 effects, v4 project, no bundled WebView, guarded BLE, universal zones and NVS output editor (static).');
