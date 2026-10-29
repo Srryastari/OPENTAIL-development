@@ -62,6 +62,7 @@ static bool authorized=false;
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
+static bool boot_enrollment_ready=false;
 static uint8_t pair_failures=0;
 static bool owner_load(void){
     nvs_handle_t h;
@@ -87,7 +88,7 @@ static bool owner_create(void){
 static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    if(conn!=active_conn||gpio_get_level(GPIO_NUM_0)!=0)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if(conn!=active_conn||!boot_enrollment_ready||gpio_get_level(GPIO_NUM_0)!=0)return BLE_ATT_ERR_READ_NOT_PERMITTED;
     if(!owner_create())return BLE_ATT_ERR_UNLIKELY;
     return os_mbuf_append(ctx->om,owner_key,sizeof(owner_key))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
@@ -428,7 +429,12 @@ bool ot_ble_start(void){
     __atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);
     owner_valid=owner_load();
     gpio_config_t boot={0};boot.pin_bit_mask=(1ULL<<0);boot.mode=GPIO_MODE_INPUT;boot.pull_up_en=GPIO_PULLUP_ENABLE;
-    gpio_config(&boot);
+    const esp_err_t boot_err=gpio_config(&boot);
+    boot_enrollment_ready=boot_err==ESP_OK;
+    if(!boot_enrollment_ready){
+        ESP_LOGE(TAG,"BOOT button GPIO setup failed: %s",esp_err_to_name(boot_err));
+        ot_st_set_fault("BLE BOOT enrollment button unavailable");
+    }
     esp_fill_random(token,sizeof(token));
     token_ready=true;
     esp_err_t err=nimble_port_init();
@@ -441,7 +447,8 @@ bool ot_ble_start(void){
     if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}
     ble_hs_cfg.sync_cb=on_sync;
     nimble_port_freertos_init(host_task);
-    ESP_LOGI(TAG,"BLE output manager and physical BOOT enrollment available; no production pairing security.");
+    ESP_LOGI(TAG,"BLE output manager started; BOOT enrollment %s; no production pairing security.",
+             boot_enrollment_ready?"available":"disabled");
     return true;
 }
 #else
