@@ -125,5 +125,22 @@ assert(ble.includes('frameCapture.cancel(); // GATT close may never produce a di
        'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
  'Preview must reuse authenticated CORE FX/STOP commands.');
+// A STOP waiting for a BLE GATT transaction must never be overwritten by
+// a later live-edit frame. Coalesced edits may follow, but not precede STOP.
+const stopQueue = ble.split('private static boolean isStopPacket(byte[] data) {')[1]
+  ?.split('@SuppressWarnings({"MissingPermission","deprecation"})')[0];
+const queuePump = ble.split('private void pumpQueue(){')[1]?.split('private String preferredPending')[0];
+assert(stopQueue && queuePump &&
+  stopQueue.includes('nextPacket=Arrays.copyOf(data,data.length);') &&
+  stopQueue.includes('afterStopPacket=null;') &&
+  stopQueue.includes('else if (isStopPacket(nextPacket))') &&
+  stopQueue.includes('afterStopPacket=Arrays.copyOf(data,data.length);') &&
+  stopQueue.includes('frameCapture.abortForStop();') &&
+  queuePump.includes('pendingPacket=nextPacket;') &&
+  queuePump.includes('nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;') &&
+  queuePump.includes('afterStopPacket=null;'),
+  'STOP priority and latest-following-FX ordering must survive GATT queue contention');
+assert((ble.match(/afterStopPacket=null;/g)||[]).length >= 6,
+  'Post-STOP queue must also reset on adapter off, disconnect and reconnect');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
 console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary authenticated bounded BLE FX; no NVS writes on edit.');
