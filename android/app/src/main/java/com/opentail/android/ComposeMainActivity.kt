@@ -79,6 +79,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val liveZoneMask = mutableIntStateOf(255)
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
+    private val sequenceMessage = mutableStateOf("")
     private val captureOutput = mutableIntStateOf(0)
     // A verified snapshot is valid only for the UI state and output at the
     // time its capture began. Old asynchronous GATT replies cannot resurrect
@@ -777,6 +778,7 @@ class ComposeMainActivity : ComponentActivity() {
         var editingStep by remember { mutableIntStateOf(-1) }
         var editedDuration by remember { mutableStateOf("") }
         var editingPaletteStep by remember { mutableIntStateOf(-1) }
+        if (sequenceMessage.value.isNotEmpty()) Caption(sequenceMessage.value, t)
         Panel(t) {
             Caption("Playback settings are saved in the v4 design; they never command CORE.", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -785,18 +787,20 @@ class ComposeMainActivity : ComponentActivity() {
                     "Shared Palette" to "sharedPaletteEnabled").forEach { (name, key) ->
                     val enabled = opts.optBoolean(key, false)
                     Pill(name + (if (enabled) " ✓" else ""), t, enabled) {
-                        opts.put(key, !enabled)
-                        project.save()
-                        refresh()
+                        if (project.updateSequenceOption(key, !enabled)) {
+                            sequenceMessage.value = ""
+                            refresh()
+                        } else sequenceMessage.value = "Could not save sequence options"
                     }
                 }
             }
             if (opts.optBoolean("sharedPaletteEnabled", false)) {
                 PalettePicker("Shared sequence palette",
                     opts.optInt("sharedPaletteId", 0), t) { id ->
-                    opts.put("sharedPaletteId", id)
-                    project.save()
-                    refresh()
+                    if (project.updateSequenceOption("sharedPaletteId", id)) {
+                        sequenceMessage.value = ""
+                        refresh()
+                    } else sequenceMessage.value = "Could not save shared palette"
                 }
                 Caption("Shared palette applies to compatible steps when the sequence is " +
                     "deployed. Disabling it restores each step's saved palette.", t)
@@ -807,11 +811,12 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Locally saved. No BLE commands are sent.", t)
             Pill("+ Add selected effect", t, true) {
                 if (steps.length() < NativeProject.MAX_SEQUENCE) {
-                    steps.put(JSONObject().put("fx", NativeEffectCatalog.byId(selectedEffect).name)
+                    val edited = sequenceList()
+                    edited.add(JSONObject().put("fx", NativeEffectCatalog.byId(selectedEffect).name)
                         .put("ms", 1500)
                         .put("settings", JSONObject()
                             .put("pal", prefs.getInt("paletteId", 0).coerceIn(0, 255))))
-                    project.setSequence(steps); refresh()
+                    updateSequence(edited)
                 }
             }
         }
@@ -828,17 +833,27 @@ class ComposeMainActivity : ComponentActivity() {
                     " (#" + effectivePalette + ") · applies to palette-compatible effects", t)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("↑", t) { moveSequence(i, -1) }
-                    Pill("↓", t) { moveSequence(i, 1) }
-                    Pill("Duplicate", t) { duplicateSequence(i) }
+                    Pill("↑", t) {
+                        editingStep = -1; editingPaletteStep = -1; moveSequence(i, -1)
+                    }
+                    Pill("↓", t) {
+                        editingStep = -1; editingPaletteStep = -1; moveSequence(i, 1)
+                    }
+                    Pill("Duplicate", t) {
+                        editingStep = -1; editingPaletteStep = -1; duplicateSequence(i)
+                    }
                     Pill("Edit time", t) {
+                        editingPaletteStep = -1
                         editingStep = i
                         editedDuration = item.optInt("ms", 1500).toString()
                     }
                     Pill("Palette", t) {
+                        editingStep = -1
                         editingPaletteStep = if (editingPaletteStep == i) -1 else i
                     }
-                    Pill("Remove", t) { removeSequence(i) }
+                    Pill("Remove", t) {
+                        editingStep = -1; editingPaletteStep = -1; removeSequence(i)
+                    }
                 }
                 if (editingPaletteStep == i) {
                     val configured = item.optJSONObject("settings")?.optInt("pal", 0) ?: 0
@@ -872,18 +887,24 @@ class ComposeMainActivity : ComponentActivity() {
                     if (ms != null && ms in 50..600000) {
                         val updated = sequenceList()
                         updated[editingStep].put("ms", ms)
-                        updateSequence(updated)
-                        editingStep = -1
+                        if (updateSequence(updated)) editingStep = -1
                     }
                 } },
                 dismissButton = { Pill("Cancel", t) { editingStep = -1 } })
         }
     }
     private fun sequenceList(): MutableList<JSONObject> =
-        (0 until project.sequence().length()).mapNotNull { project.sequence().optJSONObject(it) }.toMutableList()
-    private fun updateSequence(list: List<JSONObject>) {
+        (0 until project.sequence().length()).mapNotNull {
+            project.sequence().optJSONObject(it)?.let { entry -> JSONObject(entry.toString()) }
+        }.toMutableList()
+    private fun updateSequence(list: List<JSONObject>): Boolean {
         val arr = JSONArray(); list.forEach { arr.put(it) }
-        project.setSequence(arr); refresh()
+        val saved = project.setSequence(arr)
+        if (saved) {
+            sequenceMessage.value = ""
+            refresh()
+        } else sequenceMessage.value = "Could not save sequence; previous design retained"
+        return saved
     }
     private fun moveSequence(i: Int, delta: Int) {
         val list = sequenceList()
