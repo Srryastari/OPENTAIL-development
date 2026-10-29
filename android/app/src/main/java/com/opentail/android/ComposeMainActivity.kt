@@ -359,6 +359,14 @@ class ComposeMainActivity : ComponentActivity() {
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
         Title("Home", t)
         Panel(t) {
+            Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
+                .padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Text("Bluetooth · " + bleMessage.value, color = t.fg, fontSize = 13.sp)
+            }
+            Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
+            Caption("Connect in Settings first. BOOT is required only for first-time enrollment.", t)
+        }
+        Panel(t) {
             Text(project.name(), color = t.fg, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Caption(project.zoneCount().toString() + " zones · " +
                     project.pixelCount().toString() + " design pixels", t)
@@ -936,8 +944,7 @@ class ComposeMainActivity : ComponentActivity() {
             foundDevices.forEach { (address, label) ->
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
             }
-            Pill("Pair / BOOT", t) { ble.pairWithBoot() }
-            Pill("Authorize saved key", t) { ble.authorizeStored() }
+            Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
             Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (temporary TTL, max 24/255).", t)
