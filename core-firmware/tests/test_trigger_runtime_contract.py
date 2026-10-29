@@ -28,7 +28,13 @@ assert re.search(r"#define OT_INPUT_GPIO_LIST\s*\{4,5,6,7,8,9,10,11\}", board)
 assert "#define OT_DEBOUNCE_TICKS 4" in board
 assert re.search(r"#define OT_INPUT_ACTIVE_LOW\s+[01](?:\s|$)", board)
 assert "static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;" in core
-init = between(core, "static void input_init(void) {", "/* RMT drivers")
+entry = re.search(r"static (?:void|bool) input_init\\(void\\) \\{", core)
+assert entry, "Trigger GPIO initializer missing"
+init = core[entry.end():].split("/* RMT drivers", 1)[0]
+if "static bool input_init(void)" in core:
+    assert "if(e!=ESP_OK)" in init and "return false;" in init
+    assert "const bool inputs_ready=input_init();" in core
+    assert "sampler_ready=inputs_ready &&" in core
 assert ".mode=GPIO_MODE_INPUT" in init
 assert ".pull_up_en=GPIO_PULLUP_ENABLE" in init
 sampler = between(core, "static void input_sampler_task(void *arg){", "static void frame_wake_callback")
