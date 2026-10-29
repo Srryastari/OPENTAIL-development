@@ -68,6 +68,12 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('title = { Text("Replace current design?") }') &&
        compose.includes('Local trigger color swatch only. No simulated effect'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
+assert(compose.includes('if (offlinePreview.value) return') &&
+       compose.includes('if (i != 1) offlinePreview.value = false') &&
+       compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
+       compose.includes('CORE capture is disabled in offline preview mode.') &&
+       compose.includes('Offline mode: edits update only this local design; no CORE LED commands.'),
+       'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
@@ -76,6 +82,9 @@ const homeSection=compose.split('private fun HomePage(t: Tone, changePage: (Int)
 const settingsSection=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
                              .split('private fun HardwareOutputEditor(')[0];
 assert(settingsSection.includes('Pill("Preview Offline", t)') &&
+       settingsSection.includes('if (liveArmed.value)') &&
+       settingsSection.includes('livePreview.stop()') &&
+       settingsSection.includes('offlinePreview.value = true') &&
        settingsSection.includes('coreFrame.value = null') &&
        settingsSection.includes('changePage(1)') &&
        settingsSection.includes('ConnectPill {'),
