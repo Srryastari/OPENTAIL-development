@@ -524,7 +524,7 @@ class ComposeMainActivity : ComponentActivity() {
                 "Offline preview · design changes stay local until you leave Show Modes."
             else "Pixel-exact design inspection · effects require CORE rendered frames", t)
             EffectsPreview(t, effect)
-            if (ble.canCaptureFrame()) {
+            if (!offlinePreview.value && ble.canCaptureFrame()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Pill("OUT 1", t, captureOutput.intValue == 0) {
@@ -540,7 +540,9 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 Caption(captureMessage.value, t)
-            } else Caption("CORE frame capture unavailable until firmware supports " +
+            } else Caption(if (offlinePreview.value)
+                "CORE capture is disabled in offline preview mode."
+            else "CORE frame capture unavailable until firmware supports " +
                 "the authenticated snapshot capability. Local pixel map remains available.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Effects", "Sequences", "Presets").forEach {
