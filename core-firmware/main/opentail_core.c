@@ -1029,7 +1029,7 @@ static esp_err_t stop_post(httpd_req_t *r) {
  * CMake embeds this static page; no WLED runtime or browser network access
  * beyond the CORE bench AP is needed.
  */
-extern const uint8_t ot_dev_console_start[] asm("_binary_assets_dev_console_htm_start");
+extern const uint8_t ot_dev_console_start[] asm("_binary_dev_console_htm_start");
 static esp_err_t dev_get(httpd_req_t *r){
     httpd_resp_set_type(r,"text/html; charset=utf-8");
     httpd_resp_set_hdr(r,"Cache-Control","no-store");
