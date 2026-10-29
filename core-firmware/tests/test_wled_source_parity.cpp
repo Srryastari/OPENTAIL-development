@@ -2179,7 +2179,13 @@ int main() {
                     cfg.foreground={123,56,9};cfg.background={3,88,174};
                     ot_wled_fx_state_t state{};
                     std::vector<ot_wled_rgb_t> actual(count);
-                    for(uint32_t t:{0u,17u,171u,389u,1500u,65530u}) {
+                    /* Tetrix needs post-initial-fade frames to exercise falling
+                     * bricks; the six baseline frame instants miss that path. */
+                    const std::vector<uint32_t> frames=fx.id==44u ?
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,2024u,
+                          2050u,2073u,2200u,2400u,2600u,3000u,5000u,10000u} :
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u};
+                    for(uint32_t t:frames) {
                         strip.now=t;
                         fx.effect();
                         if(fx.id==49 && t!=0u && env.allocation.size() && env.data==nullptr)
