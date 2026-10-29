@@ -128,7 +128,10 @@ assert "raw_active || live_input_mask!=0" in save
 assert save.index("if(!tm_save(next))code=4") < save.index("ot_tm_saved_apply(")
 assert "const uint8_t pins_after=tm_gpio_input_mask();" in save
 assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," in save
-assert "tm_deferred.pending || raw_active || live_input_mask!=0" in save
+assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," in sampler
+assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," in core
+assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
 assert "tm_persistent && !tm_deferred.pending" in core
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in sampler
