@@ -2287,7 +2287,8 @@ static void colorwaves_pride_frame(const ot_wled_fx_config_t *cfg,
     const unsigned multiplier=23u+fx_beatsin88(147u,37u,now);
     unsigned hue=state->aux0;
     const unsigned hue_inc=pride?(1u+fx_beatsin88(113u,2999u,now)):
-       ((unsigned)fx_beatsin88(113u,240u,now)*(unsigned)cfg->intensity*10u/255u+((unsigned)60u*cfg->intensity*10u/255u));
+       ((60u+(unsigned)fx_beatsin88(113u,240u,now))*
+        (unsigned)cfg->intensity*10u/255u);
     uint32_t pseudo=state->step+duration*multiplier;
     state->aux0=(uint16_t)((uint32_t)state->aux0+
                            duration*(5u+fx_beatsin88(400u,4u,now)));
