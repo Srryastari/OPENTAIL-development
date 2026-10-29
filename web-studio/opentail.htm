@@ -1504,11 +1504,8 @@ function otBaseArrangementLayout(){
      </div>`).join('')||'<p class="ot-chat-hint">No zones yet. Use Add Zone to create one.</p>'}
    </div>
    <div class="ot-chat-footer"><button type="button" class="ot-chat-pill" ${otLayoutUndo.length?'':'disabled'} onclick="otLayoutUndoChange()">↶ Undo</button><button type="button" class="ot-chat-pill" ${otLayoutRedo.length?'':'disabled'} onclick="otLayoutRedoChange()">↷ Redo</button></div>
-   <details class="ot-chat-disclosure ot-chat-advanced"><summary>Controller sync and advanced pixel settings <span>›</span></summary>
-    ${otSimpleLedCountPanel()}
-    <div class="ot-chat-footer">${otControllerMode==='wled'?button('Import WLED sections','importLiveSegments()')+button('Sync layout to WLED','syncSections()','primary'):`<span class="ot-chat-hint">CORE output configuration is available below in Advanced; local zone layout does not program CORE hardware.</span>`}</div>
-    <p class="ot-chat-hint">${otControllerMode==='wled'?'Sync is required to apply section ranges to connected WLED.':'Zone changes here are local until supported CORE output synchronization is available.'}</p>
-   </details>
+   ${otControllerMode==='core'?`<details class="ot-chat-disclosure ot-chat-advanced"><summary>Design pixel summary <span>›</span></summary><div class="ot-count-summary" aria-label="Total designed LEDs"><span><strong>${otLayoutPixels()}</strong><small>Designed pixels</small></span></div><p class="ot-chat-hint">Only the layout is changed. No physical output configuration or signal mapping is modified.</p></details>`:
+   `<details class="ot-chat-disclosure ot-chat-advanced"><summary>Legacy controller synchronization <span>›</span></summary>${otSimpleLedCountPanel()}<div class="ot-chat-footer">${button('Import legacy sections','importLiveSegments()')}${button('Sync legacy layout','syncSections()','primary')}</div></details>`}
   </div>
   ${archived.length?`<details class="ot-chat-disclosure ot-chat-archived"><summary>Removed zones (${archived.length}) <span>›</span></summary>${archived.map(x=>`<div class="ot-chat-between"><span>${esc(x.name)}</span>${button('Restore',`restoreSection('${x.id}')`)}</div>`).join('')}</details>`:''}
  </section>`;
@@ -1672,6 +1669,7 @@ function otSaveRecovery(before){
 }
 function otClearRecovery(){localStorage.removeItem(OT_RECOVERY_KEY);otRecoveryRecord=null;otBenchUncertain=false;}
 function otRecoveryBanner(){
+ if(otControllerMode==='core')return ''; // old physical WLED bench snapshots are not Studio design alerts
  if(!otRecoveryRecord&&!otBenchUncertain)return '';
  // This is an expected protected snapshot while the same-tab bench session is active.
  // Only show the recovery alert after a reload, an uncertain write, or a disconnect.
@@ -3056,7 +3054,7 @@ function otSimAnimate(){if(otSimRaf)return;const tick=(now)=>{otSimRaf=0;if(docu
 let otSimToolbarSource='effect',otSimPreviewEffect='';
 function otSimPickEffect(value){otSimPreviewEffect=value;if(otSim.active&&otSim.source==='effect'){otSim.epoch=performance.now();otPeekPaint()}}
 function otSimToolbarPlay(){if(otSim.active&&otSim.source===otSimToolbarSource){otSimPause();return}otSimStart(otSimToolbarSource)}
-function otSimControls(){const playing=otSim.active&&otSim.playing&&otSim.source===otSimToolbarSource;return `<div class="ot-sim-controls ot-sim-toolbar" aria-label="Local preview controls"><div class="ot-sim-toolbar-row"><label class="ot-sim-source ot-sim-effect-choice"><span>Effect</span><select aria-label="Preview effect" onchange="otSimPickEffect(this.value)"><option value="">Current effect</option>${[...new Set(['Solid','Blink','Breathe','Wipe','Chase','Rainbow',...(state.wledEffects||[])])].map(name=>`<option value="${esc(name)}" ${otSimPreviewEffect===name?'selected':''}>${esc(name)}</option>`).join('')}</select></label><div class="ot-sim-transport"><button type="button" class="btn" aria-label="${playing?'Pause preview':'Play preview'}" onclick="otSimToolbarPlay()">${playing?'Ⅱ':'▶'}</button><button type="button" class="btn" aria-label="Stop preview" onclick="otSimStop()" ${otSim.active?'':'disabled'}>■</button></div></div><div class="ot-sim-trigger-label">Test triggers</div><div class="ot-sim-triggers">${OT_SIM_TRIGGERS.map(n=>`<button type="button" class="ot-sim-trigger ${otSim.triggers.includes(n)?'on':''}" aria-pressed="${otSim.triggers.includes(n)}" onclick="otSimTrigger('${n}')">${n}</button>`).join('')}</div><p class="small muted">Simulation only · No commands sent.</p></div>`;}
+function otSimControls(){const playing=otSim.active&&otSim.playing&&otSim.source===otSimToolbarSource;return `<div class="ot-sim-controls ot-sim-toolbar" aria-label="Local preview controls"><div class="ot-sim-toolbar-row"><label class="ot-sim-source ot-sim-effect-choice"><span>Effect</span><select aria-label="Preview effect" onchange="otSimPickEffect(this.value)"><option value="">Current effect</option>${[...new Set(['Solid','Blink','Breathe','Wipe','Chase','Rainbow',...(state.wledEffects||[])])].map(name=>`<option value="${esc(name)}" ${otSimPreviewEffect===name?'selected':''}>${esc(name)}</option>`).join('')}</select></label><div class="ot-sim-transport"><button type="button" class="btn" aria-label="${playing?'Pause preview':'Play preview'}" onclick="otSimToolbarPlay()">${playing?'Ⅱ':'▶'}</button><button type="button" class="btn" aria-label="Stop preview" onclick="otSimStop()" ${otSim.active?'':'disabled'}>■</button></div></div><div class="ot-sim-trigger-label">Preview triggers</div><div class="ot-sim-triggers">${OT_SIM_TRIGGERS.map(n=>`<button type="button" class="ot-sim-trigger ${otSim.triggers.includes(n)?'on':''}" aria-pressed="${otSim.triggers.includes(n)}" onclick="otSimTrigger('${n}')">${n}</button>`).join('')}</div><p class="small muted">Simulation only · No commands sent.</p></div>`;}
 function otSimPreviewForEditor(){if(!otUE)return '';const targets=otUE.context==='trigger'?otUE.targets:otUE.context==='effects'&&!otEffectIsAll()?[otEffectSectionId]:state.layout.slice(0,1).map(z=>z.id);const z=state.layout.find(x=>targets.includes(x.id))||state.layout[0];if(!z)return '';return `<div class="ot-ue-card ot-ue-preview" aria-label="Simulated effect preview"><div class="line"><strong>LED preview</strong><span class="ot-mini">SIMULATED · not sent</span></div><div class="ot-preview-row"><span class="ot-preview-label">${esc(z.name)} <small>${z.length} LEDs</small></span><span class="ot-ledstrip">${Array.from({length:Math.min(28,Math.max(1,Number(z.length)||1))},(_,i)=>`<i class="ot-led" data-ot-editor-index="${i}" data-ot-editor-zone="${esc(z.id)}" style="background:#070707;animation:none"></i>`).join('')}</span></div></div>`;}
 function otLiveInspectPixel(event,canvas){
  if(!otPeekExact||!otPeekPixels)return;
@@ -4146,8 +4144,7 @@ function otColorTestPanel(){const cap=otTestCeiling(),effective=otEffectiveTestB
 const otCoreOriginIsLocal = false; // Studio is no longer served from CORE firmware
 function otCoreStoredValue(key,defaultValue){try{return localStorage.getItem(key)||defaultValue}catch{return defaultValue}}
 function otCoreStoreValue(key,value){try{localStorage.setItem(key,value)}catch(e){console.warn('CORE setting not stored',e)}}
-let otControllerMode=otCoreOriginIsLocal?'core':otCoreStoredValue('ot-controller-mode-v1','core');
-if(otControllerMode!=='core')otControllerMode='wled';
+let otControllerMode='core'; // Authoring is independent of legacy controller mode stored by older Studio releases.
 let otCoreAddress=otCoreOriginIsLocal?location.origin:otCoreStoredValue('ot-core-address-v1','http://192.168.4.1');
 let otCoreConnected=false,otCorePending=false,otCoreCaps=null,otCoreStatus=null,otCoreMessage='Connect to OpenTail CORE Alpha for bench diagnostics.';
 let otCoreFaults=0,otCoreCommandChain=Promise.resolve(),otCoreCommandPending=0,otCorePollPending=false,otCoreStatusEpoch=0;
