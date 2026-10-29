@@ -23,7 +23,7 @@ manifest_xml = read("app/src/main/AndroidManifest.xml")
 manifest = ET.fromstring(manifest_xml)
 style = ET.parse(app / "res/values/styles.xml")
 gradle = read("app/build.gradle")
-main = (source / "MainActivity.java").read_text()
+compose = (source / "ComposeMainActivity.kt").read_text()
 model = (source / "NativeProject.java").read_text()
 effect = (source / "NativeEffectCatalog.java").read_text()
 ble = (source / "BleDiscovery.java").read_text()
@@ -32,63 +32,57 @@ check("Android manifest and styles parse", manifest.tag == "manifest" and style.
 check("Android v0.2.0-alpha1 native release numbers", 
       "versionName '0.2.0-alpha1'" in gradle and "versionCode 31" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
-check("Sole launcher is Kotlin Compose; Java fallback is internal and no web transport permission",
+check("Sole Kotlin Compose launcher; no Java UI entry or network transport permission",
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
       'android:name=".ComposeMainActivity"' in manifest_xml and
-      'android:name=".MainActivity"' in manifest_xml and
-      'android:exported="false"' in manifest_xml and
+      'android:name=".MainActivity"' not in manifest_xml and
       'android.permission.INTERNET' not in manifest_xml and
       manifest_xml.index('android:name=".ComposeMainActivity"') <
-      manifest_xml.index('android.intent.category.LAUNCHER') <
-      manifest_xml.index('android:name=".MainActivity"'))
+      manifest_xml.index('android.intent.category.LAUNCHER'))
 check("No WebView or packaged Studio HTML runtime assets",
-      "new WebView(" not in main and "loadUrl(" not in main and
+      "WebView(" not in compose and "loadUrl(" not in compose and
       not (app / "assets/opentail.htm").exists() and
       "androidx.webkit:webkit" not in gradle)
 check("No duplicate Android shell, BLE panel or injected JavaScript",
       all(not (app / "assets" / name).exists() for name in
           ("unified-shell.js", "ble-output-panel.js", "direct-ble-dashboard.js",
            "output-control-motion.js")))
-check("Native widget/screen classes compiled from source",
+check("Active Compose UI, independent project model and BLE codec exist",
       all((source / name).exists() for name in
-          ("MainActivity.java", "NativeUi.java", "NativeLedPreview.java",
-           "NativeProject.java", "NativeEffectCatalog.java", "NativeOutputManager.java")))
+          ("ComposeMainActivity.kt", "NativeProject.java", "NativeEffectCatalog.java",
+           "BleDiscovery.java", "BleConfigCodec.java", "ExactLedFrame.java",
+           "LiveBlePreview.kt")))
 check("Universal zones and v4 document import/export remain local",
       all(s in model for s in ("reindex()", 'put("version", 4)', "importJson(String input)",
                                "synchronized String exportJson()")) and
-      "ACTION_OPEN_DOCUMENT" in main and "ACTION_CREATE_DOCUMENT" in main)
+      "ActivityResultContracts.OpenDocument()" in compose and
+      "ActivityResultContracts.CreateDocument(" in compose)
 check("No hardcoded vehicle LED zones in native project model",
       all(w not in model for w in ("GS400", "522 pixels", "1246", "GPIO16", "GPIO17")))
 check("Previously implemented BLE owner authentication and encryption retained",
       all(s in ble for s in ("HmacSHA256", "pairWithBoot()", "authorizeStored()",
                               "showFx(", "canControl()")) and
       "AES/GCM/NoPadding" in owner)
-check("Controller writing is separate from authoring, requires confirmation",
-      "private void confirmBleTest()" in main and
-      'setTitle("Bench test on CORE?")' in main and
-      "supportedBleEffects.contains(effectId)" in main and
-      "Math.min(32," in main)
+check("Active Compose bench test requires BLE auth, capability and confirmation",
+      'Text("Test CORE LEDs on isolated bench?")' in compose and
+      'if (ble.canControl() && id in supportedIds.value)' in compose and
+      'ble.showFx(id, 3, 255' in compose and
+      'confirm = false' in compose))
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
-check("Native hardware output read/save and post-commit readback retained",
-      "new NativeOutputManager(this,ble,ui)" in main and
-      "NativeOutputManager.java" in str(source / "NativeOutputManager.java") and
+check("Active Compose output save uses authenticated BLE revision/readback path",
+      'ble.saveOutput(index, draftText)' in compose and
+      'BleConfigCodec.encode(JSONObject(draftText))' in compose and
       all(k in ble for k in ("cfgKnownRevision", "cfgExpected", "Arrays.equals(cfgBytes,cfgExpected)",
                              "cfgCrc", "cfgReadNext()", "cfgWriteNext()")))
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
-# Compose is the alpha launcher, not an on-device visual/BLE certification.
-# The earlier Java screen remains an internal debug-only comparison fallback.
-compose = (source / "ComposeMainActivity.kt").read_text()
-root_gradle = read("build.gradle")
-check("Compose is sole alpha launcher, Java fallback only available in debug",
-      'android:name=".ComposeMainActivity"' in manifest_xml and
-      'android:exported="true"' in manifest_xml and
-      'android:name=".MainActivity"' in manifest_xml and
-      'android:exported="false"' in manifest_xml and
-      'this@ComposeMainActivity, MainActivity::class.java' in compose and
-      'FLAG_DEBUGGABLE' in compose)
+# Source assertions cannot certify device visuals, BLE behavior or physical LED light.
+check("Legacy Java Views activity is inaccessible from active Compose app",
+      'android:name=".MainActivity"' not in manifest_xml and
+      'MainActivity::class.java' not in compose and
+      'startActivity(' not in compose)
 check("Kotlin + Compose toolchain is present (not a WebView replacement)",
       "org.jetbrains.kotlin.android" in root_gradle and
       "org.jetbrains.kotlin.plugin.compose" in root_gradle and
@@ -118,7 +112,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
            "ble.saveOutput(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
            "project.previewZoneOffsets(", "AlertDialog(onDismissRequest"))
-      and 'android:name=".MainActivity"' in manifest_xml)
+      and 'android:name=".MainActivity"' not in manifest_xml)
 check("Compose has full two-output draft editing without unsaved hardware mutation",
       all(word in compose for word in (
           "BleConfigCodec.ROLES", "BleConfigCodec.ORDERS", "Fit last zone",
@@ -133,5 +127,5 @@ check("Native effect catalog and approved sequence toggles remain accessible",
 check("Universal live-edit contract and bounded transient CORE FX preview",
       subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
-print("Compose status: only Android alpha launcher. Physical BLE and pixel-accurate visual parity are not certified by static checks.")
+print("Compose is the sole Android activity. Physical BLE and pixel-accurate visual parity still require hardware validation.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
