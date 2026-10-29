@@ -115,7 +115,11 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_STREAM, "Stream", "Stream@!,Width;;!",
      false, false, true, true, false},
     {OT_WLED_STREAM2, "Stream 2", "Stream 2@!,Width;;!",
-     false, false, true, true, false}
+     false, false, true, true, false},
+    {OT_WLED_LIGHTNING, "Lightning", "Lightning@!,!;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_ICU, "ICU", "ICU@!,Eye spacing;!,!;!",
+     true, true, true, true, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -1077,6 +1081,94 @@ static void stream2_frame(const ot_wled_fx_config_t *cfg,
     state->aux1=(uint16_t)it;
 }
 
+/* FX.cpp mode_lightning() adapted without modifying vehicle-trigger
+ * arbitration; this effect only colors its caller-owned zone framebuffer. */
+static void lightning_frame(const ot_wled_fx_config_t *cfg,
+                            ot_wled_fx_state_t *state,uint32_t now,
+                            ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const size_t ledstart=fx_rand_index(state,count);
+    const size_t ledlen=1u+fx_rand_index(state,count-ledstart);
+    const uint8_t divisor=(uint8_t)(1u+fx_rand8(state,2u));
+    uint8_t bri=(uint8_t)(255u/divisor);
+    if(state->aux1==0u) {
+        state->aux1=(uint16_t)(2u*(4u+fx_rand8(state,cfg->intensity/20u)));
+        bri=52u;
+        state->aux0=200u;
+    }
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    if(state->aux1>3u && !(state->aux1&1u)) {
+        const ot_wled_rgb_t color=scaled(
+             scaled(cfg->foreground,bri),cfg->brightness);
+        for(size_t i=ledstart;i<ledstart+ledlen;i++)pixels[i]=color;
+        state->aux1--;
+        state->step=now;
+    } else if(now-state->step>state->aux0) {
+        state->aux1--;
+        if(state->aux1<2u)state->aux1=0u;
+        state->aux0=(uint16_t)(50u+fx_rand8(state,100u));
+        if(state->aux1==2u)
+            state->aux0=(uint16_t)(fx_rand8(state,255u-(uint32_t)cfg->speed)*100u);
+        state->step=now;
+    }
+}
+
+/* FX.cpp mode_icu(), all positions and stage delays kept in SEGENV.step,
+ * aux0 and aux1, preserving the upstream 16-bit wrap-safe time comparison. */
+static void icu_frame(const ot_wled_fx_config_t *cfg,
+                      ot_wled_fx_state_t *state,uint32_t now,
+                      ot_wled_rgb_t *pixels,size_t count) {
+    if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const uint16_t t=(uint16_t)now;
+    size_t dest=state->aux1;
+    const size_t space=((size_t)cfg->intensity>>3)+2u;
+    const size_t offset=count/space;
+    uint16_t stage=(uint16_t)(state->step>>16);
+    uint16_t next=(uint16_t)state->step;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    if(stage!=1u) {
+        if(dest<count)pixels[dest]=fg;
+        if(dest+offset<count)pixels[dest+offset]=fg;
+        if(stage==3u) {
+            if(state->aux0>state->aux1)dest++;
+            else if(state->aux0<state->aux1 && dest>0u)dest--;
+            if(dest<count)pixels[dest]=fg;
+            if(dest+offset<count)pixels[dest+offset]=fg;
+        }
+    }
+    if((int16_t)(t-next)>=0) {
+        switch(stage) {
+            case 0u:
+                stage++;
+                if(fx_rand8(state,6u)==0u) {
+                    next=(uint16_t)(t+200u);
+                    break;
+                }
+                /* Fall through exactly as upstream ICU when no blink. */
+            case 1u:
+                next=(uint16_t)(t+500u+fx_rand_index(state,1000u));
+                stage++;
+                break;
+            case 2u:
+                state->aux0=(uint16_t)fx_rand_index(state,count-offset);
+                next=t;stage++;
+                break;
+            default:
+                state->aux1=(uint16_t)dest;
+                next=(uint16_t)(t+5u+(50u*(255u-(uint32_t)cfg->speed))/(uint32_t)count);
+                if(state->aux0==dest) {
+                    next=(uint16_t)(t+500u+fx_rand_index(state,1000u));
+                    stage=0u;
+                }
+                break;
+        }
+    }
+    state->step=((uint32_t)stage<<16)|next;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -1088,6 +1180,14 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if(cfg->effect_id==OT_WLED_LIGHTNING) {
+        lightning_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if(cfg->effect_id==OT_WLED_ICU) {
+        icu_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
     if(cfg->effect_id==OT_WLED_CHASE_RANDOM) {
         chase_random_frame(cfg,state,time_ms,pixels,count);
         return true;
