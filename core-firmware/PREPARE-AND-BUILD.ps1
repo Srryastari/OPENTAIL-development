@@ -40,7 +40,7 @@ $appSource=Join-Path $PSScriptRoot 'build\opentail_core_alpha.bin'
 if(-not (Test-Path -LiteralPath $appSource)){throw "Build output missing: $appSource"}
 $releaseDir=Join-Path $PSScriptRoot 'releases'
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$versionedApp=Join-Path $releaseDir 'opentail-core-v0.1.27-alpha-studio-v0.19.62-app.bin'
+$versionedApp=Join-Path $releaseDir 'opentail-core-v0.1.27-alpha-studio-v0.19.118-app.bin'
 Copy-Item -LiteralPath $appSource -Destination $versionedApp -Force
 Write-Host "Versioned app binary saved: $versionedApp"
 Write-Host 'Build command completed. Verify Ninja succeeded with exit code 0 before flashing.'
