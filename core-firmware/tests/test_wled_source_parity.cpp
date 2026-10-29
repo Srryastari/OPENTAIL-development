@@ -187,10 +187,16 @@ static uint8_t sin_gap(uint16_t in) {
   return sin8_t(in + 192); // correct phase shift of sine so that it starts and stops at 0
 }
 
+uint16_t triwave16(uint16_t in) {
+  if (in < 0x8000) return in *2;
+  return 0xFFFF - (in - 0x8000)*2;
+}
+
 // END UPSTREAM math/color functions.
 // Only this minimal adapter code is OpenTail-specific.
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
+    bool check2=false;
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
@@ -567,6 +573,102 @@ void mode_static_pattern()
   }
 }
 
+void scan(bool dual) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  uint32_t cycleTime = 750 + (255 - SEGMENT.speed)*150;
+  uint32_t perc = strip.now % cycleTime;
+  int prog = (perc * 65535) / cycleTime;
+  int size = 1 + ((SEGMENT.intensity * SEGLEN) >> 9);
+  int ledIndex = (prog * ((SEGLEN *2) - size *2)) >> 16;
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1));
+
+  int led_offset = ledIndex - (SEGLEN - size);
+  led_offset = abs(led_offset);
+
+  if (dual) {
+    for (int j = led_offset; j < led_offset + size; j++) {
+      unsigned i2 = SEGLEN -1 -j;
+      SEGMENT.setPixelColor(i2, SEGMENT.color_from_palette(i2, true, PALETTE_SOLID_WRAP, (SEGCOLOR(2))? 2:0));
+    }
+  }
+
+  for (int j = led_offset; j < led_offset + size; j++) {
+    SEGMENT.setPixelColor(j, SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0));
+  }
+}
+
+void mode_scan(void) {
+  scan(false);
+}
+
+void mode_dual_scan(void) {
+  scan(true);
+}
+
+static void spots_base(uint16_t threshold)
+{
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1));
+
+  unsigned maxZones = SEGLEN >> 2;
+  unsigned zones = 1 + ((SEGMENT.intensity * maxZones) >> 8);
+  unsigned zoneLen = SEGLEN / zones;
+  unsigned offset = (SEGLEN - zones * zoneLen) >> 1;
+
+  for (unsigned z = 0; z < zones; z++)
+  {
+    unsigned pos = offset + z * zoneLen;
+    for (unsigned i = 0; i < zoneLen; i++)
+    {
+      unsigned wave = triwave16((i * 0xFFFF) / zoneLen);
+      if (wave > threshold) {
+        unsigned index = 0 + pos + i;
+        unsigned s = (wave - threshold)*255 / (0xFFFF - threshold);
+        SEGMENT.setPixelColor(index, color_blend(SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0), SEGCOLOR(1), uint8_t(255-s)));
+      }
+    }
+  }
+}
+
+void mode_spots()
+{
+  spots_base((255 - SEGMENT.speed) << 8);
+}
+
+void mode_spots_fade()
+{
+  unsigned counter = strip.now * ((SEGMENT.speed >> 2) +8);
+  unsigned t = triwave16(counter);
+  unsigned tr = (t >> 1) + (t >> 2);
+  spots_base(tr);
+}
+
+void mode_heartbeat(void) {
+  unsigned bpm = 40 + (SEGMENT.speed >> 3);
+  uint32_t msPerBeat = (60000L / bpm);
+  uint32_t secondBeat = (msPerBeat / 3);
+  uint32_t bri_lower = SEGENV.aux1;
+  unsigned long beatTimer = strip.now - SEGENV.step;
+
+  bri_lower = bri_lower * 2042 / (2048 + SEGMENT.intensity);
+  SEGENV.aux1 = bri_lower;
+
+  if ((beatTimer > secondBeat) && !SEGENV.aux0) { // time for the second beat?
+    SEGENV.aux1 = UINT16_MAX; //3/4 bri
+    SEGENV.aux0 = 1;
+  }
+  if (beatTimer > msPerBeat) { // time to reset the beat timer?
+    SEGENV.aux1 = UINT16_MAX; //full bri
+    SEGENV.aux0 = 0;
+    SEGENV.step = strip.now;
+  }
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, color_blend(SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), SEGCOLOR(1), uint8_t(255 - (SEGENV.aux1 >> 8))));
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -595,7 +697,12 @@ static const RefCase refs[]={
     {15,mode_running_lights,"Running"},
     {16,mode_saw,"Saw"},
     {52,mode_running_dual,"Running Dual"},
-    {83,mode_static_pattern,"Solid Pattern"}
+    {83,mode_static_pattern,"Solid Pattern"},
+    {10,mode_scan,"Scan"},
+    {11,mode_dual_scan,"Scan Dual"},
+    {85,mode_spots,"Spots"},
+    {86,mode_spots_fade,"Spots Fade"},
+    {100,mode_heartbeat,"Heartbeat"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
