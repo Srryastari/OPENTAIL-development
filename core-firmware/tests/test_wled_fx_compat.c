@@ -12,9 +12,10 @@ static int eq(ot_wled_rgb_t a,ot_wled_rgb_t b) {
 
 int main(void) {
     uint16_t ids[10]={0};
-    assert(ot_wled_fx_supported_ids(ids,10)==6);
+    assert(ot_wled_fx_supported_ids(ids,10)==9);
     assert(ids[0]==0 && ids[1]==1 && ids[2]==3 && ids[3]==6 &&
-           ids[4]==12 && ids[5]==23);
+           ids[4]==10 && ids[5]==11 && ids[6]==12 &&
+           ids[7]==13 && ids[8]==23);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -86,6 +87,52 @@ int main(void) {
     c.palette_id=0;
     assert(!ot_wled_fx_render(&c,&s,188,p,65536u));
 
+    /*
+     * Pinned upstream FX.cpp scan(bool): with speed=255, intensity=0,
+     * one illuminated pixel makes a round trip over a 4-pixel zone.
+     * Dual Scan mirrors that exact logical position.
+     */
+    c.foreground=(ot_wled_rgb_t){255,0,0};
+    c.background=(ot_wled_rgb_t){0,0,255};
+    c.brightness=255;c.speed=255;c.intensity=0;
+    c.effect_id=OT_WLED_SCAN;
+    assert(ot_wled_fx_metadata(OT_WLED_SCAN,&meta) && meta.supports_background);
+    assert(ot_wled_fx_render(&c,&s,0,p,4));
+    assert(eq(p[3],c.foreground) && eq(p[0],c.background));
+    assert(ot_wled_fx_render(&c,&s,375,p,4));
+    assert(eq(p[0],c.foreground) && eq(p[3],c.background));
+    assert(ot_wled_fx_render(&c,&s,749,p,4));
+    assert(eq(p[3],c.foreground));
+    c.effect_id=OT_WLED_DUAL_SCAN;
+    assert(ot_wled_fx_render(&c,&s,0,p,4));
+    assert(eq(p[0],c.foreground) && eq(p[3],c.foreground));
+    assert(eq(p[1],c.background) && eq(p[2],c.background));
+    assert(ot_wled_fx_render(&c,&s,375,p,4));
+    assert(eq(p[0],c.foreground) && eq(p[3],c.foreground));
+    assert(ot_wled_fx_render(&c,&s,10,p,1) && eq(p[0],c.foreground));
+
+    /* Pinned upstream running(..., theatre=true): render before advancing
+     * SEGENV.aux0. Skipping an interval advances only one step per frame. */
+    c.effect_id=OT_WLED_THEATER;c.intensity=0;c.speed=255;
+    ot_wled_fx_reset(&s);
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[3],c.foreground));
+    assert(eq(p[1],c.background));
+    assert(ot_wled_fx_render(&c,&s,50,p,7));
+    assert(eq(p[0],c.foreground) && eq(p[1],c.background));
+    assert(s.step==1 && s.aux0==1);
+    assert(ot_wled_fx_render(&c,&s,51,p,7));
+    assert(eq(p[1],c.foreground) && eq(p[0],c.background));
+    assert(ot_wled_fx_render(&c,&s,250,p,7));
+    assert(eq(p[1],c.foreground) && s.aux0==2);
+    ot_wled_fx_reset(&s);
+    assert(s.step==0 && s.aux0==0);
+    /* Brightness and a nonzero intensity (wider scan dot) stay zone-local. */
+    c.effect_id=OT_WLED_SCAN;c.intensity=255;c.brightness=127;
+    assert(ot_wled_fx_render(&c,&s,0,p,7));
+    assert(eq(p[6],(ot_wled_rgb_t){127,0,0}));
+    assert(eq(p[0],(ot_wled_rgb_t){0,0,127}));
+
     c.effect_id=42;assert(!ot_wled_fx_render(&c,&s,0,p,31));
     c.effect_id=OT_WLED_BLINK;c.palette_id=1;
     assert(!ot_wled_fx_render(&c,&s,0,p,31));
@@ -96,6 +143,6 @@ int main(void) {
     c.speed=255;c.intensity=255;ot_wled_fx_reset(&s);
     assert(ot_wled_fx_render(&c,&s,45,p,31));
     assert(ot_wled_fx_render(&c,&s,46,p,31));
-    puts("WLED FX compatibility: Solid, Blink, Strobe timing and validation passed.");
+    puts("CORE source-derived effects: 9 modes, timing, zone limits and validation passed.");
     return 0;
 }
