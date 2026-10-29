@@ -149,13 +149,13 @@ final class BleDiscovery {
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||frameCapture.busy()){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     void saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||frameCapture.busy()){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return;}
@@ -272,12 +272,13 @@ final class BleDiscovery {
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
     void onAdapterDisabled() {
         stopScan();
+        frameCapture.cancel(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
         command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
-        writePending = false; readReplyPending = false; nextPacket = null;
+        writePending = false; readReplyPending = false; pendingPacket = null; nextPacket = null;
         Arrays.fill(cfgKnownRevision, -1);
         if (gatt != null) { try { gatt.close(); } catch (Exception ignored) {} gatt = null; }
         notifyStatus("Bluetooth off · connection closed");
