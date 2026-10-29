@@ -40,6 +40,10 @@ int main(void){
     assert(entry&&ot_effects_1d_metadata(entry->id,&meta));
     cfg.effect_id=entry->id;
     ot_effects_1d_reset(&s,(uint32_t)i+1u);
+    /* Resetting an effect also invalidates the previous zone pixel frame
+     * in the authoritative CORE LED task. Trailing effects may read the
+     * retained frame only when rendering subsequent frames of that effect. */
+    memset(pix,0,sizeof(pix));
     assert(ot_effects_1d_render(&cfg,&s,500,pix,31));
     for(unsigned k=0;k<31;k++){
       if(pix[k].r>cfg.brightness||pix[k].g>cfg.brightness||pix[k].b>cfg.brightness)
