@@ -435,6 +435,16 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     return result;
 }
 
+/* Treat an electrically asserted pin as busy even before its four
+ * debounce samples have settled. This is a pre-save admission check only:
+ * GPIO sampling/rendering remain independent of NVS operations. */
+static bool tm_raw_input_active(void){
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        const bool high=gpio_get_level(input_pin[i])!=0;
+        if(OT_INPUT_ACTIVE_LOW?!high:high)return true;
+    }
+    return false;
+}
 /* Serialize authenticated BLE and bench-HTTP trigger edits with the existing
  * configuration mutex. Commit to NVS before exposing new logical routing.
  * Codes: 0 OK, 1 invalid, 2 busy/active inputs, 3 stale, 4 NVS failure.
@@ -443,9 +453,12 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     if(!ot_tm_valid(next))return 1;
     if(!om_write_mutex ||
        xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    /* The debounced mask alone has a nominal 40ms assertion blind spot.
+     * Reject an already asserted optocoupler pin before any NVS write. */
+    const bool raw_active=tm_raw_input_active();
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    const bool busy=live_input_mask!=0 ||
+    const bool busy=raw_active || live_input_mask!=0 ||
         (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
         show_window(now);
