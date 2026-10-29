@@ -45,6 +45,23 @@ int ot_om_order_from_name(const char *order);
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]);
 bool ot_om_valid(const ot_om_output_t *o);
 int ot_om_section(const ot_om_output_t *o,unsigned pixel);
+/* O(1) amortized sequential-zone lookup for the pixel output loop.
+ * Only use after ot_om_layout() validates an output and only with
+ * ascending pixel indices. Zero-length zones are safely skipped.
+ * Standalone/random-access callers must keep using ot_om_section(). */
+typedef struct {
+    uint8_t next_zone;
+    uint16_t end;
+} ot_om_zone_cursor_t;
+static inline int ot_om_section_next(const ot_om_output_t *o,
+                                      ot_om_zone_cursor_t *cursor,unsigned pixel){
+    if(!o||!cursor||pixel>=o->active_pixels)return -1;
+    while(cursor->next_zone<o->zone_count && pixel>=cursor->end){
+        cursor->end=(uint16_t)(cursor->end+o->zones[cursor->next_zone].pixels);
+        cursor->next_zone++;
+    }
+    return cursor->next_zone?(int)cursor->next_zone-1:-1;
+}
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout);
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness);
 /* Inputs overlay only assigned zone roles. Parking is the baseline and yields
