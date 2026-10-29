@@ -32,3 +32,15 @@ uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
     }
     return mask;
 }
+
+bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
+                      uint16_t *expected_revision,ot_tm_profile_t *out){
+    if(!wire||!expected_revision||!out||
+       size!=OT_TM_BLE_WRITE_BYTES||wire[0]!=OT_TM_BLE_VERSION)return false;
+    ot_tm_profile_t candidate={0};
+    memcpy(candidate.function,wire+3,OT_IN_COUNT);
+    if(!ot_tm_valid(&candidate))return false;
+    *expected_revision=(uint16_t)((uint16_t)wire[1]|((uint16_t)wire[2]<<8));
+    *out=candidate;
+    return true;
+}
