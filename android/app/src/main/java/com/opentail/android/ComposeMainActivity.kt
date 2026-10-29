@@ -68,11 +68,15 @@ class ComposeMainActivity : ComponentActivity() {
     private val selectedEffect = mutableIntStateOf(0)
     private val liveChainMask = mutableIntStateOf(3)
     private val liveZoneMask = mutableIntStateOf(255)
+    private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
+    private val captureMessage = mutableStateOf("CORE render snapshot not captured")
+    private val captureOutput = mutableIntStateOf(0)
 
     // A single gesture updates the on-screen design immediately. When the
     // owner has explicitly armed a physical bench preview, the same gesture
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
     private fun previewCurrentEffect(effectOverride: Int? = null) {
+        coreFrame.value = null // any parameter change invalidates the frozen CORE frame
         // Live editing is the DEFAULT. Offline rendering always updates;
         // if owner-authorized BLE can preview this effect, stream the gesture
         // automatically without an extra "Live Edit Mode" switch.
@@ -98,6 +102,7 @@ class ComposeMainActivity : ComponentActivity() {
             try {
                 val data = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                 outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
+                coreFrame.value = null
                 refresh()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
         }
@@ -135,6 +140,25 @@ class ComposeMainActivity : ComponentActivity() {
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
+        ble.setFrameListener { output, sequence, rgb, error ->
+            runOnUiThread {
+                if (error != null || rgb == null) {
+                    coreFrame.value = null
+                    captureMessage.value = error ?: "No CORE frame returned"
+                } else {
+                    runCatching { ExactLedFrame.fromCoreRgb888(output, sequence, rgb) }
+                        .onSuccess {
+                            coreFrame.value = it
+                            captureMessage.value = "Verified CORE RGB888 snapshot · output " +
+                                (output + 1) + " · frame " + sequence + " · " + it.size() + " LEDs"
+                        }
+                        .onFailure {
+                            coreFrame.value = null
+                            captureMessage.value = "Invalid CORE RGB888 frame"
+                        }
+                }
+            }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -163,6 +187,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble.handlePermissions(requestCode, grantResults)
     }
     override fun onStop() {
+        coreFrame.value = null
         if (liveArmed.value) {
             livePreview.stop()
             liveArmed.value = false
@@ -386,14 +411,18 @@ class ComposeMainActivity : ComponentActivity() {
         // Every segment represents exactly one real zero-based LED index.
         // No fabricated effect motion, fixed 28-dot count, or frame sampling.
         val revisionKey = revision.intValue
-        val frame = remember(revisionKey) {
+        val localFrame = remember(revisionKey) {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
         }
+        val frame = coreFrame.value ?: localFrame
+        val isCore = frame?.origin == ExactLedFrame.Origin.CORE
         val total = frame?.size() ?: 0
         val window = total.coerceAtMost(64)
         var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
         val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
-        Caption("Exact local pixel map · " + total + " indexed design LEDs", t)
+        Caption((if (isCore) "Verified CORE-rendered RGB888 frame · output " +
+            (frame!!.output + 1) + " · sequence " + frame.frameNumber
+        else "Exact local pixel map · " + total + " indexed design LEDs"), t)
         if (frame == null) {
             Caption("Pixel map exceeds preview capacity; check manual zone offsets.", t)
         } else if (total == 0) {
@@ -417,8 +446,10 @@ class ComposeMainActivity : ComponentActivity() {
                     requestedFirst = it
                 }
         }
-        Caption("Effect " + NativeEffectCatalog.byId(effect).name +
-            " · exact animation unavailable: CORE BLE does not return rendered frames. " +
+        Caption(if (isCore) "Real CORE post-render logical RGB888 for ONE captured frame. " +
+            "This does not certify continuous animation timing or optical LED output."
+        else "Effect " + NativeEffectCatalog.byId(effect).name +
+            " · live animation unavailable without CORE frame capture. " +
             "The strip above shows the pixel-address map, NOT a simulated effect.", t)
     }
 
@@ -437,6 +468,23 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Caption("Pixel-exact design inspection · effects require CORE rendered frames", t)
             EffectsPreview(t, effect)
+            if (ble.canCaptureFrame()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Pill("OUT 1", t, captureOutput.intValue == 0) {
+                        captureOutput.intValue = 0; coreFrame.value = null
+                    }
+                    Pill("OUT 2", t, captureOutput.intValue == 1) {
+                        captureOutput.intValue = 1; coreFrame.value = null
+                    }
+                    Pill("Capture actual CORE frame", t, true) {
+                        coreFrame.value = null
+                        captureMessage.value = "Capturing next completed CORE RGB frame..."
+                        ble.captureFrame(captureOutput.intValue)
+                    }
+                }
+                Caption(captureMessage.value, t)
+            } else Caption("CORE frame capture unavailable until firmware supports " +
+                "the authenticated snapshot capability. Local pixel map remains available.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Effects", "Sequences", "Presets").forEach {
                     Pill(it, t, view == it) { view = it }
