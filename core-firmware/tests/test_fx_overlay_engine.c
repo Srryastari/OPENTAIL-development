@@ -21,6 +21,19 @@ int main(void){
     }
     assert(ot_fx_overlay_apply(&cfg,42,0,repeat,623,24));
     assert(memcmp(frame,repeat,sizeof(frame))==0);
+    /* A nonzero brightness below the spark peak must also cap the overlay.
+     * Previously only brightness=0 was respected; brightness=1 emitted 32. */
+    const uint8_t caps[]={1u,4u,24u,32u};
+    for(size_t cap=0;cap<sizeof(caps)/sizeof(caps[0]);cap++){
+        memset(repeat,0,sizeof(repeat));
+        assert(ot_fx_overlay_apply(&cfg,42,0,repeat,623,caps[cap]));
+        assert(lit(repeat,623)>0);
+        for(size_t i=0;i<623;i++){
+            assert(repeat[i].r<=caps[cap]);
+            assert(repeat[i].g<=caps[cap]);
+            assert(repeat[i].b<=caps[cap]);
+        }
+    }
     memset(repeat,0,sizeof(repeat));
     assert(ot_fx_overlay_apply(&cfg,42,60,repeat,623,24));
     assert(lit(repeat,623)>0);
