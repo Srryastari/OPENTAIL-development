@@ -10,6 +10,13 @@ cc -std=c11 -Wall -Wextra -Werror -Imain main/core_logic.c main/arbitration_logi
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/test_wled_fx_compat.c -o /tmp/ot-wled-fx-tests && /tmp/ot-wled-fx-tests
 
+# Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
+# with independent upstream math/color helpers and a narrow palette=0 shim.
+# This certifies ONLY the ten enumerated RGB/gamma-off profiles, not all modes.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain -c main/wled_fx_compat.c -o /tmp/ot-wled-fx-parity.o
+c++ -std=c++17 -Wall -Wextra -Werror -Wno-parentheses -Imain tests/test_wled_source_parity.cpp /tmp/ot-wled-fx-parity.o -o /tmp/ot-wled-source-parity
+/tmp/ot-wled-source-parity
+
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_1d.c tests/test_wled_1d.c -o /tmp/ot-wled-1d-tests && /tmp/ot-wled-1d-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests && /tmp/ot-ble-fx-tests
