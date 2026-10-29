@@ -3362,6 +3362,47 @@ int main() {
     }
     std::printf("WLED fixed palette reference comparison passed: %u RGB samples across 12 built-in/default palette IDs.\n",fixed_palette_samples);
 
+    /* WLED colors.cpp generateRandomPalette(): compare its CHSV color
+     * conversion and four RGB gradients directly against pinned upstream
+     * functions. RNG scheduling/blending is deliberately outside this test. */
+    unsigned random_palette_samples=0u;
+    for(unsigned seed=0u;seed<32u;seed++) {
+      uint8_t hsv[12]={0};
+      CRGB source_colors[4];
+      for(unsigned i=0u;i<4u;i++) {
+        const uint8_t hue=(uint8_t)(seed*73u+i*57u);
+        const uint8_t sat=(uint8_t)(160u+(seed*17u+i*29u)%95u);
+        const uint8_t val=(uint8_t)(128u+(seed*31u+i*19u)%127u);
+        hsv[3u*i]=hue;hsv[3u*i+1u]=sat;hsv[3u*i+2u]=val;
+        source_colors[i]=CRGB(CHSV(hue,sat,val));
+      }
+      CRGBPalette16 original{};
+      fill_gradient_RGB(original.entries,0u,source_colors[0],5u,source_colors[1]);
+      fill_gradient_RGB(original.entries,5u,source_colors[1],10u,source_colors[2]);
+      fill_gradient_RGB(original.entries,10u,source_colors[2],15u,source_colors[3]);
+      ot_wled_palette16_t built{};
+      if(!ot_wled_palette_from_hsv4(hsv,&built))std::abort();
+      for(unsigned ix=0u;ix<256u;ix++) {
+        for(unsigned brightness:{0u,128u,255u}) {
+          for(unsigned blend=0u;blend<=2u;blend++) {
+            const uint32_t expected=ColorFromPalette(original,ix,
+                     (uint8_t)brightness,(TBlendType)blend)&0xffffffu;
+            const uint32_t actual=pack(ot_wled_palette_sample(&built,
+                     (uint8_t)ix,(uint8_t)brightness,(ot_wled_palette_blend_t)blend));
+            if(expected!=actual) {
+              std::fprintf(stderr,
+                "WLED random palette mismatch seed=%u ix=%u bri=%u blend=%u upstream=%06X CORE=%06X\\n",
+                seed,ix,brightness,blend,(unsigned)expected,(unsigned)actual);
+              return 1;
+            }
+            random_palette_samples++;
+          }
+        }
+      }
+    }
+    if(ot_wled_palette_from_hsv4(nullptr,nullptr))std::abort();
+    std::printf("WLED random HSV construction parity passed: %u RGB samples across 32 source-derived four-color palettes.\\n",random_palette_samples);
+
     /* Exhaustively compare all 60 pinned gradient tables against source
      * loadDynamicGradientPalette and verbatim ColorFromPalette sampling. */
     unsigned gradient_samples=0u;
