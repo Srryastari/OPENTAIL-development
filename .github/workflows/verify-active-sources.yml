@@ -251,3 +251,13 @@ jobs:
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS
+
+      - name: Upload standalone web Studio v0.19.119
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-studio-v0.19.119-web
+          path: |
+            web-studio/opentail.htm
+            web-studio/opentail-v0.19.119.htm
+          if-no-files-found: error
+          retention-days: 14
