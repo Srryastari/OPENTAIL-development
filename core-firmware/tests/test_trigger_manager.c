@@ -46,6 +46,34 @@ static void test_prior_individual_input_sequences(void){
         assert(ot_debounce(&sampler,levels,4u)==0u);
     }
 }
+/* Earlier mask-matrix results: hazards 12, brake+hazards 14, plus
+ * Parking 15, plus Reverse 31, release Parking 30, then all inputs 255,
+ * AUX1..3 alone 224, and release 0. A transient stray 231 was reported
+ * before a clean 31: a one-sample raw glitch must NOT become a settled mask.
+ * This only validates debounce behavior, not electrical root cause. */
+static void test_previous_combination_transitions(void){
+    ot_inputs_t sampler={0};
+    bool levels[OT_IN_COUNT]={0};
+    const uint8_t sequence[]={0,12,14,15,31,30,31,255,224,0};
+    uint8_t settled=0;
+    for(unsigned k=0;k<sizeof(sequence);k++){
+        const uint8_t target=sequence[k];
+        for(unsigned bit=0;bit<OT_IN_COUNT;bit++)
+            levels[bit]=(target&(uint8_t)(1u<<bit))!=0;
+        for(unsigned n=0;n<3;n++)
+            assert(ot_debounce(&sampler,levels,4u)==settled);
+        settled=target;
+        assert(ot_debounce(&sampler,levels,4u)==settled);
+        if(k==4){ /* transient anomalous 231 after settling on clean 31 */
+            for(unsigned bit=0;bit<OT_IN_COUNT;bit++)
+                levels[bit]=(231u&(1u<<bit))!=0;
+            assert(ot_debounce(&sampler,levels,4u)==31u);
+            for(unsigned bit=0;bit<OT_IN_COUNT;bit++)
+                levels[bit]=(31u&(1u<<bit))!=0;
+            assert(ot_debounce(&sampler,levels,4u)==31u);
+        }
+    }
+}
 /* Earlier bench: IN3/Left interrupted a Bluetooth Wipe and Wipe resumed
  * after release; Brake, Hazards and Reverse overlaid their assigned zones.
  * Use the existing legacy show renderer rather than a fake local timeline.
@@ -128,6 +156,7 @@ static void test_prior_wipe_and_simulation_scenarios(void){
 int main(void){
     test_sampler_transitions();
     test_prior_individual_input_sequences();
+    test_previous_combination_transitions();
     test_prior_wipe_and_simulation_scenarios();
     ot_tm_profile_t p={0};
     ot_tm_defaults(&p);
