@@ -72,4 +72,31 @@ check("Native hardware output read/save and post-commit readback retained",
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
+# This is a build-tested migration candidate, NOT the launcher or a device pass.
+# Retain the earlier working Java launcher until Compose reaches functional parity.
+compose = (source / "ComposeMainActivity.kt").read_text()
+root_gradle = read("build.gradle")
+check("Kotlin + Compose toolchain is present (not a WebView replacement)",
+      "org.jetbrains.kotlin.android" in root_gradle and
+      "org.jetbrains.kotlin.plugin.compose" in root_gradle and
+      "id 'org.jetbrains.kotlin.plugin.compose'" in gradle and
+      "activity-compose" in gradle and
+      "@Composable" in compose and
+      "class ComposeMainActivity : ComponentActivity()" in compose and
+      "WebView(" not in compose)
+check("Compose migration has approved six pages and top-only navigation",
+      'listOf("Home", "Show Modes", "Layout", "Triggers", "Auto Events", "Settings")' in compose
+      and all(k in compose for k in
+          ("HomePage(", "ShowModesPage(", "LayoutPage(", "TriggersPage(",
+           "AutoEventsPage(", "SettingsPage("))
+      and "horizontalScroll(" in compose and "BottomNavigation" not in compose)
+check("Compose authoring preserves zone offsets and separate BLE confirmation",
+      all(k in compose for k in
+          ("previewZoneOffsets(id, n)", "project.editZone(",
+           "project.assign(", "project.setSequence(", "project.importJson(",
+           "project.exportJson()", "ble.canControl()", "supportedIds.value",
+           "ble.showFx(", "BleConfigCodec.encode(next)", "ble.saveOutput(",
+           "AlertDialog(onDismissRequest")))
+      and 'android:name=".MainActivity"' in manifest_xml)
+print("Compose status: compilation candidate; still NOT launcher. No UI parity or device test claimed.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
