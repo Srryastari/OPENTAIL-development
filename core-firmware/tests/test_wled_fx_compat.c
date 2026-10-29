@@ -1145,7 +1145,7 @@ int main(void) {
      * without modifying outputs; this must not silently enable other FX. */
     const ot_wled_rgb_t prim={123u,56u,9u},sec={3u,88u,174u},ter={0u,0u,0u};
     ot_wled_palette16_t palette={0};
-    assert(!ot_wled_palette_build(7u,prim,sec,ter,&palette));
+    assert(!ot_wled_palette_build(13u,prim,sec,ter,&palette));
     assert(!ot_wled_palette_build(2u,prim,sec,ter,NULL));
     for(unsigned pal=0;pal<=6u;pal++) {
         if(pal==1u)continue; /* WLED's dynamic random palette needs RNG/state */
