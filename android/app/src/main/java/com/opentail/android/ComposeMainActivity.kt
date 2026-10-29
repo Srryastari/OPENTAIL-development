@@ -780,16 +780,26 @@ class ComposeMainActivity : ComponentActivity() {
     private fun PresetsPage(t: Tone) {
         val presets = project.presets()
         var pendingLoad by remember { mutableIntStateOf(-1) }
+        var presetStatus by remember { mutableStateOf("") }
         Panel(t) {
             Title("Presets", t)
             Caption("These save a local design snapshot, not CORE firmware.", t)
             Pill("+ Save current design", t, true) {
                 if (presets.length() < NativeProject.MAX_PRESETS) {
-                    presets.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
-                        .put("studio", project.exportJson()))
-                    project.setPresets(presets);refresh()
+                    // Presets store the design only, not recursive copies of
+                    // the entire preset library (which grow on every save).
+                    val snapshot = JSONObject(project.exportJson())
+                    snapshot.put("savedPresets", JSONArray())
+                    val updated = JSONArray(presets.toString())
+                    updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
+                        .put("studio", snapshot.toString()))
+                    if (project.setPresets(updated)) {
+                        presetStatus = "Preset saved locally"
+                        refresh()
+                    } else presetStatus = "Could not save preset"
                 }
             }
+            if (presetStatus.isNotEmpty()) Caption(presetStatus, t)
         }
         for (i in 0 until presets.length()) {
             val p = presets.optJSONObject(i) ?: continue
@@ -811,7 +821,15 @@ class ComposeMainActivity : ComponentActivity() {
                 text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
                 confirmButton = { Pill("Load preset", t, true) {
                     val saved = presets.optJSONObject(pendingLoad)?.optString("studio", "").orEmpty()
-                    if (saved.isNotEmpty() && project.importJson(saved)) refresh()
+                    val restored = runCatching {
+                        val design = JSONObject(saved)
+                        // Loading one design never deletes or rolls back the
+                        // user's independently saved preset collection.
+                        design.put("savedPresets", JSONArray(project.presets().toString()))
+                        project.importJson(design.toString())
+                    }.getOrDefault(false)
+                    presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
+                    if (restored) refresh()
                     pendingLoad = -1
                 } },
                 dismissButton = { Pill("Cancel", t) { pendingLoad = -1 } })
