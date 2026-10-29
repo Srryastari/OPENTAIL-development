@@ -1371,7 +1371,7 @@ static void led_task(void *p) {
                                ot_st_set_fault("invalid BLE effect frame");
                            else if(slot->overlay.style &&
                                    !ot_fx_overlay_apply(&slot->overlay,
-                                       fx_state[ch][z].particles.seed,zone_elapsed,
+                                       (slot->generation^((uint32_t)ch<<16)^((uint32_t)z<<8)),zone_elapsed,
                                        &fx_frame[ch][offset],len,cfg.brightness))
                                ot_st_set_fault("invalid flare/spark overlay");
                        }
