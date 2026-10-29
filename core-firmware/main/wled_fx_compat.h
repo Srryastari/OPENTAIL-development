@@ -105,7 +105,8 @@ enum {
     OT_WLED_NOISE_4 = 73,
     OT_WLED_PHASED = 105, /* WLED FX_MODE_PHASED */
     OT_WLED_PHASED_NOISE = 109, /* WLED FX_MODE_PHASEDNOISE */
-    OT_WLED_PRIDE_2015 = 63   /* WLED FX_MODE_PRIDE_2015 */
+    OT_WLED_PRIDE_2015 = 63, /* WLED FX_MODE_PRIDE_2015 */
+    OT_WLED_COLORWAVES = 67  /* WLED FX_MODE_COLORWAVES */
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
