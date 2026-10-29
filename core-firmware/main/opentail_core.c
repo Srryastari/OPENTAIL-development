@@ -42,6 +42,7 @@
 #include "esp_timer.h"
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
+#include "ot_frame_snapshot.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -1339,6 +1340,7 @@ static void led_task(void *p) {
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
            bool frame_ready[OT_CHAIN_COUNT]={false};
            bool frame_submitted[OT_CHAIN_COUNT]={false};
+           bool frame_captured[OT_CHAIN_COUNT]={false};
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
@@ -1421,6 +1423,10 @@ static void led_task(void *p) {
                 * a full ot_om_valid() plus name checks for every LED.
                 * This keeps the mapping universal and reduces render latency. */
                ot_om_zone_cursor_t zone_cursor={0};
+               /* Capture one requested output, after CORE overlays/calibration,
+                * before driver color-order packing. No work in normal frames. */
+               frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
+                                        output->active_pixels,frame_index+1u);
                for(unsigned px=0;px<output->active_pixels;++px){
                    ot_rgb_t c={0,0,0};
                    int zone=ot_om_section_next(output,&zone_cursor,px);
@@ -1458,6 +1464,8 @@ static void led_task(void *p) {
                            if(decorated)c=ot_om_calibrate(c,output);
                        }
                    }
+                   if(frame_captured[ch])
+                       ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
                    ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
                }
@@ -1470,6 +1478,7 @@ static void led_task(void *p) {
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!frame_submitted[ch])continue;
                ESP_ERROR_CHECK(led_strip_refresh_async_done(strip[ch]));
+               if(frame_captured[ch])ot_frame_snapshot_complete(true);
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
