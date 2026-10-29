@@ -33,7 +33,7 @@ static uint16_t crc16(const uint8_t *data,size_t length){
 bool ot_frame_snapshot_request(uint8_t output){
     if(output>=OT_OM_OUTPUTS)return false;
     LOCK();
-    if(recording || record.pending){UNLOCK();return false;}
+    if(recording){UNLOCK();return false;}
     generation++;
     record=(ot_frame_snapshot_info_t){.output=output,.pending=true};
     UNLOCK();
