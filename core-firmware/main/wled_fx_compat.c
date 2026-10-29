@@ -4517,7 +4517,10 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     while(pitch>249.0f && octave<32u) {octave++;pitch/=2.0f;}
     pitch=fabsf((pitch-132.0f)*2.1f);
     const unsigned bpm=8u+(unsigned)octave*4u;
-    const unsigned sin=fx_beatsin8((uint16_t)bpm,0u,255u,now);
+    /* WLED beatsin8_t(...,phase_offset=octCount*8): preserve the
+     * octave-dependent phase, not just the note's oscillation BPM. */
+    const uint16_t beat=(uint16_t)(((uint32_t)(now*((uint32_t)bpm<<8)*280u))>>16);
+    const unsigned sin=wled_sin8((uint8_t)((beat>>8)+(unsigned)octave*8u));
     const size_t pos=(size_t)((uint64_t)sin*(count-1u)/255u);
     ot_wled_rgb_t foreground=cfg->foreground;
     if(cfg->palette_id) {
