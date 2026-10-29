@@ -233,7 +233,17 @@ uint32_t IRAM_ATTR color_fade(uint32_t c1, uint8_t amount, bool video) {
 // Only this minimal adapter code is OpenTail-specific.
 // Small RGB structs replicate upstream class conversion (gamma disabled).
 struct CHSV {uint8_t h,s,v;CHSV(uint8_t a,uint8_t b,uint8_t c):h(a),s(b),v(c){}};
-struct CRGBW {uint32_t color32=0u;};
+struct CHSV32 {uint8_t h,s,v;CHSV32(uint8_t a,uint8_t b,uint8_t c):h(a),s(b),v(c){}};
+struct CRGBW {
+    uint32_t color32=0u;
+    CRGBW()=default;
+    explicit CRGBW(CHSV32 c) {
+        uint8_t rgb[4]={0,0,0,0};
+        hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
+        color32=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];
+    }
+    operator uint32_t() const {return color32;}
+};
 struct CRGB : CRGBW {
     explicit CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
@@ -245,6 +255,7 @@ static uint32_t gamma32inv(uint32_t color) { return color; }
 
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
+    uint8_t custom1=48u,custom2=64u,custom3=12u;
     bool check1=false,check2=false,check3=false;
     void fade_out(uint8_t) { std::abort(); } // unsupported controls fail closed
     uint16_t offset=0u;
@@ -885,6 +896,58 @@ uint8_t perlin8(uint16_t x) {
 }
 #undef PERLIN_SHIFT
 // END UPSTREAM 1D Perlin source.
+
+// BEGIN UPSTREAM util.cpp 2D Perlin source (verbatim).
+#define PERLIN_SHIFT 1
+static inline __attribute__((always_inline)) int32_t gradient2D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy) {
+  uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D);
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  return (hashToGradient(h) * dx + hashToGradient(h>>PERLIN_SHIFT) * dy) >> (1 + PERLIN_SHIFT);
+}
+
+
+int32_t perlin2D_raw(uint32_t x, uint32_t y, bool is16bit) {
+  int32_t x0 = x >> 16;
+  int32_t y0 = y >> 16;
+  int32_t x1 = x0 + 1;
+  int32_t y1 = y0 + 1;
+
+  if(is16bit) {
+    x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+    y1 = y1 & 0xFF;
+  }
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dy0 = y & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  int32_t dy1 = dy0 - 0x10000;
+
+  int32_t g00 = gradient2D(x0, dx0, y0, dy0);
+  int32_t g10 = gradient2D(x1, dx1, y0, dy0);
+  int32_t g01 = gradient2D(x0, dx0, y1, dy1);
+  int32_t g11 = gradient2D(x1, dx1, y1, dy1);
+
+  uint32_t tx = smoothstep(dx0);
+  uint32_t ty = smoothstep(dy0);
+
+  int32_t nx0 = lerpPerlin(g00, g10, tx);
+  int32_t nx1 = lerpPerlin(g01, g11, tx);
+
+  int32_t noise = lerpPerlin(nx0, nx1, ty);
+  return noise;
+}
+
+
+uint16_t perlin16(uint32_t x, uint32_t y) {
+ return ((perlin2D_raw(x, y) * 1537) >> 10) + 32725; //scale to 16bit and offset (fastled range: about 1748 to 63697)
+}
+
+
+#undef PERLIN_SHIFT
+// END UPSTREAM util.cpp 2D Perlin source.
+
 static void phased_base(uint8_t moder) {                  // We're making sine waves here. By Andrew Tuline.
 
   unsigned allfreq = 16;                                          // Base frequency.
@@ -1516,9 +1579,10 @@ void mode_popcorn(void) {
 // Host-only stand-in for Arduino constrain() with 1D unsigned indices.
 template<typename T,typename L,typename H>
 static unsigned constrain(T value,L lo,H hi) {
-    const unsigned x=static_cast<unsigned>(value);
-    const unsigned low=static_cast<unsigned>(lo),high=static_cast<unsigned>(hi);
-    return x<low?low:(x>high?high:x);
+    /* Preserve source signed clamp: negative Perlin brightness -> zero. */
+    const int64_t x=static_cast<int64_t>(value);
+    const int64_t low=static_cast<int64_t>(lo),high=static_cast<int64_t>(hi);
+    return (unsigned)(x<low?low:(x>high?high:x));
 }
 // BEGIN UPSTREAM FX.cpp Drip, unchanged source body.
 void mode_drip(void)
@@ -1725,6 +1789,81 @@ void mode_tv_simulator(void) {
 
 // END UPSTREAM TV Simulator.
 
+
+// BEGIN UPSTREAM FX.cpp Color Clouds (verbatim), RGB/palette 0 profile.
+#define R(c) (uint8_t)(((uint32_t)(c)>>16)&255u)
+#define G(c) (uint8_t)(((uint32_t)(c)>>8)&255u)
+#define B(c) (uint8_t)((uint32_t)(c)&255u)
+void mode_ColorClouds()
+{
+  // Set random start points for clouds and color.
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = hw_random16();
+    SEGENV.aux1 = hw_random16();
+  }
+  const uint32_t volX0 = SEGENV.aux0;
+  const uint32_t hueX0 = SEGENV.aux1;
+  const uint8_t hueOffset0 = volX0 + hueX0; // derive a 3rd random number
+
+  // Makes a very soft wraparound of the color palette by putting more emphasis on the begin & end
+  // of the palette (or on the red'ish colors in case of a rainbow spectrum).
+  // This gives the effect oftentimes an even more calm perception.
+  const bool cozy = SEGMENT.check3;
+
+  // Higher values make the clouds move faster.
+  const uint32_t volSpeed = 1 + SEGMENT.speed;
+  
+  // Higher values make the color change faster.
+  const uint32_t hueSpeed = 1 + SEGMENT.intensity;
+  
+  // Higher values make more clouds (but smaller ones).
+  const uint32_t volSqueeze = 8 + SEGMENT.custom1;
+  
+  // Higher values make the clouds more colorful.
+  const uint32_t hueSqueeze = SEGMENT.custom2;
+
+  // Higher values make larger gaps between the clouds.
+  const int32_t volCutoff   = 12500 + SEGMENT.custom3 * 900;
+  const int32_t volSaturate = 52000;
+  // Note: When adjusting these calculations, ensure that volCutoff is always smaller than volSaturate.
+
+  const uint32_t now = strip.now;
+  const uint32_t volT = now * volSpeed / 8;
+  const uint32_t hueT = now * hueSpeed / 8;
+  const uint8_t hueOffset = beat88(64) >> 8;
+
+  for (int i = 0; i < SEGLEN; i++) {
+    const uint32_t volX = i * volSqueeze * 64;
+    int32_t vol = perlin16(volX0 + volX, volT);
+    vol = map(vol, volCutoff, volSaturate, 0, 255);
+    vol = constrain(vol, 0, 255);
+
+    const uint32_t hueX = i * hueSqueeze * 8;
+    uint8_t hue = perlin16(hueX0 + hueX, hueT) >> 7;
+    hue += hueOffset0;
+    hue += hueOffset;
+    if (cozy) {
+      hue = cos8_t(128 + hue / 2);
+    }
+
+    uint32_t pixel;
+    if (SEGMENT.palette) { pixel = SEGMENT.color_from_palette(hue, false, true, 0, vol); }
+    else { pixel = CRGBW(CHSV32(hue, 255, vol)); }
+
+    // Suppress extremely dark pixels to avoid flickering of plain r/g/b.
+    if (int(R(pixel)) + G(pixel) + B(pixel) <= 2) {
+      pixel = 0;
+    }
+
+    SEGMENT.setPixelColor(i, pixel);
+  }
+}
+
+#undef R
+#undef G
+#undef B
+// END UPSTREAM FX.cpp Color Clouds.
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -1771,7 +1910,8 @@ static const RefCase refs[]={
     {48,mode_rolling_balls,"Rolling Balls"},
     {95,mode_popcorn,"Popcorn"},
     {96,mode_drip,"Drip"},
-    {116,mode_tv_simulator,"TV Simulator"}
+    {116,mode_tv_simulator,"TV Simulator"},
+    {218,mode_ColorClouds,"Color Clouds"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
