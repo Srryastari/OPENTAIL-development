@@ -136,7 +136,7 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    /* 120 WLED-compatible 1D IDs + OpenTail Embers fit in a long GATT value.
+    /* 120 compatibility IDs plus original OpenTail effects fit in a long GATT value.
      * Honor Read Blob offsets so Android can retrieve the complete list even
      * when the negotiated ATT MTU is the default 23 bytes. */
     uint16_t ids[128]={0};
