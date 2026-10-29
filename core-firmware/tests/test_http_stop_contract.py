@@ -34,7 +34,7 @@ show_stop = section("static esp_err_t show_stop(httpd_req_t *r){", "/* Provision
 assert "ble_fx_enabled=false" in show_stop and "ot_fx_bank_stop_all(&fx_bank)" in show_stop
 
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
-literal = re.search(r'return send_json\\(r,(".*")\\);', capabilities)
+literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
 assert literal, "Capabilities must return valid static JSON"
 caps = json.loads(ast.literal_eval(literal.group(1)))
 assert "c->color_order=OT_OM_GRB;" in outputs
