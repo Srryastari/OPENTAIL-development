@@ -2196,10 +2196,16 @@ static void juggle_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         const uint16_t bpm=(uint16_t)((16u+(uint32_t)cfg->speed)*(i+7u));
         const size_t index=fx_beatsin88(bpm,(uint16_t)(count-1u),now);
         const ot_wled_rgb_t c=fx_hsv220(hue);
+        const ot_wled_rgb_t dot=scaled(c,cfg->brightness);
+        const unsigned r=pixels[index].r|dot.r;
+        const unsigned g=pixels[index].g|dot.g;
+        const unsigned b=pixels[index].b|dot.b;
+        /* The bitwise OR of already scaled dots can exceed the output cap.
+         * Bound only this compositing step; preserve the source OR pattern. */
         pixels[index]=(ot_wled_rgb_t){
-            (uint8_t)(pixels[index].r | scaled(c,cfg->brightness).r),
-            (uint8_t)(pixels[index].g | scaled(c,cfg->brightness).g),
-            (uint8_t)(pixels[index].b | scaled(c,cfg->brightness).b)};
+            (uint8_t)(r>cfg->brightness?cfg->brightness:r),
+            (uint8_t)(g>cfg->brightness?cfg->brightness:g),
+            (uint8_t)(b>cfg->brightness?cfg->brightness:b)};
         hue=(uint8_t)(hue+32u);
     }
 }
