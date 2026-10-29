@@ -59,6 +59,20 @@ final class BleDiscovery {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Map<String, BluetoothDevice> found = new LinkedHashMap<>();
     private final ArrayList<String> labels = new ArrayList<>();
+    // Headless discovery lets Jetpack Compose own the visible scan results.
+    // Existing GATT authentication/configuration handling is unchanged.
+    interface ScanResultListener { void onFound(String address, String label); }
+    private ScanResultListener composeScanResults;
+    private boolean headlessScan=false;
+    void setScanResultListener(ScanResultListener listener) { composeScanResults=listener; }
+    void scanHeadless() { headlessScan=true; scanImpl(); }
+    @SuppressWarnings("MissingPermission")
+    void connectFoundDevice(String address) {
+        BluetoothDevice device=found.get(address);
+        if(device==null){notifyStatus("Device no longer in scan results; scan again");return;}
+        stopScan();
+        connectReadOnly(device);
+    }
     private final ArrayAdapter<String> entries;
     private BluetoothLeScanner scanner;
     private BluetoothGatt gatt;
@@ -430,7 +444,8 @@ final class BleDiscovery {
         return true;
     }
 
-    void scan() {
+    void scan() { headlessScan=false; scanImpl(); }
+    private void scanImpl() {
         if (Build.VERSION.SDK_INT >= 31) {
             if (activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
                     || activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -467,7 +482,7 @@ final class BleDiscovery {
         found.clear();
         labels.clear();
         entries.notifyDataSetChanged();
-        if (!background) {
+        if (!background && !headlessScan) {
             preferredPending = null;
             SpannableString title = new SpannableString("Find OpenTail CORE");
             title.setSpan(new ForegroundColorSpan(Color.WHITE), 0, title.length(), 0);
@@ -519,6 +534,7 @@ final class BleDiscovery {
                     found.put(address, result.getDevice());
                     labels.add(name + "  •  " + address);
                     entries.notifyDataSetChanged();
+                    if(composeScanResults!=null)composeScanResults.onFound(address,name);
                 }
                 if (preferredPending != null && preferredPending.equalsIgnoreCase(address)) {
                     preferredPending = null;
