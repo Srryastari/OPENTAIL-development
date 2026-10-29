@@ -100,8 +100,21 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
           ("previewZoneOffsets(id, n)", "project.editZone(",
            "project.assign(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
-           "ble.showFx(", "BleConfigCodec.encode(next)", "ble.saveOutput(",
-           "AlertDialog(onDismissRequest"))
+           "ble.showFx(", "BleConfigCodec.encode(JSONObject(draftText))",
+           "ble.saveOutput(", "draftText = updated.toString()",
+           "val updated = JSONObject(draftText)",
+           "project.previewZoneOffsets(", "AlertDialog(onDismissRequest"))
       and 'android:name=".MainActivity"' in manifest_xml)
+check("Compose has full two-output draft editing without unsaved hardware mutation",
+      all(word in compose for word in (
+          "BleConfigCodec.ROLES", "BleConfigCodec.ORDERS", "Fit last zone",
+          "Assigned ", "Color order", "Remove zone", "+ Add zone",
+          "val draft = runCatching { JSONObject(draftText) }",
+          "outputMessage.value = \"Save requested · verifying hardware readback\""))
+      and 'ble.saveOutput(index, draftText)' in compose)
+check("Native effect catalog and approved sequence toggles remain accessible",
+      all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
+          "Repeat", "Edit time", "project.sequenceOptions()", "project.save()"))
+      and 'new Effect(32787, "Singularity Shutdown")' in effect)
 print("Compose status: compilation candidate; still NOT launcher. No UI parity or device test claimed.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
