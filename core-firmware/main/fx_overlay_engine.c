@@ -28,7 +28,10 @@ bool ot_fx_overlay_apply(const ot_fx_overlay_config_t *cfg,
     if(cfg->style==OT_FX_OVERLAY_OFF||!effect_brightness)return true;
     const uint32_t period=70u+(uint32_t)(255u-cfg->density)*530u/255u;
     const uint32_t life=cfg->fade_ms?cfg->fade_ms:120u;
-    const uint32_t maxpeak=cfg->peak?cfg->peak:32u;
+    /* The effect's brightness is a hard output cap, not just an on/off flag. */
+    const uint32_t requested_peak=cfg->peak?cfg->peak:32u;
+    const uint32_t maxpeak=requested_peak<effect_brightness?
+                           requested_peak:effect_brightness;
     const unsigned radius=cfg->radius?cfg->radius:4u;
     const ot_wled_rgb_t color=(cfg->color.r||cfg->color.g||cfg->color.b)
         ?cfg->color:(ot_wled_rgb_t){255u,255u,255u};
