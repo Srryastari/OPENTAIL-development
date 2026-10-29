@@ -100,15 +100,18 @@ int main(void) {
     assert(ot_wled_fx_render(&c,&s,0,p,4));
     assert(eq(p[3],c.foreground) && eq(p[0],c.background));
     assert(ot_wled_fx_render(&c,&s,375,p,4));
+    assert(eq(p[1],c.foreground) && eq(p[0],c.background));
+    assert(ot_wled_fx_render(&c,&s,376,p,4));
     assert(eq(p[0],c.foreground) && eq(p[3],c.background));
     assert(ot_wled_fx_render(&c,&s,749,p,4));
-    assert(eq(p[3],c.foreground));
+    assert(eq(p[2],c.foreground));
     c.effect_id=OT_WLED_DUAL_SCAN;
     assert(ot_wled_fx_render(&c,&s,0,p,4));
     assert(eq(p[0],c.foreground) && eq(p[3],c.foreground));
     assert(eq(p[1],c.background) && eq(p[2],c.background));
     assert(ot_wled_fx_render(&c,&s,375,p,4));
-    assert(eq(p[0],c.foreground) && eq(p[3],c.foreground));
+    assert(eq(p[1],c.foreground) && eq(p[2],c.foreground));
+    assert(eq(p[0],c.background) && eq(p[3],c.background));
     assert(ot_wled_fx_render(&c,&s,10,p,1) && eq(p[0],c.foreground));
 
     /* Pinned upstream running(..., theatre=true): render before advancing
