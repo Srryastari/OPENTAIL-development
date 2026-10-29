@@ -194,6 +194,18 @@ uint16_t triwave16(uint16_t in) {
 
 // END UPSTREAM math/color functions.
 // Only this minimal adapter code is OpenTail-specific.
+// Small RGB structs replicate upstream class conversion (gamma disabled).
+struct CHSV {uint8_t h,s,v;CHSV(uint8_t a,uint8_t b,uint8_t c):h(a),s(b),v(c){}};
+struct CRGBW {uint32_t color32=0u;};
+struct CRGB : CRGBW {
+    explicit CRGB(CHSV c) {
+        uint8_t rgb[4]={0u,0u,0u,0u};
+        hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
+        color32=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];
+    }
+};
+static uint32_t gamma32inv(uint32_t color) { return color; }
+
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
     bool check2=false;
@@ -205,9 +217,12 @@ struct PinnedSeg {
         hsv2rgb_rainbow((uint16_t)pos<<8,255,255,bgrw,true);
         return ((uint32_t)bgrw[2]<<16)|((uint32_t)bgrw[1]<<8)|bgrw[0];
     }
-    uint32_t color_from_palette(uint16_t,bool,bool,uint8_t slot) const {
-        if(palette!=0 || slot>2) {std::fprintf(stderr,"Unsupported reference palette/slot\n");std::abort();}
+    uint32_t color_from_palette(uint16_t,bool,bool,uint8_t slot,uint8_t pbri=255u) const {
+        if(palette!=0 || slot>2 || pbri!=255u) {std::fprintf(stderr,"Unsupported reference palette/slot/brightness\n");std::abort();}
         return colors[slot];
+    }
+    void blendPixelColor(size_t i,CRGBW color,uint8_t b) {
+        if(i<pixels.size()) pixels[i]=color_blend(pixels[i],color.color32,b);
     }
     void fill(uint32_t color) {std::fill(pixels.begin(),pixels.end(),color);}
     void setPixelColor(size_t i,uint32_t color) {
@@ -225,6 +240,28 @@ struct PinnedClock {uint32_t now=0;};
 static PinnedSeg* current_segment=nullptr;
 static PinnedEnv* current_environment=nullptr;
 static PinnedClock strip;
+#define millis() strip.now
+static inline uint16_t scale16(uint16_t i,uint16_t scale) {
+    return (uint16_t)(((uint32_t)i*(1u+(uint32_t)scale))>>16);
+}
+uint16_t beat88(uint16_t,uint32_t=0u);
+uint16_t beatsin88_t(uint16_t,uint16_t,uint16_t,uint32_t=0u,uint16_t=0u);
+// BEGIN PINNED upstream util.cpp beat timing. No synthesized golden values.
+uint16_t beat88(uint16_t beats_per_minute_88, uint32_t timebase) {
+  return ((millis() - timebase) * beats_per_minute_88 * 280) >> 16;
+}
+
+uint16_t beatsin88_t(uint16_t beats_per_minute_88, uint16_t lowest, uint16_t highest, uint32_t timebase, uint16_t phase_offset) {
+  uint16_t beat = beat88(beats_per_minute_88, timebase);
+  uint16_t beatsin = (sin16_t( beat + phase_offset) + 32768);
+  uint16_t rangewidth = highest - lowest;
+  uint16_t scaledbeat = scale16(beatsin, rangewidth);
+  uint16_t result = lowest + scaledbeat;
+  return result;
+}
+// END PINNED beat timing.
+#undef millis
+
 #define SEGMENT (*current_segment)
 #define SEGENV (*current_environment)
 #define SEGLEN (static_cast<unsigned>(current_segment->pixels.size()))
@@ -790,6 +827,58 @@ void mode_phased_noise(void) {
   phased_base(1);
 }
 
+void mode_colorwaves_pride_base(bool isPride2015) {
+  unsigned duration = 10 + SEGMENT.speed;
+  unsigned sPseudotime = SEGENV.step;
+  unsigned sHue16 = SEGENV.aux0;
+
+  uint8_t sat8 = isPride2015 ? beatsin88_t(87, 220, 250) : 255;
+  unsigned brightdepth = beatsin88_t(341, 96, 224);
+  unsigned brightnessthetainc16 = beatsin88_t(203, (25 * 256), (40 * 256));
+  unsigned msmultiplier = beatsin88_t(147, 23, 60);
+
+  unsigned hue16 = sHue16;
+  unsigned hueinc16 = isPride2015 ? beatsin88_t(113, 1, 3000) : 
+                                     beatsin88_t(113, 60, 300) * SEGMENT.intensity * 10 / 255;
+
+  sPseudotime += duration * msmultiplier;
+  sHue16 += duration * beatsin88_t(400, 5, 9);
+  unsigned brightnesstheta16 = sPseudotime;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    hue16 += hueinc16;
+    uint8_t hue8;
+
+    if (isPride2015) {
+      hue8 = hue16 >> 8;
+    } else {
+      unsigned h16_128 = hue16 >> 7;
+      hue8 = (h16_128 & 0x100) ? (255 - (h16_128 >> 1)) : (h16_128 >> 1);
+    }
+
+    brightnesstheta16 += brightnessthetainc16;
+    unsigned b16 = sin16_t(brightnesstheta16) + 32768;
+    unsigned bri16 = (uint32_t)((uint32_t)b16 * (uint32_t)b16) / 65536;
+    uint8_t bri8 = (uint32_t)(((uint32_t)bri16) * brightdepth) / 65536;
+    bri8 += (255 - brightdepth);
+
+    if (isPride2015) {
+      CRGBW newcolor = CRGB(CHSV(hue8, sat8, bri8));
+      newcolor.color32 = gamma32inv(newcolor.color32);
+      SEGMENT.blendPixelColor(i, newcolor, 64);
+    } else {
+      SEGMENT.blendPixelColor(i, SEGMENT.color_from_palette(hue8, false, PALETTE_SOLID_WRAP, 0, bri8), 128);
+    }
+  }
+
+  SEGENV.step = sPseudotime;
+  SEGENV.aux0 = sHue16;
+}
+
+void mode_pride_2015(void) {
+  mode_colorwaves_pride_base(true);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -826,7 +915,8 @@ static const RefCase refs[]={
     {100,mode_heartbeat,"Heartbeat"},
     {27,mode_android,"Android"},
     {105,mode_phased,"Phased"},
-    {109,mode_phased_noise,"Phased Noise"}
+    {109,mode_phased_noise,"Phased Noise"},
+    {63,mode_pride_2015,"Pride 2015"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
