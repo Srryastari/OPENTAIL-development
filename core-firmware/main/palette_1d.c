@@ -7,7 +7,7 @@ bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette){
   * and existing Embers settings fail-closed / backward compatible. */
  if(effect_id==OT_WLED_COLOR_CLOUDS||effect_id==OT_WLED_FLOW_STRIPE||
     effect_id==OT_WLED_GLITTER)
-   return palette>=2u&&palette<=12u;
+   return palette>=2u&&palette<=72u;
  return effect_id==OT_FX_EMBERS&&(palette==2u||palette==3u||palette==4u);
 }
 static uint8_t linear(uint8_t a,uint8_t b,uint8_t t){
