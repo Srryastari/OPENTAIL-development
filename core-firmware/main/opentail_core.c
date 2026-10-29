@@ -297,11 +297,12 @@ static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask,uint8_t
     return item;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent&&!om_deferred.pending;tm=tm_profile;
+    memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
+    persistent=om_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -320,7 +321,7 @@ static esp_err_t om_get(httpd_req_t *r){
     if(!obj)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
     cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
-    cJSON_AddBoolToObject(obj,"config_apply_pending",om_deferred.pending);
+    cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending);
     cJSON_AddBoolToObject(obj,"bench_only",true);
     cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT);
     cJSON_AddNumberToObject(obj,"future_outputs_target",12);
