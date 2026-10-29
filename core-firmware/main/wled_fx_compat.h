@@ -30,6 +30,7 @@ enum {
     OT_WLED_PERCENT = 98,      /* WLED FX_MODE_PERCENT */
     OT_WLED_HEARTBEAT = 100,    /* WLED FX_MODE_HEARTBEAT */
     OT_WLED_PACIFICA = 101,    /* WLED FX_MODE_PACIFICA */
+    OT_WLED_ROCKTAVES = 185,  /* WLED FX_MODE_ROCKTAVES */
     OT_WLED_COLORLOOP = 8,     /* WLED FX_MODE_RAINBOW */
     OT_WLED_RAINBOW = 9,       /* WLED FX_MODE_RAINBOW_CYCLE */
     OT_WLED_THEATER_RAINBOW = 14,
@@ -156,6 +157,14 @@ ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
 
+/* Optional measured audio peak provided by the external audio subsystem.
+ * No synthetic FFT, microphone acquisition or BLE extension is embedded in
+ * the rendering engine. This data is read only for FX 185 Rocktaves. */
+typedef struct {
+    float major_peak_hz;
+    float magnitude;
+} ot_wled_audio_peak_t;
+
 typedef struct {
     uint16_t effect_id;     /* Preserve WLED's numeric effect ID */
     uint8_t speed;          /* WLED 0..255 */
@@ -173,6 +182,7 @@ typedef struct {
     uint8_t spark_style;
     uint8_t spark_peak;
     ot_wled_rgb_t spark_color;
+    const ot_wled_audio_peak_t *audio_peak; /* nullable, source FX 185 only */
 } ot_wled_fx_config_t;
 typedef struct {
     uint16_t pos;
