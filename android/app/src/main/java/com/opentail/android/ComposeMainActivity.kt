@@ -114,20 +114,23 @@ class ComposeMainActivity : ComponentActivity() {
         // Live editing is the DEFAULT. Offline rendering always updates;
         // if owner-authorized BLE can preview this effect, stream the gesture
         // automatically without an extra "Live Edit Mode" switch.
+        val effectId = effectOverride ?: prefs.getInt("effectId", 0)
         if (!ble.canControl() || supportedIds.value.isEmpty()) return
         if (!livePreview.isArmed()) {
             if (!livePreview.arm()) return
             liveArmed.value = true
         }
         livePreview.update(LiveBlePreview.Frame(
-            effectId = effectOverride ?: prefs.getInt("effectId", 0),
+            effectId = effectId,
             chainMask = liveChainMask.intValue,
             zoneMask = liveZoneMask.intValue,
             foreground = prefs.getInt("foreground", -1),
             background = prefs.getInt("background", 0xff000000.toInt()),
             brightness = prefs.getInt("brightness", 160),
             speed = prefs.getInt("speed", 128),
-            intensity = prefs.getInt("intensity", 128)
+            intensity = prefs.getInt("intensity", 128),
+            paletteId = NativePaletteEngine.corePreviewPalette(
+                effectId, prefs.getInt("paletteId", 0))
         ))
     }
 
@@ -726,7 +729,9 @@ class ComposeMainActivity : ComponentActivity() {
                     PalettePicker("Palette", paletteId, t) { id ->
                         paletteId = id
                         prefs.edit().putInt("paletteId", id).apply()
-                        invalidateCoreFrame() // palette is NOT in the current BLE FX payload
+                        if (NativePaletteEngine.coreSupports(effect, id))
+                            previewCurrentEffect(effect)
+                        else invalidateCoreFrame() // Unsupported palettes remain local only
                     }
                     ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
                     ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
@@ -743,8 +748,8 @@ class ComposeMainActivity : ComponentActivity() {
                     Caption(if (offlinePreview.value)
                         "Offline mode: edits update only this local design; no CORE LED commands."
                     else "Supported color/speed/intensity edits preview over authorized BLE. " +
-                        "Palette selection is currently local-only until CORE advertises " +
-                        "a palette-capable edit protocol; exact animation still requires " +
+                        "CORE accepts default palette 0 and Embers palettes 2–4 over BLE. " +
+                        "Other palette choices stay local; exact animation still requires " +
                         "a CORE frame snapshot.", t)
                 }
                 // Only compose visible effect rows; never eagerly render 140
