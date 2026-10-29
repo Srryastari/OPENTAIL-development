@@ -174,7 +174,7 @@ int main(void) {
     assert(p[2].r>100 && p[2].r<150);
     c.speed=0;
     assert(ot_wled_fx_render(&c,&s,0,p,8));
-    assert(p[2].r==0 && p[4].r<4);
+    assert(p[2].r==0 && p[4].r>=253); /* narrow threshold retains peak */
     c.effect_id=OT_WLED_SPOTS_FADE;
     assert(ot_wled_fx_render(&c,&s,0,p,8));
     assert(p[2].r>100 && p[2].r<150);
