@@ -49,6 +49,16 @@ assert 'ot_fps_pacer_wait_us(&pacer,work_us)' in core
 assert 'input_sampler_task' in core and 'vTaskDelayUntil(&last_wake,period)' in core
 assert 'frame_time_ms=(uint16_t)frame_delta_ms' in core
 assert 'output_mask' in core
+# All firmware preview endpoints select generic physical outputs, not car sides.
+assert "static bool preview_output_mask(" in core
+assert core.count("preview_output_mask(obj,&chain_mask)") == 2
+preview = core.split("static esp_err_t fx_preview_post(",1)[1].split("static esp_err_t auto_preview_post(",1)[0]
+auto = core.split("static esp_err_t auto_preview_post(",1)[1].split("static esp_err_t ",1)[0]
+assert "uint8_t chain_mask=3u;" not in preview
+assert "uint8_t chain_mask=3u;" not in auto
+assert 'selection->valueint>all' in core
+assert 'selection&&legacy' in core  # ambiguous legacy/canonical selectors rejected
+assert '.chain_mask=(uint8_t)((1u<<OT_CHAIN_COUNT)-1u)' in core
 assert 'unknown legacy chain name' in core
 assert "legacy_example_zone_local" not in core
 
