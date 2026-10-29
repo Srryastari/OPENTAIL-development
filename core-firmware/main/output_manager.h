@@ -3,13 +3,22 @@
 #include <stdbool.h>
 #include "core_logic.h"
 
-/* Two present physical RMT outputs. Twelve outputs are NOT implemented. */
-#define OT_OM_OUTPUTS 2
-/* Temporary prototype allocation: 623 addressable pixels per physical lane,
- * 1246 pixels combined, with wholly user-configurable zones. This is NOT a
- * permanent architectural ceiling and must never encode a vehicle layout.
- * Capacity is a build constraint, NOT evidence of optical/FPS validation. */
-#define OT_OM_MAX_PIXELS_PER_OUTPUT 623u
+/* Physical channels are defined by the board driver, never by a vehicle profile.
+ * The board build selects a resource-budgeted, changeable buffer capacity.
+ * This is a memory allocation limit, NOT a preset pixel count or FPS promise. */
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#else
+/* Host tests use an independent representative build-time resource budget. */
+#ifndef CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT
+#define CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT 2048
+#endif
+#endif
+#if !defined(CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT) ||     CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT < 1 ||     CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT > 65535
+#error "OpenTail pixel buffer budget must fit the uint16_t profile wire format"
+#endif
+#define OT_OM_OUTPUTS OT_CHAIN_COUNT
+#define OT_OM_MAX_PIXELS_PER_OUTPUT ((unsigned)CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT)
 #define OT_OM_MAX_TOTAL_PIXELS (OT_OM_OUTPUTS * OT_OM_MAX_PIXELS_PER_OUTPUT)
 
 /* Inert one-pixel placeholder until an installer explicitly configures output.
