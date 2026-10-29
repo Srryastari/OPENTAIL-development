@@ -116,5 +116,8 @@ check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
           "Repeat", "Edit time", "project.sequenceOptions()", "project.save()"))
       and 'new Effect(32787, "Singularity Shutdown")' in effect)
+check("Universal live-edit contract and bounded transient CORE FX preview",
+      subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],
+                     cwd=root.parent, capture_output=True).returncode == 0)
 print("Compose status: compilation candidate; still NOT launcher. No UI parity or device test claimed.")
 print(f"\\n{passed}/{passed} static checks passed. Android build and device/BLE tests are separate.")
