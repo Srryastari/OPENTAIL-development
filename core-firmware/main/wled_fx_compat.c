@@ -7,7 +7,9 @@
  * mode_spots(), mode_spots_fade(), mode_percent(),
  * mode_chase_flash(), mode_running_color(), mode_rainbow(),
  * mode_rainbow_cycle(), mode_theater_chase_rainbow(),
- * mode_blink_rainbow(), and mode_strobe_rainbow().
+ * mode_blink_rainbow(), mode_strobe_rainbow(), mode_multi_strobe(),
+ * chase(), mode_two_dots(), tricolor_chase(), mode_tricolor_wipe(),
+ * and mode_tricolor_fade().
  *
  * WLED: copyright (c) 2016 Harm Aldick and individual WLED contributors.
  * Licensed under EUPL v. 1.2 or later; see third_party/wled/LICENSE.
@@ -52,7 +54,23 @@ static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_STROBE_RAINBOW, "Strobe Rainbow", "Strobe Rainbow@!;,!;!;01",
      false, true, true, false, false},
     {OT_WLED_BLINK_RAINBOW, "Blink Rainbow", "Blink Rainbow@Frequency,Blink duration;!,!;!;01",
-     false, true, true, true, false}
+     false, true, true, true, false},
+    {OT_WLED_MULTI_STROBE, "Strobe Mega", "Strobe Mega@!,!;!,!;!;01",
+     true, true, true, true, false},
+    {OT_WLED_CHASE_COLOR, "Chase", "Chase@!,Width;!,!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_CHASE_RAINBOW, "Chase Rainbow", "Chase Rainbow@!,Width;!,!;!",
+     true, true, true, true, false},
+    {OT_WLED_CHASE_RAINBOW_WHITE, "Rainbow Runner", "Rainbow Runner@!,Size;Bg;!",
+     true, true, true, true, false},
+    {OT_WLED_TWO_DOTS, "Two Dots", "Two Dots@!,Dot size,,,,,Overlay;1,2,Bg;!",
+     true, true, true, true, false},
+    {OT_WLED_TRICOLOR_CHASE, "Chase 3", "Chase 3@!,Size;1,2,3;!",
+     true, true, true, true, false},
+    {OT_WLED_TRICOLOR_WIPE, "Tri Wipe", "Tri Wipe@!;1,2,3;!",
+     true, true, true, false, false},
+    {OT_WLED_TRICOLOR_FADE, "Tri Fade", "Tri Fade@!;1,2,3;!",
+     true, true, true, false, false}
 };
 
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out) {
@@ -368,6 +386,139 @@ static void chase_flash_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t 
     if (advance) state->step=now+delay;
 }
 
+/*
+ * Pinned FX.cpp mode_multi_strobe() timing. The old SEGENV.aux1 phase
+ * is drawn before advancing, including the intentional unsmoothed edges.
+ */
+static void multi_strobe_frame(const ot_wled_fx_config_t *cfg,
+                               ot_wled_fx_state_t *state,uint32_t now,
+                               ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t n=2u*((uint32_t)(cfg->intensity/10u)+1u);
+    state->aux0=(uint16_t)(50u+20u*(255u-(uint32_t)cfg->speed));
+    ot_wled_rgb_t color=cfg->background;
+    if(state->aux1<n) {
+        if((state->aux1&1u)==0u) {
+            color=cfg->foreground;
+            state->aux0=15u;
+        } else state->aux0=50u;
+    }
+    const ot_wled_rgb_t shown=scaled(color,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=shown;
+    if(now-(uint32_t)state->aux0>state->step) {
+        state->aux1++;
+        if(state->aux1>n)state->aux1=0;
+        state->step=now;
+    }
+}
+
+/*
+ * Pinned FX.cpp chase() used by mode_chase_color(), mode_chase_rainbow(),
+ * mode_chase_rainbow_white(). The original computes the rainbow hues from
+ * OLD SEGENV.step and call before writing the new chase position.
+ * The CORE 2-color profile uses WLED's default third color RGB black.
+ */
+static void chase_frame(const ot_wled_fx_config_t *cfg,
+                        ot_wled_fx_state_t *state,uint32_t now,
+                        uint32_t call,ot_wled_rgb_t *pixels,size_t count) {
+    ot_wled_rgb_t base=cfg->background;
+    ot_wled_rgb_t c2=cfg->foreground,c3=cfg->foreground;
+    if(cfg->effect_id==OT_WLED_CHASE_RAINBOW) {
+        uint32_t sep=256u/(uint32_t)count;
+        if(sep==0u)sep=1u;
+        base=wheel_rgb((uint8_t)((state->step*sep+call)&255u));
+        c3=cfg->background;
+    } else if(cfg->effect_id==OT_WLED_CHASE_RAINBOW_WHITE) {
+        const uint32_t n=state->step,m=(n+1u)%(uint32_t)count;
+        base=cfg->foreground;
+        c2=wheel_rgb((uint8_t)(((n*256u/(uint32_t)count)+call)&255u));
+        c3=wheel_rgb((uint8_t)(((m*256u/(uint32_t)count)+call)&255u));
+    }
+    const uint16_t counter=(uint16_t)(now*((uint32_t)(cfg->speed>>2)+1u));
+    const size_t a=((uint32_t)counter*(uint32_t)count)>>16;
+    const size_t width=1u+(((uint32_t)cfg->intensity*(uint32_t)count)>>10);
+    state->step=(uint32_t)a;
+    const ot_wled_rgb_t bg=scaled(base,cfg->brightness);
+    const ot_wled_rgb_t fg=scaled(c2,cfg->brightness);
+    const ot_wled_rgb_t tail=scaled(c3,cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    for(size_t j=0;j<width;j++)pixels[(a+j)%count]=fg;
+    for(size_t j=0;j<width;j++)pixels[(a+width+j)%count]=tail;
+}
+
+/* Source: pinned FX.cpp mode_two_dots(), default Overlay=false, RGB 3rd=black. */
+static void two_dots_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                           ot_wled_rgb_t *pixels,size_t count) {
+    if(count==1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
+    const uint32_t delay=1u+(((uint32_t)cfg->frame_time_ms<<3)/(uint32_t)count);
+    const uint32_t period=(delay<<4)-
+        ((uint32_t)cfg->speed*((delay<<4)-delay))/255u;
+    const size_t offset=(now/period)%count;
+    size_t width=(((uint32_t)count*((uint32_t)cfg->intensity+1u))>>9);
+    if(!width)width=1;
+    const bool black_bg=cfg->background.r==0 && cfg->background.g==0 &&
+                        cfg->background.b==0;
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t other=scaled(black_bg?cfg->foreground:cfg->background,
+                                   cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=(ot_wled_rgb_t){0,0,0};
+    for(size_t j=0;j<width;j++) {
+        pixels[(offset+j)%count]=fg;
+        pixels[(offset+j+count/2u)%count]=other;
+    }
+}
+
+/* Source: pinned FX.cpp tricolor_chase(); third color defaults to black. */
+static void tricolor_chase_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                                 ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=50u+((255u-(uint32_t)cfg->speed)<<1);
+    const size_t width=1u+((size_t)cfg->intensity>>4);
+    size_t idx=(now/cycle)%(width*3u);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++) {
+        ot_wled_rgb_t c={0,0,0};
+        if(idx>width*2u-1u)c=bg;
+        else if(idx>width-1u)c=fg;
+        pixels[count-1u-i]=c;
+        if(++idx>=width*3u)idx=0;
+    }
+}
+
+/* Source: pinned FX.cpp mode_tricolor_wipe(), third RGB color defaults black. */
+static void tricolor_wipe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                                ot_wled_rgb_t *pixels,size_t count) {
+    const uint32_t cycle=1000u+(255u-(uint32_t)cfg->speed)*200u;
+    const uint32_t prog=(uint32_t)(((uint64_t)(now%cycle)*65535u)/cycle);
+    const size_t index=(size_t)(((uint64_t)prog*(uint32_t)count*3u)>>16);
+    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
+    for(size_t i=0;i<count;i++) pixels[i]=(ot_wled_rgb_t){0,0,0};
+    if(index<count) {
+        for(size_t i=0;i<count;i++)pixels[i]=i>index?fg:bg;
+    } else if(index<count*2u) {
+        const size_t offset=index-count;
+        for(size_t i=offset+1u;i<count;i++)pixels[i]=bg;
+    } else {
+        const size_t offset=index-count*2u;
+        for(size_t i=0;i<count&&i<=offset;i++)pixels[i]=fg;
+    }
+}
+
+/* Source: pinned FX.cpp mode_tricolor_fade(), default third RGB black. */
+static void tricolor_fade_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
+                                ot_wled_rgb_t *pixels,size_t count) {
+    const uint16_t t=(uint16_t)(now*((uint32_t)(cfg->speed>>3)+1u));
+    const uint32_t progress=((uint32_t)t*768u)>>16;
+    const uint8_t fraction=(uint8_t)progress;
+    const ot_wled_rgb_t black={0,0,0};
+    ot_wled_rgb_t a,b;
+    if(progress<256u){a=cfg->foreground;b=cfg->background;}
+    else if(progress<512u){a=cfg->background;b=black;}
+    else {a=black;b=cfg->foreground;}
+    const ot_wled_rgb_t c=scaled(blend_colors(a,b,fraction),cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=c;
+}
+
 bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state,
                        uint32_t time_ms, ot_wled_rgb_t *pixels, size_t count) {
     if (!cfg || !state || !pixels || count==0 || cfg->frame_time_ms==0 || cfg->palette_id!=0)
@@ -379,6 +530,32 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
     /* Per-zone WLED SEGENV.call advances once per rendered frame; capture
      * the old count because rainbow blink/strobe read it BEFORE advancing. */
     const uint32_t call=state->call++;
+    if (cfg->effect_id==OT_WLED_MULTI_STROBE) {
+        multi_strobe_frame(cfg,state,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_CHASE_COLOR ||
+        cfg->effect_id==OT_WLED_CHASE_RAINBOW ||
+        cfg->effect_id==OT_WLED_CHASE_RAINBOW_WHITE) {
+        chase_frame(cfg,state,time_ms,call,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_TWO_DOTS) {
+        two_dots_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_TRICOLOR_CHASE) {
+        tricolor_chase_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_TRICOLOR_WIPE) {
+        tricolor_wipe_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
+    if (cfg->effect_id==OT_WLED_TRICOLOR_FADE) {
+        tricolor_fade_frame(cfg,time_ms,pixels,count);
+        return true;
+    }
     if (cfg->effect_id==OT_WLED_COLORLOOP || cfg->effect_id==OT_WLED_RAINBOW) {
         /* Pinned FX.cpp mode_rainbow() and mode_rainbow_cycle(): 16-bit
          * wrap, speed timing and intensity-selected rainbow spacing. */
