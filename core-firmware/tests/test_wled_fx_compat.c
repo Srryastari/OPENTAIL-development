@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=97u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=98u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -909,6 +909,39 @@ int main(void) {
     assert(s.scratch==NULL && balls_other.scratch==NULL);
     assert(ot_wled_fx_render(&c,&s,0,balls_guard+1,1));
     assert(eq(balls_guard[1],c.foreground));
+    assert(s.scratch==NULL);
+
+    /* Halloween Eyes 82: 1D source state with WLED short-segment static
+     * fallback, zero-bound random draws and on/blink/off times. Tests use
+     * several arbitrary LED counts (no GS400-dependent zone constants). */
+    c.effect_id=OT_WLED_HALLOWEEN_EYES;c.speed=32u;c.intensity=0u;
+    c.brightness=32u;c.foreground=(ot_wled_rgb_t){200u,40u,10u};
+    c.background=(ot_wled_rgb_t){4u,20u,50u};
+    ot_wled_rgb_t eyes[260];
+    for(size_t length=1u;length<=5u;length++){
+        ot_wled_fx_reset(&s);
+        for(size_t pxi=0;pxi<260u;pxi++)eyes[pxi]=(ot_wled_rgb_t){111u,99u,77u};
+        assert(ot_wled_fx_render(&c,&s,0u,eyes+1u,length));
+        assert(eq(eyes[0],(ot_wled_rgb_t){111u,99u,77u}));
+        assert(eq(eyes[length+1u],(ot_wled_rgb_t){111u,99u,77u}));
+        if(length<5u) {
+            assert(eq(eyes[1],(ot_wled_rgb_t){25u,5u,1u}));
+            assert(s.scratch==NULL);
+        } else {
+            assert(s.scratch!=NULL && s.scratch_bytes>=16u);
+        }
+    }
+    c.speed=200u;c.intensity=255u;
+    for(size_t length=7u;length<=257u;length=length==7u?31u:
+                                      length==31u?257u:258u) {
+        ot_wled_fx_reset(&s);
+        for(uint32_t ms=0u;ms<60000u;ms+=911u) {
+            assert(ot_wled_fx_render(&c,&s,ms,eyes+1u,length));
+            for(size_t px=1u;px<=length;px++)
+                assert(eyes[px].r<=32u && eyes[px].g<=32u && eyes[px].b<=32u);
+        }
+    }
+    ot_wled_fx_reset(&s);
     assert(s.scratch==NULL);
 
     /* Every source adapter must actually dispatch and honor zero brightness;
