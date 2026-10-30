@@ -33,6 +33,12 @@ final class NativeTriggerMappingCodec {
         boolean matches(int[] expected) {
             return Arrays.equals(functions, expected);
         }
+        /** ATT success is not a save acknowledgment: CORE must report a
+         * newer revision, the exact logical map, and active persistence. */
+        boolean confirmsApplied(int baseRevision, int[] expected) {
+            return status == 0 && persisted &&
+                revision == ((baseRevision + 1) & 0xffff) && matches(expected);
+        }
     }
 
     static Snapshot decode(byte[] wire) {
