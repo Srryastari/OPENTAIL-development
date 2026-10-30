@@ -35,6 +35,7 @@
 #include "fx_preset_record.h"
 #include "fx_zone_bank.h"
 #include "palette_1d.h"
+#include "palette_profile.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
@@ -91,6 +92,9 @@ static bool ble_fx_enabled=false;
 /* Default remains instant until adjustable transition settings are exposed. */
 #define OT_FX_ENTRY_FADE_MS 0u
 static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect assignments */
+/* Separate ~6.4 KB palette cache, never packed into output/trigger profiles.
+ * All updates and render-task frame-snapshot copies hold state_lock briefly. */
+static ot_pal_bank_t pal_bank={0};
 static ot_ble_fx_packet_t ble_fx_request={0};
 
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
@@ -210,6 +214,103 @@ static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
+}
+
+/* Dedicated palette NVS keys; no migrations or writes to legacy profiles. */
+static bool pal_key(uint8_t index,char out[8]){
+    if(!out||index>=OT_PAL_CUSTOM_SLOTS)return false;
+    snprintf(out,8,"pal%03u",(unsigned)index);return true;
+}
+static bool pal_read_nvs(uint8_t index,ot_pal_profile_t *record){
+    char key[8];if(!record||!pal_key(index,key))return false;
+    nvs_handle_t h;
+    if(nvs_open("ot_palettes",NVS_READONLY,&h)!=ESP_OK)return false;
+    uint8_t bytes[OT_PAL_RECORD_BYTES];size_t n=sizeof(bytes);
+    const esp_err_t e=nvs_get_blob(h,key,bytes,&n);
+    nvs_close(h);
+    return e==ESP_OK&&ot_pal_decode(bytes,n,record)&&record->index==index;
+}
+static void pal_load(void){
+    memset(&pal_bank,0,sizeof(pal_bank));
+    nvs_handle_t h;
+    if(nvs_open("ot_palettes",NVS_READONLY,&h)!=ESP_OK)return;
+    unsigned count=0;
+    for(unsigned i=0;i<OT_PAL_CUSTOM_SLOTS;i++){
+        char key[8];pal_key((uint8_t)i,key);
+        uint8_t bytes[OT_PAL_RECORD_BYTES];size_t n=sizeof(bytes);
+        const esp_err_t e=nvs_get_blob(h,key,bytes,&n);
+        if(e==ESP_ERR_NVS_NOT_FOUND)continue;
+        ot_pal_profile_t record;
+        if(e!=ESP_OK||!ot_pal_decode(bytes,n,&record)||
+           record.index!=i||!ot_pal_bank_put(&pal_bank,&record)){
+            ESP_LOGW(TAG,"Ignoring corrupt custom palette slot %u",i);
+        }else count++;
+    }
+    nvs_close(h);
+    ESP_LOGI(TAG,"Validated %u custom palettes from separate NVS namespace",count);
+}
+static bool pal_in_use_locked(uint8_t palette_id,uint32_t now_ms){
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+        for(unsigned z=0;z<OT_OM_ZONES;z++){
+            const ot_fx_zone_slot_t *slot=&fx_bank.zones[o][z];
+            if(ble_fx_enabled&&slot->request.palette_id==palette_id&&
+               ot_fx_slot_active(slot,now_ms))return true;
+        }
+    return false;
+}
+/* Called only by authenticated GATT palette transport. 0 OK; 1 format;
+ * 3 revision conflict; 6 palette in use; 7 NVS failure. */
+int ot_ble_palette_commit(const ot_pal_profile_t *incoming,uint16_t expect){
+    if(!incoming)return 1;
+    ot_pal_profile_t next=*incoming;
+    if(next.index>=OT_PAL_CUSTOM_SLOTS||!ot_pal_validate(&next))return 1;
+    uint16_t revision=0;
+    const uint8_t id=(uint8_t)(200u-next.index);
+    portENTER_CRITICAL(&state_lock);
+    (void)ot_pal_bank_get(&pal_bank,id,NULL,&revision);
+    const bool busy=pal_in_use_locked(id,(uint32_t)(esp_timer_get_time()/1000LL));
+    portEXIT_CRITICAL(&state_lock);
+    if(busy)return 6;
+    if(revision!=expect||revision==UINT16_MAX)return 3;
+    next.revision=(uint16_t)(revision+1u);
+    uint8_t bytes[OT_PAL_RECORD_BYTES];
+    if(!ot_pal_encode(&next,bytes))return 1;
+    char key[8];pal_key(next.index,key);
+    nvs_handle_t h;
+    if(nvs_open("ot_palettes",NVS_READWRITE,&h)!=ESP_OK)return 7;
+    esp_err_t e=nvs_set_blob(h,key,bytes,sizeof(bytes));
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    if(e!=ESP_OK)return 7; /* RAM cache not touched on NVS failure. */
+    portENTER_CRITICAL(&state_lock);
+    (void)ot_pal_bank_put(&pal_bank,&next);
+    portEXIT_CRITICAL(&state_lock);
+    return 0;
+}
+int ot_ble_palette_delete(uint8_t index,uint16_t expected){
+    char key[8];if(!pal_key(index,key))return 1;
+    const uint8_t id=(uint8_t)(200u-index);
+    uint16_t revision=0;
+    portENTER_CRITICAL(&state_lock);
+    const bool exists=ot_pal_bank_get(&pal_bank,id,NULL,&revision);
+    const bool busy=pal_in_use_locked(id,(uint32_t)(esp_timer_get_time()/1000LL));
+    portEXIT_CRITICAL(&state_lock);
+    if(!exists)return 4;
+    if(busy)return 6;
+    if(expected!=revision)return 3;
+    nvs_handle_t h;
+    if(nvs_open("ot_palettes",NVS_READWRITE,&h)!=ESP_OK)return 7;
+    esp_err_t e=nvs_erase_key(h,key);
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    if(e!=ESP_OK)return 7;
+    portENTER_CRITICAL(&state_lock);
+    (void)ot_pal_bank_remove(&pal_bank,index);
+    portEXIT_CRITICAL(&state_lock);
+    return 0;
+}
+bool ot_ble_palette_get(uint8_t index,ot_pal_profile_t *record){
+    return pal_read_nvs(index,record);
 }
 
 #define OT_SHOW_MAX_MS 60000u
@@ -634,7 +735,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ot_wled_fx_metadata_t meta;
     if((overlay&&!ot_fx_overlay_valid(overlay))||!req||
        !ot_effects_1d_metadata(req->effect_id,&meta)||
-       !ot_palette_1d_supported(req->effect_id,req->palette_id)||
+       !(ot_palette_1d_supported(req->effect_id,req->palette_id)||
+         ot_palette_1d_external_supported(req->effect_id,req->palette_id))||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
@@ -644,6 +746,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     bool ready;
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
+    if(ready&&ot_palette_1d_external_supported(req->effect_id,req->palette_id))
+        ready=ot_pal_bank_get(&pal_bank,req->palette_id,NULL,NULL);
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
@@ -990,6 +1094,10 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
+         if(ot_palette_1d_external_supported(p->effect_id,p->palette_id)&&
+            !ot_pal_bank_get(&pal_bank,p->palette_id,NULL,NULL)){
+             ready=false;break; /* Missing custom palette: scene stays unchanged. */
+         }
          if(!ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
              ready=false;break; /* layout changed: preserve original live scene */
          }
@@ -1359,6 +1467,10 @@ static void led_task(void *p) {
     static unsigned prior_fx_offset[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static unsigned prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    /* Immutable color snapshots for one complete frame. Loaded under the
+     * same lock as zone assignments, never during effect rendering. */
+    static ot_wled_palette16_t custom_frame[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static bool custom_frame_valid[OT_CHAIN_COUNT][OT_OM_ZONES];
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
     /* WLED has exactly ONE random palette shared across active segments.
@@ -1413,7 +1525,17 @@ static void led_task(void *p) {
        if(show_window(now)){
            local_show=native_show;show_started=native_show_started_ms;
            local_fx_enabled=ble_fx_enabled;
-           if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
+           if(local_fx_enabled){
+               memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
+               for(unsigned o=0;o<OT_CHAIN_COUNT;o++)
+                   for(unsigned z=0;z<OT_OM_ZONES;z++){
+                       const ot_ble_fx_packet_t *request=&local_fx_bank.zones[o][z].request;
+                       custom_frame_valid[o][z]=
+                         ot_palette_1d_external_supported(request->effect_id,request->palette_id)&&
+                         ot_pal_bank_get(&pal_bank,request->palette_id,
+                                          &custom_frame[o][z],NULL);
+                   }
+           }
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
@@ -1499,7 +1621,9 @@ static void led_task(void *p) {
                                /* This frame-stable snapshot is shared by
                                 * every zone, regardless of output length. */
                                .resolved_palette=fx->palette_id==1u?
-                                       &global_palette.current:NULL
+                                      &global_palette.current:
+                                      custom_frame_valid[ch][z]?
+                                      &custom_frame[ch][z]:NULL
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
@@ -1679,6 +1803,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
     om_load();
     tm_load();
+    pal_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     input_init();

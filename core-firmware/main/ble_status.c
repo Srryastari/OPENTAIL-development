@@ -18,6 +18,8 @@
 #include "effects_1d.h"
 #include "fx_preset_record.h"
 #include "ble_config.h"
+#include "palette_profile.h"
+#include "esp_timer.h"
 #include "ot_frame_snapshot.h"
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +32,9 @@ extern bool ot_ble_play_fx_preset(uint8_t slot);
 extern bool ot_ble_delete_fx_preset(uint8_t slot);
 extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision);
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
+extern bool ot_ble_palette_get(uint8_t index,ot_pal_profile_t *record);
+extern int ot_ble_palette_commit(const ot_pal_profile_t *record,uint16_t expected_revision);
+extern int ot_ble_palette_delete(uint8_t index,uint16_t expected_revision);
 static uint8_t token[OT_BLE_TOKEN_BYTES];
 static bool token_ready=false;
 void ot_ble_session_hex(char out[33]){
@@ -118,6 +123,8 @@ static const ble_uuid128_t ot_challenge_uuid=BLE_UUID128_INIT(0x28,0xaf,0x2e,0x1
 static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_frame_cmd_uuid=BLE_UUID128_INIT(0x2a,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_frame_rsp_uuid=BLE_UUID128_INIT(0x2b,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_pal_cmd_uuid=BLE_UUID128_INIT(0x2c,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_pal_rsp_uuid=BLE_UUID128_INIT(0x2d,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -185,7 +192,7 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
     } else if(n==2 && buf[0]==OT_BLE_WIRE_V1 && buf[1]==OT_BLE_RELEASE_TEMPORARY){
         if(!authorized)last_result=OT_BLE_ERR_AUTH;
         else {ot_ble_disconnect_show();last_result=OT_BLE_OK_RELEASED;}
-    } else if(n>=2 && buf[0]==1 && buf[1]==OT_BLE_FX_OPCODE) {
+    } else if(n>=2 && (buf[0]==1u||buf[0]==2u) && buf[1]==OT_BLE_FX_OPCODE) {
         ot_ble_fx_packet_t fx={0};
         ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
         if(result==OT_BLE_FX_OK)
@@ -299,6 +306,120 @@ static int cfg_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *
     }
     return 0;
 }
+/* Custom palette protocol v1, independent from legacy output-config frames.
+ * Writes <=20 bytes, including on default ATT MTU 23:
+ * [1,op,index,...] 1 snapshot, 2 read (offset), 3 begin (expected rev LE,
+ * count, CRC16 LE), 4 append (offset, 1-16 bytes), 5 commit, 6 cancel,
+ * 7 delete (expected revision LE). Response [1,op|0x80,index,status,...].
+ * Status: 0 success, 1 format, 2 CRC/partial, 3 revision conflict,
+ * 4 missing, 5 auth, 6 busy, 7 NVS. Upload expires after 15s idle. */
+static ot_pal_transfer_t pal_upload;
+static ot_pal_profile_t pal_snapshot;
+static bool pal_snapshot_valid=false;
+static uint8_t pal_reply[20]={1u,0xffu,0u,5u};
+static uint8_t pal_reply_len=4u;
+static void pal_ack(uint8_t op,uint8_t index,uint8_t status){
+    memset(pal_reply,0,sizeof(pal_reply));pal_reply[0]=1u;
+    pal_reply[1]=(uint8_t)(op|0x80u);pal_reply[2]=index;
+    pal_reply[3]=status;pal_reply_len=4u;
+}
+static void pal_reset(void){
+    ot_pal_transfer_reset(&pal_upload);pal_snapshot_valid=false;
+    memset(&pal_snapshot,0,sizeof(pal_snapshot));pal_ack(0x7fu,0u,5u);
+}
+static int pal_read(uint16_t conn,uint16_t handle,
+                    struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR||
+       conn!=active_conn||!authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    return os_mbuf_append(ctx->om,pal_reply,pal_reply_len)==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static int pal_write(uint16_t conn,uint16_t handle,
+                     struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||
+       conn!=active_conn)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t p[20];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0||
+       n<3u||p[0]!=1u){
+        ot_pal_transfer_reset(&pal_upload);
+        pal_ack(0x7fu,0u,1u);return 0;
+    }
+    const uint8_t op=p[1],index=p[2];
+    pal_ack(op,index,0u);
+    if(!authorized){ot_pal_transfer_reset(&pal_upload);
+        pal_snapshot_valid=false;pal_ack(op,index,5u);return 0;}
+    if(index>=OT_PAL_CUSTOM_SLOTS){pal_ack(op,index,1u);return 0;}
+    const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    switch(op){
+    case 1: {
+        if(n!=3u){pal_ack(op,index,1u);break;}
+        pal_snapshot_valid=false;
+        if(!ot_ble_palette_get(index,&pal_snapshot)){
+            pal_ack(op,index,4u);break;
+        }
+        pal_snapshot_valid=true;
+        pal_reply[4]=(uint8_t)pal_snapshot.revision;
+        pal_reply[5]=(uint8_t)(pal_snapshot.revision>>8);
+        pal_reply[6]=pal_snapshot.stop_count;
+        const uint16_t crc=ot_pal_crc16(pal_snapshot.stops,
+                                         4u*pal_snapshot.stop_count);
+        pal_reply[7]=(uint8_t)crc;pal_reply[8]=(uint8_t)(crc>>8);
+        pal_reply_len=9u;break;
+    }
+    case 2: {
+        if(n!=4u||!pal_snapshot_valid||pal_snapshot.index!=index){
+            pal_ack(op,index,1u);break;
+        }
+        const unsigned off=p[3],size=4u*pal_snapshot.stop_count;
+        if(off>=size){pal_ack(op,index,1u);break;}
+        unsigned take=size-off;if(take>14u)take=14u;
+        pal_reply[4]=(uint8_t)off;pal_reply[5]=(uint8_t)take;
+        memcpy(pal_reply+6u,pal_snapshot.stops+off,take);
+        pal_reply_len=(uint8_t)(6u+take);break;
+    }
+    case 3:
+        if(n!=8u){ot_pal_transfer_reset(&pal_upload);
+            pal_ack(op,index,1u);break;}
+        if(!ot_pal_transfer_begin(&pal_upload,index,
+           (uint16_t)p[3]|((uint16_t)p[4]<<8),p[5],
+           (uint16_t)p[6]|((uint16_t)p[7]<<8),ms))
+            pal_ack(op,index,1u);
+        break;
+    case 4:
+        if(n<5u){ot_pal_transfer_reset(&pal_upload);
+            pal_ack(op,index,1u);break;}
+        if(!ot_pal_transfer_append(&pal_upload,index,p[3],
+                                      p+4u,(size_t)n-4u,ms))
+            pal_ack(op,index,1u);
+        break;
+    case 5: {
+        ot_pal_profile_t next={0};
+        if(n!=3u||!ot_pal_transfer_complete(&pal_upload,ms,&next)||
+           pal_upload.profile.index!=index){
+            ot_pal_transfer_reset(&pal_upload);
+            pal_ack(op,index,2u);break;
+        }
+        const int status=ot_ble_palette_commit(&next,pal_upload.expected_revision);
+        ot_pal_transfer_reset(&pal_upload);
+        if(status==0)pal_snapshot_valid=false;
+        pal_ack(op,index,(uint8_t)status);break;
+    }
+    case 6:
+        if(n!=3u){pal_ack(op,index,1u);break;}
+        ot_pal_transfer_reset(&pal_upload);break;
+    case 7: {
+        if(n!=5u){pal_ack(op,index,1u);break;}
+        const int status=ot_ble_palette_delete(index,
+                           (uint16_t)p[3]|((uint16_t)p[4]<<8));
+        if(status==0)pal_snapshot_valid=false;
+        pal_ack(op,index,(uint8_t)status);break;
+    }
+    default:pal_ack(op,index,1u);break;
+    }
+    return 0;
+}
 /* BLE post-render snapshot v1: authenticated, immutable, demand-driven.
  * WRITE: [1,1,output] captures next completed RMT frame for that output.
  *        [1,2,output,seq:uint32LE,first:uint16LE,count:uint8] selects slice.
@@ -381,6 +502,8 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_cfg_rsp_uuid.u,.access_cb=cfg_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_frame_cmd_uuid.u,.access_cb=frame_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_frame_rsp_uuid.u,.access_cb=frame_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_pal_cmd_uuid.u,.access_cb=pal_write,.flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_pal_rsp_uuid.u,.access_cb=pal_read,.flags=BLE_GATT_CHR_F_READ},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
@@ -401,11 +524,11 @@ static void advertise(void){
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
     if(ev->type==BLE_GAP_EVENT_CONNECT){
-        if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();frame_reply_reset();}
+        if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();frame_reply_reset();pal_reset();}
         else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
-        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();frame_reply_reset();advertise();
+        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();frame_reply_reset();pal_reset();advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }

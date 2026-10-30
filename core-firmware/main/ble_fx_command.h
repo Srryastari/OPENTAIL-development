@@ -1,6 +1,8 @@
 #pragma once
 /* Optional BLE FX command (bench-only). Parsed separately from legacy v1 SHOW.
  * Version 1 opcode 5, fits default ATT-MTU=23.
+ * Version 2 is the same 17-byte FX command, opting in to an already-saved
+ * user palette ID; it never bypasses authenticated validation in CORE.
  * WLED-compatible effect ID is user-visible only in the one global effect library.
  */
 #include <stdbool.h>

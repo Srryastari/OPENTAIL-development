@@ -6,5 +6,8 @@
 #include <stdint.h>
 #include "wled_fx_compat.h"
 bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette_id);
+/* Source palette-capable effects only; 73..200 are caller-validated custom
+ * profiles, 201..255 remain reserved for usermods and fail closed. */
+bool ot_palette_1d_external_supported(uint16_t effect_id,uint8_t palette_id);
 ot_wled_rgb_t ot_palette_1d_sample(uint8_t palette_id,
   ot_wled_rgb_t primary,ot_wled_rgb_t secondary,uint8_t position);
