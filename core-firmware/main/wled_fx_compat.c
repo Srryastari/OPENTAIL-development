@@ -4538,23 +4538,6 @@ static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st
  * Usermod audio FFT_MajorPeak + magnitude. Do not synthesize those inputs. */
 /* Pinned colors.cpp color_add(..., preserveCR=true), needed by
  * mode_rocktaves() when repeated peaks overlap on the same pixel. */
-static uint32_t rocktaves_add(uint32_t c1,uint32_t c2) {
-    if(c1==0u)return c2;
-    if(c2==0u)return c1;
-    const uint32_t mask=0x00ff00ffu;
-    uint32_t rb=(c1&mask)+(c2&mask);
-    uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
-    if((rb|wg)&0x01000100u) {
-        const uint32_t red=rb>>16,blue=rb&0xffffu;
-        const uint32_t white=wg>>16,green=wg&0xffffu;
-        uint32_t max=red>green?(red>blue?red:blue):(green>blue?green:blue);
-        if(white>max)max=white;
-        const uint32_t scale=(255u<<8)/max;
-        rb=((rb*scale)>>8)&mask;
-        wg=(wg*scale)&~mask;
-    } else wg<<=8;
-    return rb|wg;
-}
 static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                              ot_wled_rgb_t *pixels,size_t count) {
     if(!cfg->audio_peak ||
@@ -4593,7 +4576,7 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
     const ot_wled_rgb_t dst=scaled(
            blend_colors(cfg->background,foreground,volume),cfg->brightness);
-    pixels[pos]=fx_unpack(rocktaves_add(fx_pack(pixels[pos]),fx_pack(dst)));
+    pixels[pos]=fx_source_color_add(pixels[pos],dst);
     return true;
 }
 
