@@ -406,6 +406,20 @@ bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
     return true;
 }
 
+/* The global random/custom palette is generated and resolved by its owner.
+ * Rendering only reads the caller's frame-stable snapshot. No per-zone random
+ * generator, hidden cache, or stateful palette fallback is introduced. */
+static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
+                             ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
+                             ot_wled_rgb_t tertiary,ot_wled_palette16_t *out) {
+    if((id==1u||id>72u)&&id==cfg->palette_id) {
+        if(!cfg->resolved_palette||!out)return false;
+        *out=*cfg->resolved_palette;
+        return true;
+    }
+    return ot_wled_palette_build(id,primary,secondary,tertiary,out);
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
@@ -2388,7 +2402,7 @@ static void railway_frame(const ot_wled_fx_config_t *cfg,
     /* WLED Railway's default is palette 3 (Colors 1 & 2), sampled
      * LINEARBLEND_NOWRAP. A direct RGB blend differs at palette stops. */
     ot_wled_palette16_t pal={0};
-    if(!ot_wled_palette_build(3u,cfg->foreground,cfg->background,
+    if(!fx_palette_build(cfg,3u,cfg->foreground,cfg->background,
                              (ot_wled_rgb_t){0,0,0},&pal))return;
     const ot_wled_rgb_t first=scaled(ot_wled_palette_sample(
                  &pal,(uint8_t)(255u-pos),255u,OT_WLED_PALETTE_NOWRAP),
@@ -2418,7 +2432,7 @@ static void washing_frame(const ot_wled_fx_config_t *cfg,
     /* Source mode_washing_machine() samples default Party palette ID 0,
      * not an interpolation between the user foreground/background colors. */
     ot_wled_palette16_t source_palette;
-    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+    (void)fx_palette_build(cfg,0u,cfg->foreground,cfg->background,
                                 (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     const int speed=fx_tristate8((uint8_t)(now>>7),90u,15u);
     const int delta=(speed*2048)/(512-(int)cfg->speed);
@@ -2441,7 +2455,7 @@ static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     /* Upstream Flow uses color_from_palette(..., slot=255), which samples
      * the WLED default Party palette (ID 0), not the two zone colors. */
     ot_wled_palette16_t source_palette;
-    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+    (void)fx_palette_build(cfg,0u,cfg->foreground,cfg->background,
                                 (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     uint32_t counter=0u;
     if(cfg->speed)counter=(now*((uint32_t)(cfg->speed>>2)+1u))>>8;
@@ -2485,7 +2499,7 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
      * Use exact pinned 16-entry source palette, not a foreground/background
      * approximation; palette selection ABI remains unchanged (ID 0 only). */
     ot_wled_palette16_t fire_palette;
-    (void)ot_wled_palette_build(35u,cfg->foreground,cfg->background,
+    (void)fx_palette_build(cfg,35u,cfg->foreground,cfg->background,
                                 (ot_wled_rgb_t){0u,0u,0u},&fire_palette);
     uint32_t stage=0xffffu;
     uint32_t elapsed=(now-state->step)/100u;
@@ -2552,7 +2566,7 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
     /* Upstream color_from_palette(...,mcol=255) samples the default
      * Party palette even when the selected palette ID is zero. */
     ot_wled_palette16_t ripple_palette;
-    if(!ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+    if(!fx_palette_build(cfg,0u,cfg->foreground,cfg->background,
                               (ot_wled_rgb_t){0,0,0},&ripple_palette))
         return false;
     ot_wled_rgb_t bg=cfg->background;
@@ -2675,7 +2689,7 @@ static void fireworks_frame(const ot_wled_fx_config_t *cfg,
     ot_wled_palette16_t palette;
     /* Both Fireworks and Rain default to source palette 11 (Rainbow);
      * random spark hues must sample it, not the foreground solid color. */
-    if(!ot_wled_palette_build(11u,cfg->foreground,cfg->background,
+    if(!fx_palette_build(cfg,11u,cfg->foreground,cfg->background,
                               (ot_wled_rgb_t){0,0,0},&palette))return;
     for(size_t j=0;j<bursts;j++) {
         if(fx_rand8(state,chance)==0u) {
@@ -3043,7 +3057,7 @@ static void fire_2012_frame(const ot_wled_fx_config_t *cfg,
     uint8_t *heat=fx_zone_scratch(state,count);
     if(!heat)return;
     ot_wled_palette16_t palette;
-    if(!ot_wled_palette_build(cfg->palette_id?cfg->palette_id:35u,
+    if(!fx_palette_build(cfg,cfg->palette_id?cfg->palette_id:35u,
                    cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},
                    &palette))return;
     const uint32_t it=now>>5;
@@ -3125,7 +3139,7 @@ static void dancing_shadows_frame(const ot_wled_fx_config_t *cfg,
                                       state,n*sizeof(ot_fx_spotlight_t));
     if(!spots)return;
     ot_wled_palette16_t palette;
-    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
     for(size_t i=0;i<count;i++)pixels[i]=(ot_wled_rgb_t){0u,0u,0u};
     for(unsigned i=0;i<n;i++) {
@@ -3200,7 +3214,7 @@ static void slow_transition_frame(const ot_wled_fx_config_t *cfg,
                                 state,sizeof(ot_fx_slow_palette_t));
     if(!data)return;
     ot_wled_palette16_t target;
-    if(!ot_wled_palette_build(cfg->palette_id?cfg->palette_id:2u,
+    if(!fx_palette_build(cfg,cfg->palette_id?cfg->palette_id:2u,
                  cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},
                  &target))return;
     const bool changed=!fx_palette_same(&data->end,&target)||
@@ -3251,7 +3265,7 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
     if(now-state->step<23u)return;
     state->step=now;
     ot_wled_palette16_t pal;
-    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                   cfg->background,(ot_wled_rgb_t){0,0,0},&pal))return;
     const uint8_t rise=(uint8_t)(8u+(cfg->speed>>2));
     const uint8_t fall=(uint8_t)(8u+(cfg->speed>>3));
@@ -3322,7 +3336,7 @@ static void aurora_frame(const ot_wled_fx_config_t *cfg,
     if(!data)return;
     ot_wled_palette16_t palette;
     const uint8_t id=cfg->palette_id?cfg->palette_id:50u;
-    if(!ot_wled_palette_build(id,cfg->foreground,
+    if(!fx_palette_build(cfg,id,cfg->foreground,
                cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
     for(unsigned w=0;w<waves;w++) {
         ot_aurora_wave_t *wave=&data[w];
@@ -3468,7 +3482,7 @@ static ot_wled_rgb_t fox_twinkle(uint32_t ms,uint8_t salt,bool cat,
 static void twinklefox_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                              ot_wled_rgb_t *pixels,size_t count,bool cat) {
     ot_wled_palette16_t palette;
-    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                      cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
     const unsigned rate=cfg->speed>100u?
         3u+((255u-(unsigned)cfg->speed)>>3):
@@ -3502,7 +3516,7 @@ static void palette_mode_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                                ot_wled_rgb_t *pixels,size_t count) {
     ot_wled_palette16_t palette;
     const uint8_t id=cfg->palette_id?cfg->palette_id:12u;
-    if(!ot_wled_palette_build(id,cfg->foreground,
+    if(!fx_palette_build(cfg,id,cfg->foreground,
                    cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return;
     const float theta=(128.0f*(3.14159265358979323846f/256.0f));
@@ -3554,7 +3568,7 @@ static void blends_frame(const ot_wled_fx_config_t *cfg,
     if(!working)return;
     ot_wled_palette16_t pal;
     /* ID 0 resolves to the WLED default Party palette for mcol 255. */
-    if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                     cfg->background,(ot_wled_rgb_t){0,0,0},&pal))return;
     const uint8_t speed=(uint8_t)(10u+((unsigned)cfg->intensity*118u/255u));
     unsigned shift=(now*((unsigned)(cfg->speed>>3)+1u))>>8;
@@ -3583,7 +3597,7 @@ static void glitter_frame(const ot_wled_fx_config_t *cfg,
                           ot_wled_rgb_t *pixels,size_t count) {
     ot_wled_palette16_t palette;
     const uint8_t palette_id=cfg->palette_id?cfg->palette_id:11u;
-    if(!ot_wled_palette_build(palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,palette_id,cfg->foreground,
                               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return;
     unsigned counter=0u;
@@ -3617,7 +3631,7 @@ static void flow_stripe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
     ot_wled_palette16_t palette;
     const uint8_t palette_id=cfg->palette_id?cfg->palette_id:11u;
-    if(!ot_wled_palette_build(palette_id,cfg->foreground,
+    if(!fx_palette_build(cfg,palette_id,cfg->foreground,
                               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return;
     const int hl=(int)(count*10u/13u);
@@ -4469,7 +4483,7 @@ static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
         (uint16_t)((now*64u*280u)>>16)>>8);
     ot_wled_palette16_t palette={0};
     const bool use_palette=cfg->palette_id!=0u;
-    if(use_palette && !ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+    if(use_palette && !fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                                              cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return; /* prevalidated by renderer, defensive only */
     for(size_t i=0;i<count;i++) {
@@ -4506,7 +4520,7 @@ static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
         cfg->effect_id==OT_WLED_NOISE_3?35u:
         cfg->effect_id==OT_WLED_NOISE_4?26u:0u;
     ot_wled_palette16_t palette;
-    if(default_pal && !ot_wled_palette_build(default_pal,
+    if(default_pal && !fx_palette_build(cfg,default_pal,
           cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
         return;
     if(cfg->effect_id==OT_WLED_FILL_NOISE) {
@@ -4600,7 +4614,7 @@ static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st
     ot_wled_palette16_t pal[3]={0};
     if(cfg->palette_id) {
         for(unsigned j=0;j<3u;j++)
-            ot_wled_palette_build(cfg->palette_id,cfg->foreground,cfg->background,
+            fx_palette_build(cfg,cfg->palette_id,cfg->foreground,cfg->background,
                                   (ot_wled_rgb_t){0,0,0},&pal[j]);
     } else {
         for(unsigned j=0;j<3u;j++)
@@ -4692,7 +4706,7 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     ot_wled_rgb_t foreground=cfg->foreground;
     if(cfg->palette_id) {
         ot_wled_palette16_t palette={0};
-        if(!ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+        if(!fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                 cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return false;
         foreground=ot_wled_palette_sample(&palette,(uint8_t)fmodf(pitch,256.0f),
                 255u,OT_WLED_PALETTE_LINEAR);
@@ -4784,7 +4798,7 @@ static bool exploding_fireworks_frame(const ot_wled_fx_config_t *cfg,
         if(sparks[1].col>4u) {
             ot_wled_palette16_t palette={0};
             if(cfg->palette_id)
-                ot_wled_palette_build(cfg->palette_id,cfg->foreground,
+                fx_palette_build(cfg,cfg->palette_id,cfg->foreground,
                           cfg->background,(ot_wled_rgb_t){0,0,0},&palette);
             for(unsigned i=1u;i<sparks_count;i++) {
                 sparks[i].pos+=sparks[i].vel;
@@ -4869,7 +4883,7 @@ static bool noise_pal_frame(const ot_wled_fx_config_t *cfg,
         if(!ot_wled_palette_from_hsv4(hsv,&pal[1]))return false;
     }
     noise_pal_blend(&pal[0],&pal[1]);
-    if(cfg->palette_id && !ot_wled_palette_build(cfg->palette_id,
+    if(cfg->palette_id && !fx_palette_build(cfg,cfg->palette_id,
          cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},&pal[0]))
         return false;
     const uint16_t scale=(uint16_t)(15u+(cfg->intensity>>2u));
@@ -4905,7 +4919,8 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
             cfg->effect_id!=OT_WLED_EXPLODING_FIREWORKS &&
             cfg->effect_id!=OT_WLED_NOISE_PAL &&
             cfg->effect_id!=OT_WLED_ROCKTAVES) ||
-           (cfg->palette_id<2u || cfg->palette_id>72u))return false;
+           ((cfg->palette_id==1u || cfg->palette_id>72u) &&
+            !cfg->resolved_palette))return false;
     }
     ot_wled_fx_metadata_t meta;
     if (!ot_wled_fx_metadata(cfg->effect_id, &meta)) return false;
