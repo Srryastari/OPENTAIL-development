@@ -4757,7 +4757,8 @@ int main() {
     unsigned checked=0;
     for(const RefCase& fx:refs) {
         const std::vector<unsigned> zone_lengths=
-            (fx.id==89u || fx.id==44u || fx.id==90u) ?
+            (fx.id==89u || fx.id==44u || fx.id==90u ||
+             fx.id==104u || fx.id==110u || fx.id==113u) ?
             std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
             std::vector<unsigned>{2u,3u,7u,16u,31u};
         for(unsigned count: zone_lengths) {
