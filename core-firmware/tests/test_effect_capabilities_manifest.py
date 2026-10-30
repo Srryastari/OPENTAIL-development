@@ -23,8 +23,8 @@ assert manifest["schema"] == "opentail.effects-capabilities.v1"
 assert manifest["source"]["borrowed_fx_commit"] == "20e7a717664295eefc6ad77972cee1888d2da072"
 assert manifest["runtime_gate"]["require_installed_core_to_advertise_each_effect"] is True
 assert manifest["runtime_gate"]["offline_catalog_does_not_authorize_physical_playback"] is True
-assert manifest["palettes"]["dynamic_random_id_1"] == "unsupported"
-assert manifest["palettes"]["user_custom_palettes"] == "unsupported"
+assert manifest["palettes"]["dynamic_random_id_1"] == "global_shared_hardware_rng_core_frame"
+assert manifest["palettes"]["user_custom_palettes"] == "BLE_v3_committed_profile_runtime_gated_ids_73_to_200"
 assert manifest["palettes"]["rgb_preview_stops"] == "not_included_do_not_synthesize"
 assert manifest["overlays"]["default_style"] == 0
 assert manifest["overlays"]["compositing"] == "effect_then_overlay_then_physical_trigger"
@@ -32,8 +32,14 @@ assert manifest["overlays"]["compositing"] == "effect_then_overlay_then_physical
 ids = {k: int(v) for k, v in re.findall(r"\b(OT_WLED_[A-Z0-9_]+)\s*=\s*(\d+)", header)}
 source_registry = renderer.split("static const ot_wled_fx_metadata_t supported[] = {", 1)[1].split("bool ot_wled_fx_metadata(", 1)[0]
 registered = re.findall(r'\{\s*(OT_WLED_[A-Z0-9_]+)\s*,\s*"([^"]+)"', source_registry)
-palette_part = palette.split("if(effect_id==", 1)[1].split("return palette>=2u&&palette<=72u;", 1)[0]
-palette_modes = set(re.findall(r"\bOT_WLED_[A-Z0-9_]+\b", palette_part))
+# The authoritative renderer registry marks exactly the palette-capable
+# modes; do not maintain a second source-code allowlist in palette_1d.c.
+registry_meta = re.findall(
+    r'\\{\\s*(OT_WLED_[A-Z0-9_]+)\\s*,\\s*"([^"]+)".*?,\\s*(?:true|false),\\s*(?:true|false),\\s*(?:true|false),\\s*(?:true|false),\\s*(true|false)\\s*\\}',
+    source_registry, re.S)
+assert len(registry_meta) == 120
+palette_modes = {symbol for symbol, _name, enabled in registry_meta if enabled == "true"}
+assert "meta.supports_palette" in palette
 expected = {}
 for symbol, name in registered:
     assert symbol in ids, f"Undeclared effect {symbol}"
@@ -41,7 +47,7 @@ for symbol, name in registered:
         "id": ids[symbol],
         "name": name,
         "origin": "source_derived_1d",
-        "palette_ids": [0] + list(range(2, 73)) if symbol in palette_modes else [0],
+        "palette_ids": [0, 1] + list(range(2, 201)) if symbol in palette_modes else [0],
         "requires_measured_audio": symbol == "OT_WLED_ROCKTAVES",
     }
 assert len(expected) == 120 and len(palette_modes) == 16
@@ -72,4 +78,4 @@ assert [item["id"] for item in actual] == sorted(expected)
 for item in actual:
     assert item == expected[item["id"]], f"Stale effect metadata/palette support: {item['id']}"
 assert manifest["runtime_gate"]["requires_measured_audio_effect_ids"] == [185]
-print("Effects capability manifest: 120 source-derived + 20 originals, 16 fixed-palette-enabled modes, fail-closed runtime gating PASS")
+print("Effects manifest: 120 source ports, 16 frame-owned palette modes with runtime-checked custom IDs PASS")
