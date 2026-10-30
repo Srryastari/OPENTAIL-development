@@ -311,6 +311,17 @@ assert(stopFailureBlock &&
        (stopFailureBlock.match(/discardFollowingFxIfStopFailed\(\)/g)||[]).length >= 4,
        'Failed write and readback paths must not release deferred FX following STOP');
 
+// CORE's current ble_command.c returns ERR AUTH for expired/rejected owner
+// sessions. A later command error must revoke stale Android authorization.
+const replyPath=bleSource.split('private void acceptReply(byte[] raw,int status)')[1]
+  ?.split('@SuppressWarnings("MissingPermission")')[0];
+assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) {') &&
+       replyPath.includes('authorized=false;') &&
+       replyPath.includes('fxNotify("[]");') &&
+       replyPath.includes('nextPacket=null;') &&
+       replyPath.includes('afterStopPacket=null;'),
+       'CORE ERR AUTH must invalidate Android owner and queued effects');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
