@@ -2529,7 +2529,7 @@ static void fireworks_frame(const ot_wled_fx_config_t *cfg,
             const size_t index=fx_rand_index(state,count);
             const uint8_t hue=fx_rand8(state,256u);
             pixels[index]=scaled(ot_wled_palette_sample(&palette,hue,255u,
-                                OT_WLED_PALETTE_LINEAR),cfg->brightness);
+                                OT_WLED_PALETTE_NOWRAP),cfg->brightness);
             state->aux1=state->aux0;
             state->aux0=(uint16_t)index;
         }
