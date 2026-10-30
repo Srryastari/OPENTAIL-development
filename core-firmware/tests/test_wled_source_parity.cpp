@@ -5572,7 +5572,7 @@ int main() {
                                  {3u,88u,174u},{0u,0u,0u},&built))
           std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned bt:{0u,1u,32u,128u,255u}) {
+        for(unsigned bt=0u;bt<256u;bt++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,(uint8_t)bt,
                                                      (TBlendType)blend)&0xffffffu;
@@ -5611,7 +5611,7 @@ int main() {
       ot_wled_palette16_t built{};
       if(!ot_wled_palette_from_hsv4(hsv,&built))std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned brightness:{0u,128u,255u}) {
+        for(unsigned brightness=0u;brightness<256u;brightness++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,
                      (uint8_t)brightness,(TBlendType)blend)&0xffffffu;
@@ -5641,7 +5641,7 @@ int main() {
                                   {3u,88u,174u},{0u,0u,0u},&built))
           std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned bt:{0u,1u,32u,128u,255u}) {
+        for(unsigned bt=0u;bt<256u;bt++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,(uint8_t)bt,
                                                      (TBlendType)blend)&0xffffffu;
