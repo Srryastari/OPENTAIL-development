@@ -205,6 +205,17 @@ static void om_load(void){
         ESP_LOGW(TAG,"No valid output profile; restored neutral unconfigured mapping");
     }
 }
+static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
+    ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
+    memcpy(stored.outputs,items,sizeof(stored.outputs));
+    nvs_handle_t h;
+    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,"profile_v2",&stored,sizeof(stored));
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    return e==ESP_OK;
+}
+
 /* Dedicated palette NVS keys; no migrations or writes to legacy profiles. */
 static bool pal_key(uint8_t index,char out[8]){
     if(!out||index>=OT_PAL_CUSTOM_SLOTS)return false;
@@ -300,16 +311,6 @@ int ot_ble_palette_delete(uint8_t index,uint16_t expected){
 }
 bool ot_ble_palette_get(uint8_t index,ot_pal_profile_t *record){
     return pal_read_nvs(index,record);
-}
-static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
-    ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
-    memcpy(stored.outputs,items,sizeof(stored.outputs));
-    nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"profile_v2",&stored,sizeof(stored));
-    if(e==ESP_OK)e=nvs_commit(h);
-    nvs_close(h);
-    return e==ESP_OK;
 }
 
 #define OT_SHOW_MAX_MS 60000u
