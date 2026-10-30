@@ -2200,7 +2200,8 @@ static bool meteor_frame(const ot_wled_fx_config_t *cfg,
             const uint8_t scale=(uint8_t)(128u+fx_rand8(state,127u));
             trail[i]=(uint8_t)(((uint16_t)trail[i]*(1u+scale))>>8);
             const uint8_t luminance=trail[i];
-            pixels[i]=scaled(scaled(cfg->foreground,luminance),cfg->brightness);
+            /* Source palette=0 applies video-aware color_fade before CORE cap. */
+            pixels[i]=scaled(fx_video_fade(cfg->foreground,luminance),cfg->brightness);
         }
     }
     const ot_wled_rgb_t full=scaled(cfg->foreground,cfg->brightness);
@@ -2404,6 +2405,7 @@ static void fx_ripple_blend(ot_wled_rgb_t *pixels,size_t count,
 /* Upstream mode_ripple() and mode_ripple_rainbow() with the original
  * 1D four-tap propagation, wave birth, amplitude and lifetime. WLED
  * nonzero palette selection is still outside the current RGB-only profile. */
+static void fx_blur_1d(ot_wled_rgb_t *pixels,size_t count,uint8_t amount);
 static bool ripple_frame(const ot_wled_fx_config_t *cfg,
                          ot_wled_fx_state_t *state,uint32_t now,
                          uint32_t old_call,ot_wled_rgb_t *pixels,
@@ -2429,8 +2431,14 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
         bg=blend_colors(wheel_rgb((uint8_t)state->aux0),
                         (ot_wled_rgb_t){0,0,0},235u);
     }
-    const ot_wled_rgb_t base=scaled(bg,cfg->brightness);
-    for(size_t i=0;i<count;i++)pixels[i]=base;
+    if(rainbow) {
+        const ot_wled_rgb_t base=scaled(bg,cfg->brightness);
+        for(size_t i=0;i<count;i++)pixels[i]=base;
+    } else {
+        /* Source Ripple default custom1=48 fades the retained frame,
+         * instead of erasing it to secondary before ripple propagation. */
+        fx_fade_previous(cfg,pixels,count,250u);
+    }
     for(size_t i=0;i<max_ripples;i++) {
         uint32_t ripple_state=ripples[i].ripple_state;
         if(ripple_state) {
@@ -2462,6 +2470,7 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
             ripples[i].color=fx_rand8(state,256u);
         }
     }
+    if(!rainbow)fx_blur_1d(pixels,count,24u); /* source default custom1>>1 */
     return true;
 }
 
@@ -2480,14 +2489,15 @@ static ot_wled_rgb_t fx_add_saturate(ot_wled_rgb_t a,ot_wled_rgb_t b) {
                           (uint8_t)(g>255u?255u:g),
                           (uint8_t)(blue>255u?255u:blue)};
 }
-static void fx_blur16(ot_wled_rgb_t *pixels,size_t count) {
-    if(!count)return;
-    ot_wled_rgb_t carry=fx_scale256(pixels[0],8u);
-    pixels[0]=fx_scale256(pixels[0],239u);
+static void fx_blur_1d(ot_wled_rgb_t *pixels,size_t count,uint8_t amount) {
+    if(!count||!amount)return;
+    const uint8_t keep=(uint8_t)(255u-amount),seep=(uint8_t)(amount>>1);
+    ot_wled_rgb_t carry=fx_scale256(pixels[0],seep);
+    pixels[0]=fx_scale256(pixels[0],keep);
     for(size_t i=1;i<count;i++) {
         const ot_wled_rgb_t cur=pixels[i];
-        const ot_wled_rgb_t part=fx_scale256(cur,8u);
-        pixels[i]=fx_add_saturate(fx_scale256(cur,239u),carry);
+        const ot_wled_rgb_t part=fx_scale256(cur,seep);
+        pixels[i]=fx_add_saturate(fx_scale256(cur,keep),carry);
         pixels[i-1u]=fx_add_saturate(pixels[i-1u],part);
         carry=part;
     }
@@ -2513,7 +2523,7 @@ static void fireworks_frame(const ot_wled_fx_config_t *cfg,
                                  (ot_wled_rgb_t){0,0,0};
         const ot_wled_rgb_t old_b=valid_b?pixels[state->aux1]:
                                  (ot_wled_rgb_t){0,0,0};
-        fx_blur16(pixels,count);
+        fx_blur_1d(pixels,count,16u);
         if(valid_a)pixels[state->aux0]=old_a;
         if(valid_b)pixels[state->aux1]=old_b;
     }
