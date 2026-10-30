@@ -103,7 +103,7 @@ check("Compose Material UI follows locked OLED/white colors",
           "MaterialTheme(colorScheme = scheme)", "lightColorScheme(", "darkColorScheme(",
           "Color.White", "ConnectPill", "RoundedCornerShape(99.dp)",
           'previewCurrentEffect(item.id)',
-          "Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())")))
+          "if (editingId == id)", "ZoneDotPreview(t,n,reverse)", "HardwareOutputEditor(t)")))
 check("Compose authoring preserves zone offsets and separate BLE confirmation",
       all(k in compose for k in
           ("previewZoneOffsets(id, n)", "project.editZone(",
