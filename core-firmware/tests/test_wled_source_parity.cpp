@@ -5675,8 +5675,81 @@ static void certifyPaletteOneLifecycle() {
                 blendSamples,tickSamples);
 }
 
+/* Pinned fastled_slim.h loadDynamicGradientPalette() RGB stop layout.
+ * The oracle uses the existing verbatim fill_gradient_RGB() source body
+ * on each stop span; no test interpolation tolerance is permitted. */
+static void certifyCustomGradientLoader() {
+    unsigned checked=0u;
+    for(unsigned count=2u;count<=18u;count++) {
+        for(unsigned seed=0u;seed<48u;seed++) {
+            std::array<uint8_t,72> stops{};
+            for(unsigned i=0u;i<count;i++) {
+                const unsigned index=i*255u/(count-1u);
+                stops[4u*i]=(uint8_t)index;
+                stops[4u*i+1u]=(uint8_t)(i*37u+seed*11u);
+                stops[4u*i+2u]=(uint8_t)(i*13u+seed*19u);
+                stops[4u*i+3u]=(uint8_t)(i*61u+seed*7u);
+            }
+            ot_wled_palette16_t actual{};
+            if(!ot_wled_palette_from_gradient_stops(stops.data(),count,&actual))
+                {std::fprintf(stderr,"Custom palette valid stops rejected\\n");std::abort();}
+            CRGBPalette16 expected{};
+            int lastSlot=-1;
+            unsigned indexstart=0u;
+            CRGB start(stops[1],stops[2],stops[3]);
+            for(unsigned i=1u;i<count;i++) {
+                const unsigned indexend=stops[4u*i];
+                const CRGB end(stops[4u*i+1u],stops[4u*i+2u],stops[4u*i+3u]);
+                unsigned start8=indexstart/16u,end8=indexend/16u;
+                if(count<16u&&(int)start8<=lastSlot&&lastSlot<15) {
+                    start8=(unsigned)(lastSlot+1);
+                    if(end8<start8)end8=start8;
+                }
+                lastSlot=(int)end8;
+                fill_gradient_RGB(expected.entries,start8,start,end8,end);
+                start=end;indexstart=indexend;
+            }
+            for(unsigned i=0u;i<16u;i++) {
+                const uint32_t got=pack(actual.entries[i]);
+                const uint32_t want=expected.entries[i].color32&0xffffffu;
+                if(got!=want) {
+                    std::fprintf(stderr,
+                      "Custom gradient source mismatch count=%u seed=%u stop=%u upstream=%06X CORE=%06X\\n",
+                      count,seed,i,(unsigned)want,(unsigned)got);
+                    std::abort();
+                }
+                checked+=3u;
+            }
+            const ot_wled_palette16_t unchanged=actual;
+            stops[4u*(count-1u)]=254u;
+            if(ot_wled_palette_from_gradient_stops(stops.data(),count,&actual)||
+               std::memcmp(&unchanged,&actual,sizeof(actual)))
+                {std::fprintf(stderr,"Custom gradient accepted missing 255 terminator\\n");std::abort();}
+            stops[4u*(count-1u)]=255u;
+            if(count>=3u) {
+                stops[4u]=254u;
+                stops[8u]=3u;
+                if(ot_wled_palette_from_gradient_stops(stops.data(),count,&actual)||
+                   std::memcmp(&unchanged,&actual,sizeof(actual)))
+                    {std::fprintf(stderr,"Custom gradient accepted descending stops\\n");std::abort();}
+            }
+        }
+    }
+    std::array<uint8_t,72> invalid{};
+    ot_wled_palette16_t untouched{};
+    untouched.entries[0]={7u,9u,11u};
+    const ot_wled_palette16_t original=untouched;
+    if(ot_wled_palette_from_gradient_stops(invalid.data(),1u,&untouched)||
+       ot_wled_palette_from_gradient_stops(invalid.data(),19u,&untouched)||
+       ot_wled_palette_from_gradient_stops(nullptr,2u,&untouched)||
+       std::memcmp(&untouched,&original,sizeof(original)))
+        {std::fprintf(stderr,"Custom gradient bounds violated\\n");std::abort();}
+    std::printf("WLED custom palette 2-18 stop interpolation reference passed: %u RGB channel comparisons and invalid-input fail-closed checks.\\n",checked);
+}
+
 int main() {
     certifyPaletteOneLifecycle();
+    certifyCustomGradientLoader();
 
     /* Explicit fixed RGB palettes are source tables too. Test their entire
      * sampling space, rather than relying on effect frame coverage to catch
