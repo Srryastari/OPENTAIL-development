@@ -1936,11 +1936,14 @@ static void twinkle_frame(const ot_wled_fx_config_t *cfg,
  * during the stepped flash delays, and retained adjacent flash pixels. */
 static void chase_flash_random_frame(const ot_wled_fx_config_t *cfg,
                                       ot_wled_fx_state_t *state,uint32_t now,
+                                      uint32_t old_call,
                                       ot_wled_rgb_t *pixels,size_t count) {
     if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
     const bool advance=now>=state->step;
-    if(!advance && state->call)state->call--;
-    const unsigned flash_step=state->call%9u;
+    /* Source FX.cpp reads SEGENV.call before the per-frame increment.
+     * A held frame first decrements the count and reuses the prior phase. */
+    if(!advance)state->call--;
+    const unsigned flash_step=(old_call-(advance?0u:1u))%9u;
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     const ot_wled_rgb_t wheel=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
@@ -4849,7 +4852,7 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         return true;
     }
     if(cfg->effect_id==OT_WLED_CHASE_FLASH_RANDOM) {
-        chase_flash_random_frame(cfg,state,time_ms,pixels,count);
+        chase_flash_random_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_MULTI_COMET) {
