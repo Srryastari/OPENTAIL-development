@@ -131,6 +131,11 @@ assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target
 assert 'fps_policy' in core and 'adaptive_load_53_to_120' in core
 assert 'ot_fps_pacer_observe(&pacer,work_us,longest_pixels)' in core
 assert 'ot_fps_pacer_wait_us(&pacer,work_us)' in core
+# The render task may wake early for a real trigger, but must not cut a
+# requested long-chain frame wait short at the former fixed 30ms timeout.
+assert 'ot_fps_pacer_wait_ticks(' in core
+assert 'ulTaskNotifyTake(pdTRUE,timeout)' in core
+assert 'ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30u))' not in core
 assert 'input_sampler_task' in core and 'vTaskDelayUntil(&last_wake,period)' in core
 assert 'frame_time_ms=(uint16_t)frame_delta_ms' in core
 assert 'output_mask' in core
