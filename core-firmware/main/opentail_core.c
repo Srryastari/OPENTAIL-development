@@ -40,6 +40,8 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_random.h"
+#include "palette_runtime.h"
 #include "esp_app_desc.h"
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
@@ -50,6 +52,14 @@
  * actual pixel length, transfer backend and render processing time. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
+static uint8_t palette_random_byte(void *unused){
+    (void)unused;return (uint8_t)esp_random();
+}
+static bool palette_resolved(uint8_t id){
+    if(id<73u||id>200u)return true;
+    ot_palette_entry_t entry={0};
+    return ot_palette_runtime_get((uint8_t)(200u-id),&entry)&&entry.present;
+}
 extern bool ot_ble_start(void);
 extern bool ot_ble_radio_ever_ready(void);
 extern void ot_ble_session_hex(char out[33]);
@@ -61,8 +71,7 @@ static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGH
 static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
-/* Control-plane Stop must wake the render owner instead of waiting for the
- * next adaptive frame timer. All strip writes still belong to led_task. */
+static uint8_t tm_gpio_input_mask(void);
 static void request_render_refresh(void){
     TaskHandle_t task=NULL;
     portENTER_CRITICAL(&state_lock);
@@ -70,6 +79,9 @@ static void request_render_refresh(void){
     portEXIT_CRITICAL(&state_lock);
     if(task)xTaskNotifyGive(task);
 }
+/* Latches successful physical GPIO setup and sampler task creation before
+ * BLE/HTTP configuration endpoints start accepting durable mapping writes. */
+static bool input_sampler_ready=false;
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -101,12 +113,15 @@ static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect ass
 static ot_ble_fx_packet_t ble_fx_request={0};
 
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
+static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
+static ot_tm_pending_t tm_deferred; /* Persisted mapping awaits release. */
 static bool tm_persistent=false;
+static uint16_t tm_revision=1u;
 typedef struct {
     uint32_t magic, version;
     ot_tm_profile_t profile;
@@ -220,6 +235,8 @@ static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
 }
 
 #define OT_SHOW_MAX_MS 60000u
+/* Input simulation is limited to 15 seconds, independent of show TTL. */
+#define OT_SIM_MAX_MS 15000u
 
 
 static bool before_deadline(TickType_t now,TickType_t deadline) {
@@ -255,14 +272,6 @@ static esp_err_t respond_err(httpd_req_t *r,int status,const char *reason) {
     httpd_resp_set_status(r,status==500?"500 Internal Server Error":status==409?"409 Conflict":status==408?"408 Request Timeout":"400 Bad Request");
     char buf[120];snprintf(buf,sizeof(buf),"{\"error\":\"%s\"}",reason);
     return send_json(r,buf);
-}
-static uint8_t signal_mask_of(const char *name) {
-    if(!strcmp(name,"park")) return OT_SIG_PARK;
-    if(!strcmp(name,"brake")) return OT_SIG_BRAKE;
-    if(!strcmp(name,"left")) return OT_SIG_LEFT;
-    if(!strcmp(name,"right")) return OT_SIG_RIGHT;
-    if(!strcmp(name,"reverse")) return OT_SIG_REVERSE;
-    return 0;
 }
 static bool show_window(TickType_t now){
     if(ble_fx_enabled)return ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
@@ -326,11 +335,12 @@ oom:
     return NULL;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent;tm=tm_profile;
+    memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
+    persistent=om_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -349,6 +359,7 @@ static esp_err_t om_get(httpd_req_t *r){
     if(!obj)return respond_err(r,500,"out of memory");
     if(!cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION) ||
        !cJSON_AddBoolToObject(obj,"saved_on_device",persistent) ||
+       !cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending) ||
        !cJSON_AddBoolToObject(obj,"bench_only",true) ||
        !cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT) ||
        !cJSON_AddNumberToObject(obj,"future_outputs_target",12) ||
@@ -419,12 +430,16 @@ static esp_err_t om_post(httpd_req_t *r){
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
+    if(!input_sampler_ready)
+        return respond_err(r,409,"physical input sampler unavailable");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
+    /* A freshly asserted optocoupler pin is busy even before debounce. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
@@ -432,8 +447,11 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
+    const uint8_t pins_after=tm_gpio_input_mask();
     portENTER_CRITICAL(&state_lock);
-    memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+    (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                            pins_after,live_input_mask);
+    om_persistent=true;om_revision[index]++;
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return om_get(r);
@@ -452,10 +470,13 @@ bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
 }
 int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
     if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
+    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
+    /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
@@ -465,8 +486,11 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
+            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+            (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                                    pins_after,live_input_mask);
+            om_persistent=true;om_revision[index]++;
             portEXIT_CRITICAL(&state_lock);
         }
     }
@@ -474,46 +498,138 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     return result;
 }
 
+/* Normalized instantaneous GPIO levels (NOT debounced). Used only for
+ * diagnostic readback and the pre-save busy gate; the independent sampler
+ * still owns the debounced physical mask used for rendering. */
+static uint8_t tm_gpio_input_mask(void){
+    uint8_t mask=0;
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        const bool high=gpio_get_level(input_pin[i])!=0;
+        if(OT_INPUT_ACTIVE_LOW?!high:high)mask|=(uint8_t)(1u<<i);
+    }
+    return mask;
+}
+/* Serialize authenticated BLE and bench-HTTP trigger edits with the existing
+ * configuration mutex. Commit to NVS before exposing new logical routing.
+ * Codes: 0 OK, 1 invalid, 2 busy/active inputs, 3 stale, 4 NVS failure.
+ * Physical input sampling never takes this mutex and remains BLE-independent. */
+static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_revision){
+    if(!ot_tm_valid(next))return 1;
+    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
+    if(!om_write_mutex ||
+       xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    /* The debounced mask alone has a nominal 40ms assertion blind spot.
+     * Reject an already asserted optocoupler pin before any NVS write. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0 ||
+        (before_deadline(now,sim_deadline)&&sim_mask) ||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
+        show_window(now);
+    const bool stale=require_revision&&tm_revision!=expected;
+    portEXIT_CRITICAL(&state_lock);
+    int code=busy?2:stale?3:0;
+    if(!code){
+        if(!tm_save(next))code=4;
+        else {
+            /* NVS is durable, but an input may have asserted while it was
+             * writing. Preserve its OLD mapping until fully released. */
+            const uint8_t pins_after=tm_gpio_input_mask();
+            portENTER_CRITICAL(&state_lock);
+            (void)ot_tm_saved_apply(&tm_profile,&tm_deferred,next,
+                                    pins_after,live_input_mask);
+            tm_persistent=true;
+            tm_revision++;
+            portEXIT_CRITICAL(&state_lock);
+        }
+    }
+    xSemaphoreGive(om_write_mutex);
+    return code;
+}
+bool ot_ble_trigger_get(ot_tm_profile_t *out,uint16_t *revision,
+                        uint8_t *raw,uint8_t *effective,bool *persistent){
+    if(!out||!revision||!raw||!effective||!persistent)return false;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    *out=tm_profile;
+    *revision=tm_revision;
+    *raw=live_input_mask;
+    *effective=(uint8_t)(ot_tm_resolve(out,*raw)|
+        (before_deadline(now,sim_deadline)?sim_mask:0u));
+    *persistent=tm_persistent && !tm_deferred.pending;
+    portEXIT_CRITICAL(&state_lock);
+    return true;
+}
+int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
+    return tm_commit(next,revision,true);
+}
+
 /* Universal Trigger Manager v1: independent physical-input-to-function profile.
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved;uint8_t physical,sim;
+    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    cfg=tm_profile;saved=tm_persistent;physical=live_input_mask;
+    cfg=tm_profile;pending=tm_deferred.pending;saved=tm_persistent&&!pending;
+    physical=live_input_mask;config_revision=tm_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
-    cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION);
-    cJSON_AddBoolToObject(root,"saved_on_device",saved);
-    cJSON_AddBoolToObject(root,"bench_only",true);
-    cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
-    cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0);
-    cJSON_AddNumberToObject(root,"raw_input_mask",physical);
-    cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical));
-    cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim);
+    /* An incomplete trigger map must never be acknowledged as HTTP 200. */
+    if(!cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION) ||
+       !cJSON_AddNumberToObject(root,"config_revision",config_revision) ||
+       !cJSON_AddBoolToObject(root,"saved_on_device",saved) ||
+       !cJSON_AddBoolToObject(root,"config_apply_pending",pending) ||
+       !cJSON_AddBoolToObject(root,"bench_only",true) ||
+       !cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT) ||
+       !cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0) ||
+       /* Backward compatibility: raw_input_mask means DEBOUNCED physical
+        * inputs. Normalized instantaneous GPIO levels are separate. */
+       !cJSON_AddNumberToObject(root,"raw_input_mask",physical) ||
+       !cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask()) ||
+       !cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical)) ||
+       !cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim))
+        goto oom;
     cJSON *supported=cJSON_AddArrayToObject(root,"supported_functions");
-    for(int k=0;k<=OT_TM_AUX3;k++)cJSON_AddItemToArray(supported,cJSON_CreateString(ot_tm_name(k)));
+    if(!supported)goto oom;
+    for(int k=0;k<=OT_TM_AUX3;k++){
+        cJSON *name=cJSON_CreateString(ot_tm_name(k));
+        if(!name)goto oom;
+        if(!cJSON_AddItemToArray(supported,name)){cJSON_Delete(name);goto oom;}
+    }
     cJSON *arr=cJSON_AddArrayToObject(root,"inputs");
+    if(!arr)goto oom;
     for(int i=0;i<OT_IN_COUNT;i++){
         cJSON *v=cJSON_CreateObject();
-        cJSON_AddNumberToObject(v,"index",i+1);
-        cJSON_AddNumberToObject(v,"gpio",(int)input_pin[i]);
-        cJSON_AddStringToObject(v,"function",ot_tm_name(cfg.function[i]));
-        cJSON_AddBoolToObject(v,"active",(physical&(1u<<i))!=0);
-        cJSON_AddItemToArray(arr,v);
+        if(!v)goto oom;
+        if(!cJSON_AddNumberToObject(v,"index",i+1) ||
+           !cJSON_AddNumberToObject(v,"gpio",(int)input_pin[i]) ||
+           !cJSON_AddStringToObject(v,"function",ot_tm_name(cfg.function[i])) ||
+           !cJSON_AddBoolToObject(v,"active",(physical&(1u<<i))!=0)){
+            cJSON_Delete(v);goto oom;
+        }
+        if(!cJSON_AddItemToArray(arr,v)){cJSON_Delete(v);goto oom;}
     }
-    char *body=cJSON_PrintUnformatted(root);cJSON_Delete(root);
+    char *body=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     if(!body)return respond_err(r,500,"out of memory");
     esp_err_t ret=send_json(r,body);free(body);return ret;
+oom:
+    cJSON_Delete(root);
+    return respond_err(r,500,"out of memory");
 }
 static esp_err_t tm_post(httpd_req_t *r){
     cJSON *root=NULL;int status=recv_json(r,&root);
     if(status!=200){cJSON_Delete(root);return respond_err(r,status,"invalid JSON request");}
-    unsigned revision=0;
+    unsigned revision=0,expected_config_revision=0;
+    const cJSON *expected=cJSON_GetObjectItemCaseSensitive(root,"expected_config_revision");
+    const bool require_revision=expected!=NULL;
     const cJSON *arr=cJSON_GetObjectItemCaseSensitive(root,"inputs");
-    bool valid=om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
+    bool valid=(!require_revision || om_number(root,"expected_config_revision",
+                    &expected_config_revision,0,UINT16_MAX)) &&
+        om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
         cJSON_IsArray(arr) && cJSON_GetArraySize(arr)==OT_IN_COUNT;
     ot_tm_profile_t next={0};
     for(int i=0;valid && i<OT_IN_COUNT;i++){
@@ -526,17 +642,13 @@ static esp_err_t tm_post(httpd_req_t *r){
     }
     cJSON_Delete(root);
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
-    TickType_t now=xTaskGetTickCount();
-    portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask!=0 || (before_deadline(now,sim_deadline)&&sim_mask) ||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    portEXIT_CRITICAL(&state_lock);
-    if(busy)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
-    /* Commit first; previous profile is unchanged on error. */
-    if(!tm_save(&next))return respond_err(r,500,"failed to save trigger mapping in flash");
-    portENTER_CRITICAL(&state_lock);
-    tm_profile=next;tm_persistent=true;
-    portEXIT_CRITICAL(&state_lock);
+    /* Same transaction and busy policy as authenticated BLE. The HTTP
+     * 'revision' field is a schema version, not the BLE edit revision. */
+    const int result=tm_commit(&next,(uint16_t)expected_config_revision,require_revision);
+    if(result==2)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
+    if(result==3)return respond_err(r,409,"stale trigger mapping revision; read back current profile before saving");
+    if(result==4)return respond_err(r,500,"failed to save trigger mapping in flash");
+    if(result!=0)return respond_err(r,400,"invalid trigger mapping");
     return tm_get(r);
 }
 static esp_err_t show_get(httpd_req_t *r){
@@ -675,13 +787,16 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
-                                      const ot_fx_spark_style_t *spark){
+                                      const ot_fx_spark_style_t *spark,
+                                      const ot_fx_overlay_config_t *overlay){
     ot_wled_fx_metadata_t meta;
-    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
+    if((overlay&&!ot_fx_overlay_valid(overlay))||
+       !req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
-       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
+       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60||
+       !palette_resolved(req->palette_id))
         return false;
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
@@ -705,6 +820,16 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
             }
         }
     }
+    if(ready&&overlay){
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+            if(!(req->chain_mask&(1u<<o)))continue;
+            for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
+                   om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                fx_bank.zones[o][z].overlay=*overlay;
+            }
+        }
+    }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
         native_show=(ot_show_t){
@@ -723,7 +848,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL); /* live 60-sec bench preview */
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -817,8 +942,50 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         .intensity=(uint8_t)intensity,.palette_id=(uint8_t)palette,
         .ttl_sec=(uint8_t)ttl
     };
+    /* Optional RAM-only compositor. Never changes effect ID, trigger priority,
+     * saved palette profiles, or BLE FX packet layouts. */
+    struct {const char *key;unsigned max;unsigned value;} options[]={
+       {"overlay_style",3u,0u},{"overlay_peak",32u,32u},
+       {"overlay_density",255u,160u},{"overlay_radius",12u,4u},
+       {"overlay_fade_ms",1000u,120u},{"overlay_r",255u,255u},
+       {"overlay_g",255u,255u},{"overlay_b",255u,255u}
+    };
+    for(unsigned k=0;k<sizeof(options)/sizeof(options[0]);k++){
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,options[k].key);
+        if(!v)continue;
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           v->valueint<0||(unsigned)v->valueint>options[k].max){
+            cJSON_Delete(obj);return respond_err(r,400,"invalid overlay setting");
+        }
+        options[k].value=(unsigned)v->valueint;
+    }
+    const ot_fx_overlay_config_t overlay={
+       .style=(uint8_t)options[0].value,.peak=(uint8_t)options[1].value,
+       .density=(uint8_t)options[2].value,.radius=(uint8_t)options[3].value,
+       .fade_ms=(uint16_t)options[4].value,
+       .color={(uint8_t)options[5].value,(uint8_t)options[6].value,
+               (uint8_t)options[7].value}
+    };
+    const cJSON *only=cJSON_GetObjectItemCaseSensitive(obj,"overlay_only");
+    if(!ot_fx_overlay_valid(&overlay)||(only&&!cJSON_IsBool(only))){
+        cJSON_Delete(obj);return respond_err(r,400,"invalid overlay parameters");
+    }
+    const bool overlay_only=cJSON_IsTrue(only);
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,NULL))
+    if(overlay_only){
+        const TickType_t now=xTaskGetTickCount();
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        bool changed=false;
+        portENTER_CRITICAL(&state_lock);
+        if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
+            changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
+                  req.chain_mask,req.zone_mask,ms,&overlay);
+        portEXIT_CRITICAL(&state_lock);
+        if(!changed)return respond_err(r,409,"no matching active effect zones");
+        request_render_refresh();
+        return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
+    }
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -884,7 +1051,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -958,7 +1125,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -976,7 +1143,8 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
-         if(!ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
+         if(!palette_resolved(p->palette_id) ||
+            !ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
              ready=false;break; /* layout changed: preserve original live scene */
          }
          out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
@@ -1011,6 +1179,42 @@ bool ot_ble_delete_fx_preset(uint8_t slot){
  if(e==ESP_OK)e=nvs_commit(h);
  nvs_close(h);
  return e==ESP_OK;
+}
+/* Palette profile NVS writes use the SAME serialization and active-input
+ * veto as Output/Trigger Manager saves. No flash I/O runs under state_lock.
+ * Unlike geometry edits, a palette may change during an idle-input FX show. */
+bool ot_ble_palette_mutation_begin(void){
+    if(!input_sampler_ready||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
+    /* Immediate GPIO sampling covers the sampler's debounce assertion delay. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool busy=om_deferred.pending||tm_deferred.pending||raw_active||
+        live_input_mask!=0||
+        (before_deadline(now,sim_deadline)&&sim_mask!=0);
+    portEXIT_CRITICAL(&state_lock);
+    if(busy)xSemaphoreGive(om_write_mutex);
+    return !busy;
+}
+void ot_ble_palette_mutation_end(bool changed){
+    /* Publish/write is finished before the owner wakes the render task. */
+    xSemaphoreGive(om_write_mutex);
+    if(changed)request_render_refresh();
+}
+bool ot_ble_palette_in_use(uint8_t index){
+    if(index>=OT_PALETTE_SLOTS)return false;
+    const uint8_t id=(uint8_t)(200u-index);
+    const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool used=false;
+    portENTER_CRITICAL(&state_lock);
+    if(ble_fx_enabled)
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+            for(unsigned z=0;z<OT_OM_ZONES;z++)
+                if(ot_fx_slot_active(&fx_bank.zones[o][z],ms) &&
+                   fx_bank.zones[o][z].request.palette_id==id)used=true;
+    portEXIT_CRITICAL(&state_lock);
+    return used;
 }
 void ot_ble_disconnect_show(void){
  /* Disconnect expires only temporary zones; explicitly loaded NVS effects
@@ -1148,6 +1352,7 @@ static esp_err_t demo_post(httpd_req_t *r) {
     demo=(ot_demo_t){mode,{rcol,gcol,bcol},brightness};
     demo_deadline=mode==OT_DEMO_OFF?now:now+pdMS_TO_TICKS(ttl);
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     cJSON_Delete(obj);
     return send_json(r,"{\"ok\":true,\"message\":\"temporary demo scheduled; real trigger inputs have priority\"}");
 }
@@ -1160,17 +1365,18 @@ static esp_err_t simulate_post(httpd_req_t *r) {
     uint8_t mask=0;
     cJSON *v=NULL;
     cJSON_ArrayForEach(v,arr){
-       if(!cJSON_IsString(v)||!signal_mask_of(v->valuestring)){
+       if(!cJSON_IsString(v)||!ot_tm_signal_mask_of(v->valuestring)){
           cJSON_Delete(obj);return respond_err(r,400,"unrecognized signal");
        }
-       mask|=signal_mask_of(v->valuestring);
+       mask|=ot_tm_signal_mask_of(v->valuestring);
     }
-    unsigned ttl=bounded_int(obj,"ttl_ms",2000,100,OT_DEMO_MAX_MS);
+    unsigned ttl=bounded_int(obj,"ttl_ms",2000,100,OT_SIM_MAX_MS);
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     sim_mask=mask;
     sim_deadline=mask?now+pdMS_TO_TICKS(ttl):now;
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     cJSON_Delete(obj);
     return send_json(r,"{\"ok\":true,\"message\":\"temporary isolated bench input simulation scheduled\"}");
 }
@@ -1359,14 +1565,22 @@ static void input_sampler_task(void *arg){
     if(!period)period=1u;
     for(;;){
         bool levels[OT_IN_COUNT];
+        uint8_t instantaneous=0;
         for(unsigned i=0;i<OT_IN_COUNT;i++){
             const int level=gpio_get_level(input_pin[i]);
             levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+        /* This is the only deferred activation point. Do not swap mappings
+         * while either a raw pin or its settled level is asserted. */
+        if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
+                                   instantaneous,physical))target=render_task_handle;
+        if(ot_om_apply_if_released(om_outputs,&om_deferred,
+                                   instantaneous,physical))target=render_task_handle;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
@@ -1402,6 +1616,12 @@ static void led_task(void *p) {
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
+    /* One source-owned random palette for ALL outputs and zones. */
+    ot_wled_palette_random_t global_palette={0};
+    if(!ot_wled_palette_global_init(&global_palette,palette_random_byte,NULL)){
+        ot_st_set_fault("global palette RNG initialization failed");
+        vTaskDelete(NULL);return;
+    }
     bool boot_frame_verified=false;
     uint32_t previous_frame_ms=0;
     TaskHandle_t self=xTaskGetCurrentTaskHandle();
@@ -1444,6 +1664,17 @@ static void led_task(void *p) {
            if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
+       /* One immutable snapshot of every requested custom palette per frame.
+        * No locks or NVS access occur in the per-pixel/FX draw loops. */
+       uint8_t palette_ids[OT_OM_OUTPUTS*OT_OM_ZONES];
+       ot_palette_entry_t frame_palettes[OT_OM_OUTPUTS*OT_OM_ZONES];
+       for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+           const uint8_t id=local_fx_bank.zones[o][z].request.palette_id;
+           palette_ids[o*OT_OM_ZONES+z]=(id>=73u&&id<=200u)?
+                                        (uint8_t)(200u-id):255u;
+       }
+       ot_palette_runtime_snapshot(palette_ids,OT_OM_OUTPUTS*OT_OM_ZONES,
+                                   frame_palettes);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
        /* Vehicle inputs no longer pause the show engine. Effects render behind
         * per-zone trigger overlays and resume at their current phase. */
@@ -1480,6 +1711,11 @@ static void led_task(void *p) {
            previous_frame_ms=frame_ms;
            if(frame_delta_ms<1u)frame_delta_ms=1u;
            if(frame_delta_ms>65535u)frame_delta_ms=65535u;
+           if(native_rendering&&local_fx_enabled &&
+              !ot_wled_palette_global_tick(&global_palette,frame_ms,5u,
+                    (uint16_t)(frame_delta_ms<8u?8u:frame_delta_ms>1000u?1000u:frame_delta_ms),
+                    750u,palette_random_byte,NULL))
+               ot_st_set_fault("global palette producer failed");
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
@@ -1528,14 +1764,26 @@ static void led_task(void *p) {
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
                                .spark_style=slot->spark.style,
                                .spark_peak=slot->spark.peak,
-                               .spark_color=slot->spark.color
+                               .spark_color=slot->spark.color,
+                               .resolved_palette=fx->palette_id==1u?
+                                   &global_palette.current:
+                                   (fx->palette_id>=73u&&fx->palette_id<=200u&&
+                                    frame_palettes[ch*OT_OM_ZONES+z].present)?
+                                   &frame_palettes[ch*OT_OM_ZONES+z].palette:NULL
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
-                           if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
+                           if(((fx->palette_id>=73u&&fx->palette_id<=200u)&&
+                                 !frame_palettes[ch*OT_OM_ZONES+z].present) ||
+                              !ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
                                                 &fx_frame[ch][offset],len)){
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                           } else if(slot->overlay.style &&
+                                     !ot_fx_overlay_apply(&slot->overlay,
+                                         slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
+                                         zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
+                               ot_st_set_fault("invalid effect overlay");
                            }
                        } else {
                            prior_fx_active[ch][z]=false;
@@ -1696,6 +1944,7 @@ static void led_task(void *p) {
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
+    ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
     om_load();
     tm_load();
@@ -1706,6 +1955,7 @@ void app_main(void) {
     const bool sampler_ready=inputs_ready &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
     if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
     bool outputs_ready=sampler_ready&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
     const bool wifi_started=wifi_ap_init();

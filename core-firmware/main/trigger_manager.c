@@ -18,6 +18,11 @@ int ot_tm_from_name(const char *s){
     for(int i=0;i<=OT_TM_AUX3;i++)if(strcmp(s,names[i])==0)return i;
     return -1;
 }
+uint8_t ot_tm_signal_mask_of(const char *name){
+    const int function=ot_tm_from_name(name);
+    return function>OT_TM_DISABLED && function<=OT_TM_AUX3
+        ? (uint8_t)(1u<<((unsigned)function-1u)):0u;
+}
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
     if(!ot_tm_valid(p))return 0;
     uint8_t mask=0;
@@ -26,4 +31,54 @@ uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
             mask|=(uint8_t)(1u<<(p->function[i]-1u));
     }
     return mask;
+}
+
+
+bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                       const ot_tm_profile_t *saved,uint8_t instantaneous,
+                       uint8_t debounced){
+    if(!active||!deferred||!ot_tm_valid(saved))return false;
+    if(instantaneous||debounced){
+        deferred->profile=*saved;
+        deferred->pending=true;
+        return false;
+    }
+    *active=*saved;
+    deferred->pending=false;
+    return true;
+}
+bool ot_tm_apply_if_released(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced){
+    if(!active||!deferred||!deferred->pending||
+       instantaneous||debounced)return false;
+    *active=deferred->profile;
+    deferred->pending=false;
+    return true;
+}
+
+bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
+                      uint16_t *expected_revision,ot_tm_profile_t *out){
+    if(!wire||!expected_revision||!out||
+       size!=OT_TM_BLE_WRITE_BYTES||wire[0]!=OT_TM_BLE_VERSION)return false;
+    ot_tm_profile_t candidate={0};
+    memcpy(candidate.function,wire+3,OT_IN_COUNT);
+    if(!ot_tm_valid(&candidate))return false;
+    *expected_revision=(uint16_t)((uint16_t)wire[1]|((uint16_t)wire[2]<<8));
+    *out=candidate;
+    return true;
+}
+
+bool ot_tm_ble_encode(const ot_tm_profile_t *profile,uint16_t revision,
+                      uint8_t raw,uint8_t effective,bool persisted,uint8_t status,
+                      uint8_t wire[OT_TM_BLE_READ_BYTES]){
+    if(!ot_tm_valid(profile)||!wire)return false;
+    wire[0]=OT_TM_BLE_VERSION;
+    wire[1]=status;
+    wire[2]=(uint8_t)revision;
+    wire[3]=(uint8_t)(revision>>8);
+    wire[4]=raw;
+    wire[5]=effective;
+    wire[6]=persisted?1u:0u;
+    memcpy(wire+7,profile->function,OT_IN_COUNT);
+    return true;
 }

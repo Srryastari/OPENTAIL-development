@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "core_logic.h"
 
@@ -23,4 +24,38 @@ void ot_tm_defaults(ot_tm_profile_t *p);
 bool ot_tm_valid(const ot_tm_profile_t *p);
 const char *ot_tm_name(uint8_t function);
 int ot_tm_from_name(const char *name);
+/* Canonical function-name to logical signal mask for bench simulation and tests.
+ * Disabled/unknown names map to zero; never interpret simulation names as GPIO pins. */
+uint8_t ot_tm_signal_mask_of(const char *name);
 uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t physical_bits);
+
+/* A successful NVS write must not change the mapping of a physical input
+ * which asserted during that write. Keep the old active profile until both
+ * instantaneous GPIO and debounced inputs are released. Call under CORE's
+ * state_lock; no flash writes or GPIO reads occur inside these pure helpers. */
+typedef struct {
+    ot_tm_profile_t profile;
+    bool pending;
+} ot_tm_pending_t;
+
+bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                       const ot_tm_profile_t *saved,uint8_t instantaneous,
+                       uint8_t debounced);
+bool ot_tm_apply_if_released(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
+                             uint8_t instantaneous,uint8_t debounced);
+
+/* Authenticated BLE trigger-profile v1: one 11-byte write fits default ATT MTU.
+ * [version, expected_revision LE16, IN1..IN8 logical function IDs].
+ * No GPIO numbers, LED geometry, or vehicle-specific function assumptions. */
+#define OT_TM_BLE_VERSION 1u
+#define OT_TM_BLE_WRITE_BYTES (3u+OT_IN_COUNT)
+#define OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)
+bool ot_tm_ble_decode(const uint8_t *wire,size_t size,
+                      uint16_t *expected_revision,ot_tm_profile_t *out);
+
+/* Pure encoder for the 15-byte owner-authenticated trigger GATT readback.
+ * [version,status,revision LE16,raw input mask,effective function mask,
+ *  persisted flag,IN1..IN8 function IDs]. Returns false for invalid profile. */
+bool ot_tm_ble_encode(const ot_tm_profile_t *profile,uint16_t revision,
+                      uint8_t raw,uint8_t effective,bool persisted,uint8_t status,
+                      uint8_t wire[OT_TM_BLE_READ_BYTES]);

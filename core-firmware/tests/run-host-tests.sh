@@ -38,11 +38,21 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/particle_system_1d.c tes
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_effects_1d.c -o /tmp/ot-effects-unified-tests -lm && /tmp/ot-effects-unified-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test -lm && /tmp/ot-fx-presets-test
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/fx_overlay_engine.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test -lm && /tmp/ot-fx-presets-test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test -lm && /tmp/ot-palettes-test
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
+
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c tests/test_fx_overlay_engine.c -o /tmp/ot-fx-overlay && /tmp/ot-fx-overlay
+python3 tests/test_effect_capabilities_manifest.py
+# Firmware-owned v3 palette codec + authenticated BLE transaction regression,
+# including simulated durable write failure and session reset.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/palette_profile.c main/palette_transfer.c main/palette_ble_v3.c \
+  main/wled_fx_compat.c tests/test_palette_protocol.c \
+  -o /tmp/ot-palette-v3-tests -lm && /tmp/ot-palette-v3-tests
+python3 tests/test_palette_integration_contract.py
 
 python3 tests/test_wled_catalog.py
 # Inventory audit is separate from release certification (which remains blocked
@@ -78,7 +88,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_fps_pacer.c tests/tes
 # Verify the unchanged v1 BLE wire ABI round-trips arbitrary user-created zones.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_config.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
 
-cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c main/show_logic.c tests/test_trigger_manager.c -o /tmp/ot-trigger-manager-tests && /tmp/ot-trigger-manager-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/trigger_manager.c main/core_logic.c main/arbitration_logic.c main/output_manager.c tests/test_prior_trigger_profiles.c -o /tmp/ot-prior-trigger-profiles && /tmp/ot-prior-trigger-profiles
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_ot_transition.c -o /tmp/ot-transition-tests && /tmp/ot-transition-tests
 
