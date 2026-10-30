@@ -317,6 +317,8 @@ const replyPath=bleSource.split('private void acceptReply(byte[] raw,int status)
   ?.split('@SuppressWarnings("MissingPermission")')[0];
 assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) {') &&
        replyPath.includes('authorized=false;') &&
+       replyPath.includes('Arrays.fill(cfgKnownRevision,-1);') &&
+       replyPath.includes('Arrays.fill(cfgLatest,null);') &&
        replyPath.includes('fxNotify("[]");') &&
        replyPath.includes('nextPacket=null;') &&
        replyPath.includes('afterStopPacket=null;'),
