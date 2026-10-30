@@ -750,12 +750,12 @@ final class BleDiscovery {
     void tryReconnect(String address) {
         if (stopped || connected || connecting || scanning || address == null || address.isEmpty()) return;
         if (android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
-        if (Build.VERSION.SDK_INT >= 31 && (activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
-                || activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)) return;
-        if (Build.VERSION.SDK_INT < 31 && activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+        if (Build.VERSION.SDK_INT >= 31 &&
+                activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return;
         lastReconnectAttempt = android.os.SystemClock.elapsedRealtime();
-        preferredPending = address;
-        beginScan(true);
+        // A known device does not need advertising or a scan permission to
+        // establish a GATT connection; Android OS bonding is retained.
+        connectFromApp(address);
     }
 
     BleDiscovery(Activity activity, StatusListener listener) {
@@ -1071,6 +1071,7 @@ final class BleDiscovery {
             paletteCapabilities=service.getCharacteristic(PALETTE_CAP_UUID);
             palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities);
             authorized = false;
+            scanFallbackAllowed=false; // service discovery succeeded; clear one-shot fallback
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             // The info read is optional discovery metadata. If Android rejects
             // its ATT start, do not strand owner auto-authorization indefinitely.
