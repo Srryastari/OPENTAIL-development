@@ -4467,6 +4467,8 @@ void mode_flow(void)
   }
 }
 
+/* Source millis() reads current LED frame time, as in the pinned engine. */
+#define millis() strip.now
 void mode_sunrise() {
   if (SEGLEN <= 1) FX_FALLBACK_STATIC;
   //speed 0 - static sun
@@ -4510,6 +4512,8 @@ void mode_sunrise() {
     SEGMENT.setPixelColor(SEGLEN - i - 1, c);
   }
 }
+
+#undef millis
 
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
