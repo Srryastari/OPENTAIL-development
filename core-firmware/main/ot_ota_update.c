@@ -16,6 +16,7 @@
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_app_format.h"
+#include "esp_app_desc.h"
 #include "esp_image_format.h"
 #include "ot_version.h"
 #include "ot_ota_update.h"
