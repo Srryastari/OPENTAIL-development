@@ -5659,7 +5659,9 @@ int main() {
     std::printf("WLED gradient catalog reference comparison passed: %u RGB samples across 60 palettes (13-72).\n",gradient_samples);
 
     unsigned checked=0;
+    unsigned mismatched_modes=0;
     for(const RefCase& fx:refs) {
+        bool mismatch_reported=false;
         const std::vector<unsigned> zone_lengths=
             (fx.id==89u || fx.id==44u || fx.id==90u ||
              fx.id==104u || fx.id==110u || fx.id==113u) ?
@@ -5728,12 +5730,14 @@ int main() {
                             return 1;
                         }
                         for(size_t i=0;i<count;i++) {
-                            if(pack(actual[i])!=(seg.pixels[i]&0xffffffu)) {
+                            if(pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
+                               !mismatch_reported) {
                                 std::fprintf(stderr,
                                   "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
                                   fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
-                                return 1;
+                                mismatch_reported=true;
+                                mismatched_modes++;
                             }
                             checked++;
                         }
@@ -5742,6 +5746,10 @@ int main() {
                 }
             }
         }
+    }
+    if(mismatched_modes) {
+        std::fprintf(stderr,"WLED direct source-parity failed in %u distinct effects; no parity release claim.\n",mismatched_modes);
+        return 1;
     }
     std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (RGB with default/explicit fixed palettes where enabled, gamma-off except Fairy/Fairytwinkle; synchronized test RNG)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
