@@ -51,6 +51,13 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effect
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c tests/test_fx_overlay_engine.c -o /tmp/ot-fx-overlay && /tmp/ot-fx-overlay
+# Effects-owned OEM matrix on corrected firmware; no production protocol
+# or trigger implementation changes. Physically verified output stays gated.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  main/fx_overlay_engine.c tests/test_effects_oem_safety_matrix.c \
+  -o /tmp/ot-effects-oem-safety && /tmp/ot-effects-oem-safety
+python3 tests/test_effects_render_safety_contract.py
 python3 tests/test_effect_capabilities_manifest.py
 # Firmware-owned v3 palette codec + authenticated BLE transaction regression,
 # including simulated durable write failure and session reset.
