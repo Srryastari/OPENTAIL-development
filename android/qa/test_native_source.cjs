@@ -257,6 +257,16 @@ const buildFile=fs.readFileSync('android/app/build.gradle','utf8');
 assert(buildFile.includes("testImplementation 'org.json:json:20240303'"),
   'Native project failure-injection tests require executable JSONObject implementation');
 
+// Output Manager readbacks are asynchronous UI deliveries, too: a reply
+// from a retired CORE must not resurrect its saved output on a new device.
+// Committed-but-pending geometry is never described as an active save.
+assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
+       bleSource.includes('if(!stopped && owner==gatt && configListener!=null)') &&
+       bleSource.includes('CORE active output differs; may be pending trigger release.') &&
+       bleSource.includes('Reload after release; no active change verified') &&
+       bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
+       'Output Manager must reject stale controller callbacks and fail closed on pending geometry');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
