@@ -33,7 +33,7 @@ assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx
 for(const required of [
   'fun applyTriggerStyle(): Boolean','applyTriggerStyle()','project.assignMany(',
   'project.styleTriggers(selections, chosenFx, chosenColor)',
-  'if (applyTriggerStyle()) editing = false', 'Pill("Done",t,true)',
+  'if (applyTriggerStyle()) editing = false', 'confirmButton = { Pill("Done"',
 ]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
 assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
