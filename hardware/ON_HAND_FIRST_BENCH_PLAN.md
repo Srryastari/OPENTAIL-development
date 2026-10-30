@@ -2,6 +2,8 @@
 
 **Priority override (2026-10-30):** User has already obtained physical OpenTail bench hardware. Do **not** turn POC into a new parts-shopping exercise or a custom PCB order. Prototype the two independent MCU render/trigger paths with on-hand hardware first; isolate the missing truly automatic takeover circuit as a separate, not-owned gate. One compact enclosure per car remains the final mechanical requirement. Frozen Software PR #51: `bc92d886560dab88c6a53316d8e4cddc5d2fb8ef`.
 
+**No WAGO connectors are owned.** Adafruit #6066 already has two low-current screw-terminal signal paths: **GPIO16 → DAT → D5** and **GPIO17 → CLK → C5**, where CLK/C5 is used as a second *data* lane for clockless WS2815. `!D5` is inverted and not used. The separate fused LED +12 V feed must use its existing **verified rated** connections, never the #6066 terminals. See [`ON_HAND_BENCH_WIRING.md`](./ON_HAND_BENCH_WIRING.md) for wiring and [`ON_HAND_BENCH_RESULTS.csv`](./ON_HAND_BENCH_RESULTS.csv) for test evidence; every physical test is initially NOT_RUN.
+
 ## Verified user-reported inventory vs assumptions
 
 | Part | User-reported status | Immediate role | What it cannot prove |
