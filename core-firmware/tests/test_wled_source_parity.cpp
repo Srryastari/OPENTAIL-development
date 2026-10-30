@@ -3879,6 +3879,35 @@ void mode_multi_strobe(void) {
   }
 }
 
+/* WLED FX.cpp Railway — source default palette 3. */
+void mode_railway() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned dur = (256 - SEGMENT.speed) * 40;
+  uint16_t rampdur = (dur * SEGMENT.intensity) >> 8;
+  if (SEGENV.step > dur)
+  {
+    //reverse direction
+    SEGENV.step = 0;
+    SEGENV.aux0 = !SEGENV.aux0;
+  }
+  unsigned pos = 255;
+  if (rampdur != 0)
+  {
+    unsigned p0 = (SEGENV.step * 255) / rampdur;
+    if (p0 < 255) pos = p0;
+  }
+  if (SEGENV.aux0) pos = 255 - pos;
+  for (unsigned i = 0; i < SEGLEN; i += 2)
+  {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(255 - pos, false, false, 255)); // do not use color 1 or 2, always use palette
+    if (i < SEGLEN -1)
+    {
+      SEGMENT.setPixelColor(i + 1, SEGMENT.color_from_palette(pos, false, false, 255)); // do not use color 1 or 2, always use palette
+    }
+  }
+  SEGENV.step += FRAMETIME;
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3952,7 +3981,8 @@ static const RefCase refs[]={
     {45,mode_fire_flicker,"Fire Flicker"},
     {58,mode_icu,"ICU"},
     {50,mode_two_dots,"Two Dots"},
-    {25,mode_multi_strobe,"Strobe Mega"}
+    {25,mode_multi_strobe,"Strobe Mega"},
+    {78,mode_railway,"Railway"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -4071,7 +4101,7 @@ int main() {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
