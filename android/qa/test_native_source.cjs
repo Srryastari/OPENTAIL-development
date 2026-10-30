@@ -170,6 +170,7 @@ const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(layout.includes('Pill("+ Add Zone", t)') &&
        layout.includes('.semantics { contentDescription = "Delete Zone" }') &&
        layout.includes('Canvas(Modifier.size(22.dp))') &&
+       layout.includes('Canvas(Modifier.size(22.dp)) {\n                                val c = t.red') &&
        !layout.includes('Pill("Delete Zone", t)') &&
        layout.includes('var choosingDelete by remember { mutableStateOf(false) }') &&
        layout.includes('title = { Text("Choose zone to delete") }') &&
