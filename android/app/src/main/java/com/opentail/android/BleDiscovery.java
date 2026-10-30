@@ -188,9 +188,9 @@ final class BleDiscovery {
                     notifyStatus("Trigger mapping revision mismatch; reload before retry");
                 else if(!result.persisted)
                     notifyStatus("Trigger mapping committed but not yet active; reload after physical inputs release");
-                else if(triggerMapExpected==null||!result.matches(triggerMapExpected))
-                    notifyStatus("Trigger mapping readback mismatch; reload before retry");
-                else notifyStatus("CORE trigger mapping verified and active");
+                else if(result.confirmsApplied(triggerMapBaseRevision,triggerMapExpected))
+                    notifyStatus("CORE trigger mapping verified and active");
+                else notifyStatus("Trigger mapping readback mismatch; reload before retry");
             } else notifyStatus("CORE trigger mapping read · rev "+result.revision);
             if(triggerMapListener!=null){
                 NativeTriggerMappingCodec.Snapshot delivered=result;
