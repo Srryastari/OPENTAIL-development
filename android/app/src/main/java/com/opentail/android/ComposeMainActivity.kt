@@ -195,6 +195,7 @@ class ComposeMainActivity : ComponentActivity() {
         selectedEffect.intValue = prefs.getInt("effectId", 0)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
+            if (ble.isConnected() && !status.startsWith("Scanning")) foundDevices.clear()
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilities()
             if (!ble.canControl()) {
