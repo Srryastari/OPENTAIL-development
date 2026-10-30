@@ -4515,6 +4515,37 @@ void mode_sunrise() {
 
 #undef millis
 
+/* Verbatim pinned FX.cpp washing oscillator and waveform renderer. */
+static int8_t tristate_square8(uint8_t x, uint8_t pulsewidth, uint8_t attdec) {
+  int8_t a = 127;
+  if (x > 127) {
+    a = -127;
+    x -= 127;
+  }
+
+  if (x < attdec) { //inc to max
+    return (int16_t) x * a / attdec;
+  }
+  else if (x < pulsewidth - attdec) { //max
+    return a;
+  }
+  else if (x < pulsewidth) { //dec to 0
+    return (int16_t) (pulsewidth - x) * a / attdec;
+  }
+  return 0;
+}
+
+void mode_washing_machine(void) {
+  int speed = tristate_square8(strip.now >> 7, 90, 15);
+
+  SEGENV.step += (speed * 2048) / (512 - SEGMENT.speed);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint8_t col = sin8_t(((SEGMENT.intensity / 25 + 1) * 255 * i / SEGLEN) + (SEGENV.step >> 7));
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(col, false, PALETTE_SOLID_WRAP, 3));
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4615,6 +4646,7 @@ static const RefCase refs[]={
     {94,mode_sinelon_rainbow,"Sinelon Rainbow"},
     {110,mode_flow,"Flow"},
     {104,mode_sunrise,"Sunrise"},
+    {113,mode_washing_machine,"Washing Machine"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
