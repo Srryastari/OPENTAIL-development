@@ -193,7 +193,9 @@ assert "(req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0" in core
 assert "req->chain_mask>3" not in core
 # All output revisions, including future board variants, start at v1.
 assert "static uint16_t om_revision[OT_OM_OUTPUTS];" in core
-assert "for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;" in core
+assert "for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;" in core
+assert "memcpy(om_revision,r->candidate_revision,sizeof(om_revision));" in core
+assert "memcpy(om_active_revision,r->previous_revision,sizeof(om_active_revision));" in core
 assert "om_revision[OT_OM_OUTPUTS]={1,1}" not in core
 assert "OT_TARGET_FPS" not in core, "Do not revive a bench-specific fixed target FPS"
 assert 'fps_policy' in core and 'adaptive_load_53_to_120' in core
