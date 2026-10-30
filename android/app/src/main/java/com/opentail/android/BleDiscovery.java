@@ -64,6 +64,9 @@ final class BleDiscovery {
     private final Activity activity;
     private final StatusListener listener;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    // Declared before the palette field initializer that captures them.
+    private volatile BluetoothGatt gatt;
+    private boolean stopped;
     private final Map<String, BluetoothDevice> found = new LinkedHashMap<>();
     private final ArrayList<String> labels = new ArrayList<>();
     // Headless discovery lets Jetpack Compose own the visible scan results.
@@ -146,11 +149,9 @@ final class BleDiscovery {
     private final ArrayAdapter<String> entries;
     private BluetoothLeScanner scanner;
     // Updated by UI lifecycle, read by Android's asynchronous GATT callbacks.
-    private volatile BluetoothGatt gatt;
     private AlertDialog scanDialog;
     private volatile boolean scanning;
     private volatile int scanGeneration=0;
-    private boolean stopped;
     private volatile boolean connected = false;
     private volatile boolean connecting = false;
     private volatile BluetoothGattCharacteristic command;
