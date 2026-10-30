@@ -77,6 +77,24 @@ assert "show_here?(uint8_t)(mask&~OT_SIG_PARK):mask" in outputs
 assert "if(hit&&color)*color=ot_om_trigger_color(role,active,brightness);" in outputs
 assert "if(trigger_here)c=ot_om_calibrate(" not in renderer
 assert "OT_OM_MAX_PIXELS_PER_OUTPUT" in (root / "output_manager.h").read_text()
+# Current firmware owns the final pixel transport and fault signaling.
+# The trigger branch must not accidentally roll back newer CORE failure
+# handling, runtime boot gates, or the post-trigger logical frame snapshot.
+# Check order inside the actual single-owner render task, not by the presence
+# of unrelated symbols elsewhere in the file.
+frame_capture = renderer.index("ot_frame_snapshot_pixel(")
+wire_swizzle = renderer.index("ot_om_swizzle(c,output->color_order)")
+trigger_overlay = renderer.index("ot_om_trigger_overlay(role,combined,")
+driver_write = renderer.index("led_strip_set_pixel(")
+assert trigger_overlay < frame_capture < wire_swizzle < driver_write
+assert "output_runtime_fault_mask" in renderer
+assert "output_runtime_fault(" in renderer
+assert "native_outputs_ready=all_configured && output_runtime_fault_mask==0u" in renderer
+assert "ot_frame_snapshot_unavailable(" in renderer
+assert "static bool input_init(void)" in core
+assert "boot_enrollment_ready" in ble
+assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
+assert "elf_sha256" in core  # running-image identity, not physical proof
 
 # 7: time-limited logical bench simulation is not a raw pin mask and
 # does not mutate the independent physical input snapshot.
