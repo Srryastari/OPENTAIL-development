@@ -18,6 +18,8 @@ int main(void){
  show[10]=15;show[4]=0;assert(ot_ble_parse(show,sizeof(show),key,&auth,&v)==OT_BLE_ERR_RANGE);
  uint8_t stop[]={1,3};assert(ot_ble_parse(stop,sizeof(stop),key,&auth,&v)==OT_BLE_OK_STOP);
  auth=false;assert(ot_ble_parse(stop,sizeof(stop),key,&auth,&v)==OT_BLE_ERR_AUTH);
- token[2]=0x55;assert(ot_ble_parse(token,18,key,&auth,&v)==OT_BLE_ERR_AUTH&&!auth);
+ /* An invalid re-auth must revoke a previously authorized legacy session. */
+ auth=true;token[2]=0x55;
+ assert(ot_ble_parse(token,18,key,&auth,&v)==OT_BLE_ERR_AUTH&&!auth);
  return 0;
 }

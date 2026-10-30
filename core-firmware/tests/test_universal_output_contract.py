@@ -121,6 +121,24 @@ assert "portENTER_CRITICAL(&state_lock);\n               measured_fps=fps;\n    
 ble = (root / "ble_status.c").read_text(encoding="utf-8")
 cfg_read = ble.split("static int cfg_read(",1)[1].split("static int cfg_write(",1)[0]
 assert "if(conn!=active_conn || !authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;" in cfg_read
+# A failed re-authentication on an already-authorized BLE connection is
+# an explicit session revocation: end ONLY transient BLE-owned effects and
+# invalidate cached responses, leaving standalone scenes and GPIO triggers.
+cmd = ble.split("static int command_write(",1)[1].split(
+    "/* BLE Output Config v1",1
+)[0]
+assert "const bool was_authorized=authorized;" in cmd
+assert "authorized=owner_verify(buf+2);" in cmd
+assert "last_result=ot_ble_parse(buf,n,token,&authorized,&show);" in cmd
+assert "if(was_authorized && !authorized){" in cmd
+revoked=cmd.split("if(was_authorized && !authorized){",1)[1].split(
+    "if(last_result==OT_BLE_OK_SHOW",1
+)[0]
+for token in ("ot_ble_disconnect_show();", "cfg_reset();", "frame_reply_reset();"):
+    assert token in revoked, token
+assert revoked.index("ot_ble_disconnect_show();") < revoked.index("cfg_reset();") < revoked.index("frame_reply_reset();")
+assert "static void cfg_reset(void);" in ble.split("static int command_write(",1)[0]
+assert "static void frame_reply_reset(void);" in ble.split("static int command_write(",1)[0]
 
 # All BLE and persisted effect boundaries use the same board contract.
 # Keep the wire representation unchanged until physical output expansion is designed.

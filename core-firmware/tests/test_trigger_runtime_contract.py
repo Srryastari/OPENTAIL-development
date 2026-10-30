@@ -114,6 +114,15 @@ assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < 
     "active_conn=BLE_HS_CONN_HANDLE_NONE;")
 assert gap.count("trigger_last_status=0;") == 2
 assert "ot_ble_disconnect_show();" in gap and "live_input_mask=" not in gap
+# Invalid owner re-auth must invalidate cached mapping status along with
+# output and RGB frame replies, without mutating physical GPIO signals.
+command = between(ble,"static int command_write(","/* BLE Output Config")
+assert "const bool was_authorized=authorized;" in command
+revoke = between(command,"if(was_authorized && !authorized){","if(last_result==OT_BLE_OK_SHOW")
+for action in ("ot_ble_disconnect_show();","cfg_reset();","frame_reply_reset();","trigger_last_status=0;"):
+    assert action in revoke
+assert "live_input_mask=" not in command
+assert ble.index("static uint8_t trigger_last_status=0;") < ble.index("static int command_write(")
 assert "elf_sha256" in core  # running-image identity, not physical proof
 
 # 7: time-limited logical bench simulation is not a raw pin mask and
