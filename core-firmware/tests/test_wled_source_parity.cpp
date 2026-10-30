@@ -5747,9 +5747,52 @@ static void certifyCustomGradientLoader() {
     std::printf("WLED custom palette 2-18 stop interpolation reference passed: %u RGB channel comparisons and invalid-input fail-closed checks.\\n",checked);
 }
 
+static void certifyPaletteIdLookup() {
+    std::array<ot_wled_palette16_t,128> custom{};
+    std::array<ot_wled_palette16_t,55> usermods{};
+    ot_wled_palette16_t random{};
+    for(size_t i=0;i<custom.size();i++)
+        for(unsigned j=0;j<16u;j++)
+            custom[i].entries[j]={(uint8_t)i,(uint8_t)(j*9u),(uint8_t)(i+j)};
+    for(size_t i=0;i<usermods.size();i++)
+        for(unsigned j=0;j<16u;j++)
+            usermods[i].entries[j]={(uint8_t)(i+81u),(uint8_t)j,(uint8_t)(255u-i)};
+    for(unsigned j=0;j<16u;j++)random.entries[j]={(uint8_t)j,91u,37u};
+    const ot_wled_rgb_t fg={123u,56u,9u},bg={3u,88u,174u},third={0u,0u,0u};
+    unsigned bytes=0u;
+    for(unsigned id=0;id<=255u;id++) {
+        ot_wled_palette16_t actual{},expected{};
+        if(id==1u) expected=random;
+        else if(id<=72u) {
+            if(!ot_wled_palette_build((uint8_t)id,fg,bg,third,&expected))
+                std::abort();
+        } else if(id<=200u)expected=custom[200u-id];
+        else expected=usermods[255u-id];
+        if(!ot_wled_palette_resolve((uint8_t)id,fg,bg,third,&random,
+            custom.data(),custom.size(),usermods.data(),usermods.size(),&actual)||
+            std::memcmp(&actual,&expected,sizeof(actual))) {
+            std::fprintf(stderr,"Palette ID resolver mismatch id=%u\\n",id);
+            std::abort();
+        }
+        bytes+=(unsigned)sizeof(actual);
+    }
+    ot_wled_palette16_t original{};
+    original.entries[0]={7u,9u,11u};
+    ot_wled_palette16_t changed=original;
+    if(ot_wled_palette_resolve(1u,fg,bg,third,nullptr,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(200u,fg,bg,third,&random,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(255u,fg,bg,third,&random,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(199u,fg,bg,third,&random,custom.data(),1u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(254u,fg,bg,third,&random,nullptr,0u,usermods.data(),1u,&changed)||
+       std::memcmp(&original,&changed,sizeof(original)))
+        {std::fprintf(stderr,"Missing palette IDs did not fail closed\\n");std::abort();}
+    std::printf("WLED palette ID mapping 0-255 verified: %u RGB bytes and missing-ID checks.\\n",bytes);
+}
+
 int main() {
     certifyPaletteOneLifecycle();
     certifyCustomGradientLoader();
+    certifyPaletteIdLookup();
 
     /* Explicit fixed RGB palettes are source tables too. Test their entire
      * sampling space, rather than relying on effect frame coverage to catch
