@@ -168,6 +168,22 @@ ble_stop = between(core, "void ot_ble_stop_show(void){", "/* Eight opt-in named-
 assert "if(refresh_requested)request_render_refresh();" in ble_stop
 disconnect_stop = between(core, "void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
 assert "if(owned_before)request_render_refresh();" in disconnect_stop
+# Accepted show, FX, demo and synthetic trigger updates must wake the
+# single render owner after state_lock is released, including sim-mask release.
+# Rejected requests and hardware inputs never use these synthetic handlers.
+for begin,end,expected in (
+    ("static esp_err_t show_start(httpd_req_t *r){","static esp_err_t show_stop(httpd_req_t *r){","request_render_refresh();"),
+    ("bool ot_ble_apply_show(","/* Runtime control over BLE;","if(ready)request_render_refresh();"),
+    ("static bool ot_ble_apply_fx_internal(","bool ot_ble_apply_fx(","if(ready)request_render_refresh();"),
+    ("bool ot_ble_play_fx_preset(","bool ot_ble_delete_fx_preset(","if(ready)request_render_refresh();"),
+    ("static esp_err_t demo_post(httpd_req_t *r) {","static esp_err_t simulate_post(httpd_req_t *r) {","request_render_refresh();"),
+    ("static esp_err_t simulate_post(httpd_req_t *r) {","static esp_err_t stop_post(httpd_req_t *r) {","request_render_refresh();"),
+):
+    operation=between(core,begin,end)
+    assert operation.index("portEXIT_CRITICAL(&state_lock);") < operation.index(expected)
+    assert "live_input_mask=" not in operation
+assert "ot_tm_signal_mask_of(v->valuestring)" in between(
+    core,"static esp_err_t simulate_post(httpd_req_t *r) {","static esp_err_t stop_post(httpd_req_t *r) {")
 
 
 # 9: save admission includes instant GPIO and settled GPIO, source-level
