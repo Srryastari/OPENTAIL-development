@@ -5916,11 +5916,15 @@ static void certifyGlobalHardwarePaletteProducer() {
                                    nextPaletteByte,&stream)||
        stream.draws!=36u||
        std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
-    const ot_wled_palette_random_t before=shared;
+    /* Source blending can advance on a second service call at the same
+     * timestamp, but random HSV generation must NOT run a second time. */
+    if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,nullptr))
+        std::abort();
     if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,
                                    nextPaletteByte,&stream)||
        stream.draws!=36u||
-       std::memcmp(&before,&shared,sizeof(shared))!=0)std::abort();
+       std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
+    const ot_wled_palette_random_t before=shared;
     if(ot_wled_palette_global_tick(&shared,10000u,5u,0u,750u,
                                   nextPaletteByte,&stream)||
        stream.draws!=36u||
