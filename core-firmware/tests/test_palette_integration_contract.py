@@ -15,6 +15,9 @@ assert all(f'"{name}.c"' in cmake for name in
      "fx_overlay_engine"))
 assert 'ot_palette_runtime_load();' in core.split("void app_main(void) {",1)[1]
 assert 'ot_palette_runtime_snapshot(palette_ids,OT_OM_OUTPUTS*OT_OM_ZONES,' in core
+# Match the verified #39 source harmonic palette-1 producer exactly once
+# per global render frame. Palette snapshots stay immutable per zone.
+assert "750u,true,palette_random_byte,NULL" in core
 assert core.index("ot_palette_runtime_snapshot(") < core.index(
     "ot_wled_palette_global_tick(") < core.index("ot_effects_1d_render(")
 assert "if(!palette_resolved(p->palette_id) ||" in core

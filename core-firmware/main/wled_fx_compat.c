@@ -448,6 +448,98 @@ bool ot_wled_palette_generate_random(ot_wled_random_byte_fn draw,
     }
     return ot_wled_palette_from_hsv4(hsv,out);
 }
+/* Source colors.cpp rgb2hsv(const CRGB): 16-bit hue truncated to CHSV
+ * high 8 bits, integer division rounds toward zero for signed offsets. */
+static uint8_t ot_palette_rgb_hue(ot_wled_rgb_t color) {
+    const int32_t r=color.r,g=color.g,b=color.b;
+    const uint32_t mx=(r>g)?(r>b?r:b):(g>b?g:b);
+    if(mx==0u)return 0u;
+    const uint32_t mn=(r<g)?(r<b?r:b):(g<b?g:b);
+    const int32_t delta=(int32_t)(mx-mn);
+    if(delta==0)return 0u;
+    int32_t hue;
+    if(mx==(uint32_t)r)hue=(10923*(g-b))/delta;
+    else if(mx==(uint32_t)g)hue=21845+(10923*(b-r))/delta;
+    else hue=43690+(10923*(r-g))/delta;
+    return (uint8_t)((uint16_t)hue>>8);
+}
+static uint8_t ot_palette_hw_range(ot_wled_random_byte_fn draw,void *ctx,
+                                   uint8_t lower,uint8_t upper){
+    return (uint8_t)(lower+(((uint16_t)draw(ctx)*
+                             (uint16_t)(upper-lower))>>8));
+}
+static void ot_palette_swap_byte(uint8_t *a,uint8_t *b) {
+    const uint8_t t=*a;*a=*b;*b=t;
+}
+bool ot_wled_palette_generate_harmonic(const ot_wled_palette16_t *base,
+                                ot_wled_random_byte_fn draw,void *context,
+                                ot_wled_palette16_t *out){
+    if(!base||!draw||!out)return false;
+    uint8_t hsv[12]={0};
+    const uint8_t keep=ot_palette_hw_range(draw,context,0u,4u);
+    const ot_wled_rgb_t ref=base->entries[keep*5u];
+    hsv[keep*3u]=ot_palette_rgb_hue(ref);
+    hsv[keep*3u]=(uint8_t)(hsv[keep*3u]+
+             ot_palette_hw_range(draw,context,0u,10u)-5u);
+    for(unsigned i=0u;i<3u;i++){
+        hsv[i*3u+1u]=ot_palette_hw_range(draw,context,200u,255u);
+        hsv[i*3u+2u]=ot_palette_hw_range(draw,context,220u,255u);
+    }
+    hsv[10u]=ot_palette_hw_range(draw,context,20u,255u);
+    hsv[11u]=ot_palette_hw_range(draw,context,80u,255u);
+    for(int i=3;i>0;i--){
+        const uint8_t sat_j=ot_palette_hw_range(draw,context,0u,(uint8_t)(i+1));
+        ot_palette_swap_byte(&hsv[i*3u+1u],&hsv[sat_j*3u+1u]);
+        const uint8_t val_j=ot_palette_hw_range(draw,context,0u,(uint8_t)(i+1));
+        ot_palette_swap_byte(&hsv[i*3u+2u],&hsv[val_j*3u+2u]);
+    }
+    const uint8_t basehue=hsv[keep*3u];
+    uint8_t harmonics[3]={0};
+    const uint8_t type=ot_palette_hw_range(draw,context,0u,5u);
+    switch(type){
+    case 0:
+        harmonics[0]=(uint8_t)(basehue+ot_palette_hw_range(draw,context,30u,50u));
+        harmonics[1]=(uint8_t)(basehue+ot_palette_hw_range(draw,context,10u,30u));
+        harmonics[2]=(uint8_t)(basehue-ot_palette_hw_range(draw,context,10u,30u));
+        break;
+    case 1:
+        harmonics[0]=(uint8_t)(basehue+113u+ot_palette_hw_range(draw,context,0u,15u));
+        harmonics[1]=(uint8_t)(basehue+233u+ot_palette_hw_range(draw,context,0u,15u));
+        harmonics[2]=(uint8_t)(basehue-7u+ot_palette_hw_range(draw,context,0u,15u));
+        break;
+    case 2:
+        harmonics[0]=(uint8_t)(basehue+145u+ot_palette_hw_range(draw,context,0u,10u));
+        harmonics[1]=(uint8_t)(basehue+205u+ot_palette_hw_range(draw,context,0u,10u));
+        harmonics[2]=(uint8_t)(basehue-5u+ot_palette_hw_range(draw,context,0u,10u));
+        break;
+    case 3:
+        harmonics[0]=(uint8_t)(basehue+85u+ot_palette_hw_range(draw,context,0u,10u));
+        harmonics[1]=(uint8_t)(basehue+175u+ot_palette_hw_range(draw,context,0u,10u));
+        harmonics[2]=(uint8_t)(basehue+265u+ot_palette_hw_range(draw,context,0u,10u));
+        break;
+    default:
+        harmonics[0]=(uint8_t)(basehue+80u+ot_palette_hw_range(draw,context,0u,20u));
+        harmonics[1]=(uint8_t)(basehue+170u+ot_palette_hw_range(draw,context,0u,20u));
+        harmonics[2]=(uint8_t)(basehue-15u+ot_palette_hw_range(draw,context,0u,30u));
+        break;
+    }
+    if(draw(context)<128u){
+        for(int i=2;i>0;i--){
+            const uint8_t j=ot_palette_hw_range(draw,context,0u,(uint8_t)(i+1));
+            ot_palette_swap_byte(&harmonics[i],&harmonics[j]);
+        }
+    }
+    unsigned j=0u;
+    for(unsigned i=0u;i<4u;i++){
+        if(i==keep)continue;
+        hsv[i*3u]=harmonics[j++];
+    }
+    const bool pastel=draw(context)<25u;
+    if(pastel)for(unsigned i=0u;i<4u;i++){
+        if(hsv[i*3u+1u]>180u)hsv[i*3u+1u]-=160u;
+    }
+    return ot_wled_palette_from_hsv4(hsv,out);
+}
 bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
                                 ot_wled_random_byte_fn draw,void *context) {
     if(!state||!draw)return false;
@@ -461,15 +553,41 @@ bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
 bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
                                 uint32_t now_ms,uint16_t interval_s,
                                 uint16_t frame_time_ms,uint16_t transition_ms,
-                                ot_wled_random_byte_fn draw,void *context) {
+                                bool harmonic,ot_wled_random_byte_fn draw,
+                                void *context) {
     if(!state||!draw||frame_time_ms<8u||frame_time_ms>1000u||
        transition_ms<100u)return false;
     ot_wled_palette16_t generated;
     const bool due=ot_wled_palette_random_generation_due(state,now_ms,interval_s);
-    if(due && !ot_wled_palette_generate_random(draw,context,&generated))
+    if(due && !(harmonic ?
+        ot_wled_palette_generate_harmonic(&state->current,draw,context,&generated):
+        ot_wled_palette_generate_random(draw,context,&generated)))
         return false;
     return ot_wled_palette_random_tick(state,now_ms,interval_s,
             frame_time_ms,transition_ms,due?&generated:NULL);
+}
+
+/* Pinned colors.cpp NeoGammaWLEDMethod::calcGammaTable: float powf,
+ * rounded +0.5f, both forward and inverse, gammaT[0]=0. No white
+ * channel or ESP-IDF side effects; output owner chooses if/when to apply. */
+bool ot_wled_gamma_tables_build(float exponent,ot_wled_gamma_tables_t *out){
+    if(!out||!isfinite(exponent)||exponent<=0.0f||
+       exponent>10.0f)return false;
+    ot_wled_gamma_tables_t next={0};
+    const float inverse=1.0f/exponent;
+    for(unsigned i=1u;i<256u;i++){
+        next.forward[i]=(uint8_t)(powf((float)i/255.0f,exponent)*255.0f+0.5f);
+        next.inverse[i]=(uint8_t)(powf(((float)i-0.5f)/255.0f,inverse)*255.0f+0.5f);
+    }
+    *out=next;
+    return true;
+}
+ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
+                                const ot_wled_gamma_tables_t *tables,
+                                bool inverse) {
+    if(!tables)return c;
+    const uint8_t *g=inverse?tables->inverse:tables->forward;
+    return (ot_wled_rgb_t){g[c.r],g[c.g],g[c.b]};
 }
 
 static const ot_wled_fx_metadata_t supported[] = {

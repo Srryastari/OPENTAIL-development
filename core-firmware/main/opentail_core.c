@@ -1714,7 +1714,7 @@ static void led_task(void *p) {
            if(native_rendering&&local_fx_enabled &&
               !ot_wled_palette_global_tick(&global_palette,frame_ms,5u,
                     (uint16_t)(frame_delta_ms<8u?8u:frame_delta_ms>1000u?1000u:frame_delta_ms),
-                    750u,palette_random_byte,NULL))
+                    750u,true,palette_random_byte,NULL))
                ot_st_set_fault("global palette producer failed");
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
