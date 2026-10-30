@@ -10,6 +10,8 @@
 
 **The component shortlist and schematic concept below are explicitly later-stage unowned engineering candidates**, not a request to buy parts or a claim they are available on the bench. No custom PCB will be ordered without physical A/B evidence and circuit review. The GLEDOPTO 4D-EXMU is a separate WLED baseline only, not a two-processor data selector. Keep full vehicle lighting independent of bench prototypes.
 
+Adafruit #6066 actual **owned two-channel bench hookup** is documented in [`ON_HAND_BENCH_WIRING.md`](./ON_HAND_BENCH_WIRING.md). Its two level-shifted paths are `DAT → D5` and `CLK → C5`; clockless WS2815 uses the latter **as a second DATA signal**, subject to testing. `!D5` is inverted and must not be used. Neither this shifter nor its terminals are an automatic source selector or a high-current LED distribution connector. **No WAGO connectors are owned or assumed.**
+
 ## POC topology: exclusive 5 V bus drivers for two outputs
 
 ```
