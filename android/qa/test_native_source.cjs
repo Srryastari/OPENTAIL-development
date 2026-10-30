@@ -272,13 +272,16 @@ for (const required of [
  'wire[2] = (byte)(expectedRevision >>> 8);',
  'functions[i] < 0 || functions[i] > 8',
  'final boolean persisted;',
- 'return Arrays.equals(functions, expected);'
+ 'return Arrays.equals(functions, expected);',
+ 'boolean confirmsApplied(int baseRevision, int[] expected)',
+ 'revision == ((baseRevision + 1) & 0xffff)'
 ]) assert(triggerCodec.includes(required), 'Trigger team GATT V1 codec regressed: '+required);
 for (const required of [
  'decodesExactFifteenByteReadbackIncludingAuxAndPendingApply',
  'encodesExactlyElevenBytesWithRevisionAndDuplicateFunctions',
  'rejectsMalformedVersionsAndInvalidFunctionIds',
- 'exposesBusyStaleAndNvsFailureAsFailuresNotSuccess'
+ 'exposesBusyStaleAndNvsFailureAsFailuresNotSuccess',
+ 'requiresAuthoritativeAppliedReadbackNotJustAttWriteAck'
 ]) assert(triggerCodecTest.includes(required),
   'Byte-accurate trigger-mapping JUnit contract missing: '+required);
 for (const required of [
@@ -287,6 +290,9 @@ for (const required of [
  'boolean readTriggerMap()',
  'boolean saveTriggerMap(int expectedRevision,int[] mapping)',
  'if(connection!=gatt || !triggerMapBusy || !canMapTriggers())return;',
+ 'nextPacket!=null||authPending||pairPending||challengePending',
+ 'if(connection==gatt && canMapTriggers() && triggerMapListener!=null)',
+ 'result.confirmsApplied(triggerMapBaseRevision,triggerMapExpected)',
  'triggerMapBusy',
  'NativeTriggerMappingCodec.decode(raw)',
  'triggerMapBaseRevision+1',
