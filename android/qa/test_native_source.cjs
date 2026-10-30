@@ -191,10 +191,35 @@ for(const required of ['project.previewZoneOffsets(id, n)',
 }
 assert(!layout.includes('ble.saveOutput(') && !layout.includes('ble.showFx('),
  'Local layout authoring must not persist or command physical outputs');
-for(const required of ['selections =', 'testing =', 'project.customTrigger(',
-  'project.deleteTrigger(', 'project.assignMany(', 'applyTriggerStyle()']) {
-  assert(triggers.includes(required),'Compose trigger regression: '+required);
+for(const required of ['var selections by remember', 'selections=if(selected) selections-name else selections+name',
+  'editing=true', 'fun applyTriggerStyle(): Boolean',
+  'project.styleTriggers(selections, chosenFx, chosenColor)',
+  'project.customTrigger(newTrigger)', 'project.deleteTrigger(name)',
+  'project.assignMany(selections, zoneId, !checked)', 'Pill("Edit "+selections.size+" selected Triggers"',
+  'chosenFx=fx.name', 'chosenColor = it.take(7)',
+  'CoreTriggerMappingPage(t)']) {
+  assert(triggers.includes(required),'Editable Compose triggers regressed: '+required);
 }
+assert(triggers.includes('contentDescription = "Delete custom trigger"') &&
+       triggers.includes('val canDelete = selections.size == 1') &&
+       triggers.includes('project.trigger(selections.first()).optString("kind") == "trigger-custom"') &&
+       triggers.includes('Delete custom trigger?') &&
+       !triggers.includes('▷ Test') && !triggers.includes('■ Stop') &&
+       !triggers.includes('var testing by remember'),
+       'Triggers must retain universal edits and safe custom deletion but move developer testing to Settings');
+const settings=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
+  .split('private fun HardwareOutputEditor(')[0];
+assert(settings.includes('Developer · Trigger Testing') &&
+       settings.includes('var simulatedTriggers by remember') &&
+       settings.includes('defaults.chunked(2).forEach') &&
+       settings.includes('Clear test states') &&
+       settings.includes('Local simulation only') &&
+       !settings.includes('ble.simulate'),
+       'Developer-only trigger testing belongs in Settings and must not touch physical GPIO');
+assert(model.includes('.put("zones", new JSONArray())') &&
+       model.includes('"Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse"') &&
+       model.includes('!"trigger-custom".equals(p.optString("kind"))'),
+       'Universal trigger defaults must remain unassigned and undeletable');
 assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
 for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Sequences", "Presets")',
   'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
