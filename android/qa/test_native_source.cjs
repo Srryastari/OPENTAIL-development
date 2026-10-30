@@ -379,10 +379,11 @@ assert(connectBlock &&
 
 // A retired scan's delayed timeout must not cancel a new scan. A queued
 // scan result must never reopen GATT after scan stop or Activity shutdown.
-assert(bleSource.includes('private int scanGeneration=0;') &&
+assert(bleSource.includes('private volatile int scanGeneration=0;') &&
        bleSource.includes('final int scanLease=++scanGeneration;') &&
        bleSource.includes('if (!scanning || scanGeneration!=scanLease || stopped) return;') &&
-       bleSource.includes('if(stopped || !scanning)return;') &&
+       bleSource.includes('if(stopped || !scanning || scanGeneration!=scanLease)return;') &&
+       (bleSource.match(/final int scanLease=scanGeneration;/g)||[]).length === 2 &&
        bleSource.includes('scanning = false;\n        scanGeneration++;'),
        'BLE scan generations and shutdown must invalidate deferred callbacks');
 
