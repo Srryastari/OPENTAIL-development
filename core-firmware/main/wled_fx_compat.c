@@ -1537,6 +1537,10 @@ static void stream2_frame(const ot_wled_fx_config_t *cfg,
 
 /* FX.cpp mode_lightning() adapted without modifying vehicle-trigger
  * arbitration; this effect only colors its caller-owned zone framebuffer. */
+/* WLED Segment::color_from_palette(palette=0) uses color_fade(video=true),
+ * not ordinary linear RGB scaling. Shared with Fairy/Colorwaves. */
+static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
+
 static void lightning_frame(const ot_wled_fx_config_t *cfg,
                             ot_wled_fx_state_t *state,uint32_t now,
                             ot_wled_rgb_t *pixels,size_t count) {
@@ -1554,7 +1558,7 @@ static void lightning_frame(const ot_wled_fx_config_t *cfg,
     for(size_t i=0;i<count;i++)pixels[i]=bg;
     if(state->aux1>3u && !(state->aux1&1u)) {
         const ot_wled_rgb_t color=scaled(
-             scaled(cfg->foreground,bri),cfg->brightness);
+             fx_video_fade(cfg->foreground,bri),cfg->brightness);
         for(size_t i=ledstart;i<ledstart+ledlen;i++)pixels[i]=color;
         state->aux1--;
         state->step=now;
@@ -1661,9 +1665,6 @@ static void fire_flicker_frame(const ot_wled_fx_config_t *cfg,
 /* Pinned FX.cpp mode_wavesins(), palette=0 direct foreground.
  * WLED's index modulation is ignored by the source itself when palette=0:
  * the pixel receives SEGCOLOR(0) at the sin8_t brightness. */
-/* WLED Segment::color_from_palette(palette=0) uses color_fade(video=true),
- * not ordinary linear RGB scaling. Shared with Fairy/Colorwaves. */
-static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
 static void wavesins_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                            ot_wled_rgb_t *pixels,size_t count) {
     for(size_t i=0;i<count;i++) {
@@ -1735,7 +1736,7 @@ static void plasma_frame(const ot_wled_fx_config_t *cfg,
         const uint8_t wave2=fx_cos8((uint8_t)(i*(1u+2u*frequency)+phase2));
         const unsigned index=(unsigned)wave1/2u+(unsigned)wave2/2u;
         const uint8_t brightness=(uint8_t)(index>threshold?index-threshold:0u);
-        pixels[i]=scaled(scaled(cfg->foreground,brightness),cfg->brightness);
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,brightness),cfg->brightness);
     }
 }
 /* Pinned FX.cpp mode_oscillate(), including signed two's-complement
