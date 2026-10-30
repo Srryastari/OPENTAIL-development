@@ -33,6 +33,16 @@ int main(void){
     ot_fps_pacer_observe(&p,2000000u,65535u);
     assert(p.target_fps==1u);
     assert(ot_fps_pacer_period_us(&p)==1000000u);
+    /* 30ms fixed task timeouts truncated long adaptive frame waits.
+     * Delays convert with a ceiling at BOTH typical RTOS tick rates. */
+    assert(ot_fps_pacer_wait_ticks(0u,100u)==0u);
+    assert(ot_fps_pacer_wait_ticks(1000u,0u)==0u);
+    assert(ot_fps_pacer_wait_ticks(500u,100u)==2u);
+    assert(ot_fps_pacer_wait_ticks(30000u,100u)==4u);
+    assert(ot_fps_pacer_wait_ticks(75000u,100u)==9u);
+    assert(ot_fps_pacer_wait_ticks(1000000u,100u)==101u);
+    assert(ot_fps_pacer_wait_ticks(33333u,1000u)==35u);
+    assert(ot_fps_pacer_wait_ticks(1000000u,1000u)==1001u);
     printf("Adaptive FPS pacer tests passed: preferred 53..120, truthful overload fallback, no bench defaults\n");
     return 0;
 }
