@@ -5764,6 +5764,67 @@ int main() {
                                   "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u frame_ms=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
                                   fx.id,fx.name,(unsigned)pal,color_case,frame_time_ms,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
+                                /* On long segments, identify whether the
+                                 * first divergence is RNG/state or RGB math.
+                                 * Diagnostics never alter source/CORE frames. */
+                                if(fx.id==74u && state.scratch) {
+                                    const size_t flags=(count+7u)/8u;
+                                    if(state.scratch_bytes>=flags+count*3u &&
+                                       env.data && i<count) {
+                                        const uint8_t ref_bit=
+                                          (env.data[i>>3]>>(i&7u))&1u;
+                                        const uint8_t core_bit=
+                                          (state.scratch[i>>3]>>(i&7u))&1u;
+                                        const auto raw=state.scratch+flags+i*3u;
+                                        std::fprintf(stderr,
+                                          "Colortwinkles state pixel=%zu upflag=%u coreflag=%u coreRaw=%02X%02X%02X coreStep=%u refStep=%u refRNG=%08X coreRNG=%08X\\n",
+                                          i,(unsigned)ref_bit,(unsigned)core_bit,
+                                          raw[0],raw[1],raw[2],
+                                          (unsigned)state.step,(unsigned)env.step,
+                                          (unsigned)ref_rng_state,(unsigned)state.rng_state);
+                                    }
+                                }
+                                if((fx.id==79u || fx.id==99u) &&
+                                   env.data && state.scratch) {
+                                    const size_t ripples=std::min(
+                                      1u+count/4u,(size_t)100u);
+                                    struct DebugRipple {
+                                        uint8_t phase,color;uint16_t pos;
+                                    };
+                                    if(state.scratch_bytes>=
+                                         ripples*sizeof(DebugRipple)) {
+                                        const auto *refR=
+                                          reinterpret_cast<const DebugRipple*>(env.data);
+                                        const auto *coreR=
+                                          reinterpret_cast<const DebugRipple*>(state.scratch);
+                                        unsigned first=ripples;
+                                        for(unsigned j=0;j<ripples;j++)
+                                            if(refR[j].phase!=coreR[j].phase ||
+                                               refR[j].color!=coreR[j].color ||
+                                               refR[j].pos!=coreR[j].pos) {
+                                                first=j;break;
+                                            }
+                                        std::fprintf(stderr,
+                                          "Ripple state firstDifference=%u/%zu refRNG=%08X coreRNG=%08X refAux=%u,%u coreAux=%u,%u\\n",
+                                          first,ripples,(unsigned)ref_rng_state,
+                                          (unsigned)state.rng_state,
+                                          (unsigned)env.aux0,(unsigned)env.aux1,
+                                          (unsigned)state.aux0,(unsigned)state.aux1);
+                                        for(unsigned j=0;j<ripples;j++) {
+                                            if(refR[j].phase && refR[j].pos+4u>=i &&
+                                               refR[j].pos<=i+4u) {
+                                                std::fprintf(stderr,
+                                                  "Ripple near pixel source wave[%u]=%u,%u,%u core=%u,%u,%u\\n",
+                                                  j,(unsigned)refR[j].phase,
+                                                  (unsigned)refR[j].pos,
+                                                  (unsigned)refR[j].color,
+                                                  (unsigned)coreR[j].phase,
+                                                  (unsigned)coreR[j].pos,
+                                                  (unsigned)coreR[j].color);
+                                            }
+                                        }
+                                    }
+                                }
                                 mismatch_reported=true;
                                 mismatched_modes++;
                             }
