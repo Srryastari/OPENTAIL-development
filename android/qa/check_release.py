@@ -123,7 +123,7 @@ check("Compose has full two-output draft editing without unsaved hardware mutati
       and 'ble.saveOutput(index, draftText)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
-          "Repeat", "Edit time", "project.sequenceOptions()", "project.save()"))
+          "Repeat", "Edit time", "project.sequenceOptions()", "project.styleTriggers("))
       and 'new Effect(32787, "Singularity Shutdown")' in effect)
 check("Universal live-edit contract and bounded transient CORE FX preview",
       subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],
