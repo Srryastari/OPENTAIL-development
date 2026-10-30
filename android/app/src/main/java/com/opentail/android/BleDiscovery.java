@@ -169,7 +169,8 @@ final class BleDiscovery {
         triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
         notifyStatus("Trigger map write could not start");pumpQueue();return false;
     }
-    private void triggerMapRead(byte[] raw,int status){
+    private void triggerMapRead(BluetoothGatt connection,byte[] raw,int status){
+        if(connection!=gatt || !triggerMapBusy || !canMapTriggers())return;
         boolean verifying=triggerMapSavePending;
         triggerMapBusy=false;triggerMapSavePending=false;
         NativeTriggerMappingCodec.Snapshot result=null;
@@ -201,6 +202,7 @@ final class BleDiscovery {
     }
     @SuppressWarnings("MissingPermission")
     private void triggerMapWritten(BluetoothGatt connection,int status){
+        if(connection!=gatt || !triggerMapBusy || !canMapTriggers())return;
         if(status!=BluetoothGatt.GATT_SUCCESS){
             triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
             notifyStatus("CORE trigger mapping ATT write failed ("+status+")");pumpQueue();return;
@@ -792,7 +794,7 @@ final class BleDiscovery {
             if (FRAME_RSP_UUID.equals(characteristic.getUuid())) { frameCapture.read(connection,value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
-            if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(value,status);return;}
+            if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE connected · " + new String(value, StandardCharsets.UTF_8));
                 if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
@@ -813,7 +815,7 @@ final class BleDiscovery {
                     acceptReply(characteristic.getValue(),status);return;
                 }
                 if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
-                if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(characteristic.getValue(),status);return;}
+                if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                     byte[] value = characteristic.getValue();
                     notifyStatus("BLE connected · " + new String(value == null ? new byte[0] : value, StandardCharsets.UTF_8));
