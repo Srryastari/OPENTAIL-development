@@ -272,17 +272,19 @@ final class BleDiscovery {
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
-    void saveOutput(int index,String json){
-        if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
-        if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return;}
+    /** Returns true when an output save enters the GATT transaction; only readback proves application. */
+    boolean saveOutput(int index,String json){
+        if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
+        if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
-        catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return;}
+        catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
         cfgExpected=Arrays.copyOf(cfgBytes,cfgBytes.length);
         cfgBusy=true;cfgSaving=true;cfgIndex=index;cfgPhase=3;cfgOffset=0;
         cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];
         cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
                 (byte)cfgCrc,(byte)(cfgCrc>>8),(byte)cfgRevision,(byte)(cfgRevision>>8)});
+        return true;
     }
     private void cfgNotify(boolean ok,String message,org.json.JSONObject output,int index){
         if(configListener==null)return;
