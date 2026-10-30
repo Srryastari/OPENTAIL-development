@@ -5681,9 +5681,9 @@ int main() {
                      * and saturated channel paths that the original warm
                      * foreground / blue background cannot cover. */
                     for(unsigned color_case=0u;color_case<2u;color_case++) {
-                    /* Compare distinct source render cadence, keeping the
-                     * production default 23ms and a slower 42ms frame. */
-                    for(unsigned frame_time_ms:{23u,42u}) {
+                    /* Compare 8ms high-FPS, 23ms reference, and slower 42ms
+                     * source render cadences without bypassing any test. */
+                    for(unsigned frame_time_ms:{8u,23u,42u}) {
                     source_frame_time_ms=(uint16_t)frame_time_ms;
                     const uint32_t fg=color_case?0x00ff0000u:0x007b3809u;
                     const uint32_t bg=color_case?0x00000000u:0x000358aeu;
