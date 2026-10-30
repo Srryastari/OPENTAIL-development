@@ -22,6 +22,12 @@ assert "!palette_resolved(req->palette_id)" in core
 assert "bool ot_ble_palette_in_use(uint8_t index)" in core
 assert "ot_palette_id_to_index" in profile
 assert "ot_palette_record_is_tombstone" in profile
+# A valid CRC alone does not authorize a record from a DIFFERENT NVS slot:
+# wrong-index tombstones must not advance/rewrite another palette revision.
+load=runtime.split("void ot_palette_runtime_load(void){",1)[1].split(
+    "bool ot_palette_runtime_get(",1)[0]
+assert "if(record.index!=i){" in load
+assert load.index("if(record.index!=i){") < load.index("if(ot_palette_record_is_tombstone(&record))")
 assert "candidate.crc=record_crc(&candidate)" in profile
 assert 'nvs_open("ot_palettes",NVS_READWRITE' in runtime
 assert runtime.index("nvs_commit_record(record)") < runtime.index("palette_bank[record->index]=next;")
