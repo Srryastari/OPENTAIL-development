@@ -173,7 +173,7 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.busy()') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
-assert(gradle.includes("versionName '0.2.0-alpha2'"));
+assert(gradle.includes("versionName '0.2.0-alpha3'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
@@ -357,12 +357,21 @@ assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
        'Repeated authorization must not overlap active ATT operations or waiting STOP');
 
+// The shipped BLE flow must require no Wi-Fi permission or bootstrap.
+assert(!manifest.includes('android.permission.INTERNET') &&
+       !manifest.includes('android.permission.ACCESS_NETWORK_STATE') &&
+       !fs.existsSync('android/app/src/main/java/com/opentail/android/BenchWifiSessionAuth.java') &&
+       !fs.existsSync('android/app/src/main/res/xml/bench_network_security.xml') &&
+       bleSource.includes('BleFxCapabilities.decode(raw)') &&
+       compose.includes('ble.tryReconnect(it)'),
+       'Bluetooth-only CORE discovery, owner reconnect and full FX capability path');
+
 // A capability-read GATT rejection must release a STOP queued during the
 // read. Successful reads already pump the queue through fxRead().
 const capsStart=bleSource.split('void readFxCapabilities(){')[1]?.split('private void fxNotify')[0];
 assert(capsStart && capsStart.includes('fxCapsBusy=false;fxNotify("[]");pumpQueue();') &&
        capsStart.includes('catch(SecurityException ex){') &&
-       bleSource.includes('fxNotify(ids.append(\']\').toString());pumpQueue();'),
+       bleSource.includes('fxNotify(BleFxCapabilities.decode(raw));'),
        'Failed capability-read admission must not strand a queued STOP');
 
 // A rejected optional CORE info read must not strand auto-auth. Normal

@@ -240,6 +240,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPreferredListener { address ->
+            runOnUiThread { prefs.edit().putString("preferred_ble_address", address).apply() }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -288,6 +291,14 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         ble.handlePermissions(requestCode, grantResults)
+    }
+    override fun onStart() {
+        super.onStart()
+        if (!ble.isConnected()) {
+            prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
+        } else if (!ble.canControl()) {
+            ble.authorizeOrPair()
+        }
     }
     override fun onStop() {
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding

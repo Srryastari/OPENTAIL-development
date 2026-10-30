@@ -301,13 +301,12 @@ final class BleDiscovery {
         fxCapsBusy=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
         int n=raw[1]&255;
-        if(n>127||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
-        StringBuilder ids=new StringBuilder("[");
-        for(int i=0;i<n;i++){
-            if(i>0)ids.append(',');
-            ids.append((raw[2+i*2]&255)|((raw[3+i*2]&255)<<8));
+        try {fxNotify(BleFxCapabilities.decode(raw));}
+        catch(IllegalArgumentException ex){
+            notifyStatus("CORE effect catalog invalid: "+ex.getMessage());
+            fxNotify("[]");
         }
-        fxNotify(ids.append(']').toString());pumpQueue();
+        pumpQueue();
     }
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
@@ -825,6 +824,17 @@ final class BleDiscovery {
                     labels.add(name + "  •  " + address);
                     entries.notifyDataSetChanged();
                     if(composeScanResults!=null)composeScanResults.onFound(address,name);
+                    // Prefer a single-tap BLE connect on a bench with exactly one
+                    // controller; retain manual selection for multiple devices.
+                    if(headlessScan && preferredPending==null && found.size()==1){
+                        ui.postDelayed(()->{
+                            if(stopped || !scanning || scanGeneration!=scanLease ||
+                               connecting || connected || found.size()!=1)return;
+                            BluetoothDevice sole=found.values().iterator().next();
+                            stopScan();
+                            connectReadOnly(sole);
+                        },1800L);
+                    }
                 }
                 if (preferredPending != null && preferredPending.equalsIgnoreCase(address)) {
                     preferredPending = null;
