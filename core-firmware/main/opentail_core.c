@@ -567,33 +567,48 @@ static esp_err_t tm_get(httpd_req_t *r){
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
-    cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION);
-    cJSON_AddNumberToObject(root,"config_revision",config_revision);
-    cJSON_AddBoolToObject(root,"saved_on_device",saved);
-    cJSON_AddBoolToObject(root,"config_apply_pending",pending);
-    cJSON_AddBoolToObject(root,"bench_only",true);
-    cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
-    cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0);
-    /* Backward compatibility: raw_input_mask historically meant DEBOUNCED
-     * physical inputs. Report instantaneous normalized pins separately. */
-    cJSON_AddNumberToObject(root,"raw_input_mask",physical);
-    cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask());
-    cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical));
-    cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim);
+    /* An incomplete trigger map must never be acknowledged as HTTP 200. */
+    if(!cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION) ||
+       !cJSON_AddNumberToObject(root,"config_revision",config_revision) ||
+       !cJSON_AddBoolToObject(root,"saved_on_device",saved) ||
+       !cJSON_AddBoolToObject(root,"config_apply_pending",pending) ||
+       !cJSON_AddBoolToObject(root,"bench_only",true) ||
+       !cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT) ||
+       !cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0) ||
+       /* Backward compatibility: raw_input_mask means DEBOUNCED physical
+        * inputs. Normalized instantaneous GPIO levels are separate. */
+       !cJSON_AddNumberToObject(root,"raw_input_mask",physical) ||
+       !cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask()) ||
+       !cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical)) ||
+       !cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim))
+        goto oom;
     cJSON *supported=cJSON_AddArrayToObject(root,"supported_functions");
-    for(int k=0;k<=OT_TM_AUX3;k++)cJSON_AddItemToArray(supported,cJSON_CreateString(ot_tm_name(k)));
+    if(!supported)goto oom;
+    for(int k=0;k<=OT_TM_AUX3;k++){
+        cJSON *name=cJSON_CreateString(ot_tm_name(k));
+        if(!name)goto oom;
+        if(!cJSON_AddItemToArray(supported,name)){cJSON_Delete(name);goto oom;}
+    }
     cJSON *arr=cJSON_AddArrayToObject(root,"inputs");
+    if(!arr)goto oom;
     for(int i=0;i<OT_IN_COUNT;i++){
         cJSON *v=cJSON_CreateObject();
-        cJSON_AddNumberToObject(v,"index",i+1);
-        cJSON_AddNumberToObject(v,"gpio",(int)input_pin[i]);
-        cJSON_AddStringToObject(v,"function",ot_tm_name(cfg.function[i]));
-        cJSON_AddBoolToObject(v,"active",(physical&(1u<<i))!=0);
-        cJSON_AddItemToArray(arr,v);
+        if(!v)goto oom;
+        if(!cJSON_AddNumberToObject(v,"index",i+1) ||
+           !cJSON_AddNumberToObject(v,"gpio",(int)input_pin[i]) ||
+           !cJSON_AddStringToObject(v,"function",ot_tm_name(cfg.function[i])) ||
+           !cJSON_AddBoolToObject(v,"active",(physical&(1u<<i))!=0)){
+            cJSON_Delete(v);goto oom;
+        }
+        if(!cJSON_AddItemToArray(arr,v)){cJSON_Delete(v);goto oom;}
     }
-    char *body=cJSON_PrintUnformatted(root);cJSON_Delete(root);
+    char *body=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     if(!body)return respond_err(r,500,"out of memory");
     esp_err_t ret=send_json(r,body);free(body);return ret;
+oom:
+    cJSON_Delete(root);
+    return respond_err(r,500,"out of memory");
 }
 static esp_err_t tm_post(httpd_req_t *r){
     cJSON *root=NULL;int status=recv_json(r,&root);
