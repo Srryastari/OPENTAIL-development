@@ -799,13 +799,9 @@ final class BleDiscovery {
                 connecting = false;
                 connected = true;
                 notifyStatus("BLE connected · negotiating MTU…");
-                try {
-                    mtuNegotiating=connection.requestMtu(247);
-                    if(!mtuNegotiating)connection.discoverServices();
-                } catch (SecurityException ex) {
-                    mtuNegotiating=false;
-                    connection.discoverServices();
-                }
+                try { mtuNegotiating=connection.requestMtu(247); }
+                catch (SecurityException ex) { mtuNegotiating=false; }
+                if(!mtuNegotiating) discoverCoreServices(connection);
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
@@ -822,7 +818,22 @@ final class BleDiscovery {
             if(mtuNegotiating){
                 mtuNegotiating=false;
                 notifyStatus("BLE MTU "+mtu+"; discovering services…");
-                connection.discoverServices();
+                discoverCoreServices(connection);
+            }
+        }
+
+        /** A rejected discovery call otherwise leaves the connection awaiting
+         * an event Android will never deliver. Keep the existing user retry
+         * path and never issue an overlapping second discovery.
+         */
+        @SuppressWarnings("MissingPermission")
+        private void discoverCoreServices(BluetoothGatt connection) {
+            if(stopped || connection!=gatt)return;
+            try {
+                if(!connection.discoverServices())
+                    notifyStatus("BLE service discovery could not start; reconnect CORE");
+            } catch(SecurityException ex) {
+                notifyStatus("Bluetooth permission missing for BLE service discovery");
             }
         }
 
