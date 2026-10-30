@@ -48,7 +48,7 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame.colorAt(first+i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'frame.colorAt(sample)', 'No invented animation:', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
@@ -64,8 +64,8 @@ assert(compose.includes('private fun CapsuleSlider(') &&
        'All editing controls should use the approved capsule slider and accessible pills');
 assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('verticalScroll(pageScroll)') &&
-       compose.includes('val window = total.coerceAtMost(visiblePixels)') &&
-       compose.includes('listOf(30, 60, 90)') &&
+       compose.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
+       compose.includes('val columns = 28') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
        compose.includes('Local trigger color swatch only. No simulated effect'),
@@ -529,13 +529,13 @@ assert(model.includes('synchronized boolean mapZoneToOutputSlot(') &&
        compose.includes('copy the linked zone into the physical draft') &&
        storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly'),
        'Bidirectional design zone/CORE physical output links must remain unique and saved locally');
-assert(compose.includes('Title("Live Lighting Preview",t)') &&
-       compose.includes('listOf(30, 60, 90)') &&
-       compose.includes('Color(frame.colorAt(first+i))') &&
-       compose.includes('val columns=30') &&
-       compose.includes('val rowPitch=size.height/3f') &&
-       compose.includes('Only CORE-captured RGB is labeled rendered.'),
-       'Show Modes preview must use the compact 3x30 indexed LED dots');
+const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+  .split('private fun ShowModesPage(')[0];
+assert(liveStrip.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
+       liveStrip.includes('drawRoundRect(') &&
+       liveStrip.includes('Color(frame.colorAt(sample))') &&
+       !/Title\\(|Caption\\(|Text\\(|Zoom|LED count|SIMULATED|status|drawCircle\\(/.test(liveStrip),
+       'Locked live preview: exactly three rows of unlabeled rounded LED capsules');
 
 // Imported trigger dictionaries may omit older built-in defaults, but they
 // must not contain malformed entries. A read must never persist new profiles.
