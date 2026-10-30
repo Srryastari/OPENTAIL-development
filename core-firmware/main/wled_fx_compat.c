@@ -372,6 +372,16 @@ void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
  * seconds/next-blend wrap, absolute transition window and per-frame blend
  * budget. The upstream generated palette is caller-supplied to avoid
  * changing the global WLED PRNG sequence or inventing random palettes. */
+bool ot_wled_palette_random_generation_due(
+    const ot_wled_palette_random_t *state,uint32_t now_ms,
+    uint16_t change_interval_s) {
+    if(!state)return false;
+    const uint16_t now_s=(uint16_t)(now_ms/1000u);
+    const uint16_t last=now_s<state->last_change_s?
+                        0u:state->last_change_s;
+    return (uint32_t)now_s>(uint32_t)last+change_interval_s;
+}
+
 bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
                                  uint32_t now_ms,uint16_t change_interval_s,
                                  uint16_t frame_time_ms,

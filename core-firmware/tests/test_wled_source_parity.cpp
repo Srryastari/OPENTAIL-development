@@ -5641,6 +5641,23 @@ static void certifyPaletteOneLifecycle() {
                    5000u,5001u,65530u,65535u,65536u,65540u,
                    100000u,65534000u,65535000u,65536000u,65537000u};
                 for(uint32_t now:times) {
+                    /* Random HSV/RNG may be consumed only at an upstream
+                     * regeneration event. A missing generated palette makes
+                     * the verified source-timing tick fail exactly when due. */
+                    const ot_wled_palette_random_t before_gate=live;
+                    const bool due=ot_wled_palette_random_generation_due(
+                        &live,now,2u);
+                    ot_wled_palette_random_t no_generator=live;
+                    const bool no_generator_ok=ot_wled_palette_random_tick(
+                        &no_generator,now,2u,(uint16_t)frame,
+                        (uint16_t)transition,nullptr);
+                    if(due==no_generator_ok ||
+                       std::memcmp(&before_gate,&live,sizeof(live))!=0){
+                        std::fprintf(stderr,
+                          "Global random palette due gate disagrees with source timing at %u ms\\n",
+                          (unsigned)now);
+                        std::abort();
+                    }
                     const bool ok=ot_wled_palette_random_tick(
                         &live,now,2u,(uint16_t)frame,(uint16_t)transition,&target);
                     SourcePalette48 generated{};
@@ -5671,6 +5688,8 @@ static void certifyPaletteOneLifecycle() {
             }
         }
     }
+    if(ot_wled_palette_random_generation_due(nullptr,7000000u,2u))
+        {std::fprintf(stderr,"Null global palette source accepted\\n");std::abort();}
     std::printf("WLED palette-1 source blend and shared lifecycle parity passed: %u RGB bytes + %u schedule/state bytes checked.\\n",
                 blendSamples,tickSamples);
 }
