@@ -37,6 +37,7 @@
 #include "palette_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
+#include "config_journal.h"
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
@@ -82,6 +83,11 @@ static void request_render_refresh(void){
 /* Latches successful physical GPIO setup and sampler task creation before
  * BLE/HTTP configuration endpoints start accepting durable mapping writes. */
 static bool input_sampler_ready=false;
+/* GPIO any-edge ISR records transitions even during a slow NVS write.
+ * A quiet debounced window + unchanged epoch is required to promote. */
+static volatile uint32_t input_edge_epoch=0u;
+static uint8_t input_quiet_samples=0u;
+static bool config_recovery_fault=false;
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -137,13 +143,45 @@ static void tm_load(void){
         stored.magic==OT_TM_MAGIC && stored.version==OT_TM_VERSION && ot_tm_valid(&stored.profile);
     if(tm_persistent)tm_profile=stored.profile;
     else ESP_LOGI(TAG,"No valid trigger profile; preserving original IN1..IN8 defaults");
+    /* Pending always wins at boot, even if power failed AFTER writing the
+     * future active key. Its previous image is the only safe old routing. */
+}
+static void tm_journal_load(void){
+    nvs_handle_t h;
+    esp_err_t e=nvs_open("ot_trig_cfg",NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return;
+    if(e!=ESP_OK){config_recovery_fault=true;return;}
+    ot_tm_journal_t active={0},stage={0};
+    size_t n=sizeof(active);
+    esp_err_t a=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active,&n);
+    bool has_a=a==ESP_OK;
+    if(has_a&&n!=sizeof(active))config_recovery_fault=true;
+    else if(a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    n=sizeof(stage);
+    esp_err_t b=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n);
+    bool has_b=b==ESP_OK;
+    if(has_b&&n!=sizeof(stage))config_recovery_fault=true;
+    else if(b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    nvs_close(h);
+    if(!config_recovery_fault&&!ot_tm_journal_recover(
+        has_a?&active:NULL,has_b?&stage:NULL,&tm_profile,&tm_deferred))
+        config_recovery_fault=true;
+    if(config_recovery_fault){ot_tm_defaults(&tm_profile);tm_persistent=false;return;}
+    if(has_a||has_b)tm_persistent=true;
 }
 static bool tm_save(const ot_tm_profile_t *p){
     if(!ot_tm_valid(p))return false;
-    ot_tm_store_t stored={.magic=OT_TM_MAGIC,.version=OT_TM_VERSION,.profile=*p};
+    ot_tm_profile_t old;
+    portENTER_CRITICAL(&state_lock);
+    old=tm_profile;
+    portEXIT_CRITICAL(&state_lock);
+    ot_tm_journal_t staged={0};
+    if(!ot_tm_journal_build(&staged,&old,p))return false;
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"profile_v1",&stored,sizeof(stored));
+    /* Stage candidate separately. Never overwrite the live active key
+     * before GPIO-qualified promotion; preserve v1 compatibility key. */
+    esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
@@ -223,12 +261,39 @@ static void om_load(void){
         ESP_LOGW(TAG,"No valid output profile; restored neutral unconfigured mapping");
     }
 }
+static void om_journal_load(void){
+    nvs_handle_t h;
+    esp_err_t e=nvs_open("ot_output_cfg",NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return;
+    if(e!=ESP_OK){config_recovery_fault=true;return;}
+    ot_om_journal_t active={0},stage={0};
+    size_t n=sizeof(active);
+    esp_err_t a=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active,&n);
+    bool has_a=a==ESP_OK;
+    if(has_a&&n!=sizeof(active))config_recovery_fault=true;
+    else if(a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    n=sizeof(stage);
+    esp_err_t b=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n);
+    bool has_b=b==ESP_OK;
+    if(has_b&&n!=sizeof(stage))config_recovery_fault=true;
+    else if(b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    nvs_close(h);
+    if(!config_recovery_fault&&!ot_om_journal_recover(
+        has_a?&active:NULL,has_b?&stage:NULL,om_outputs,&om_deferred))
+        config_recovery_fault=true;
+    if(config_recovery_fault){ot_om_defaults(om_outputs);om_persistent=false;return;}
+    if(has_a||has_b)om_persistent=true;
+}
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
-    ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
-    memcpy(stored.outputs,items,sizeof(stored.outputs));
+    ot_om_output_t old[OT_OM_OUTPUTS];
+    portENTER_CRITICAL(&state_lock);
+    memcpy(old,om_outputs,sizeof(old));
+    portEXIT_CRITICAL(&state_lock);
+    ot_om_journal_t staged={0};
+    if(!ot_om_journal_build(&staged,old,items))return false;
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"profile_v2",&stored,sizeof(stored));
+    esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
@@ -447,10 +512,9 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
-    const uint8_t pins_after=tm_gpio_input_mask();
     portENTER_CRITICAL(&state_lock);
-    (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
-                            pins_after,live_input_mask);
+    memcpy(om_deferred.outputs,next_all,sizeof(next_all));
+    om_deferred.pending=true;
     om_persistent=true;om_revision[index]++;
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
@@ -486,10 +550,9 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
-            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
-                                    pins_after,live_input_mask);
+            memcpy(om_deferred.outputs,next_all,sizeof(next_all));
+            om_deferred.pending=true;
             om_persistent=true;om_revision[index]++;
             portEXIT_CRITICAL(&state_lock);
         }
@@ -533,12 +596,11 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     if(!code){
         if(!tm_save(next))code=4;
         else {
-            /* NVS is durable, but an input may have asserted while it was
-             * writing. Preserve its OLD mapping until fully released. */
-            const uint8_t pins_after=tm_gpio_input_mask();
+            /* Durable staging never changes the active physical role map.
+             * The promoter persists and validates the active generation. */
             portENTER_CRITICAL(&state_lock);
-            (void)ot_tm_saved_apply(&tm_profile,&tm_deferred,next,
-                                    pins_after,live_input_mask);
+            tm_deferred.profile=*next;
+            tm_deferred.pending=true;
             tm_persistent=true;
             tm_revision++;
             portEXIT_CRITICAL(&state_lock);
@@ -1575,12 +1637,11 @@ static void input_sampler_task(void *arg){
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
-        /* This is the only deferred activation point. Do not swap mappings
-         * while either a raw pin or its settled level is asserted. */
-        if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
-                                   instantaneous,physical))target=render_task_handle;
-        if(ot_om_apply_if_released(om_outputs,&om_deferred,
-                                   instantaneous,physical))target=render_task_handle;
+        /* Sampler never writes NVS or swaps a journaled profile. Physical
+         * edges reset the independent quiet-window gate for the promoter. */
+        if(instantaneous==0u && physical==0u){
+            if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
+        }else input_quiet_samples=0u;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
@@ -1948,15 +2009,18 @@ void app_main(void) {
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
     om_load();
     tm_load();
+    om_journal_load();
+    tm_journal_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
-    const bool inputs_ready=input_init();
+    if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
+    const bool inputs_ready=!config_recovery_fault&&input_init();
     if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
     const bool sampler_ready=inputs_ready &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
     if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
     input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
-    bool outputs_ready=sampler_ready&&strip_init();
+    bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
     const bool wifi_started=wifi_ap_init();
     if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
