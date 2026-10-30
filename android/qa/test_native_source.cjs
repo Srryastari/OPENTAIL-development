@@ -294,6 +294,23 @@ assert(bleSource.includes('if(cfgSaving && index>=0 && index<cfgKnownRevision.le
        bleSource.includes('cfgBusy=false;cfgSaving=false;cfgWaitingWrite=false;'),
        'Failed output save must invalidate cached firmware revision before retry');
 
+// When ATT cannot start a STOP, or its write/readback fails, deferred FX
+// must not restart the show. An earlier FX failure may still drain a STOP.
+for (const guard of [
+  'private void discardFollowingFxIfStopFailed()',
+  'if (isStopPacket(pendingPacket)) {',
+  'nextPacket=null;',
+  'afterStopPacket=null;',
+  'ui.post(this::pumpQueue);',
+  'if(!ok)commandWriteStartFailed("BLE write could not start")',
+  'catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}',
+  'if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();'
+]) assert(bleSource.includes(guard), 'Failed STOP may release deferred FX: '+guard);
+const stopFailureBlock=bleSource.split('void onCharacteristicWrite(')[1]?.split('private Runnable thisAutoAuth')[0];
+assert(stopFailureBlock &&
+       (stopFailureBlock.match(/discardFollowingFxIfStopFailed\(\)/g)||[]).length >= 4,
+       'Failed write and readback paths must not release deferred FX following STOP');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
