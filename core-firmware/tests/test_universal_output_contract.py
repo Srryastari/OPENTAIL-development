@@ -74,6 +74,19 @@ assert done_idx < refresh_idx
 assert "if(e!=ESP_OK){" in render[done_idx:refresh_idx]
 assert "continue;" in render[done_idx:refresh_idx]
 assert "output_refreshes[ch]++" not in render.split("esp_err_t e=led_strip_refresh_async(strip[ch]);",1)[1].split("esp_err_t e=led_strip_refresh_async_done(strip[ch]);",1)[0]
+# Pacing must account for only actually completed physical RMT lanes.
+# A failed large output must never throttle good small lanes or their trigger updates.
+assert "uint16_t longest_pixels=0; /* Only successfully refreshed RMT lanes. */" in render
+success=render.split("esp_err_t e=led_strip_refresh_async_done(strip[ch]);",1)[1].split(
+    "const bool full_frame=ot_frame_all_submitted(",1
+)[0]
+assert success.index("if(e!=ESP_OK){") < success.index("continue;") < success.index(
+    "if(local_outputs[ch].active_pixels>longest_pixels)"
+)
+assert "longest_pixels=local_outputs[ch].active_pixels;" in success
+assert "ot_fps_pacer_observe(&pacer,work_us,longest_pixels)" in render
+after_work=render.split("int64_t work_elapsed=esp_timer_get_time()-frame_started_us;",1)[1]
+assert "if(local_outputs[ch].active_pixels>longest_pixels)" not in after_work
 assert "ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)" in core
 assert "if(!native_rendering && full_frame)" in core
 assert "if(full_frame)frame_window_frames++" in core
