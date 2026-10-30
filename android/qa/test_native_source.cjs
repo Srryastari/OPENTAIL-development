@@ -257,6 +257,16 @@ const buildFile=fs.readFileSync('android/app/build.gradle','utf8');
 assert(buildFile.includes("testImplementation 'org.json:json:20240303'"),
   'Native project failure-injection tests require executable JSONObject implementation');
 
+// GATT callback ownership must be checked on both modern/legacy Android
+// callback overloads. A retired controller must not erase live new-device
+// state, reuse FX capabilities, or deliver old authorization/config replies.
+assert(bleSource.includes('if (stopped || connection != gatt) {') &&
+       (bleSource.match(/if\(stopped \|\| connection!=gatt\)return;/g)||[]).length === 5 &&
+       bleSource.includes('final BluetoothGatt owner=gatt;') &&
+       bleSource.includes('if(owner==gatt && fxCapabilitiesListener!=null)') &&
+       bleSource.includes('fxCapabilitiesListener.accept(connected && authorized ? json : "[]");'),
+       'BLE must drop stale disconnected-controller GATT callbacks and capabilities');
+
 // Trigger-team contract V1 is optional on older CORE. Android may edit a
 // physical IN1–IN8 map only after owner auth, explicit Save, readback and
 // revision/mapping verification. No speculative GPIO hardcoding or writes.
