@@ -43,6 +43,14 @@ for token in ("esp_ota_begin(", "esp_ota_write(", "esp_ota_end(",
               "X-OpenTail-Update", "Origin", "192.168.4.1",
               "esp_ota_get_partition_description(", "ot_ota_available()"):
     assert token in ota,token
+# A same-version development candidate is valid if its actual image differs.
+# Conversely, an identical ELF must not be installed under another label.
+# This is a source-level guard; ESP-IDF compilation and physical OTA remain separate.
+assert "const esp_app_desc_t *installed=esp_app_get_description();" in ota
+assert "memcmp(desc.app_elf_sha256,installed->app_elf_sha256," in ota
+assert "sizeof(desc.app_elf_sha256))==0" in ota
+assert "strncmp(desc.version,OT_FW_VERSION" not in ota
+assert ota.index("memcmp(desc.app_elf_sha256,installed->app_elf_sha256,") < ota.index("esp_ota_set_boot_partition(update)")
 assert '.uri="/api/v1/ota"' in core
 for token in ('id="otaFile"', 'id="otaSend"', 'id="otaStatus"',
               'async function otaCheck()', 'async function otaSend()',
