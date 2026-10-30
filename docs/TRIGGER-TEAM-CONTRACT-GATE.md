@@ -64,6 +64,18 @@ The pinned heads in the table preserve the **historical source-audit snapshot**,
 
 **Staging sequence, without authorizing merge:** effects owners reconcile #23 + #22 first; firmware owner produces a pinned cross-team candidate using **only** trigger hunks above; trigger owner reviews against this list, the locked release contract and active Android readback; only then run software verification on the pinned image; perform physical checks only after 100% owner contract agreement. Do not create a release merely by merging stacked histories.
 
+## Current trigger/CORE code checkpoint — 2026-10-29 CDT
+
+**Trigger-only source on active PR #24:** `1fef06cf172911a3e87c619ca45b18456224f70c`, a normal two-parent merge of prior trigger head `e042e782` and firmware PR #19 `8fa0204b`. No force-push, no unrelated PR merges, no flashing or physical tests. GitHub compared this branch at **0 commits behind** the pinned firmware base, mergeable and draft; subsequent firmware head movement requires another scope review.
+
+**Start-to-render responsiveness:** firmware-owned successful HTTP Show start, authenticated BLE Show/FX start and saved-preset playback wake the render task only after `state_lock` release, and rejected/not-ready requests do not wake. Trigger-owned accepted HTTP demo and logical input `/simulate` updates also call the same helper (including an empty mask to clear simulation). The independent physical input sampler, final role-local overlay, and hardware RMT writer are untouched.
+
+**Revoked-session isolation:** newer firmware #19 auth logic clears temporary previews and stale output/frame replies on transition from authorized to unauthorized. The trigger GATT integration also clears `trigger_last_status` on that transition. The mapping characteristic still requires the active owner connection and authorization for read/write; a rejected second central is not permitted to clear owner session state or real input sampling. This is **source/host-level assurance, not a real-phone radio result**.
+
+**CI evidence:** trigger regression workflow [40994188042](https://github.com/Srryastari/OPENTAIL-development/actions/runs/40994188042) **PASSED** on implementation head `1fef06cf`. Full active-source workflow [40994188129](https://github.com/Srryastari/OPENTAIL-development/actions/runs/40994188129) pending at checkpoint; do not call it passed before completion. Release-evidence gate remains intentionally blocking for absent optical/electrical acceptance and incomplete combined effects provenance.
+
+**Still blocked:** source reconciliation of Effects/overlay #26 with current firmware/trigger; Android output BLE v2 durable-vs-active deferred readback agreement; pending mapping reboot-under-held-input safety; documented 22 physical release checks. All workstream owners must sign off on one exact combined SHA **before any physical tests**.
+
 ## Latest scoped cross-team checkpoint
 
 **Trigger PR #24**, implementation head `48fa1b1ba5f85e54439cc4d29e3336893731467e`: reconciled against firmware #19 `75bf77bcef2ce7299e636502627fb61df4eed006` using a normal merge commit, **0 commits behind that firmware head** at review time. No branch force-push, other PR merge or physical flash. Trigger-only CI **PASSED**; full CORE exact-head software/build and release evidence remain separate checks. The default release-evidence gate must remain red until actual acceptance and full effects provenance exist.
