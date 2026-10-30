@@ -48,8 +48,8 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame.colorAt(first+i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
-  'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id, activePixel, hex)',
+  'frame.colorAt(first+i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
   'BleConfigCodec.encode(JSONObject(draftText))']) {
@@ -167,10 +167,10 @@ const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
 for(const required of ['project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
-  'project.editZone(id, label, n, reverse)',
-  'project.setPixelColor(id, activePixel, hex)',
-  'project.clearPixelColor(id, activePixel)',
+  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'project.editZone(id,label,n,reverse)',
+  'project.setPixelColor(id,activePixel,hex)',
+  'project.clearPixelColor(id,activePixel)',
   'project.removeZone(id)', 'project.moveZone(',
   'Pill("+ Add next"', 'Pill("Remove"']) {
   assert(layout.includes(required),'Compose layout regression: '+required);
