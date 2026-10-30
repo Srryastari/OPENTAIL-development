@@ -1,7 +1,7 @@
 "Part","Known_owned_quantity","Use_now_for_one_car_bench","Required_total_for_two_final_cars","Inventory_status","Gap_or_constraint"
 "hiBCTR ESP32-S3 N16R8","6","2","4 plus 2 spares","OWNED","None for MCU count"
 "PC817 8-channel optocoupler board","2","2, one per MCU on a single-car dual-input test","4 independent eight-input banks","OWNED_PARTIAL","Two additional independent banks or an equivalently qualified dual-bank solution needed later"
-"Adafruit Pixel Shifter #6066","At least 1 received","One 2-output path from selected MCU","TBD after tested 12-lane gated selection","OWNED_PARTIAL","Not an automatic two-MCU selector or output isolator"
+"Adafruit Pixel Shifter #6066","At least 1 received","GPIO16 DAT→D5; GPIO17 CLK→C5 as second WS2815 data; screw terminals included","TBD after tested 12-lane gated selection","OWNED_PARTIAL","!D5 is inverted; not an automatic two-MCU selector or output isolator; not a high-current connector"
 "AITRIP nominal fixed 5V buck module","10-pack reported","Bench-power candidate ONLY after output/headroom/backfeed verification","Two independent protected controller rails per car plus supervisor","OWNED_UNQUALIFIED","No 5-24V or automotive transient qualification"
 "Adjustable DC buck module","Owned; count/model unverified","Bench regulator candidate ONLY after independent output measurement","TBD","OWNED_UNQUALIFIED","Step-down might not regulate from 5V input; no automotive rating established"
 "Inline automotive fuseholders","Owned; exact count/rating unknown","Protect low-current LED test branches","Per actual LED loads and distribution design","OWNED_UNQUALIFIED","Fuse values sized against cable and measured load; do not guess"
