@@ -315,14 +315,19 @@ assert(stopFailureBlock &&
 // sessions. A later command error must revoke stale Android authorization.
 const replyPath=bleSource.split('private void acceptReply(byte[] raw,int status)')[1]
   ?.split('@SuppressWarnings("MissingPermission")')[0];
-assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) {') &&
-       replyPath.includes('authorized=false;') &&
-       replyPath.includes('Arrays.fill(cfgKnownRevision,-1);') &&
-       replyPath.includes('Arrays.fill(cfgLatest,null);') &&
-       replyPath.includes('fxNotify("[]");') &&
-       replyPath.includes('nextPacket=null;') &&
-       replyPath.includes('afterStopPacket=null;'),
-       'CORE ERR AUTH must invalidate Android owner and queued effects');
+const revokePath=bleSource.split('private void revokeOwnerSession(){')[1]
+  ?.split('private void acceptReply(')[0];
+const cfgErrorPath=bleSource.split('private void cfgResponse(byte[] packet,int status)')[1]
+  ?.split('private void cfgReadNext()')[0];
+assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) revokeOwnerSession();') &&
+       cfgErrorPath && cfgErrorPath.includes('if(code==5) revokeOwnerSession();') &&
+       revokePath && revokePath.includes('authorized=false;') &&
+       revokePath.includes('Arrays.fill(cfgKnownRevision,-1);') &&
+       revokePath.includes('Arrays.fill(cfgLatest,null);') &&
+       revokePath.includes('fxNotify("[]");') &&
+       revokePath.includes('nextPacket=null;') &&
+       revokePath.includes('afterStopPacket=null;'),
+       'Both CORE auth-error protocols must invalidate owner state and output revisions');
 
 // Repeated Authorize/Pair is idempotent. A legacy token auth cannot turn
 // an in-flight FX/STOP reply into a false failed authentication.
