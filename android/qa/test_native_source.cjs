@@ -502,9 +502,40 @@ assert(compose.includes('private val projectLoadRevision = mutableIntStateOf(0)'
        compose.includes('if (restored) refreshLoadedProject()') &&
        !compose.includes('var name by remember(revision.intValue)') &&
        compose.includes('fun applyLiveZone(): Boolean') &&
-       compose.includes('if (applyLiveZone()) editingId = null') &&
+       compose.includes('if(applyLiveZone())editingId=null') &&
        compose.includes('if (project.removeZone(id)) {'),
        'Layout must follow committed project revisions and retain failed edit dialogs');
+
+// The approved design must not be replaced by a green-tinted modal editor.
+const layoutPart=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun addZoneAfter(')[0];
+const settingsPart=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
+  ?.split('private fun HardwareOutputEditor(')[0];
+assert(!/0xFF79D99B|0xFF226E45|0xFF71DFA0/.test(compose) &&
+       compose.includes('val fill = if (selected)') &&
+       compose.includes('val fg = t.fg') &&
+       compose.includes('Color(0xFF303030)'),
+       'OLED/white UI must use neutral controls, never the rejected green accents');
+assert(layoutPart && layoutPart.includes('if (editingId == id)') &&
+       layoutPart.includes('ZoneDotPreview(t,n,reverse)') &&
+       !layoutPart.includes('AlertDialog(onDismissRequest = { editingId = null }') &&
+       layoutPart.includes('HardwareOutputEditor(t)') &&
+       settingsPart && !settingsPart.includes('HardwareOutputEditor(t)'),
+       'Layout owns inline zone expansion, dot preview, and CORE output manager');
+assert(model.includes('synchronized boolean mapZoneToOutputSlot(') &&
+       model.includes('Two design zones cannot own one physical section') &&
+       compose.includes('project.mapZoneToOutputSlot(') &&
+       compose.includes('Physical section link is local until CORE Save/readback.') &&
+       compose.includes('copy the linked zone into the physical draft') &&
+       storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly'),
+       'Bidirectional design zone/CORE physical output links must remain unique and saved locally');
+assert(compose.includes('Title("Live Lighting Preview",t)') &&
+       compose.includes('listOf(30, 60, 90)') &&
+       compose.includes('Color(frame.colorAt(first+i))') &&
+       compose.includes('val columns=30') &&
+       compose.includes('val rowPitch=size.height/3f') &&
+       compose.includes('Only CORE-captured RGB is labeled rendered.'),
+       'Show Modes preview must use the compact 3x30 indexed LED dots');
 
 // Imported trigger dictionaries may omit older built-in defaults, but they
 // must not contain malformed entries. A read must never persist new profiles.
