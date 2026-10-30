@@ -208,6 +208,14 @@ assert(hardware.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
        hardware.includes('BleConfigCodec.encode(draft)') &&
        hardware.includes('ble.saveOutput(index, draftText)'),
   'CORE output editor must validate universal drafts and synchronize zone totals');
+// A rejected GATT save is not an in-flight hardware commit. Readback, not
+// request admission, remains the only success evidence.
+assert(bleSource.includes('boolean saveOutput(int index,String json)') &&
+       bleSource.includes('Load this output over BLE before saving",null,index);return false;') &&
+       bleSource.includes('BLE is busy; retry after current transfer",null,index);return false;') &&
+       hardware.includes('if (ble.saveOutput(index, draftText))') &&
+       hardware.includes('Save request rejected · see BLE status'),
+  'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
   'synchronized boolean editZone(', 'synchronized boolean moveZone(',
   'synchronized boolean removeZone(', 'synchronized boolean importJson(',
