@@ -1418,6 +1418,18 @@ class ComposeMainActivity : ComponentActivity() {
                             applyTriggerStyle()
                         }
                         Caption("Changes apply immediately to the local design; DONE only closes this editor.", t)
+                        if (selections.size == 1 &&
+                            project.trigger(selections.first()).optString("kind") == "trigger-custom") {
+                            Pill("Remove custom trigger", t) {
+                                val name=selections.first()
+                                if(project.deleteTrigger(name)){
+                                    selections=emptySet()
+                                    testing=testing-name
+                                    editing=false
+                                    refresh()
+                                } else triggerMessage="Could not remove custom trigger"
+                            }
+                        }
                         Caption("Zone assignment (select to apply to all)", t)
                         for (i in 0 until project.zoneCount()) {
                             val z = project.zone(i) ?: continue
