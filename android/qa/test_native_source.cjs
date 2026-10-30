@@ -396,6 +396,11 @@ assert(model.includes('if (inputProfiles.optJSONObject(profileName) == null)') &
        !model.includes('profiles().put(name, p);save();') &&
        storageTest.includes('malformedTriggerProfilesNeverOverwriteSavedDataOnRead'),
        'Trigger project imports/readers must never silently replace invalid profiles');
+assert(model.includes('if (candidate.has(key) && !(candidate.opt(key) instanceof JSONArray))') &&
+       model.includes('if (candidate.has("selectedPixels")') &&
+       model.includes('throw new JSONException("Invalid selectedPixels object");') &&
+       storageTest.includes('malformedOptionalDesignerSectionsCannotEraseImportedWork'),
+  'Malformed optional v4 designer data must fail without replacing saved work');
 
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
