@@ -167,12 +167,16 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     if(chunk>max_chunk)chunk=max_chunk;
     return os_mbuf_append(ctx->om,payload+offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+/* Revoked sessions must discard cached config and frame responses. */
+static void cfg_reset(void);
+static void frame_reply_reset(void);
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR || conn!=active_conn)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     uint8_t buf[20];uint16_t n=0;
     if(ble_hs_mbuf_to_flat(ctx->om,buf,sizeof(buf),&n)!=0){last_result=OT_BLE_ERR_WIRE;return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;}
     ot_ble_show_packet_t show={0};
+    const bool was_authorized=authorized;
     if(n==18 && buf[0]==1 && buf[1]==4){
         authorized=owner_verify(buf+2);
         last_result=authorized?OT_BLE_OK_AUTH:OT_BLE_ERR_AUTH;
@@ -200,6 +204,13 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
         else if(result==OT_BLE_FX_RANGE || result==OT_BLE_FX_UNSUPPORTED)last_result=OT_BLE_ERR_RANGE;
         else last_result=OT_BLE_ERR_WIRE;
     } else last_result=ot_ble_parse(buf,n,token,&authorized,&show);
+    if(was_authorized && !authorized){
+        /* Invalid re-auth revokes session-owned preview, not permanent scenes
+         * or physical triggers; stale configuration replies cannot survive. */
+        ot_ble_disconnect_show();
+        cfg_reset();
+        frame_reply_reset();
+    }
     if(last_result==OT_BLE_OK_SHOW && !ot_ble_apply_show(&show))last_result=OT_BLE_ERR_BUSY;
     if(last_result==OT_BLE_OK_STOP)ot_ble_stop_show();
     /* Errors are returned by read-only reply characteristic; always acknowledge write. */
