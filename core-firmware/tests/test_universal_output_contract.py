@@ -27,6 +27,27 @@ assert "#define OT_CHAIN_PIXELS OT_OM_MAX_PIXELS_PER_OUTPUT" in board
 assert "OT_SMALL_BENCH_LAYOUT" not in board
 assert "OT_LAYOUT_SECTIONS {6,6,6,6,6" not in board
 
+# Output Manager diagnostics must never acknowledge a partial mapping as a
+# valid 200 response when cJSON allocation fails under memory pressure.
+json_output=core.split("static cJSON *om_json_output(",1)[1].split(
+    "static esp_err_t om_get(",1
+)[0]
+om_get=core.split("static esp_err_t om_get(",1)[1].split(
+    "static esp_err_t om_post(",1
+)[0]
+assert "if(!cal)goto oom;" in json_output
+assert "if(!rgb||!w)goto oom;" in json_output
+assert "if(!r||!white){cJSON_Delete(r);cJSON_Delete(white);goto oom;}" in json_output
+assert "if(!entry)goto oom;" in json_output
+assert "cJSON_Delete(entry);goto oom;" in json_output
+assert "cJSON_Delete(item);" in json_output.split("oom:",1)[1]
+assert 'if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}' in om_get
+assert 'if(!entry){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}' in om_get
+assert 'for(int i=0;i<OT_OM_OUTPUTS;i++){' in om_get
+assert om_get.index("if(!entry){cJSON_Delete(obj);") < om_get.index("cJSON_PrintUnformatted(obj)")
+# Out-of-memory status must leave hardware-owned data and output config unchanged.
+assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
+
 # Runtime driver length must follow each saved output, not a global max.
 assert ".max_leds=pixels" in core
 assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
@@ -54,6 +75,22 @@ assert "bool output_failed[OT_CHAIN_COUNT]={false};" in render
 assert "const bool all_configured=ot_frame_all_submitted(frame_ready,OT_CHAIN_COUNT);" in render
 assert "native_outputs_ready=all_configured && output_runtime_fault_mask==0u;" in render
 assert render.index("frame_ready[ch]=strip_configure_channel") < render.index("const bool all_configured=")
+# A failed post-save RMT resize must latch the lane as failed. Otherwise a
+# damaged/low-memory channel repeatedly deletes/reallocates the driver on
+# every frame, starving healthy lanes and repeatedly logging faults.
+configure=render.split("/* Reconfigure only after the preceding frame's async RMT transfers",1)[1].split(
+    "const bool all_configured=ot_frame_all_submitted(",1
+)[0]
+assert "if(!output_failed[ch]){" in configure
+assert "if(!frame_ready[ch]){" in configure
+assert 'output_runtime_fault(ch,"reconfigure",ESP_FAIL);' in configure
+assert "output_failed[ch]=true;" in configure
+assert configure.index("frame_ready[ch]=strip_configure_channel(") < configure.index(
+    'output_runtime_fault(ch,"reconfigure",ESP_FAIL);') < configure.index(
+    "output_failed[ch]=true;") < configure.index("ot_frame_snapshot_unavailable((uint8_t)ch);")
+assert "if(!frame_ready[ch])continue;" in render
+assert "output_runtime_fault_mask|=(1u<<ch);" in core
+
 assert render.index("native_outputs_ready=all_configured") < render.index("const uint32_t frame_ms=")
 assert "if(!output_failed[ch])" in render
 assert 'output_runtime_fault((unsigned)ch,"pixel write",e)' in render
