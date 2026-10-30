@@ -1138,6 +1138,7 @@ class ComposeMainActivity : ComponentActivity() {
         var searchFx by remember { mutableStateOf("") }
         var chosenFx by remember { mutableStateOf("Solid") }
         var chosenColor by remember { mutableStateOf("#ff0000") }
+        var triggerMessage by remember { mutableStateOf("") }
         val profiles = project.profiles()
         val names = profiles.names()
         val keys = (0 until (names?.length() ?: 0))
@@ -1145,6 +1146,7 @@ class ComposeMainActivity : ComponentActivity() {
             .filterNot { it == "Startup" || it == "Shutdown" || it == "Show" }
         Panel(t) {
             Caption("Multiple triggers can be selected and edited together. Nothing on this page sends BLE commands.", t)
+            if (triggerMessage.isNotEmpty()) Caption(triggerMessage, t)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(newTrigger, "Custom trigger name", t) { newTrigger = it.take(32) }
             }
@@ -1204,15 +1206,14 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         if (editing) {
-            fun applyTriggerStyle() {
+            fun applyTriggerStyle(): Boolean {
                 if (selections.isEmpty() ||
                     !Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor) ||
-                    NativeEffectCatalog.all().none { it.name == chosenFx }) return
-                selections.forEach { key ->
-                    project.trigger(key).put("pattern", chosenFx).put("color", chosenColor)
-                }
-                project.save()
-                refresh()
+                    NativeEffectCatalog.all().none { it.name == chosenFx }) return false
+                val saved = project.styleTriggers(selections, chosenFx, chosenColor)
+                triggerMessage = if (saved) "" else "Could not save trigger styles"
+                if (saved) refresh()
+                return saved
             }
             AlertDialog(onDismissRequest = { editing = false },
                 title = { Text("Edit " + selections.size + " triggers") },
@@ -1252,8 +1253,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 },
                 confirmButton = { Pill("Done", t, true) {
-                    applyTriggerStyle()
-                    editing = false
+                    if (applyTriggerStyle()) editing = false
                 } },
                 dismissButton = { Pill("Close", t) { editing = false } })
         }
