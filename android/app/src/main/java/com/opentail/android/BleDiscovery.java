@@ -864,6 +864,18 @@ final class BleDiscovery {
                     labels.add(name + "  •  " + address);
                     entries.notifyDataSetChanged();
                     if(composeScanResults!=null)composeScanResults.onFound(address,name);
+                    // A single physical CORE needs only the white Connect tap.
+                    // With multiple discovered controllers, preserve the full
+                    // visible picker and require explicit target selection.
+                    if(headlessScan && preferredPending==null && found.size()==1){
+                        ui.postDelayed(()->{
+                            if(stopped || !scanning || scanGeneration!=scanLease ||
+                               connecting || connected || found.size()!=1)return;
+                            BluetoothDevice sole=found.values().iterator().next();
+                            stopScan();
+                            connectReadOnly(sole);
+                        },1800L);
+                    }
                 }
                 if (preferredPending != null && preferredPending.equalsIgnoreCase(address)) {
                     preferredPending = null;
