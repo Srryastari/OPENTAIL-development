@@ -910,6 +910,14 @@ final class BleDiscovery {
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
         if(authPending){authorized="OK AUTH".equals(response);authPending=false;}
+        if("ERR AUTH".equals(response)) {
+            // CORE is the authority for this connection's owner session.
+            // A rejected command cannot leave Android claiming authorization.
+            authorized=false;
+            nextPacket=null;
+            afterStopPacket=null;
+            fxNotify("[]");
+        }
         if(response.startsWith("ERR"))notifyStatus("BLE · " + response + " (Wi-Fi control unaffected)");
         else notifyStatus("BLE · " + response + (authorized?" · lighting enabled":""));
         pumpQueue();
