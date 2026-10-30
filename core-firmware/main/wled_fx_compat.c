@@ -4116,11 +4116,11 @@ static void juggle_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         const size_t index=fx_beatsin88(bpm,(uint16_t)(count-1u),now);
         const ot_wled_rgb_t c=fx_hsv220(hue);
         const ot_wled_rgb_t dot=scaled(c,cfg->brightness);
-        const unsigned r=pixels[index].r|dot.r;
-        const unsigned g=pixels[index].g|dot.g;
-        const unsigned b=pixels[index].b|dot.b;
-        /* The bitwise OR of already scaled dots can exceed the output cap.
-         * Bound only this compositing step; preserve the source OR pattern. */
+        /* Pinned FastLED CRGB::operator|= is channel-wise maximum,
+         * not a bitwise OR. Preserve the original non-additive blend. */
+        const unsigned r=pixels[index].r>dot.r?pixels[index].r:dot.r;
+        const unsigned g=pixels[index].g>dot.g?pixels[index].g:dot.g;
+        const unsigned b=pixels[index].b>dot.b?pixels[index].b:dot.b;
         pixels[index]=(ot_wled_rgb_t){
             (uint8_t)(r>cfg->brightness?cfg->brightness:r),
             (uint8_t)(g>cfg->brightness?cfg->brightness:g),
