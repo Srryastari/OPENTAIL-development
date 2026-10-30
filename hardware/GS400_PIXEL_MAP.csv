@@ -1,0 +1,11 @@
+chain,planned_data_lane,side,zone,start_zero_based,end_zero_based,pixel_count,trigger_role,physical_order,historical_522_pixel_bench_fixture_covered
+LEFT_SERPENTINE,PIX1,LEFT,Top,0,117,118,park_brake,1,YES
+LEFT_SERPENTINE,PIX1,LEFT,Turn Amber,118,226,109,left_turn,2,YES
+LEFT_SERPENTINE,PIX1,LEFT,Reverse,227,268,42,reverse,3,YES
+LEFT_SERPENTINE,PIX1,LEFT,Bottom,269,521,253,park_brake,4,YES
+LEFT_SERPENTINE,PIX1,LEFT,Trunk,522,622,101,park_brake,5,NO
+RIGHT_SERPENTINE,PIX2,RIGHT,Top,0,117,118,park_brake,1,YES
+RIGHT_SERPENTINE,PIX2,RIGHT,Turn Amber,118,226,109,right_turn,2,YES
+RIGHT_SERPENTINE,PIX2,RIGHT,Reverse,227,268,42,reverse,3,YES
+RIGHT_SERPENTINE,PIX2,RIGHT,Bottom,269,521,253,park_brake,4,YES
+RIGHT_SERPENTINE,PIX2,RIGHT,Trunk,522,622,101,park_brake,5,NO
