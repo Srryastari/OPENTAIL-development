@@ -365,7 +365,7 @@ void fill_gradient_RGB(CRGB* colors, uint32_t num, const CRGB& c1, const CRGB& c
   fill_gradient_RGB(colors, twothirds, c3,      last, c4);
 }
 
-uint32_t ColorFromPalette(const CRGBPalette16& pal, unsigned index, uint8_t brightness, TBlendType blendType) {
+uint32_t ColorFromPalette(const CRGBPalette16& pal, unsigned index, uint8_t brightness, TBlendType blendType=LINEARBLEND) {
   if (blendType == LINEARBLEND_NOWRAP) {
     index = (index * 0xF0) >> 8; // Blend range is affected by lo4 blend of values, remap to avoid wrapping
   }
@@ -5133,6 +5133,8 @@ public:
 };
 
 static PRNG prng;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
 void mode_random_chase(void) {
   if (SEGENV.call == 0) {
     SEGENV.step = RGBW32(prng.random8(), prng.random8(), prng.random8(), 0);
@@ -5422,6 +5424,7 @@ void mode_ripple_rainbow(void) {
 }
 #undef SPEED_FORMULA_L
 #undef IBN
+#pragma GCC diagnostic pop
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
