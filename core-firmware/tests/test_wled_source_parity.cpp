@@ -5094,6 +5094,69 @@ void mode_candle()
 void mode_candle_multi(){candle(true);}
 #undef FRAMETIME_FIXED
 
+/* Pinned upstream prng.h and FX.cpp deterministic 1D source references. */
+class PRNG {
+private:
+  uint16_t seed;
+public:
+  PRNG(uint16_t initialSeed = 0x1234) : seed(initialSeed) {}
+  void setSeed(uint16_t s) { seed = s; }
+  uint16_t getSeed() const { return seed; }
+  uint16_t random16() {
+    seed = seed * 3001 + 31683;
+    seed ^= seed >> 7;
+    return seed;
+  }
+  uint16_t random16(uint16_t lim) { return ((uint32_t)random16() * lim) >> 16; }
+  uint16_t random16(uint16_t min, uint16_t lim) { uint16_t delta = lim - min; return random16(delta) + min; }
+  uint8_t random8() { return random16(); }
+  uint8_t random8(uint8_t lim) { return (uint8_t)(((uint16_t)random8() * lim) >> 8); }
+  uint8_t random8(uint8_t min, uint8_t lim) { uint8_t delta = lim - min; return random8(delta) + min; }
+};
+
+static PRNG prng;
+void mode_random_chase(void) {
+  if (SEGENV.call == 0) {
+    SEGENV.step = RGBW32(prng.random8(), prng.random8(), prng.random8(), 0);
+    SEGENV.aux0 = prng.random16();
+  }
+  unsigned prevSeed = prng.getSeed(); // save seed so we can restore it at the end of the function
+  uint32_t cycleTime = 25 + (3 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+  uint32_t color = SEGENV.step;
+  prng.setSeed(SEGENV.aux0);
+
+  for (int i = SEGLEN -1; i >= 0; i--) {
+    uint8_t r = prng.random8(6) != 0 ? (color >> 16 & 0xFF) : prng.random8();
+    uint8_t g = prng.random8(6) != 0 ? (color >> 8  & 0xFF) : prng.random8();
+    uint8_t b = prng.random8(6) != 0 ? (color       & 0xFF) : prng.random8();
+    color = RGBW32(r, g, b, 0);
+    SEGMENT.setPixelColor(i, color);
+    if (i == SEGLEN -1U && SEGENV.aux1 != (it & 0xFFFFU)) { //new first color in next frame
+      SEGENV.step = color;
+      SEGENV.aux0 = prng.getSeed();
+    }
+  }
+
+  SEGENV.aux1 = it & 0xFFFF;
+
+  prng.setSeed(prevSeed); // restore original seed so other effects can use "random" PRNG
+}
+
+void mode_twinkleup(void) {                     // A very short twinkle routine with fade-in and dual controls. By Andrew Tuline.
+  unsigned prevSeed = prng.getSeed();           // save seed so we can restore it at the end of the function
+  prng.setSeed(535);                            // The randomizer needs to be re-set each time through the loop in order for the same 'random' numbers to be the same each time through.
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned ranstart = prng.random8();         // The starting value (aka brightness) for each pixel. Must be consistent each time through the loop for this to work.
+    unsigned pixBri = sin8_t(ranstart + 16 * strip.now/(256-SEGMENT.speed));
+    if (prng.random8() > SEGMENT.intensity) pixBri = 0;
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(prng.random8()+strip.now/100, false, PALETTE_SOLID_WRAP, 0), pixBri));
+  }
+
+  prng.setSeed(prevSeed);                       // restore original seed so other effects can use "random" PRNG
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -5199,6 +5262,8 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {61,mode_random_chase,"Stream 2"},
+    {106,mode_twinkleup,"Twinkleup"},
     {39,mode_running_random,"Stream"},
     {62,mode_oscillate,"Oscillate"},
     {88,mode_candle,"Candle"},
