@@ -64,6 +64,13 @@ J_LED_RETURN -> rated return distribution; deliberate common LED-data reference 
 - 12 data lanes are **signal only** on logic carrier. Fused high-current positive/negative LED supply routing belongs in a separate rated distribution harness/bus inside enclosure as mechanically feasible; multiple injection points branch-fused and returns adequately sized. Use low-impedance shared signal reference near a deliberate star/bond location (do not sever necessary LED signal return). Consult exact pixel datasheet for DI/BI/DO/BO and clockless timing.
 - 10 auxiliary positive-switched channels remain proposed **3 × TPS4H160-Q1 (4 channels each; two unused)**, driven by MCP23017 from the primary if allowed by PR #51. All OFF on MCU/expander reset. These devices are **not main LED current switches** and any safety-critical lamp connected to an AUX output requires its own independently reviewed fallback. At the nominal 160 mΩ ON resistance, illustrative per-channel conduction at 2.5 A gives ~1 W/ch; simultaneous load/thermal/ambient, current-sense error, hard short, fuse coordination and SOA must be explicitly analyzed. Never imply 2.5 A is a safe continuous application rating without thermal proof.
 
+### Layout ownership: native app configures installed vehicle, not the PCB
+
+- **Locked design principle:** physical hardware provides neutral output connectors and electrical limits. The Android app owns installation-specific LED counts, active lanes, universal contiguous zones, zero-based auto-computed starts, trigger roles, color order and calibration via authenticated CORE readback. **No GS400-specific zones or fixed 623-pixel default** are allowed in the board, boot profile or backup.
+- The `GS400_PIXEL_MAP.csv` 623+623 configuration below is **only one explicitly selected bench-test fixture**. Physical strip/wiring order is real and cannot be changed in software; logical zones and roles can be changed within that order and within output/protection limits.
+- On config changes, the backup must receive an integrity-checked, installer-defined **essential-light map** before the new safety-critical mapping is activated. Mismatched/partly written/pending revisions cannot drive arbitrary essential zones.
+- See [`UNIVERSAL_LAYOUT_CONTRACT.md`](./UNIVERSAL_LAYOUT_CONTRACT.md) for hardware-versus-CORE-versus-Android ownership, safe staged activation, 12-channel expansion boundaries and acceptance implications.
+
 ### GS400 pixel chains and output compatibility
 
 - **One physically daisy-chained serpentine chain per side**; left and right independent data chains. Each: Top=118, Turn/Amber=109, Reverse=42, Bottom=253, **Trunk appended after Bottom=101** → 623 pixels per side; both total **1,246**.
