@@ -652,6 +652,22 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun EmptyLightingPreview(t: Tone) {
+        // An unlit preview remains visible before zones or a CORE frame exist.
+        // Neutral dots are UI placeholders, never simulated effect output.
+        Canvas(Modifier.fillMaxWidth().height(96.dp)
+            .clip(RoundedCornerShape(16.dp)).background(t.raised)) {
+            val pitch=size.width/30f
+            val rowPitch=size.height/3f
+            for(i in 0 until 90){
+                val center=Offset((i%30+0.5f)*pitch,(i/30+0.5f)*rowPitch)
+                drawCircle(t.muted.copy(alpha=0.10f),radius=7.5f,center=center)
+                drawCircle(t.muted.copy(alpha=0.38f),radius=3.5f,center=center)
+            }
+        }
+    }
+
+    @Composable
     private fun ZoneDotPreview(t: Tone, count: Int, reverse: Boolean) {
         // Neutral, indexed LED-address preview. Never invent effect animation.
         val dots = count.coerceIn(0, 30)
@@ -723,9 +739,11 @@ class ComposeMainActivity : ComponentActivity() {
             (frame!!.output + 1) + " · sequence " + frame.frameNumber
         else "Exact local pixel map · " + total + " indexed design LEDs"), t)
         if (frame == null) {
-            Caption("Pixel map exceeds preview capacity; check manual zone offsets.", t)
+            EmptyLightingPreview(t)
+            Caption("No verified frame · preview dots are unlit placeholders; check the local pixel layout.", t)
         } else if (total == 0) {
-            Caption("Add zones in Layout to inspect individual pixel addresses.", t)
+            EmptyLightingPreview(t)
+            Caption("Add zones in Layout or capture a CORE frame to illuminate the preview.", t)
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
