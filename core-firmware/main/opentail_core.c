@@ -40,6 +40,8 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_random.h"
+#include "palette_runtime.h"
 #include "esp_app_desc.h"
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
@@ -50,6 +52,14 @@
  * actual pixel length, transfer backend and render processing time. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
+static uint8_t palette_random_byte(void *unused){
+    (void)unused;return (uint8_t)esp_random();
+}
+static bool palette_resolved(uint8_t id){
+    if(id<73u||id>200u)return true;
+    ot_palette_entry_t entry={0};
+    return ot_palette_runtime_get((uint8_t)(200u-id),&entry)&&entry.present;
+}
 extern bool ot_ble_start(void);
 extern bool ot_ble_radio_ever_ready(void);
 extern void ot_ble_session_hex(char out[33]);
@@ -783,7 +793,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
-       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
+       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60||
+       !palette_resolved(req->palette_id))
         return false;
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
@@ -1078,7 +1089,8 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
-         if(!ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
+         if(!palette_resolved(p->palette_id) ||
+            !ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
              ready=false;break; /* layout changed: preserve original live scene */
          }
          out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
@@ -1113,6 +1125,20 @@ bool ot_ble_delete_fx_preset(uint8_t slot){
  if(e==ESP_OK)e=nvs_commit(h);
  nvs_close(h);
  return e==ESP_OK;
+}
+bool ot_ble_palette_in_use(uint8_t index){
+    if(index>=OT_PALETTE_SLOTS)return false;
+    const uint8_t id=(uint8_t)(200u-index);
+    const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool used=false;
+    portENTER_CRITICAL(&state_lock);
+    if(ble_fx_enabled)
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+            for(unsigned z=0;z<OT_OM_ZONES;z++)
+                if(ot_fx_slot_active(&fx_bank.zones[o][z],ms) &&
+                   fx_bank.zones[o][z].request.palette_id==id)used=true;
+    portEXIT_CRITICAL(&state_lock);
+    return used;
 }
 void ot_ble_disconnect_show(void){
  /* Disconnect expires only temporary zones; explicitly loaded NVS effects
@@ -1514,6 +1540,12 @@ static void led_task(void *p) {
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
+    /* One source-owned random palette for ALL outputs and zones. */
+    ot_wled_palette_random_t global_palette={0};
+    if(!ot_wled_palette_global_init(&global_palette,palette_random_byte,NULL)){
+        ot_st_set_fault("global palette RNG initialization failed");
+        vTaskDelete(NULL);return;
+    }
     bool boot_frame_verified=false;
     uint32_t previous_frame_ms=0;
     TaskHandle_t self=xTaskGetCurrentTaskHandle();
@@ -1556,6 +1588,17 @@ static void led_task(void *p) {
            if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
+       /* One immutable snapshot of every requested custom palette per frame.
+        * No locks or NVS access occur in the per-pixel/FX draw loops. */
+       uint8_t palette_ids[OT_OM_OUTPUTS*OT_OM_ZONES];
+       ot_palette_entry_t frame_palettes[OT_OM_OUTPUTS*OT_OM_ZONES];
+       for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+           const uint8_t id=local_fx_bank.zones[o][z].request.palette_id;
+           palette_ids[o*OT_OM_ZONES+z]=(id>=73u&&id<=200u)?
+                                        (uint8_t)(200u-id):255u;
+       }
+       ot_palette_runtime_snapshot(palette_ids,OT_OM_OUTPUTS*OT_OM_ZONES,
+                                   frame_palettes);
        const ot_arbitration_t decision=ot_arbitrate(combined,local_demo.mode!=OT_DEMO_OFF,local_show.mode!=OT_SHOW_OFF);
        /* Vehicle inputs no longer pause the show engine. Effects render behind
         * per-zone trigger overlays and resume at their current phase. */
@@ -1592,6 +1635,11 @@ static void led_task(void *p) {
            previous_frame_ms=frame_ms;
            if(frame_delta_ms<1u)frame_delta_ms=1u;
            if(frame_delta_ms>65535u)frame_delta_ms=65535u;
+           if(native_rendering&&local_fx_enabled &&
+              !ot_wled_palette_global_tick(&global_palette,frame_ms,5u,
+                    (uint16_t)(frame_delta_ms<8u?8u:frame_delta_ms>1000u?1000u:frame_delta_ms),
+                    750u,palette_random_byte,NULL))
+               ot_st_set_fault("global palette producer failed");
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
@@ -1640,10 +1688,17 @@ static void led_task(void *p) {
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
                                .spark_style=slot->spark.style,
                                .spark_peak=slot->spark.peak,
-                               .spark_color=slot->spark.color
+                               .spark_color=slot->spark.color,
+                               .resolved_palette=fx->palette_id==1u?
+                                   &global_palette.current:
+                                   (fx->palette_id>=73u&&fx->palette_id<=200u&&
+                                    frame_palettes[ch*OT_OM_ZONES+z].present)?
+                                   &frame_palettes[ch*OT_OM_ZONES+z].palette:NULL
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
-                           if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
+                           if(((fx->palette_id>=73u&&fx->palette_id<=200u)&&
+                                 !frame_palettes[ch*OT_OM_ZONES+z].present) ||
+                              !ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
                                                 &fx_frame[ch][offset],len)){
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
@@ -1808,6 +1863,7 @@ static void led_task(void *p) {
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
+    ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
     om_load();
     tm_load();
