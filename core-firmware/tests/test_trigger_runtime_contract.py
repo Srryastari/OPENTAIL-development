@@ -337,6 +337,46 @@ assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (
     root / "trigger_manager.h").read_text()
 assert "ot_tm_ble_decode(" in gatt and "ot_tm_ble_encode(" in gatt
 
+# P1 #45 / Firmware #46 activation veto: a pin assertion between RAM
+# publication and NVS stage deletion must NOT discard the only durable old
+# mapping/geometry. Source-level negative fence; Firmware owns finalization.
+# This intentionally FAILS on an unsafe promoter until its owner implements
+# and fault-injects a crash/edge-safe transition protocol. It cannot prove
+# full transaction atomicity, which requires independent host + hardware tests.
+trigger_promotion=between(core,"static void tm_promote(uint32_t epoch){",
+                         "static void om_promote(uint32_t epoch){")
+output_promotion=between(core,"static void om_promote(uint32_t epoch){",
+                        "static void config_activation_task(void *unused){")
+for kind,operation,helper in (
+    ("trigger",trigger_promotion,"ot_tm_apply_if_released("),
+    ("output geometry",output_promotion,"ot_om_apply_if_released("),
+):
+    assert "config_write_active(h," in operation, kind
+    assert "config_activation_idle(epoch)" in operation, kind
+    assert helper in operation, kind
+    assert "config_clear_stage(h)" in operation, kind
+    assert not (operation.index(helper)<operation.index("config_clear_stage(h)") and
+                "if(applied&&!config_clear_stage(h))" in operation), (
+        f"{kind}: unsafe active-RAM publication precedes unfenced durable "
+        "stage deletion; a new GPIO edge can discard the previous-active "
+        "recovery record (P1 issue #45)"
+    )
+
+# Persistent optimistic concurrency requires a recovered revision, not just a
+# session counter initialized at startup. The legacy 11/15-byte BLE packet
+# must stay the same; only its revision value/readback semantics may evolve.
+trigger_recovery=between(core,"static void tm_journal_load(void){",
+                         "static bool tm_save(")
+output_recovery=between(core,"static void om_journal_load(void){",
+                        "static bool om_save(")
+assert "tm_revision" in trigger_recovery, (
+    "trigger recovery must restore a durable configuration revision; "
+    "otherwise a stale BLE/REST editor can reuse revision 1 after reboot"
+)
+assert "om_revision" in output_recovery, (
+    "output recovery must restore durable per-output edit revisions"
+)
+
 # 10–11: hardware proof remains explicitly required, not encoded as a host PASS.
 assert "OT_INPUT_ACTIVE_LOW 1" in board  # provisional bench assumption
 assert "BENCH ONLY" in core or "BENCH ONLY" in board
