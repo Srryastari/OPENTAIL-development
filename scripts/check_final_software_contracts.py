@@ -15,6 +15,7 @@ PINS = {
 }
 BLOBS = {
     "android": "88ade4b946861c9e74ce2b0a780f9fbe84792159",
+    "web-studio": "07dc933321e423b4effc2eee2b77bfedbaab0091",
     "core-firmware/tests/test_trigger_runtime_contract.py": "c2a81a83ef5f7640cfde85248e8721bb95be7e4a",
     "core-firmware/tests/run-host-tests.sh": "b1251aa18806e4ffc1fa7fe5dc4111b7df1cd331",
     "core-firmware/tests/test_effects_nvs_recovery_isolation.c": "2c65d91d4591f9a249fe292ca3fc03215a802abf",
@@ -52,7 +53,7 @@ approved={
     "core-firmware/tests/test_effects_render_safety_contract.py",
 }
 changes=git("diff","--name-only",PINS["firmware"],head).splitlines()
-unexpected=[p for p in changes if not (p.startswith("android/") or p in approved)]
+unexpected=[p for p in changes if not (p.startswith("android/") or p.startswith("web-studio/") or p in approved)]
 assert not unexpected, f"Unexpected integration-scope changes: {unexpected}"
 
 # The mandatory release gate and physical evidence rules must not be rewritten.
