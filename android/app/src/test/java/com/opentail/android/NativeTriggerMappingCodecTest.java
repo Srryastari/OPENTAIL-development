@@ -1,7 +1,6 @@
 package com.opentail.android;
 
 import org.junit.Test;
-import java.util.Arrays;
 import static org.junit.Assert.*;
 
 /** Byte-level compatibility with docs/TRIGGER-BLE-CONTRACT-V1.md on trigger PR #24. */
@@ -30,13 +29,11 @@ public class NativeTriggerMappingCodecTest {
     @Test public void rejectsMalformedVersionsAndInvalidFunctionIds() {
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(new byte[14]));
         byte[] good = {1, 0, 1, 0, 0, 0, 1, 1,2,3,4,5,6,7,8};
-        byte[] copy = good.clone();copy[0] = 2;
-        assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(copy));
-        copy = good.clone();copy[1] = 5;
-        final byte[] invalidStatus = copy;
+        final byte[] invalidVersion = good.clone();invalidVersion[0] = 2;
+        assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(invalidVersion));
+        final byte[] invalidStatus = good.clone();invalidStatus[1] = 5;
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(invalidStatus));
-        copy = good.clone();copy[14] = 9;
-        final byte[] invalidId = copy;
+        final byte[] invalidId = good.clone();invalidId[14] = 9;
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(invalidId));
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(-1, new int[8]));
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(65536, new int[8]));
