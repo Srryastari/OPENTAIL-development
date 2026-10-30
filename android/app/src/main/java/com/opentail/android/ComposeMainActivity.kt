@@ -721,71 +721,45 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun EffectsPreview(t: Tone, effect: Int) {
-        // Every segment represents exactly one real zero-based LED index.
-        // No fabricated effect motion, fixed 28-dot count, or frame sampling.
-        Title("Live Lighting Preview",t)
+        // Locked P4-baseline visual: exactly three unlabeled horizontal LED
+        // strips. The capsules are display samples, not claimed physical LEDs.
+        // No invented animation: only trusted CORE RGB or local design colors.
         val revisionKey = revision.intValue
         val localFrame = remember(revisionKey) {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
         }
         val frame = coreFrame.value ?: localFrame
-        val isCore = frame?.origin == ExactLedFrame.Origin.CORE
-        val total = frame?.size() ?: 0
-        var visiblePixels by rememberSaveable { mutableIntStateOf(90) }
-        val window = total.coerceAtMost(visiblePixels)
-        var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
-        val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
-        Caption((if (isCore) "Verified CORE-rendered RGB888 frame · output " +
-            (frame!!.output + 1) + " · sequence " + frame.frameNumber
-        else "Exact local pixel map · " + total + " indexed design LEDs"), t)
-        if (frame == null) {
-            EmptyLightingPreview(t)
-            Caption("No verified frame · preview dots are unlit placeholders; check the local pixel layout.", t)
-        } else if (total == 0) {
-            EmptyLightingPreview(t)
-            Caption("Add zones in Layout or capture a CORE frame to illuminate the preview.", t)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Zoom", color = t.muted, fontSize = 12.sp)
-                listOf(30, 60, 90).forEach { pixels ->
-                    Pill(pixels.toString(), t, visiblePixels == pixels) { visiblePixels = pixels }
-                }
+        Canvas(Modifier.fillMaxWidth().height(150.dp)
+            .clip(RoundedCornerShape(20.dp)).background(t.surface)) {
+            val columns = 28
+            val pitch = size.width / columns
+            val rowPitch = size.height / 3f
+            val capsuleWidth = pitch * 0.65f
+            val capsuleHeight = rowPitch * 0.56f
+            // Each row remains present when disconnected, with no labels,
+            // counters, status indicators, playback buttons or extra text.
+            for(row in 0 until 3) for(col in 0 until columns) {
+                val sample = row * columns + col
+                val color = if(frame != null && sample < frame.size())
+                    Color(frame.colorAt(sample)) else t.muted.copy(alpha = 0.18f)
+                val lit = color.red + color.green + color.blue > 0.1f &&
+                    frame != null && sample < frame.size()
+                val x = col * pitch + (pitch - capsuleWidth) / 2f
+                val y = row * rowPitch + (rowPitch - capsuleHeight) / 2f
+                drawRoundRect(
+                    color = color.copy(alpha = if(lit) 0.18f else 0.12f),
+                    topLeft = Offset(x - 2f, y - 3f),
+                    size = androidx.compose.ui.geometry.Size(capsuleWidth + 4f,capsuleHeight + 6f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth * 0.5f)
+                )
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x,y),
+                    size = androidx.compose.ui.geometry.Size(capsuleWidth,capsuleHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth * 0.5f)
+                )
             }
-            // Approved compact lighting preview: at most 3 × 30 glowing
-            // indexed dots. Only CORE-captured RGB is labeled rendered.
-            Canvas(Modifier.fillMaxWidth().height(96.dp)
-                .clip(RoundedCornerShape(16.dp)).background(t.raised)) {
-                val columns=30
-                val rows=((window+columns-1)/columns).coerceAtLeast(1)
-                val pitch=size.width/columns
-                val rowPitch=size.height/3f
-                val radius=minOf(pitch*0.24f,rowPitch*0.27f)
-                for(i in 0 until window){
-                    val col=i%columns
-                    val row=i/columns
-                    val center=Offset((col+0.5f)*pitch,(row+0.5f)*rowPitch)
-                    val actual=Color(frame.colorAt(first+i))
-                    val lit=actual.red+actual.green+actual.blue>0.04f
-                    val color=if(lit)actual else t.muted.copy(alpha=0.38f)
-                    drawCircle(color.copy(alpha=if(lit)0.22f else 0.12f),
-                        radius=radius*1.9f,center=center)
-                    drawCircle(color.copy(alpha=if(lit)1f else 0.52f),
-                        radius=radius,center=center)
-                }
-            }
-            Caption("LED " + first + "–" + (first + window - 1) +
-                " · one display segment per real LED index · black = unpainted", t)
-            if (total > window)
-                ValueSlider("First visible pixel", first, total - window, t) {
-                    requestedFirst = it
-                }
         }
-        Caption(if (isCore) "Real CORE post-render logical RGB888 for ONE captured frame. " +
-            "This does not certify continuous animation timing or optical LED output."
-        else "Effect " + NativeEffectCatalog.byId(effect).name +
-            " · live animation unavailable without CORE frame capture. " +
-            "The strip above shows the pixel-address map, NOT a simulated effect.", t)
     }
 
     @Composable
