@@ -138,6 +138,15 @@ final class NativeProject {
         }
         if (candidate.optString("projectName", "Untitled project").length() > 64)
             throw new JSONException("Project name is too long");
+        // Reads must not silently overwrite malformed imported trigger entries.
+        // Only absent built-in profiles are filled below for older v1–v3 designs.
+        JSONObject inputProfiles = candidate.getJSONObject("profiles");
+        JSONArray profileNames = inputProfiles.names();
+        if (profileNames != null) for (int i = 0; i < profileNames.length(); i++) {
+            String profileName = profileNames.getString(i);
+            if (inputProfiles.optJSONObject(profileName) == null)
+                throw new JSONException("Invalid trigger profile: " + profileName);
+        }
         if (candidate.optJSONArray("sequence") != null
                 && candidate.getJSONArray("sequence").length() > MAX_SEQUENCE)
             throw new JSONException("Too many sequence steps");
@@ -401,9 +410,10 @@ final class NativeProject {
     synchronized JSONObject trigger(String name) {
         JSONObject p = profiles().optJSONObject(name);
         if (p != null) return p;
-        try { p = defaultTrigger(name); profiles().put(name, p);save(); }
-        catch (JSONException ignored) { }
-        return p;
+        // A read must not create a profile or commit to storage. Validated
+        // legacy projects already receive missing built-in profiles on import.
+        try { return defaultTrigger(name); }
+        catch (JSONException ignored) { return null; }
     }
 
     synchronized boolean customTrigger(String name) {
