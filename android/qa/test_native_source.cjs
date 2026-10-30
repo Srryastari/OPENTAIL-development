@@ -355,6 +355,16 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        bleSource.includes('finishInfoRead(characteristic.getValue(),status);'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
+// MTU negotiation failures fall through to guarded service discovery.
+const mtuFlow=bleSource.split('void onConnectionStateChange(')[1]
+  ?.split('void onServicesDiscovered(')[0];
+assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(connection);') &&
+       mtuFlow.includes('discoverCoreServices(connection);') &&
+       mtuFlow.includes('if(!connection.discoverServices())') &&
+       mtuFlow.includes('catch(SecurityException ex)') &&
+       mtuFlow.includes('BLE service discovery could not start; reconnect CORE'),
+       'MTU/service discovery failure must not silently strand the GATT session');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
