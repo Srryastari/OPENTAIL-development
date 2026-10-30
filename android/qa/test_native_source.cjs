@@ -534,7 +534,7 @@ const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int) 
 assert(liveStrip.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
        liveStrip.includes('drawRoundRect(') &&
        liveStrip.includes('Color(frame.colorAt(sample))') &&
-       !/Title\\(|Caption\\(|Text\\(|Zoom|LED count|SIMULATED|status|drawCircle\\(/.test(liveStrip),
+       !['Title(', 'Caption(', 'Text(', 'Zoom', 'LED count', 'SIMULATED', 'status', 'drawCircle('].some(token => liveStrip.includes(token)),
        'Locked live preview: exactly three rows of unlabeled rounded LED capsules');
 
 // Imported trigger dictionaries may omit older built-in defaults, but they
