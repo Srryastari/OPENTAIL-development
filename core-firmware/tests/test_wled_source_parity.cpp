@@ -4601,6 +4601,43 @@ void mode_chase_flash(void) {
   if (advance)
     SEGENV.step = now + delay;
 }
+void mode_chase_flash_random(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned now = strip.now; // save time for delay calculation
+  bool advance = true;
+  if (now < SEGENV.step) {
+    SEGENV.call--; // revert increment to skip moving the animation forward and just render the same frame again
+    advance = false;
+  }
+  unsigned flash_step = SEGENV.call % ((FLASH_COUNT * 2) + 1);
+
+  for (int i = 0; i < SEGENV.aux1; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_wheel(SEGENV.aux0));
+  }
+
+  unsigned delay = 1 + ((10 * (uint16_t)(255 - SEGMENT.speed)) / SEGLEN);
+  if(flash_step < (FLASH_COUNT * 2)) {
+    unsigned n = SEGENV.aux1;
+    unsigned m = (SEGENV.aux1 + 1) % SEGLEN;
+    if(flash_step % 2 == 0) {
+      SEGMENT.setPixelColor( n, SEGCOLOR(0));
+      SEGMENT.setPixelColor( m, SEGCOLOR(0));
+      delay = 20;
+    } else {
+      SEGMENT.setPixelColor( n, SEGMENT.color_wheel(SEGENV.aux0));
+      SEGMENT.setPixelColor( m, SEGCOLOR(1));
+      delay = 30;
+    }
+  } else if (advance) {
+    SEGENV.aux1 = (SEGENV.aux1 + 1) % SEGLEN;
+
+    if (SEGENV.aux1 == 0) {
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0);
+    }
+  }
+  if (advance)
+    SEGENV.step = now + delay;
+}
 #undef FLASH_COUNT
 
 // END UPSTREAM FX.cpp functions.
@@ -4706,6 +4743,7 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {32,mode_chase_flash_random,"Chase Flash Rnd"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
@@ -4853,7 +4891,7 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==31u ?
+                    const std::vector<uint32_t> frames=(fx.id==31u || fx.id==32u) ?
                         /* Exercise every flash phase and actual movement. */
                         std::vector<uint32_t>{0u,17u,20u,41u,72u,103u,
                           134u,165u,196u,227u,258u,289u,320u,351u,382u,
