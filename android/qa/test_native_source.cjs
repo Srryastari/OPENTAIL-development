@@ -401,12 +401,33 @@ assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(con
 
 // Android connectGatt can reject without a callback or exception. Never
 // leave the app in a phantom connecting state on a null GATT handle.
-const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device) {')[1]
+const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device,boolean knownDevice) {')[1]
   ?.split('private final BluetoothGattCallback callback')[0];
 assert(connectBlock &&
-       connectBlock.includes('if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}') &&
-       connectBlock.includes('connecting=false;notifyStatus("BLE connection permission denied");'),
-       'Rejected GATT connection start must clear the connecting state');
+       connectBlock.includes('if(gatt==null){') &&
+       connectBlock.includes('connecting=false;scanFallbackAllowed=false;') &&
+       connectBlock.includes('connecting=false;scanFallbackAllowed=false;notifyStatus("BLE connection permission denied");') &&
+       connectBlock.includes('watchGattReady(gatt,attempt)'),
+       'Rejected or stalled GATT connection start must clear connecting state');
+
+// Existing OS pairing must never be deleted/recreated to use the white
+// Connect control. Saved addresses and bonded COREs get a direct GATT attempt
+// with bounded stale-client recovery and a one-shot BLE discovery fallback.
+const connectUi=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]?.split('private fun HardwareOutputEditor(')[0];
+const connectFlow=bleSource.split('void connectFromApp(String preferredAddress) {')[1]?.split('void connectFoundDevice(')[0];
+assert(connectUi?.includes('ble.connectFromApp(prefs.getString("preferred_ble_address", null))') &&
+       connectFlow?.includes('if(connected) {') &&
+       connectFlow.includes('getBondedDevices()') &&
+       connectFlow.includes('BluetoothAdapter.checkBluetoothAddress(preferredAddress)') &&
+       connectFlow.includes('adapter.getRemoteDevice(preferredAddress)') &&
+       connectFlow.includes('connectReadOnly(match,true)') &&
+       bleSource.includes('connectFromApp(address);') &&
+       bleSource.includes('private void recoverStalledGatt(BluetoothGatt owner, String reason)') &&
+       bleSource.includes('if(stopped || attempt!=connectionAttempt || gatt!=owner)return;') &&
+       bleSource.includes('private static final long GATT_SETUP_TIMEOUT_MS=18000L;') &&
+       !/removeBond\s*\(/.test(bleSource) &&
+       !manifest.includes('android.permission.INTERNET'),
+       'BLE Connect must reuse OS bonding, recover stale GATT and remain Wi-Fi-free');
 
 // A retired scan's delayed timeout must not cancel a new scan. A queued
 // scan result must never reopen GATT after scan stop or Activity shutdown.
