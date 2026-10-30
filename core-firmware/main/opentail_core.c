@@ -1180,6 +1180,28 @@ bool ot_ble_delete_fx_preset(uint8_t slot){
  nvs_close(h);
  return e==ESP_OK;
 }
+/* Palette profile NVS writes use the SAME serialization and active-input
+ * veto as Output/Trigger Manager saves. No flash I/O runs under state_lock.
+ * Unlike geometry edits, a palette may change during an idle-input FX show. */
+bool ot_ble_palette_mutation_begin(void){
+    if(!input_sampler_ready||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
+    /* Immediate GPIO sampling covers the sampler's debounce assertion delay. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool busy=om_deferred.pending||tm_deferred.pending||raw_active||
+        live_input_mask!=0||
+        (before_deadline(now,sim_deadline)&&sim_mask!=0);
+    portEXIT_CRITICAL(&state_lock);
+    if(busy)xSemaphoreGive(om_write_mutex);
+    return !busy;
+}
+void ot_ble_palette_mutation_end(bool changed){
+    /* Publish/write is finished before the owner wakes the render task. */
+    xSemaphoreGive(om_write_mutex);
+    if(changed)request_render_refresh();
+}
 bool ot_ble_palette_in_use(uint8_t index){
     if(index>=OT_PALETTE_SLOTS)return false;
     const uint8_t id=(uint8_t)(200u-index);
