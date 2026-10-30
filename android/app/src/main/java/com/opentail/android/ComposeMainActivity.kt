@@ -74,6 +74,12 @@ class ComposeMainActivity : ComponentActivity() {
     private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
+    private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
+    private val paletteV3Supported = mutableStateOf(false)
+    private val paletteLoadedSlot = mutableIntStateOf(-1)
+    private val paletteLoadedRevision = mutableLongStateOf(-1L)
+    private val paletteLoadedStops = mutableStateOf("")
+    private val paletteLoadedPresent = mutableStateOf(false)
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
@@ -196,6 +202,11 @@ class ComposeMainActivity : ComponentActivity() {
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 coreTriggerMapping.value = null // never reuse another controller's physical input mapping
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
+                paletteV3Supported.value = false
+                paletteLoadedSlot.intValue = -1
+                paletteLoadedRevision.longValue = -1L
+                paletteLoadedStops.value = ""
+                paletteLoadedPresent.value = false
             }
             if (!ble.canControl() && liveArmed.value) {
                 livePreview.stop()
@@ -240,6 +251,22 @@ class ComposeMainActivity : ComponentActivity() {
                 val list = JSONArray(data)
                 supportedIds.value = (0 until list.length()).map { list.optInt(it) }.toSet()
             } catch (_: Exception) { supportedIds.value = emptySet() }
+        }
+        ble.setPaletteListener { result ->
+            runOnUiThread {
+                paletteTransferMessage.value = result.message
+                paletteV3Supported.value = result.capable && ble.canControl()
+                if (!result.ok) {
+                    paletteLoadedSlot.intValue = -1 // failed/ambiguous save requires new QUERY
+                    paletteLoadedRevision.longValue = -1L
+                } else if (result.index in 0..127) {
+                    paletteLoadedSlot.intValue = result.index
+                    paletteLoadedRevision.longValue = result.revision
+                    paletteLoadedPresent.value = result.present
+                    paletteLoadedStops.value = if (result.stops != null)
+                        NativePaletteV3.formatStops(result.stops) else ""
+                }
+            }
         }
         ble.setConfigListener { raw ->
             try {
@@ -1388,6 +1415,86 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun CorePaletteTransferPanel(t: Tone) {
+        var slotText by rememberSaveable { mutableStateOf("0") }
+        var stopsText by rememberSaveable {
+            mutableStateOf("0:#FF0000,255:#0000FF")
+        }
+        var deleteConfirm by remember { mutableStateOf(false) }
+        val slot = slotText.toIntOrNull()
+        val validSlot = slot != null && slot in 0..127
+        val matchesReadback = validSlot &&
+            paletteLoadedSlot.intValue == slot && paletteLoadedRevision.longValue >= 0L
+        Panel(t) {
+            Title("CORE custom palettes", t)
+            Caption("Authenticated BLE v3 · 128 slots · 2–18 exact RGB stops. " +
+                "Stored in CORE flash only after explicit Upload/Delete and verified readback.", t)
+            Pill("Check CORE palette v3", t) {
+                if (!ble.negotiatePaletteV3())
+                    paletteTransferMessage.value = "Authorize a CORE advertising palette v3 and finish the current BLE transfer"
+            }
+            Caption(if (paletteV3Supported.value)
+                "CORE v3 capability negotiated · palette IDs 200 down to 73"
+                else "No authenticated v3 palette capability verified; older CORE stays offline-only", t)
+            Field(slotText, "Palette slot 0–127", t) {
+                slotText = it.filter { c -> c.isDigit() }.take(3)
+            }
+            if (validSlot) Caption("Custom palette ID " + (200 - slot!!), t)
+            Field(stopsText, "0:#FF0000,128:#00FF00,255:#0000FF", t) {
+                stopsText = it.take(320)
+            }
+            Caption("Strictly increasing positions; include 0 and 255. " +
+                "Example: 0:#FF0000,255:#0000FF", t)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Download / query", t) {
+                    if (!validSlot || !ble.downloadPalette(slot!!))
+                        paletteTransferMessage.value = "Negotiate v3, authorize, and enter a valid slot"
+                }
+                Pill("Upload / verify", t) {
+                    if (!matchesReadback) {
+                        paletteTransferMessage.value = "Download this slot first to obtain its current revision"
+                    } else if (ble.uploadPalette(slot!!, paletteLoadedRevision.longValue, stopsText)) {
+                        paletteLoadedSlot.intValue = -1 // no save success until CRC/readback confirms
+                        paletteTransferMessage.value = "Upload requested · verifying CORE NVS and RGB stops"
+                        invalidateCoreFrame()
+                    } else paletteTransferMessage.value = "Upload rejected; check BLE state or exact stop syntax"
+                }
+                Pill("Delete", t) {
+                    if (matchesReadback && paletteLoadedPresent.value) deleteConfirm = true
+                    else paletteTransferMessage.value = "Download a present palette before deleting"
+                }
+            }
+            if (matchesReadback) {
+                Caption("CORE revision " + paletteLoadedRevision.longValue +
+                    (if (paletteLoadedPresent.value) " · stored" else " · empty / tombstone"), t)
+                if (paletteLoadedPresent.value) {
+                    Caption("Verified stored stops: " + paletteLoadedStops.value, t)
+                    Pill("Copy CORE stops into editor", t) { stopsText = paletteLoadedStops.value }
+                }
+            }
+            Caption(paletteTransferMessage.value, t)
+            Caption("Uploading a custom palette does not prove live support for any selected effect. " +
+                "Unsupported effect/palette combinations stay local until CORE advertises them; " +
+                "only CORE frame snapshots can verify logical RGB output.", t)
+        }
+        if (deleteConfirm) AlertDialog(
+            onDismissRequest = { deleteConfirm = false },
+            title = { Text("Delete stored CORE palette?") },
+            text = { Text("This writes a revision tombstone to CORE flash. The palette must not be active or referenced.") },
+            confirmButton = { Pill("Delete from CORE", t, true) {
+                deleteConfirm = false
+                if (matchesReadback && ble.deletePalette(slot!!, paletteLoadedRevision.longValue)) {
+                    paletteLoadedSlot.intValue = -1
+                    paletteTransferMessage.value = "Delete requested · awaiting tombstone readback"
+                    invalidateCoreFrame()
+                } else paletteTransferMessage.value = "Delete rejected; reload slot and check CORE inputs"
+            } },
+            dismissButton = { Pill("Cancel", t) { deleteConfirm = false } }
+        )
+    }
+
+    @Composable
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
         Title("Settings", t)
         Panel(t) {
@@ -1440,6 +1547,7 @@ class ComposeMainActivity : ComponentActivity() {
             } else Caption("Offline design updates instantly. Connect and authorize CORE to preview supported effects on LEDs.", t)
             Caption("Changing zone boundaries and individual pixels on hardware requires a firmware volatile-preview command; Android does not flash NVS on each edit.", t)
         }
+        CorePaletteTransferPanel(t)
         var confirm by remember { mutableStateOf(false) }
         Panel(t) {
             Caption("Bench effect demo requires confirmation. Authorized live effect edits also send bounded temporary previews automatically.", t)
