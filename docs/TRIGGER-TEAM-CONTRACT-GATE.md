@@ -1,12 +1,12 @@
 # OpenTail Trigger Integration — team contract gate
 
-## Active integration candidate for review (PR #25)
+## Active trigger integration: PR #24
 
-**Current source of truth for reviewing trigger changes:** [draft PR #25](https://github.com/Srryastari/OPENTAIL-development/pull/25), created directly from CORE firmware PR #19 commit `c97a98feb0b3ee6843b4bae072e8ced7c6e2da3d`. The older [PR #24](https://github.com/Srryastari/OPENTAIL-development/pull/24) remains historical source/provenance and must **not** be merged again as a second copy of the same trigger integration. The older exact-head table below documents its preceding cross-team audit; it is **not** the current combined source or evidence of consent.
+**PR #24 is the only active trigger/audit PR.** Its latest branch now carries the selective current-CORE implementation previously staged in [closed PR #25](https://github.com/Srryastari/OPENTAIL-development/pull/25). The original PR #24 source tip `bdcca5e0da81f07d1901117df02127387dce9eab` is retained as [archived history](https://github.com/Srryastari/OPENTAIL-development/tree/archive/trigger-pr24-original-20261029); the original PR conversation, cross-team handoffs and evidence remain attached to #24.
 
-The candidate's scoped source adds authenticated BLE mapping, 15-second AUX simulation, readback revision checks, deferred post-NVS activation of user-defined input mappings/output roles, sampler wakeup, and host contracts. The firmware's error-aware RMT output/OTA/BOOT/advertising/fingerprint protections remain on the current CORE source. This is not a combined candidate with independent Effects PRs #23+#22 or native Android #21; final owner approval and one complete pinned integration SHA are still missing.
+The current implementation was based on firmware PR #19 commit `c97a98feb0b3ee6843b4bae072e8ced7c6e2da3d` and selectively carries authenticated BLE trigger mapping, AUX simulation, revision-aware saves, raw GPIO busy checks, and deferred activation of input mappings/output geometry. It does **not** replace the newer CORE RMT fault, BOOT enrollment, advertising, OTA identity or frame-snapshot logic. PR #25 is closed **without merge** and must not be integrated as a second trigger feature.
 
-**Testing policy:** exact-head trigger and software CI may be run for source correctness, while physical/optical/12V/phone/vehicle tests and all flashing remain **deferred until 100% cross-team source/ABI agreement**. Software CI passing does not change the mandatory hardware/release acceptance gates. PR #25 is draft, unmerged, and has no auto-merge authorization.
+**Verification boundary:** source CI/ESP-IDF checks may verify the exact current PR #24 combined code. Optical/12V/phone/vehicle acceptance, flash and release are **deferred until 100% owner-approved team contracts**. Software checks are not physical evidence. PR #24 remains draft and unmerged.
 
 **Status:** BLOCKED — source/ABI reconciliation incomplete. **Physical testing is deferred until 100% of cross-team contracts below are agreed and reconciled.**
 
@@ -17,12 +17,12 @@ The candidate's scoped source adds authenticated BLE mapping, 15-second AUX simu
 | Workstream | Exact PR head inspected | Relevant contract |
 |---|---|---|
 | CORE / firmware | PR #19 `b84453dc2239e53494d64d3df1730ca0461fce35` | `docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md`, CORE frame snapshot v1 |
-| Trigger integration | PR #24 `81bdee8bb08a174162a7832da923b5879d5fc909` (before this audit-document update) | `docs/TRIGGER-BLE-CONTRACT-V1.md`, 11-domain source audit |
+| Trigger integration | PR #24 initial audit `81bdee8` (historical); current implementation transferred from formerly staged PR #25, on top of the current CORE safety baseline | `docs/TRIGGER-BLE-CONTRACT-V1.md`, 11-domain source audit |
 | Native Android | PR #21 `e53a0a6c74a664767c16e159c872e0449951804d` | `android/LIVE-EDIT-CONTRACT.md`, `android/EXACT-LED-PREVIEW-CONTRACT.md` |
 | Spark/flare engine | PR #22 `2f08e6717ae2ea71bac9a999719f51b6b929f79d` | Zone overlay after FX render, before trigger arbitration |
 | Borrowed effects and palettes | PR #23 `e5f590650184c5d9208b38008c3de79a17adf54e` | Source-derived modes, selected-palette compatibility |
 
-These are **independent draft heads**, not a reconciled integrated image. Changes to those heads require repeating only the affected *source contract review* before any combined tests.
+The pinned heads in the table preserve the **historical source-audit snapshot**, not the current PR heads. The active trigger implementation is PR #24, incorporating the selective current-CORE patch; Effects #23/#22 and Android #21 remain independent draft workstreams. This is not a single fully reconciled product image. Changes to those heads require repeating only the affected *source contract review* before any combined tests.
 
 ## Required agreements (a complete source check is not an owner sign-off)
 
@@ -47,7 +47,7 @@ These are **independent draft heads**, not a reconciled integrated image. Change
 
 ## Pinned trigger-only integration cutlist for CORE #19
 
-**Source-only review on October 29:** Trigger PR #24 at `a63787c02159cd3a7f9241d24e94c898e2e1590c` is **71 commits ahead / 52 behind** firmware PR #19 head `b84453dc2239e53494d64d3df1730ca0461fce35` in GitHub's bidirectional ancestry comparison. These numbers describe divergent histories, **not** 123 separate trigger fixes. No integration ref, source test, physical test or merge is claimed here.
+**Historical pre-reconciliation review on October 29 (not the current PR #24 code):** The old trigger source at `a63787c02159cd3a7f9241d24e94c898e2e1590c` is **71 commits ahead / 52 behind** firmware PR #19 head `b84453dc2239e53494d64d3df1730ca0461fce35` in GitHub's bidirectional ancestry comparison. These numbers describe divergent histories, **not** 123 separate trigger fixes. This historical assessment predates the selective transfer onto the newer CORE source; it does not count as current physical acceptance.
 
 **Transfer from the trigger owner, with strictly limited hunks:**
 
