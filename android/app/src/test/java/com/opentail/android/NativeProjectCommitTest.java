@@ -154,6 +154,40 @@ public class NativeProjectCommitTest {
         assertEquals(previous, project.exportJson());
     }
 
+    @Test public void importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.addZoneAt("Universal", 8, 0));
+        String original = project.exportJson();
+        int commits = storage.commits;
+
+        for (Object invalid : new Object[]{1.5, "1", -1, 1000000}) {
+            JSONObject copy = new JSONObject(original);
+            copy.getJSONArray("layout").getJSONObject(0).put("start", invalid);
+            assertFalse("Invalid offset " + invalid, project.importJson(copy.toString()));
+            assertEquals(original, project.exportJson());
+        }
+        for (Object invalid : new Object[]{8.5, "8", 0, 10001}) {
+            JSONObject copy = new JSONObject(original);
+            copy.getJSONArray("layout").getJSONObject(0).put("length", invalid);
+            assertFalse("Invalid zone length " + invalid, project.importJson(copy.toString()));
+            assertEquals(original, project.exportJson());
+        }
+        for (Object invalid : new Object[]{50.5, "100", 49, 600001}) {
+            JSONObject copy = new JSONObject(original);
+            copy.put("sequence", new JSONArray().put(new JSONObject()
+                .put("fx", "Solid").put("ms", invalid)));
+            assertFalse("Invalid sequence duration " + invalid, project.importJson(copy.toString()));
+            assertEquals(original, project.exportJson());
+        }
+        assertEquals("Rejected imports must not write storage", commits, storage.commits);
+
+        JSONObject valid = new JSONObject(original);
+        valid.getJSONArray("layout").getJSONObject(0).put("start", 999992L);
+        assertTrue(project.importJson(valid.toString()));
+        assertEquals(999992, project.zone(0).getInt("start"));
+    }
+
     @Test public void failedReindexBeforeCommitCannotLeavePartialLayout() throws Exception {
         Storage store = new Storage();
         NativeProject project = new NativeProject(store.prefs);
