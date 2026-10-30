@@ -1340,10 +1340,13 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                 }
-                Pill("Save mapping to CORE · verify readback", t, true) { confirm = true }
+                if (snapshot.persisted && snapshot.status == 0 && snapshot.revision in 1..65534)
+                    Pill("Save mapping to CORE · verify readback", t, true) { confirm = true }
+                else Caption("CORE mapping cannot be edited until the pending profile applies, a valid readback is loaded, or revisions are available.", t)
             } else Caption("Read the authenticated CORE map before editing; no writes on selection.", t)
         }
-        if (confirm && snapshot != null) AlertDialog(
+        if (confirm && snapshot != null && snapshot.persisted &&
+            snapshot.status == 0 && snapshot.revision in 1..65534) AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Save physical input mapping?") },
             text = { Text("CORE will reject active triggers or stale revisions. Readback must confirm the saved mapping. Offline trigger styles are separate.") },
