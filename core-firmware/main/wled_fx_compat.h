@@ -159,6 +159,35 @@ ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
 
+/* WLED fastled_slim.cpp nblendPaletteTowardPalette(), RGB-only.
+ * These 16 RGB entries occupy 48 contiguous bytes in WLED's source order.
+ * Like the source, a decrement can move a channel two units per pass.
+ * The transition is shared by segments; callers own its lifecycle. */
+void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
+                                  const ot_wled_palette16_t *target,
+                                  uint8_t max_changes);
+
+/* Source FX_fcn.cpp handleRandomPalette() time/transition state. The WLED
+ * palette is GLOBAL across segments. Call this once per global FX frame, not
+ * independently per output or zone. The caller supplies a pre-generated
+ * source palette ONLY when a change is due (from the existing verified HSV4
+ * constructor or harmonic generator); this function never invents random
+ * values. For a requested change with no generated palette, it rejects
+ * atomically and leaves state untouched. */
+typedef struct {
+    ot_wled_palette16_t current;
+    ot_wled_palette16_t target;
+    uint16_t last_change_s;
+    uint16_t next_blend_ms;
+} ot_wled_palette_random_t;
+
+bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
+                                 uint32_t now_ms, uint16_t change_interval_s,
+                                 uint16_t frame_time_ms,
+                                 uint16_t transition_time_ms,
+                                 const ot_wled_palette16_t *generated_if_due);
+
+
 /* Optional measured audio peak provided by the external audio subsystem.
  * No synthetic FFT, microphone acquisition or BLE extension is embedded in
  * the rendering engine. This data is read only for FX 185 Rocktaves. */
