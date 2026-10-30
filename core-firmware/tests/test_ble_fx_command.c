@@ -44,5 +44,23 @@ int main(void){
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   cmd[2]=3;cmd[15]=11;
   assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  /* v1 never accepts dynamic IDs; v2 opt-in only for fixed-palette-source
+   * effects and custom range 73..200. ID 1 & usermod range fail closed. */
+  cmd[2]=87;cmd[3]=0;cmd[15]=200;cmd[0]=1;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[0]=2;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),false,&v)==OT_BLE_FX_UNAUTHORIZED);
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  assert(v.palette_id==200u&&v.effect_id==87u);
+  cmd[15]=73;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[15]=201;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[15]=1;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[2]=3;cmd[15]=200;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[0]=3;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_BAD_WIRE);
   return 0;
 }
