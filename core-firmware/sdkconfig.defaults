@@ -5,6 +5,12 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_ota.csv"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
+# app_main synchronously recovers NVS zone/trigger journals and initializes
+# the SPI status LED plus BLE/Wi-Fi. ESP-IDF's default main-task stack is
+# insufficient on the tested ESP32-S3 (bootloop after GPIO48 SPI init).
+# Reserve startup headroom; renderer and sampler task stacks stay unchanged.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
+
 # BLE show and output manager over authorized GATT, Wi-Fi remains full Studio transport
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
