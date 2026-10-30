@@ -72,9 +72,12 @@ void ot_pal_transfer_reset(ot_pal_transfer_t *t){if(t)memset(t,0,sizeof(*t));}
 bool ot_pal_transfer_begin(ot_pal_transfer_t *t,uint8_t index,
                           uint16_t expected_revision,uint8_t count,
                           uint16_t crc,uint32_t now_ms){
-    if(!t||index>=OT_PAL_CUSTOM_SLOTS||
-       count<2u||count>OT_PAL_STOP_MAX)return false;
+    if(!t)return false;
+    /* A malformed replacement BEGIN must invalidate old staged bytes.
+     * Never permit a partial transaction to survive a rejected restart. */
     ot_pal_transfer_reset(t);
+    if(index>=OT_PAL_CUSTOM_SLOTS||
+       count<2u||count>OT_PAL_STOP_MAX)return false;
     t->active=true;t->profile.index=index;
     t->profile.stop_count=count;
     t->expected_revision=expected_revision;
