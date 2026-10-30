@@ -7,23 +7,31 @@
 /* Host fake for the NVS commit boundary. Inject failure before exposing the
  * new profile, then simulate reboot by restoring the durable slot. */
 static ot_palette_entry_t live[OT_PALETTE_SLOTS],saved[OT_PALETTE_SLOTS];
+static ot_palette_record_t raw_saved[OT_PALETTE_SLOTS];
 static bool fail_commit=false,used=false;
 void ot_palette_runtime_load(void){memcpy(live,saved,sizeof(saved));}
 bool ot_palette_runtime_get(uint8_t i,ot_palette_entry_t *out){
     if(i>=OT_PALETTE_SLOTS||!out)return false;*out=live[i];return true;
 }
+bool ot_palette_runtime_read_record(uint8_t i,ot_palette_record_t *r){
+    ot_wled_palette16_t decoded;
+    if(i>=OT_PALETTE_SLOTS||!r||!live[i].present||
+       live[i].revision!=raw_saved[i].revision||
+       !ot_palette_record_valid(&raw_saved[i],&decoded))return false;
+    *r=raw_saved[i];return true;
+}
 bool ot_palette_runtime_put(const ot_palette_record_t *r,uint32_t old){
     ot_palette_entry_t e={0};
     if(!r||!ot_palette_entry_from_record(&e,r)||r->revision!=old+1u||
        live[r->index].revision!=old||fail_commit)return false;
-    saved[r->index]=e;live[r->index]=e;return true;
+    saved[r->index]=e;live[r->index]=e;raw_saved[r->index]=*r;return true;
 }
 bool ot_palette_runtime_delete(uint8_t i,uint32_t old){
     ot_palette_record_t r={0};
     if(i>=OT_PALETTE_SLOTS||!live[i].present||live[i].revision!=old||
        !ot_palette_record_tombstone(&r,i,old+1u)||fail_commit)return false;
     saved[i]=(ot_palette_entry_t){.revision=old+1u};
-    live[i]=saved[i];return true;
+    live[i]=saved[i];raw_saved[i]=r;return true;
 }
 void ot_palette_runtime_snapshot(const uint8_t *idx,size_t n,ot_palette_entry_t *out){
     for(size_t i=0;i<n;i++)out[i]=idx[i]<OT_PALETTE_SLOTS?
@@ -76,6 +84,12 @@ int main(void){
     const uint8_t commit[]={3,3,0};
     assert(result(commit,sizeof(commit),103)==0);
     assert(live[0].present&&live[0].revision==1&&reply[11]==1);
+    const uint8_t first_read[]={3,7,0,0};
+    assert(result(first_read,sizeof(first_read),105)==0);
+    assert(reply[4]==0&&reply[5]==6&&memcmp(reply+6,stops,6)==0);
+    const uint8_t second_read[]={3,7,0,6};
+    assert(result(second_read,sizeof(second_read),106)==0);
+    assert(reply[4]==6&&reply[5]==2&&memcmp(reply+6,stops+6,2)==0);
     uint8_t stale[]={3,1,0,2,0,0,0,0,(uint8_t)crc,(uint8_t)(crc>>8)};
     assert(result(stale,sizeof(stale),110)==3);
     begin(0,2,1,crc,120);
@@ -100,6 +114,7 @@ int main(void){
     used=true;assert(result(deletion,sizeof(deletion),450)==2);
     used=false;assert(result(deletion,sizeof(deletion),451)==0);
     assert(!live[0].present&&live[0].revision==3);
+    assert(result(first_read,sizeof(first_read),452)==1);
     assert(result(deletion,sizeof(deletion),452)==3);
     ot_palette_runtime_load();
     assert(!live[0].present&&live[0].revision==3);
