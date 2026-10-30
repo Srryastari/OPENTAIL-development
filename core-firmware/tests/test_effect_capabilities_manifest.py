@@ -35,7 +35,7 @@ registered = re.findall(r'\{\s*(OT_WLED_[A-Z0-9_]+)\s*,\s*"([^"]+)"', source_reg
 # The authoritative renderer registry marks exactly the palette-capable
 # modes; do not maintain a second source-code allowlist in palette_1d.c.
 registry_meta = re.findall(
-    r'\\{\\s*(OT_WLED_[A-Z0-9_]+)\\s*,\\s*"([^"]+)".*?,\\s*(?:true|false),\\s*(?:true|false),\\s*(?:true|false),\\s*(?:true|false),\\s*(true|false)\\s*\\}',
+    r'\{\s*(OT_WLED_[A-Z0-9_]+)\s*,\s*"([^"]+)".*?,\s*(?:true|false),\s*(?:true|false),\s*(?:true|false),\s*(?:true|false),\s*(true|false)\s*\}',
     source_registry, re.S)
 assert len(registry_meta) == 120
 palette_modes = {symbol for symbol, _name, enabled in registry_meta if enabled == "true"}
