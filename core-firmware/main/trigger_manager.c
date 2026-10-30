@@ -34,6 +34,12 @@ uint8_t ot_tm_resolve(const ot_tm_profile_t *p,uint8_t bits){
 }
 
 
+bool ot_tm_stage(ot_tm_pending_t *deferred,const ot_tm_profile_t *saved){
+    if(!deferred||!ot_tm_valid(saved))return false;
+    deferred->profile=*saved;
+    deferred->pending=true;
+    return true;
+}
 bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
                        const ot_tm_profile_t *saved,uint8_t instantaneous,
                        uint8_t debounced){
