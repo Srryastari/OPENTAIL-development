@@ -1326,7 +1326,7 @@ static inline __attribute__((always_inline)) int32_t gradient3D(uint32_t x0, int
 }
 
 
-int32_t perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit) {
+int32_t perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit=false) {
   int32_t x0 = x >> 16;
   int32_t y0 = y >> 16;
   int32_t z0 = z >> 16;
