@@ -301,13 +301,12 @@ final class BleDiscovery {
         fxCapsBusy=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
         int n=raw[1]&255;
-        if(n>127||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
-        StringBuilder ids=new StringBuilder("[");
-        for(int i=0;i<n;i++){
-            if(i>0)ids.append(',');
-            ids.append((raw[2+i*2]&255)|((raw[3+i*2]&255)<<8));
+        try {fxNotify(BleFxCapabilities.decode(raw));}
+        catch(IllegalArgumentException ex){
+            notifyStatus("CORE effect catalog invalid: "+ex.getMessage());
+            fxNotify("[]");
         }
-        fxNotify(ids.append(']').toString());pumpQueue();
+        pumpQueue();
     }
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
