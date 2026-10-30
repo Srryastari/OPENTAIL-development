@@ -38,6 +38,25 @@ assert "ot_palette_ble_session_reset();" in ble
 assert "ot_palette_cmd_uuid" in ble and "ot_palette_rsp_uuid" in ble and "ot_palette_caps_uuid" in ble
 assert "ot_palette_transfer_finish(&upload,index,now,&rec)" in wire
 assert "ot_palette_runtime_put(&rec,rec.revision-1u)" in wire
+# Before a palette NVS write, share CORE's GPIO/trigger idle veto and
+# configuration-save mutex; never hold the state spinlock over flash I/O.
+assert "bool ot_ble_palette_mutation_begin(void)" in core
+assert "void ot_ble_palette_mutation_end(bool changed)" in core
+start=core.split("bool ot_ble_palette_mutation_begin(void){",1)[1].split(
+    "void ot_ble_palette_mutation_end(",1)[0]
+assert "if(!input_sampler_ready||!om_write_mutex||" in start
+assert "xSemaphoreTake(om_write_mutex,0)" in start
+assert "raw_active=tm_gpio_input_mask()!=0" in start
+assert "om_deferred.pending||tm_deferred.pending||raw_active" in start
+assert "live_input_mask!=0" in start
+assert "sim_mask!=0" in start
+assert "if(busy)xSemaphoreGive(om_write_mutex)" in start
+end=core.split("void ot_ble_palette_mutation_end(bool changed){",1)[1].split(
+    "bool ot_ble_palette_in_use(",1)[0]
+assert "xSemaphoreGive(om_write_mutex);" in end
+assert "if(changed)request_render_refresh();" in end
+assert wire.count("ot_ble_palette_mutation_begin()")==2
+assert wire.count("ot_ble_palette_mutation_end(")==2
 assert "ot_ble_palette_in_use(index)" in wire
 assert "ot_palette_runtime_delete(index,e.revision)" in wire
 assert "ot_palette_runtime_read_record(index,&record)" in wire
