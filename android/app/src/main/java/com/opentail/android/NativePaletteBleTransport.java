@@ -97,8 +97,15 @@ final class NativePaletteBleTransport {
     private void lease(){
         int thisGeneration=++generation;
         handler.postDelayed(()->{
-            if(busy && generation==thisGeneration)
-                finish(false,false,null,"CORE palette BLE operation timed out; reconnect before retry");
+            if(busy && generation==thisGeneration) {
+                // Android may still own an unresolved ATT request. Never
+                // start a second write or drain queued STOP over it.
+                // The next GATT callback may release the lease; otherwise
+                // reconnect resets this stalled transport safely.
+                abort=true;generation++;
+                listener.onPalette(new Result(false,supported(),index,verifiedRevision,false,null,
+                    "CORE palette BLE timed out; disconnect and reconnect before retry"));
+            }
         },8000);
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
