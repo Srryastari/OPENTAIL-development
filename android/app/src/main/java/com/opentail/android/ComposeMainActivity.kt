@@ -152,7 +152,23 @@ class ComposeMainActivity : ComponentActivity() {
     private val importer = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
-                val data = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw java.io.IOException("Cannot open selected document")
+                val data = input.bufferedReader().use { reader ->
+                    // The v4 model rejects files over two million characters.
+                    // Enforce that limit while reading, not after a potentially
+                    // unbounded allocation from a user-selected document.
+                    val text = StringBuilder()
+                    val chunk = CharArray(8192)
+                    while (true) {
+                        val count = reader.read(chunk)
+                        if (count < 0) break
+                        if (text.length + count > 2_000_000)
+                            throw java.io.IOException("Project exceeds 2 MB character limit")
+                        text.append(chunk, 0, count)
+                    }
+                    text.toString()
+                }
                 outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
                 refresh()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
@@ -161,7 +177,9 @@ class ComposeMainActivity : ComponentActivity() {
     private val exporter = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             try {
-                contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(project.exportJson()) }
+                val output = contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Cannot open output document")
+                output.bufferedWriter().use { it.write(project.exportJson()) }
                 outputMessage.value = "Design exported"
             } catch (e: Exception) { outputMessage.value = "Export failed: " + (e.message ?: "storage error") }
         }
