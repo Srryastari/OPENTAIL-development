@@ -787,9 +787,11 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
-                                      const ot_fx_spark_style_t *spark){
+                                      const ot_fx_spark_style_t *spark,
+                                      const ot_fx_overlay_config_t *overlay){
     ot_wled_fx_metadata_t meta;
-    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
+    if((overlay&&!ot_fx_overlay_valid(overlay))||
+       !req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
@@ -818,6 +820,16 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
             }
         }
     }
+    if(ready&&overlay){
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+            if(!(req->chain_mask&(1u<<o)))continue;
+            for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
+                   om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                fx_bank.zones[o][z].overlay=*overlay;
+            }
+        }
+    }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
         native_show=(ot_show_t){
@@ -836,7 +848,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL); /* live 60-sec bench preview */
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -997,7 +1009,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -1071,7 +1083,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -1703,6 +1715,11 @@ static void led_task(void *p) {
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                           } else if(slot->overlay.style &&
+                                     !ot_fx_overlay_apply(&slot->overlay,
+                                         slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
+                                         zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
+                               ot_st_set_fault("invalid effect overlay");
                            }
                        } else {
                            prior_fx_active[ch][z]=false;
