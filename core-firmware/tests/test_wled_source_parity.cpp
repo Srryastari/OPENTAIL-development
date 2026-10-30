@@ -3837,6 +3837,48 @@ void mode_icu(void) {
 #pragma GCC diagnostic pop
 
 #undef SPEED_FORMULA_L
+/* Exact pinned WLED FX.cpp default RGB Two Dots / Strobe Mega. */
+void mode_two_dots() {
+ if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned delay = 1 + (FRAMETIME<<3) / SEGLEN;  // longer segments should change faster
+  uint32_t it = strip.now / map(SEGMENT.speed, 0, 255, delay<<4, delay);
+  unsigned offset = it % SEGLEN;
+  unsigned width = ((SEGLEN*(SEGMENT.intensity+1))>>9); //max width is half the strip
+  if (!width) width = 1;
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(2));
+  const uint32_t color1 = SEGCOLOR(0);
+  const uint32_t color2 = (SEGCOLOR(1) == SEGCOLOR(2)) ? color1 : SEGCOLOR(1);
+  for (unsigned i = 0; i < width; i++) {
+    unsigned indexR = (offset + i) % SEGLEN;
+    unsigned indexB = (offset + i + (SEGLEN>>1)) % SEGLEN;
+    SEGMENT.setPixelColor(indexR, color1);
+    SEGMENT.setPixelColor(indexB, color2);
+  }
+}
+
+void mode_multi_strobe(void) {
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+  }
+
+  SEGENV.aux0 = 50 + 20*(uint16_t)(255-SEGMENT.speed);
+  unsigned count = 2 * ((SEGMENT.intensity / 10) + 1);
+  if(SEGENV.aux1 < count) {
+    if((SEGENV.aux1 & 1) == 0) {
+      SEGMENT.fill(SEGCOLOR(0));
+      SEGENV.aux0 = 15;
+    } else {
+      SEGENV.aux0 = 50;
+    }
+  }
+
+  if (strip.now - SEGENV.aux0 > SEGENV.step) {
+    SEGENV.aux1++;
+    if (SEGENV.aux1 > count) SEGENV.aux1 = 0;
+    SEGENV.step = strip.now;
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3908,7 +3950,9 @@ static const RefCase refs[]={
     {97,mode_plasma,"Plasma"},
     {57,mode_lightning,"Lightning"},
     {45,mode_fire_flicker,"Fire Flicker"},
-    {58,mode_icu,"ICU"}
+    {58,mode_icu,"ICU"},
+    {50,mode_two_dots,"Two Dots"},
+    {25,mode_multi_strobe,"Strobe Mega"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
