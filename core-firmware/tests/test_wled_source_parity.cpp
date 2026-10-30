@@ -4372,6 +4372,69 @@ void mode_chase_rainbow_white(void) {
 }
 #undef FX_MODE_CHASE_RANDOM
 
+/* Verbatim pinned util.cpp beat16 and beatsin16 source functions. */
+uint16_t beat16(uint16_t beats_per_minute,uint32_t timebase=0u);
+uint16_t beatsin16_t(uint16_t beats_per_minute,uint16_t lowest,uint16_t highest,
+                     uint32_t timebase=0u,uint16_t phase_offset=0u);
+uint16_t beat16(uint16_t beats_per_minute, uint32_t timebase) {
+  if (beats_per_minute < 256) beats_per_minute <<= 8;
+  return beat88(beats_per_minute, timebase);
+}
+
+uint16_t beatsin16_t(uint16_t beats_per_minute, uint16_t lowest, uint16_t highest, uint32_t timebase, uint16_t phase_offset) {
+  uint16_t beat = beat16(beats_per_minute, timebase);
+  uint16_t beatsin = sin16_t(beat + phase_offset) + 32768;
+  uint16_t rangewidth = highest - lowest;
+  uint16_t scaledbeat = scale16(beatsin, rangewidth);
+  uint16_t result = lowest + scaledbeat;
+  return result;
+}
+
+/* Verbatim pinned FX.cpp Sinelon family (default palette and RGB only). */
+void sinelon_base(bool dual, bool rainbow=false) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  SEGMENT.fade_out(SEGMENT.intensity);
+  unsigned pos = beatsin16_t(SEGMENT.speed/10,0,SEGLEN-1);
+  if (SEGENV.call == 0) SEGENV.aux0 = pos;
+  uint32_t color1 = SEGMENT.color_from_palette(pos, true, false, 0);
+  uint32_t color2 = SEGCOLOR(2);
+  if (rainbow) {
+    color1 = SEGMENT.color_wheel((pos & 0x07) * 32);
+  }
+  SEGMENT.setPixelColor(pos, color1);
+  if (dual) {
+    if (!color2) color2 = SEGMENT.color_from_palette(pos, true, false, 0);
+    if (rainbow) color2 = color1; //rainbow
+    SEGMENT.setPixelColor(SEGLEN-1-pos, color2);
+  }
+  if (SEGENV.aux0 != pos) {
+    if (SEGENV.aux0 < pos) {
+      for (unsigned i = SEGENV.aux0; i < pos ; i++) {
+        SEGMENT.setPixelColor(i, color1);
+        if (dual) SEGMENT.setPixelColor(SEGLEN-1-i, color2);
+      }
+    } else {
+      for (unsigned i = SEGENV.aux0; i > pos ; i--) {
+        SEGMENT.setPixelColor(i, color1);
+        if (dual) SEGMENT.setPixelColor(SEGLEN-1-i, color2);
+      }
+    }
+    SEGENV.aux0 = pos;
+  }
+}
+
+void mode_sinelon(void) {
+  sinelon_base(false);
+}
+
+void mode_sinelon_dual(void) {
+  sinelon_base(true);
+}
+
+void mode_sinelon_rainbow(void) {
+  sinelon_base(false, true);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4467,6 +4530,9 @@ static const RefCase refs[]={
     {5,mode_random_color,"Random Colors"},
     {28,mode_chase_color,"Chase"},
     {29,mode_chase_random,"Chase Random"},
+    {92,mode_sinelon,"Sinelon"},
+    {93,mode_sinelon_dual,"Sinelon Dual"},
+    {94,mode_sinelon_rainbow,"Sinelon Rainbow"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
