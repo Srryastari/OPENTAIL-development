@@ -2519,12 +2519,17 @@ static void fireworks_frame(const ot_wled_fx_config_t *cfg,
     }
     const size_t bursts=count/20u?count/20u:1u;
     const uint32_t chance=129u-(cfg->intensity>>1);
-    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    ot_wled_palette16_t palette;
+    /* Both Fireworks and Rain default to source palette 11 (Rainbow);
+     * random spark hues must sample it, not the foreground solid color. */
+    if(!ot_wled_palette_build(11u,cfg->foreground,cfg->background,
+                              (ot_wled_rgb_t){0,0,0},&palette))return;
     for(size_t j=0;j<bursts;j++) {
         if(fx_rand8(state,chance)==0u) {
             const size_t index=fx_rand_index(state,count);
-            (void)fx_rand8(state,256u); /* palette hue draw, mcol=0 */
-            pixels[index]=fg;
+            const uint8_t hue=fx_rand8(state,256u);
+            pixels[index]=scaled(ot_wled_palette_sample(&palette,hue,255u,
+                                OT_WLED_PALETTE_LINEAR),cfg->brightness);
             state->aux1=state->aux0;
             state->aux0=(uint16_t)index;
         }
