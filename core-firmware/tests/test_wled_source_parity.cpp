@@ -4078,6 +4078,54 @@ void mode_hyper_sparkle(void) {
   }
 }
 
+/* Source WLED FX.cpp Twinkle + Chunchun, exact 1D RGB. */
+static uint32_t hw_random() {return ref_random32();}
+void mode_twinkle(void) {
+  SEGMENT.fade_out(224);
+
+  uint32_t cycleTime = 20 + (255 - SEGMENT.speed)*5;
+  uint32_t it = strip.now / cycleTime;
+  if (it != SEGENV.step)
+  {
+    unsigned maxOn = map(SEGMENT.intensity, 0, 255, 1, SEGLEN); // make sure at least one LED is on
+    if (SEGENV.aux0 >= maxOn)
+    {
+      SEGENV.aux0 = 0;
+      SEGENV.aux1 = hw_random(); //new seed for our PRNG
+    }
+    SEGENV.aux0++;
+    SEGENV.step = it;
+  }
+
+  uint16_t PRNG16 = SEGENV.aux1;
+
+  for (unsigned i = 0; i < SEGENV.aux0; i++)
+  {
+    PRNG16 = (uint16_t)(PRNG16 * 2053) + 13849; // next 'random' number
+    uint32_t p = (uint32_t)SEGLEN * (uint32_t)PRNG16;
+    unsigned j = p >> 16;
+    SEGMENT.setPixelColor(j, SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0));
+  }
+}
+
+void mode_chunchun(void)
+{
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  SEGMENT.fade_out(254); // add a bit of trail
+  unsigned counter = strip.now * (6 + (SEGMENT.speed >> 4));
+  unsigned numBirds = 2 + (SEGLEN >> 3);  // 2 + 1/8 of a segment
+  unsigned span = (SEGMENT.intensity << 8) / numBirds;
+
+  for (unsigned i = 0; i < numBirds; i++)
+  {
+    counter -= span;
+    unsigned megumin = sin16_t(counter) + 0x8000;
+    unsigned bird = uint32_t(megumin * SEGLEN) >> 16;
+    bird = constrain(bird, 0U, SEGLEN-1U);
+    SEGMENT.setPixelColor(bird, SEGMENT.color_from_palette((i * 255)/ numBirds, false, false, 0)); // no palette wrapping
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4161,7 +4209,9 @@ static const RefCase refs[]={
     {117,mode_dynamic_smooth,"Dynamic Smooth"},
     {0,mode_static,"Solid"},
     {21,mode_flash_sparkle,"Sparkle Dark"},
-    {22,mode_hyper_sparkle,"Sparkle+"}
+    {22,mode_hyper_sparkle,"Sparkle+"},
+    {17,mode_twinkle,"Twinkle"},
+    {111,mode_chunchun,"Chunchun"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
