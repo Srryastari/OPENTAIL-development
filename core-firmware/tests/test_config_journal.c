@@ -16,7 +16,7 @@ static void test_trigger_reboot_while_held(void){
     ot_tm_pending_t deferred={0};
     live=recovered;
     assert(live.function[0]==OT_TM_PARK);
-    assert(!ot_tm_saved_apply(&live,&deferred,&requested,1u,1u));
+    assert(ot_tm_stage(&deferred,&requested));
     assert(deferred.pending && live.function[0]==OT_TM_PARK);
     assert(!ot_tm_apply_if_released(&live,&deferred,1u,1u));
     assert(!ot_tm_apply_if_released(&live,&deferred,0u,1u));
@@ -42,7 +42,7 @@ static void test_output_reboot_and_corruption(void){
     assert(recovered[0].zones[0].role==OT_OM_OFF);
     assert(requested[0].zones[0].role==OT_OM_BRAKE);
     ot_om_pending_t deferred={0};
-    assert(!ot_om_saved_apply(recovered,&deferred,requested,2u,0u));
+    assert(ot_om_stage(&deferred,requested));
     assert(!ot_om_apply_if_released(recovered,&deferred,2u,0u));
     assert(ot_om_apply_if_released(recovered,&deferred,0u,0u));
     assert(recovered[0].zones[0].role==OT_OM_BRAKE);
