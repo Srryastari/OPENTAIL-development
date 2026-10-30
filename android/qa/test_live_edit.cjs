@@ -147,7 +147,8 @@ assert(stopQueue && queuePump &&
   queuePump.includes('afterStopPacket=null;'),
   'STOP priority and latest-following-FX ordering must survive GATT queue contention');
 assert(ble.includes('pendingPacket = null; nextPacket = null; afterStopPacket = null;') &&
-       (ble.match(/pendingPacket=null;nextPacket=null;afterStopPacket=null;/g)||[]).length === 2,
+       (ble.match(/pendingPacket=null;nextPacket=null;afterStopPacket=null;/g)||[]).length >= 2 &&
+       ble.includes('private void recoverStalledGatt(BluetoothGatt owner, String reason)'),
   'Post-STOP queue must reset on adapter off, reconnect and disconnect');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
 console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary authenticated bounded BLE FX; no NVS writes on edit.');
