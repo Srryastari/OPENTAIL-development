@@ -38,6 +38,8 @@ typedef struct {
     bool pending;
 } ot_tm_pending_t;
 
+/* A durable save is staged; the sampler alone activates it after release. */
+bool ot_tm_stage(ot_tm_pending_t *deferred,const ot_tm_profile_t *saved);
 bool ot_tm_saved_apply(ot_tm_profile_t *active,ot_tm_pending_t *deferred,
                        const ot_tm_profile_t *saved,uint8_t instantaneous,
                        uint8_t debounced);
