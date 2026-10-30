@@ -1509,10 +1509,17 @@ static void stream2_frame(const ot_wled_fx_config_t *cfg,
                           uint32_t old_call,ot_wled_rgb_t *pixels,
                           size_t count) {
     if(old_call==0u) {
-        const uint8_t r=fx_rand8(state,256),g=fx_rand8(state,256),
-                      b=fx_rand8(state,256);
+        /* Pinned prng.h 16-bit sequence; GCC evaluates the source
+         * RGBW32(prng.random8(),...) arguments from right to left.
+         * Seed is injected by the per-zone RNG state (zero = default).
+         * Never consume unrelated shared WLED global PRNG state. */
+        uint16_t seed=(uint16_t)(state->rng_state?
+                                  state->rng_state:0x73a11c5du);
+        const uint8_t b=stream2_random8(&seed);
+        const uint8_t g=stream2_random8(&seed);
+        const uint8_t r=stream2_random8(&seed);
         state->step=((uint32_t)r<<16)|((uint32_t)g<<8)|b;
-        state->aux0=(uint16_t)fx_prng(state);
+        state->aux0=stream2_next(&seed);
     }
     const uint32_t it=now/(25u+3u*(255u-(uint32_t)cfg->speed));
     uint32_t color=state->step;
