@@ -229,7 +229,14 @@ final class BleDiscovery {
         catch(SecurityException ex){fxCapsBusy=false;fxNotify("[]");}
     }
     private void fxNotify(String json){
-        if(fxCapabilitiesListener!=null)ui.post(()->fxCapabilitiesListener.accept(json));
+        // A capability reply may already be posted when disconnect or a
+        // different CORE invalidates its GATT ownership. Never expose IDs
+        // from the old controller as capabilities of the new connection.
+        final BluetoothGatt owner=gatt;
+        ui.post(()->{
+            if(owner==gatt && fxCapabilitiesListener!=null)
+                fxCapabilitiesListener.accept(connected && authorized ? json : "[]");
+        });
     }
     private void fxRead(byte[] raw,int status){
         fxCapsBusy=false;
@@ -732,7 +739,10 @@ final class BleDiscovery {
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
         @SuppressWarnings("MissingPermission")
         @Override public void onConnectionStateChange(BluetoothGatt connection, int status, int newState) {
-            if (stopped) { connection.close(); return; }
+            if (stopped || connection != gatt) {
+                connection.close();
+                return; // late callback must not close the new CORE session
+            }
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 connecting = false;
                 connected = true;
@@ -756,6 +766,7 @@ final class BleDiscovery {
 
         @SuppressWarnings("MissingPermission")
         @Override public void onMtuChanged(BluetoothGatt connection, int mtu, int status) {
+            if(stopped || connection!=gatt)return;
             if(mtuNegotiating){
                 mtuNegotiating=false;
                 notifyStatus("BLE MTU "+mtu+"; discovering services…");
@@ -765,6 +776,7 @@ final class BleDiscovery {
 
         @SuppressWarnings("MissingPermission")
         @Override public void onServicesDiscovered(BluetoothGatt connection, int status) {
+            if(stopped || connection!=gatt)return;
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE service discovery failed: " + status);
                 return;
@@ -793,6 +805,7 @@ final class BleDiscovery {
 
         @Override public void onCharacteristicRead(BluetoothGatt connection, BluetoothGattCharacteristic characteristic,
                                                     byte[] value, int status) {
+            if(stopped || connection!=gatt)return;
             if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,value,status);return;}
             if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(value,status);return;}
             if (CFG_RSP_UUID.equals(characteristic.getUuid())) { cfgResponse(value,status);return; }
@@ -811,6 +824,7 @@ final class BleDiscovery {
         @SuppressWarnings("deprecation")
         @Override public void onCharacteristicRead(BluetoothGatt connection, BluetoothGattCharacteristic characteristic,
                                                     int status) {
+            if(stopped || connection!=gatt)return;
             if (Build.VERSION.SDK_INT < 33) {
                 if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,characteristic.getValue(),status);return;}
                 if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(characteristic.getValue(),status);return;}
@@ -829,6 +843,7 @@ final class BleDiscovery {
             }
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
+            if(stopped || connection!=gatt)return;
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {frameCapture.written(connection,status);return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
