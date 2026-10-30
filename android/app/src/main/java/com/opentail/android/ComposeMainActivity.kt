@@ -65,6 +65,9 @@ class ComposeMainActivity : ComponentActivity() {
     private lateinit var project: NativeProject
     private lateinit var ble: BleDiscovery
     private val revision = mutableIntStateOf(0)
+    // Import/preset restoration replaces the local document; ordinary saves
+    // must not reset in-progress TextField values (including typed spaces).
+    private val projectLoadRevision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
     private val supportedIds = mutableStateOf(setOf<Int>())
     private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
@@ -155,8 +158,9 @@ class ComposeMainActivity : ComponentActivity() {
                 val input = contentResolver.openInputStream(uri)
                     ?: throw java.io.IOException("Cannot open selected document")
                 val data = input.bufferedReader().use { reader -> NativeProjectDocumentIo.readBounded(reader) }
-                outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
-                refresh()
+                val imported = project.importJson(data)
+                outputMessage.value = if (imported) "Design imported" else "Invalid v4 project"
+                if (imported) refreshLoadedProject()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
         }
     }
@@ -277,6 +281,10 @@ class ComposeMainActivity : ComponentActivity() {
     private fun refresh() {
         invalidateCoreFrame() // local design changes invalidate an older CORE snapshot
         revision.intValue++
+    }
+    private fun refreshLoadedProject() {
+        projectLoadRevision.intValue++
+        refresh()
     }
 
     private data class Tone(val bg: Color, val surface: Color, val raised: Color,
@@ -1010,7 +1018,7 @@ class ComposeMainActivity : ComponentActivity() {
                         project.importJson(design.toString())
                     }.getOrDefault(false)
                     presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
-                    if (restored) refresh()
+                    if (restored) refreshLoadedProject()
                     pendingLoad = -1
                 } },
                 dismissButton = { Pill("Cancel", t) { pendingLoad = -1 } })
@@ -1019,9 +1027,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun LayoutPage(t: Tone) {
         Title("Layout", t)
-        // Import and preset load replace the project. Use the committed model
-        // rather than keeping a name from the previous design.
-        var name by remember(revision.intValue) { mutableStateOf(project.name()) }
+        // Only document replacement reloads this field. Keying it to every
+        // keystroke's save revision would erase typed trailing spaces.
+        var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember { mutableStateOf<String?>(null) }
         var deleteId by remember { mutableStateOf<String?>(null) }
         Panel(t) {
