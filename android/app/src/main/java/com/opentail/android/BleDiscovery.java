@@ -345,6 +345,7 @@ final class BleDiscovery {
                 packet[0]!=2||(packet[2]&255)!=cfgIndex){cfgFail("Invalid BLE configuration response");return;}
         final int opcode=packet[1]&255, code=packet[3]&255;
         if(code!=0){
+            if(code==5) revokeOwnerSession();
             String error=code==2?"Stop all shows and release physical inputs before saving":
                     code==3?"Output changed elsewhere; reload it before saving":
                     code==4?"CORE failed to save configuration to flash":
@@ -962,22 +963,23 @@ final class BleDiscovery {
         };
     }
 
+    /** Both FX command and output-config responses can revoke CORE ownership. */
+    private void revokeOwnerSession(){
+        authorized=false;
+        Arrays.fill(cfgKnownRevision,-1);
+        Arrays.fill(cfgLatest,null);
+        nextPacket=null;
+        afterStopPacket=null;
+        fxNotify("[]");
+    }
+
     private void acceptReply(byte[] raw,int status){
         readReplyPending=false;
         String response = status==BluetoothGatt.GATT_SUCCESS && raw!=null
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
         if(authPending){authorized="OK AUTH".equals(response);authPending=false;}
-        if("ERR AUTH".equals(response)) {
-            // CORE is the authority for this connection's owner session.
-            // A rejected command cannot leave Android claiming authorization.
-            authorized=false;
-            Arrays.fill(cfgKnownRevision,-1);
-            Arrays.fill(cfgLatest,null);
-            nextPacket=null;
-            afterStopPacket=null;
-            fxNotify("[]");
-        }
+        if("ERR AUTH".equals(response)) revokeOwnerSession();
         if(response.startsWith("ERR"))notifyStatus("BLE · " + response + " (Wi-Fi control unaffected)");
         else notifyStatus("BLE · " + response + (authorized?" · lighting enabled":""));
         pumpQueue();
