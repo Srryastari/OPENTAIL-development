@@ -1,0 +1,99 @@
+name: Verify firmware durable NVS recovery exact head
+on:
+  pull_request:
+    branches: [firmware/core38-effects39-harmonic-integration]
+  workflow_dispatch:
+permissions:
+  contents: read
+# Software-only evidence. Never bypass release, flashing, or physical acceptance.
+jobs:
+  host-and-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Assert exact SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Full CORE host suite and NVS journal fault regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Regression impact audit
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+  espidf-5-5-5:
+    needs: host-and-recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Compile ESP32-S3 firmware without flashing
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify image manifest
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path("core-firmware/build")
+          f=json.loads((b/"flasher_args.json").read_text())["flash_files"]
+          assert len(f)>=3 and all((b/x).is_file() and (b/x).stat().st_size>0 for x in f.values())
+          PY
+  android-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: BLE ABI and Android debug APK
+        run: |
+          python3 android/qa/check_release.py
+          node android/qa/test_unified_ble_fx.cjs
+          node android/qa/test_ble_output_pending.cjs
+          cd android
+          gradle --no-daemon :app:assembleDebug
+  studio-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Studio regression
+        run: node --test web-studio/tests/*.test.cjs
