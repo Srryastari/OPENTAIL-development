@@ -149,6 +149,39 @@ assert 'cJSON_AddNumberToObject(root,"raw_input_mask",physical)' in readback
 assert 'cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask())' in readback
 assert 'cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim)' in readback
 
+# All required trigger readback fields and both arrays must be atomic from
+# the client's perspective: low heap -> HTTP 500, not partial HTTP 200.
+# The GET handler must never mutate active or saved input mapping.
+for required in (
+    '"revision",OT_TM_VERSION',
+    '"config_revision",config_revision',
+    '"saved_on_device",saved',
+    '"config_apply_pending",pending',
+    '"bench_only",true',
+    '"physical_inputs",OT_IN_COUNT',
+    '"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0',
+    '"raw_input_mask",physical',
+    '"gpio_input_mask",tm_gpio_input_mask()',
+    '"physical_function_mask",ot_tm_resolve(&cfg,physical)',
+    '"effective_mask",ot_tm_resolve(&cfg,physical)|sim',
+):
+    assert '!cJSON_Add' in readback.split(required,1)[0].splitlines()[-1], required
+for guard in (
+    'if(!supported)goto oom;',
+    'if(!name)goto oom;',
+    'if(!cJSON_AddItemToArray(supported,name)){cJSON_Delete(name);goto oom;}',
+    'if(!arr)goto oom;',
+    'if(!v)goto oom;',
+    'cJSON_Delete(v);goto oom;',
+    'if(!cJSON_AddItemToArray(arr,v)){cJSON_Delete(v);goto oom;}',
+    'if(!body)return respond_err(r,500,"out of memory");',
+    'oom:\n    cJSON_Delete(root);\n    return respond_err(r,500,"out of memory");',
+):
+    assert guard in readback, guard
+assert readback.index('cJSON_PrintUnformatted(root)') < readback.index('oom:')
+assert "tm_profile=" not in readback and "tm_save(" not in readback
+
+
 # 8: BLE owner-authorized read/write and revision readback, including
 # disconnect not zeroing physical signals.
 gatt = between(ble, "static int trigger_access(", "static const struct ble_gatt_chr_def")
