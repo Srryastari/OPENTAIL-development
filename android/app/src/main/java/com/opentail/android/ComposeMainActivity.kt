@@ -321,7 +321,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun tone(light: Boolean): Tone = if (light)
         Tone(Color.White, Color(0xFFF4F4F4), Color(0xFFE6E6E6),
              Color(0xFF181818), Color(0xFF606060), Color(0xFF242424), Color(0xFFBD3842))
-    else Tone(Color.Black, Color(0xFF101010), Color(0xFF1B1B1B),
+    else Tone(Color.Black, Color(0xFF080808), Color(0xFF191919),
               Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color.White, Color(0xFFED6472))
 
     @Composable
@@ -390,6 +390,8 @@ class ComposeMainActivity : ComponentActivity() {
             else Color(0xFFDEDEDE)) else t.raised
         Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(99.dp))
                 .background(fill)
+                .border(1.dp,t.muted.copy(alpha=if(selected)0.36f else 0.18f),
+                    RoundedCornerShape(99.dp))
                 .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
@@ -474,7 +476,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun Panel(t: Tone, content: @Composable ColumnScope.() -> Unit) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .background(t.surface).padding(16.dp),
+            .background(t.surface)
+            .border(1.dp,t.muted.copy(alpha=0.14f),RoundedCornerShape(20.dp))
+            .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
     }
     @Composable
