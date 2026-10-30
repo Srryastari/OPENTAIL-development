@@ -16,18 +16,23 @@ int main(void){
     ot_fps_pacer_observe(&p,15000u,500u);
     assert(p.target_fps>=53u&&p.target_fps<=60u);
     ot_fps_pacer_observe(&p,22000u,900u);
-    assert(p.target_fps==53u);
+    assert(p.target_fps>0u && p.target_fps<53u);
     /* Overloaded output does not sleep to make an impossible FPS claim. */
-    assert(ot_fps_pacer_wait_us(&p,30000u)==0u);
+    assert(ot_fps_pacer_wait_us(&p,35000u)==0u);
     assert(ot_fps_pacer_wait_us(&p,0u)>0u);
     /* Shrinking a zone must eventually recover to 120, with hysteresis. */
     ot_fps_pacer_observe(&p,1000u,1u);
     assert(p.target_fps==120u);
     for(unsigned i=0;i<16u;i++)ot_fps_pacer_observe(&p,1000u,1u);
     assert(p.target_fps==120u);
+    /* 1246 pixels take >=37.68ms on an 800kHz RGB wire, so 53 FPS is impossible. */
+    ot_fps_pacer_observe(&p,35000u,1246u);
+    assert(p.target_fps>=1u && p.target_fps<=24u);
+    assert(ot_fps_pacer_period_us(&p)>=41666u);
+    /* Extreme overload still produces a nonzero, bounded rate and period. */
     ot_fps_pacer_observe(&p,2000000u,65535u);
-    assert(p.target_fps==53u);
-    assert(ot_fps_pacer_period_us(&p)==18867u);
-    printf("Adaptive FPS pacer tests passed: variable 53..120, actual-load fallback, no bench counts\n");
+    assert(p.target_fps==1u);
+    assert(ot_fps_pacer_period_us(&p)==1000000u);
+    printf("Adaptive FPS pacer tests passed: preferred 53..120, truthful overload fallback, no bench defaults\n");
     return 0;
 }
