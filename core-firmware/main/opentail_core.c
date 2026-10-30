@@ -1588,8 +1588,9 @@ static void led_task(void *p) {
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
            }
-           /* Measure real on-device FX work independently from blocking
-            * RMT transfer; the counters never infer optical LED FPS. */
+           /* Measure wall-time for the active effects/output pipeline,
+            * INCLUDING RMT completion waits. It is not pure CPU FX time and
+            * cannot establish optical LED output. */
            if(native_rendering && local_fx_enabled){
                const int64_t fx_elapsed=esp_timer_get_time()-fx_started_us;
                const uint32_t us=fx_elapsed<0?0u:
@@ -1640,7 +1641,7 @@ static void led_task(void *p) {
        if((uint32_t)(perf_now_ms-fx_perf_window_ms)>=5000u){
            if(fx_perf_frames){
                const uint32_t mean=(uint32_t)(fx_perf_total_us/fx_perf_frames);
-               ESP_LOGI(TAG,"FX perf (on-device): mean_us=%lu max_us=%lu "
+               ESP_LOGI(TAG,"FX pipeline (incl. RMT): mean_us=%lu max_us=%lu "
                    "samples=%lu internal_free=%u internal_min_free=%u "
                    "observed_full_frame_fps=%lu",
                    (unsigned long)mean,(unsigned long)fx_perf_max_us,
