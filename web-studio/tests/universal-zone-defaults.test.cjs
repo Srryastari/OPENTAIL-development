@@ -3,10 +3,13 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const source=fs.readFileSync('web-studio/opentail.htm','utf8');
-const release=fs.readFileSync('web-studio/opentail-v0.19.118.htm','utf8');
-const android=fs.readFileSync('android/app/src/main/assets/opentail.htm','utf8');
+const release=fs.readFileSync('web-studio/opentail-v0.19.120.htm','utf8');
+const nativeAndroid=fs.readFileSync('android/app/src/main/java/com/opentail/android/MainActivity.java','utf8');
+const nativeModel=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
 assert.equal(source,release,'Stable and versioned Studio files must match');
-assert.equal(source,android,'Android must bundle the same universal UI');
+assert(!nativeAndroid.includes('new WebView('),'Android must use native Views, not embed web Studio');
+assert(nativeModel.includes('long end = 0'),'Native universal layout must recalculate from zero');
+assert(source.includes("const OT_VERSION='0.19.120'"),'Web Studio version must be independent');
 assert(!source.includes('function otOMGS400Main('),'No GS400 CORE mapping shortcut');
 assert(!source.includes('function otOMExample('),'No five-zone CORE factory template');
 assert(!source.includes('function otGs400Example('),'No GS400 project generator');
