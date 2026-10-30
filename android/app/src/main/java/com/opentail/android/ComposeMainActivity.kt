@@ -67,6 +67,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val revision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
     private val supportedIds = mutableStateOf(setOf<Int>())
+    private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
     private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
@@ -185,6 +186,7 @@ class ComposeMainActivity : ComponentActivity() {
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
+                coreTriggerMapping.value = null // never reuse another controller's physical input mapping
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
             }
             if (!ble.canControl() && liveArmed.value) {
@@ -221,6 +223,9 @@ class ComposeMainActivity : ComponentActivity() {
         }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
+        }
+        ble.setTriggerMapListener { mapping ->
+            runOnUiThread { coreTriggerMapping.value = mapping }
         }
         ble.setFxCapabilitiesListener { data ->
             try {
@@ -1257,6 +1262,47 @@ class ComposeMainActivity : ComponentActivity() {
                 } },
                 dismissButton = { Pill("Close", t) { editing = false } })
         }
+        CoreTriggerMappingPage(t)
+    }
+    @Composable
+    private fun CoreTriggerMappingPage(t: Tone) {
+        if (!ble.canMapTriggers()) return // Older firmware keeps offline authoring intact
+        val snapshot = coreTriggerMapping.value
+        val names = listOf("Disabled", "Park", "Brake", "Left", "Right",
+            "Reverse", "AUX1", "AUX2", "AUX3")
+        var draft by remember(snapshot) { mutableStateOf(snapshot?.functions?.toList() ?: emptyList()) }
+        var confirm by remember { mutableStateOf(false) }
+        Panel(t) {
+            Caption("CORE input mapping · authorized BLE v1 · IN1–IN8 are logical functions, not GPIO selections", t)
+            Pill("Read CORE input mapping", t) { ble.readTriggerMap() }
+            if (snapshot != null) {
+                Caption("Revision " + snapshot.revision +
+                    " · physical mask " + snapshot.rawPhysicalMask +
+                    " · effective mask " + snapshot.effectiveMask +
+                    (if (snapshot.persisted) " · active/persisted" else " · pending application or unsaved"), t)
+                for (i in 0 until NativeTriggerMappingCodec.INPUTS) {
+                    Caption("IN" + (i + 1) + " → " + names[draft[i]], t)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        names.forEachIndexed { id, name ->
+                            Pill(name, t, draft[i] == id) {
+                                draft = draft.toMutableList().also { it[i] = id }
+                            }
+                        }
+                    }
+                }
+                Pill("Save mapping to CORE · verify readback", t, true) { confirm = true }
+            } else Caption("Read the authenticated CORE map before editing; no writes on selection.", t)
+        }
+        if (confirm && snapshot != null) AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Save physical input mapping?") },
+            text = { Text("CORE will reject active triggers or stale revisions. Readback must confirm the saved mapping. Offline trigger styles are separate.") },
+            confirmButton = { Pill("Save mapping", t, true) {
+                ble.saveTriggerMap(snapshot.revision, draft.toIntArray())
+                confirm = false
+            } },
+            dismissButton = { Pill("Cancel", t) { confirm = false } })
     }
     @Composable
     private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {
