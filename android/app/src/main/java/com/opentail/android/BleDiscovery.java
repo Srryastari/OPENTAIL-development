@@ -53,6 +53,8 @@ final class BleDiscovery {
     private static final UUID FRAME_CMD_UUID=UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2a");
     private static final UUID FRAME_RSP_UUID=UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2b");
     private static final UUID FX_CAPS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf29");
+    // Optional trigger-team v1 contract (PR #24); absent on older CORE firmware.
+    private static final UUID TRIGGER_MAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2c");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
 
@@ -96,7 +98,7 @@ final class BleDiscovery {
     boolean captureFrame(int output) {
         if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return false;}
         if(frameCapture.busy() || frameCallbackPending || cfgBusy || writePending ||
-           readReplyPending || fxCapsBusy || authPending || pairPending || challengePending) {
+           readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending) {
             notifyStatus("BLE busy; retry frame capture");return false;
         }
         frameCapture.request(output);
@@ -114,13 +116,105 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic reply;
     private volatile BluetoothGattCharacteristic fxCaps;
     private volatile boolean fxCapsBusy=false;
+    private BluetoothGattCharacteristic triggerMapping;
+    private volatile boolean triggerMapBusy=false;
+    private boolean triggerMapSavePending=false;
+    private int[] triggerMapExpected;
+    private int triggerMapBaseRevision;
+    private Consumer<NativeTriggerMappingCodec.Snapshot> triggerMapListener;
     private volatile boolean mtuNegotiating=false;
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
+    void setTriggerMapListener(Consumer<NativeTriggerMappingCodec.Snapshot> listener){
+        triggerMapListener=listener;
+    }
+    boolean canMapTriggers(){return canControl() && triggerMapping!=null;}
+    private boolean triggerMapAvailable(){
+        if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
+        if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+           frameCapture.busy()||authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry trigger mapping");return false;
+        }
+        return true;
+    }
+    @SuppressWarnings("MissingPermission")
+    boolean readTriggerMap(){
+        if(!triggerMapAvailable())return false;
+        triggerMapBusy=true;triggerMapSavePending=false;triggerMapExpected=null;
+        try {
+            if(gatt.readCharacteristic(triggerMapping))return true;
+        }catch(SecurityException ignored){}
+        triggerMapBusy=false;notifyStatus("Trigger map read could not start");pumpQueue();return false;
+    }
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    boolean saveTriggerMap(int expectedRevision,int[] mapping){
+        byte[] wire;
+        try {wire=NativeTriggerMappingCodec.encode(expectedRevision,mapping);}
+        catch(IllegalArgumentException ex){notifyStatus("Invalid trigger map draft");return false;}
+        if(!triggerMapAvailable())return false;
+        triggerMapBusy=true;triggerMapSavePending=true;
+        triggerMapBaseRevision=expectedRevision;triggerMapExpected=mapping.clone();
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=gatt.writeCharacteristic(triggerMapping,wire,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                triggerMapping.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                triggerMapping.setValue(wire);
+                started=gatt.writeCharacteristic(triggerMapping);
+            }
+        }catch(SecurityException ignored){}
+        if(started)return true;
+        triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
+        notifyStatus("Trigger map write could not start");pumpQueue();return false;
+    }
+    private void triggerMapRead(byte[] raw,int status){
+        boolean verifying=triggerMapSavePending;
+        triggerMapBusy=false;triggerMapSavePending=false;
+        NativeTriggerMappingCodec.Snapshot result=null;
+        try {
+            if(status!=BluetoothGatt.GATT_SUCCESS)throw new IllegalArgumentException("GATT "+status);
+            result=NativeTriggerMappingCodec.decode(raw);
+        }catch(IllegalArgumentException ex){
+            notifyStatus("Invalid trigger map readback: "+ex.getMessage());
+        }
+        if(result!=null){
+            if(verifying){
+                if(result.status!=0)
+                    notifyStatus("CORE rejected trigger mapping (status "+result.status+"); reload before retry");
+                else if(result.revision!=((triggerMapBaseRevision+1)&65535))
+                    notifyStatus("Trigger mapping revision mismatch; reload before retry");
+                else if(!result.persisted)
+                    notifyStatus("Trigger mapping committed but not yet active; reload after physical inputs release");
+                else if(triggerMapExpected==null||!result.matches(triggerMapExpected))
+                    notifyStatus("Trigger mapping readback mismatch; reload before retry");
+                else notifyStatus("CORE trigger mapping verified and active");
+            } else notifyStatus("CORE trigger mapping read · rev "+result.revision);
+            if(triggerMapListener!=null){
+                NativeTriggerMappingCodec.Snapshot delivered=result;
+                ui.post(()->triggerMapListener.accept(delivered));
+            }
+        }
+        triggerMapExpected=null;
+        pumpQueue();
+    }
+    @SuppressWarnings("MissingPermission")
+    private void triggerMapWritten(BluetoothGatt connection,int status){
+        if(status!=BluetoothGatt.GATT_SUCCESS){
+            triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
+            notifyStatus("CORE trigger mapping ATT write failed ("+status+")");pumpQueue();return;
+        }
+        try {if(connection.readCharacteristic(triggerMapping))return;}
+        catch(SecurityException ignored){}
+        triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
+        notifyStatus("CORE trigger mapping readback could not start");pumpQueue();
+    }
+
     @SuppressWarnings("MissingPermission")
     void readFxCapabilities(){
         if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
@@ -159,13 +253,13 @@ final class BleDiscovery {
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     void saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return;}
@@ -309,7 +403,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
@@ -320,7 +414,7 @@ final class BleDiscovery {
     void authorizeStored(){
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
         try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
@@ -420,7 +514,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || frameCapture.busy()) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy()) {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
@@ -454,7 +548,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){writePending=false;authPending=false;notifyStatus("BLE permission missing");}
     }
     private void pumpQueue(){
-        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!frameCapture.busy()&&nextPacket!=null){
+        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!triggerMapBusy&&!frameCapture.busy()&&nextPacket!=null){
             pendingPacket=nextPacket;
             nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;
             afterStopPacket=null;
