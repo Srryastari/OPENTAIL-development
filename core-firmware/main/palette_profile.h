@@ -33,6 +33,8 @@ typedef struct {
 uint16_t ot_palette_crc16(const uint8_t *p,size_t n);
 bool ot_palette_record_build(ot_palette_record_t *r,uint8_t index,uint8_t count,
                               uint32_t revision,const uint8_t *stops);
+bool ot_palette_record_tombstone(ot_palette_record_t *r,uint8_t index,uint32_t revision);
+bool ot_palette_record_is_tombstone(const ot_palette_record_t *r);
 bool ot_palette_record_valid(const ot_palette_record_t *r,
                               ot_wled_palette16_t *palette);
 bool ot_palette_entry_from_record(ot_palette_entry_t *entry,
