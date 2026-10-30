@@ -593,7 +593,21 @@ struct PinnedSeg {
     unsigned nrOfVStrips() const {return 1u;}
     bool is2D() const {return false;}
     void blurCols(uint8_t){std::abort();}
-    void blur(uint8_t){std::abort();}
+    void blur(uint8_t amount) {
+        if(!amount||pixels.empty())return;
+        const uint8_t keep=(uint8_t)(255u-amount), seep=amount>>1;
+        uint32_t cur=pixels[0],carry=source_fast_scale(cur,seep);
+        pixels[0]=source_fast_scale(cur,keep);
+        for(size_t i=1;i<pixels.size();i++){
+            cur=pixels[i];
+            const uint32_t part=source_fast_scale(cur,seep);
+            cur=source_fast_scale(cur,keep);
+            cur=source_color_add(cur,carry);
+            pixels[i-1]=source_color_add(pixels[i-1],part);
+            pixels[i]=cur;
+            carry=part;
+        }
+    }
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
     void setPixelColorXY(unsigned x,unsigned y,uint8_t r,uint8_t g,uint8_t b) { (void)y;setPixelColor(x,r,g,b); }
     void fadeToBlackBy(uint8_t fade) {for(auto& px:pixels)px=source_fast_scale(px,(uint8_t)(255u-fade));}
@@ -601,7 +615,10 @@ struct PinnedSeg {
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
-    uint32_t getPixelColor(unsigned i) const {return pixels.at(i);}
+    uint32_t getPixelColor(unsigned i) const {return i<pixels.size()?pixels[i]:0u;}
+    uint32_t getPixelColorXY(unsigned x,unsigned y) const {return y==0u?getPixelColor(x):0u;}
+    void move(unsigned,unsigned,bool) {std::abort();} // unreachable in 1D
+    void drawCircle(unsigned,unsigned,unsigned,uint32_t,bool) {std::abort();} // unreachable in 1D
     uint32_t color_wheel(uint8_t pos) const {
         if(palette!=0u)return ColorFromPalette(ref_palette(palette,colors[0],colors[1],colors[2]),pos,255u,LINEARBLEND);
         uint8_t bgrw[4]={0,0,0,0};
@@ -5174,6 +5191,237 @@ void mode_juggle(void) {
   }
 }
 #undef SEGPALETTE
+/* Verbatim pinned 1D Fireworks, Rain, Meteor, Ripple and Ripple Rainbow. */
+#define SPEED_FORMULA_L (5u+(50u*(255u-SEGMENT.speed))/SEGLEN)
+#define IBN 5100
+void mode_fireworks() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const uint16_t width  = SEGMENT.is2D() ? SEG_W : SEGLEN;
+  const uint16_t height = SEG_H;
+
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = UINT16_MAX;
+    SEGENV.aux1 = UINT16_MAX;
+  }
+  SEGMENT.fade_out(128);
+
+  uint8_t x = SEGENV.aux0%width, y = SEGENV.aux0/width; // 2D coordinates stored in upper and lower byte
+  if (!SEGENV.step) {
+    // fireworks mode (blur flares)
+    bool valid1 = (SEGENV.aux0 < width*height);
+    bool valid2 = (SEGENV.aux1 < width*height);
+    uint32_t sv1 = 0, sv2 = 0;
+    if (valid1) sv1 = SEGMENT.is2D() ? SEGMENT.getPixelColorXY(x, y) : SEGMENT.getPixelColor(SEGENV.aux0); // get spark color
+    if (valid2) sv2 = SEGMENT.is2D() ? SEGMENT.getPixelColorXY(x, y) : SEGMENT.getPixelColor(SEGENV.aux1);
+    SEGMENT.blur(16); // used in mode_rain()
+    if (valid1) { if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, sv1); else SEGMENT.setPixelColor(SEGENV.aux0, sv1); } // restore spark color after blur
+    if (valid2) { if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, sv2); else SEGMENT.setPixelColor(SEGENV.aux1, sv2); } // restore old spark color after blur
+  }
+
+  for (int i=0; i<max(1, width/20); i++) {
+    if (hw_random8(129 - (SEGMENT.intensity >> 1)) == 0) {
+      uint16_t index = hw_random16(width*height);
+      x = index % width;
+      y = index / width;
+      uint32_t col = SEGMENT.color_from_palette(hw_random8(), false, false, 0);
+      if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, col);
+      else                SEGMENT.setPixelColor(index, col);
+      SEGENV.aux1 = SEGENV.aux0;  // old spark
+      SEGENV.aux0 = index;        // remember where spark occurred
+    }
+  }
+}
+
+void mode_rain() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const unsigned width  = SEG_W;
+  const unsigned height = SEG_H;
+  SEGENV.step += FRAMETIME;
+  if (SEGENV.call && SEGENV.step > SPEED_FORMULA_L) {
+    SEGENV.step = 1;
+    if (SEGMENT.is2D()) {
+      //uint32_t ctemp[width];
+      //for (int i = 0; i<width; i++) ctemp[i] = SEGMENT.getPixelColorXY(i, height-1);
+      SEGMENT.move(6, 1, true);  // move all pixels down
+      //for (int i = 0; i<width; i++) SEGMENT.setPixelColorXY(i, 0, ctemp[i]); // wrap around
+      SEGENV.aux0 = (SEGENV.aux0 % width) + (SEGENV.aux0 / width + 1) * width;
+      SEGENV.aux1 = (SEGENV.aux1 % width) + (SEGENV.aux1 / width + 1) * width;
+    } else {
+      //shift all leds left
+      uint32_t ctemp = SEGMENT.getPixelColor(0);
+      for (unsigned i = 0; i < SEGLEN - 1; i++) {
+        SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i+1));
+      }
+      SEGMENT.setPixelColor(SEGLEN -1, ctemp); // wrap around
+      SEGENV.aux0++;  // increase spark index
+      SEGENV.aux1++;
+    }
+    if (SEGENV.aux0 == 0) SEGENV.aux0 = UINT16_MAX; // reset previous spark position
+    if (SEGENV.aux1 == 0) SEGENV.aux0 = UINT16_MAX; // reset previous spark position
+    if (SEGENV.aux0 >= width*height) SEGENV.aux0 = 0;     // ignore
+    if (SEGENV.aux1 >= width*height) SEGENV.aux1 = 0;
+  }
+  mode_fireworks();
+}
+
+void mode_meteor() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if (!SEGENV.allocateData(SEGLEN)) FX_FALLBACK_STATIC; //allocation failed
+  const bool meteorSmooth = SEGMENT.check3;
+  byte* trail = SEGENV.data;
+
+  const unsigned meteorSize = 1 + SEGLEN / 20; // 5%
+  uint16_t meteorstart;
+  if(meteorSmooth) meteorstart = map((SEGENV.step >> 6 & 0xFF), 0, 255, 0, SEGLEN -1);
+  else {
+    unsigned counter = strip.now * ((SEGMENT.speed >> 2) + 8);
+    meteorstart = (counter * SEGLEN) >> 16;
+  }
+
+  const int max = SEGMENT.palette==5 || !SEGMENT.check1 ? 240 : 255;
+  // fade all leds to colors[1] in LEDs one step
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint32_t col;
+    if (hw_random8() <= 255 - SEGMENT.intensity) {
+      if(meteorSmooth) {
+        if (trail[i] > 0) {
+          int change = trail[i] + 4 - hw_random8(24); //change each time between -20 and +4
+          trail[i] = constrain(change, 0, max);
+        }
+        col = SEGMENT.check1 ? SEGMENT.color_from_palette(i, true, false, 0, trail[i]) : SEGMENT.color_from_palette(trail[i], false, true, 255);
+      }
+      else {
+        trail[i] = scale8(trail[i], 128 + hw_random8(127));
+        int index = trail[i];
+        int idx = 255;
+        int bri = SEGMENT.palette==35 || SEGMENT.palette==36 ? 255 : trail[i];
+        if (!SEGMENT.check1) {
+          idx = 0;
+          index = map(i,0,SEGLEN,0,max);
+          bri = trail[i];
+        }
+        col = SEGMENT.color_from_palette(index, false, false, idx, bri);  // full brightness for Fire
+      }
+      SEGMENT.setPixelColor(i, col);
+    }
+  }
+
+  // draw meteor
+  for (unsigned j = 0; j < meteorSize; j++) {
+    unsigned index = (meteorstart + j) % SEGLEN;
+    if(meteorSmooth) {
+        trail[index] = max;
+        uint32_t col = SEGMENT.check1 ? SEGMENT.color_from_palette(index, true, false, 0, trail[index]) : SEGMENT.color_from_palette(trail[index], false, true, 255);
+        SEGMENT.setPixelColor(index, col);
+    }
+    else{
+      int idx = 255;
+      int i = trail[index] = max;
+      if (!SEGMENT.check1) {
+        i = map(index,0,SEGLEN,0,max);
+        idx = 0;
+      }
+      uint32_t col = SEGMENT.color_from_palette(i, false, false, idx, 255); // full brightness
+      SEGMENT.setPixelColor(index, col);
+    }
+  }
+
+  SEGENV.step += SEGMENT.speed +1;
+}
+
+typedef struct Ripple {
+  uint8_t state;
+  uint8_t color;
+  uint16_t pos;
+} ripple;
+
+#ifdef ESP8266
+  #define MAX_RIPPLES   56
+#else
+  #define MAX_RIPPLES  100
+#endif
+static void ripple_base(uint8_t blurAmount = 0) {
+  unsigned maxRipples = min(1 + (int)(SEGLEN >> 2), MAX_RIPPLES);  // 56 max for 16 segment ESP8266
+  unsigned dataSize = sizeof(ripple) * maxRipples;
+
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  Ripple* ripples = reinterpret_cast<Ripple*>(SEGENV.data);
+
+  //draw wave
+  for (unsigned i = 0; i < maxRipples; i++) {
+    unsigned ripplestate = ripples[i].state;
+    if (ripplestate) {
+      unsigned rippledecay = (SEGMENT.speed >> 4) +1; //faster decay if faster propagation
+      unsigned rippleorigin = ripples[i].pos;
+      uint32_t col = SEGMENT.color_from_palette(ripples[i].color, false, false, 255);
+      unsigned propagation = ((ripplestate/rippledecay - 1) * (SEGMENT.speed + 1));
+      int propI = propagation >> 8;
+      unsigned propF = propagation & 0xFF;
+      unsigned amp = (ripplestate < 17) ? triwave8((ripplestate-1)*8) : map(ripplestate,17,255,255,2);
+
+      #ifndef WLED_DISABLE_2D
+      if (SEGMENT.is2D()) {
+        propI /= 2;
+        unsigned cx = rippleorigin >> 8;
+        unsigned cy = rippleorigin & 0xFF;
+        unsigned mag = scale8(sin8_t((propF>>2)), amp);
+        if (propI > 0) SEGMENT.drawCircle(cx, cy, propI, color_blend(SEGMENT.getPixelColorXY(cx + propI, cy), col, mag), true);
+      } else
+      #endif
+      {
+        int left = rippleorigin - propI -1;
+        int right = rippleorigin + propI +2;
+        for (int v = 0; v < 4; v++) {
+          uint8_t mag = scale8(cubicwave8((propF>>2) + v * 64), amp);
+          SEGMENT.setPixelColor(left + v, color_blend(SEGMENT.getPixelColor(left + v), col, mag)); // TODO
+          SEGMENT.setPixelColor(right - v, color_blend(SEGMENT.getPixelColor(right - v), col, mag)); // TODO
+        }
+      }
+      ripplestate += rippledecay;
+      ripples[i].state = (ripplestate > 254) ? 0 : ripplestate;
+    } else {//randomly create new wave
+      if (hw_random16(IBN + 10000) <= (SEGMENT.intensity >> (SEGMENT.is2D()*3))) {
+        ripples[i].state = 1;
+        ripples[i].pos = SEGMENT.is2D() ? ((hw_random8(SEG_W)<<8) | (hw_random8(SEG_H))) : hw_random16(SEGLEN);
+        ripples[i].color = hw_random8(); //color
+      }
+    }
+  }
+  SEGMENT.blur(blurAmount);
+}
+#undef MAX_RIPPLES
+
+
+
+void mode_ripple(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if(SEGMENT.custom1 || SEGMENT.check2) // blur or overlay
+    SEGMENT.fade_out(250);
+  else
+    SEGMENT.fill(SEGCOLOR(1));
+
+  ripple_base(SEGMENT.custom1>>1);
+}
+
+void mode_ripple_rainbow(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if (SEGENV.call ==0) {
+    SEGENV.aux0 = hw_random8();
+    SEGENV.aux1 = hw_random8();
+  }
+  if (SEGENV.aux0 == SEGENV.aux1) {
+    SEGENV.aux1 = hw_random8();
+  } else if (SEGENV.aux1 > SEGENV.aux0) {
+    SEGENV.aux0++;
+  } else {
+    SEGENV.aux0--;
+  }
+  SEGMENT.fill(color_blend(SEGMENT.color_wheel(SEGENV.aux0),BLACK,uint8_t(235)));
+  ripple_base();
+}
+#undef SPEED_FORMULA_L
+#undef IBN
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -5279,6 +5527,11 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {42,mode_fireworks,"Fireworks"},
+    {43,mode_rain,"Rain"},
+    {76,mode_meteor,"Meteor"},
+    {79,mode_ripple,"Ripple"},
+    {99,mode_ripple_rainbow,"Ripple Rainbow"},
     {64,mode_juggle,"Juggle"},
     {61,mode_random_chase,"Stream 2"},
     {106,mode_twinkleup,"Twinkleup"},
@@ -5416,7 +5669,7 @@ int main() {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
