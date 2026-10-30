@@ -31,7 +31,7 @@ final class NativeUi {
         raised=light?0xffebebeb:0xff1c1c1c;
         text=light?0xff181818:0xfff5f5f5;
         secondary=light?0xff606060:0xffa7a7a7;
-        accent=light?0xff226e45:0xff79d99b;
+        accent=light?0xff181818:0xfff5f5f5;
         danger=light?0xffbd3842:0xffed6472;
         divider=light?0xffdedede:0xff252525;
     }
@@ -59,14 +59,14 @@ final class NativeUi {
     TextView button(String value,boolean primary) {
         TextView b=text(value,13,true);b.setGravity(Gravity.CENTER);
         b.setMinHeight(dp(43));b.setPadding(dp(16),dp(9),dp(16),dp(9));
-        b.setTextColor(primary?(light?Color.WHITE:0xff101510):text);
+        b.setTextColor(primary?background:text);
         b.setBackground(shape(primary?accent:raised,999));b.setClickable(true);b.setFocusable(true);
         return b;
     }
     TextView chip(String value,boolean selected) {
         TextView t=button(value,false);
-        t.setBackground(shape(selected?(light?0xffdcefe2:0xff22342a):surface,999));
-        t.setTextColor(selected?accent:secondary);
+        t.setBackground(shape(selected?accent:surface,999));
+        t.setTextColor(selected?background:secondary);
         t.setPadding(dp(13),dp(8),dp(13),dp(8));
         return t;
     }
