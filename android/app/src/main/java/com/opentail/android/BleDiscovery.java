@@ -301,7 +301,14 @@ final class BleDiscovery {
         }catch(Exception ignored){}
     }
     private void cfgFail(String message){
-        int index=cfgIndex;cfgBusy=false;cfgWaitingWrite=false;cfgWaitingRead=false;
+        int index=cfgIndex;
+        // A failed save may have reached flash before its confirmation failed.
+        // Require a fresh authoritative read instead of reusing stale revision.
+        if(cfgSaving && index>=0 && index<cfgKnownRevision.length) {
+            cfgKnownRevision[index]=-1;
+            cfgLatest[index]=null;
+        }
+        cfgBusy=false;cfgSaving=false;cfgWaitingWrite=false;cfgWaitingRead=false;
         cfgWatchdog++;cfgNotify(false,message,null,index);pumpQueue();
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
