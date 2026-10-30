@@ -3765,6 +3765,8 @@ void mode_fire_flicker(void) {
   SEGENV.step = it;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough" /* unchanged WLED ICU switch */
 void mode_icu(void) {
   // states: 0 = pause1, 1 = blink, 2 = pause2, 3 = move
 
@@ -3831,6 +3833,8 @@ void mode_icu(void) {
   // use upper bits of SEGENV.step to store current state, lower bits for next update time
   SEGENV.step = (state << 16) | nextUpdate;
 }
+
+#pragma GCC diagnostic pop
 
 #undef SPEED_FORMULA_L
 // END UPSTREAM FX.cpp functions.
