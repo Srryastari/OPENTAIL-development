@@ -291,7 +291,7 @@ struct CRGB : CRGBW {
     CRGB(uint8_t red,uint8_t green,uint8_t blue) {r=red;g=green;b=blue;w=0u;}
     explicit CRGB(uint32_t color) { color32=color; }
     CRGB& operator|=(const CRGB& rhs) { if(rhs.r>r)r=rhs.r; if(rhs.g>g)g=rhs.g; if(rhs.b>b)b=rhs.b; return *this; }
-    explicit CRGB(CHSV c) {
+    CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
         hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
         color32=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];
