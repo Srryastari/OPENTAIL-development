@@ -1,7 +1,7 @@
 name: Certify integrated OpenTail effects at exact commit
 on:
   pull_request:
-    branches: [effects/source-port-rolling-balls-48]
+    branches: [effects/source-port-rolling-balls-48, effects/integrated-engine-candidate-20261029]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,7 +9,7 @@ permissions:
 # completed-branch/physical-evidence requirement for flash packages.
 jobs:
   effects-exact-head-host:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'effects/integrated-engine-candidate-20261029'
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'effects/integrated-engine-candidate-20261029' || github.head_ref == 'effects/harmonic-rng-lifecycle-oracle-20261029')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
