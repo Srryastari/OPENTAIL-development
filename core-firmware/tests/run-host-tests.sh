@@ -6,6 +6,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/core_logic.c main/arbit
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/test_status_logic.c -o /tmp/opentail-status-led-tests
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
+python3 tests/test_main_stack_boot_contract.py
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
