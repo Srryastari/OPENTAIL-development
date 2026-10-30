@@ -5,7 +5,8 @@
 #include "palette_1d.h"
 ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
                                    ot_ble_fx_packet_t *out){
-  if(!p||!out||n!=OT_BLE_FX_WIRE_BYTES||p[0]!=1u||p[1]!=OT_BLE_FX_OPCODE)
+  if(!p||!out||n!=OT_BLE_FX_WIRE_BYTES||
+     (p[0]!=1u&&p[0]!=2u)||p[1]!=OT_BLE_FX_OPCODE)
     return OT_BLE_FX_BAD_WIRE;
   if(!authorized)return OT_BLE_FX_UNAUTHORIZED;
   uint16_t id=(uint16_t)p[2]|((uint16_t)p[3]<<8);
