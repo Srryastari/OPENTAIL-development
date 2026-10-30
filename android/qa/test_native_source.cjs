@@ -346,6 +346,17 @@ assert(compose.includes('NativeProjectDocumentIo.readBounded(reader)') &&
        !compose.includes('openOutputStream(uri)?.bufferedWriter()?.use'),
        'Project import/export must reject unavailable document providers without false success');
 
+// Imported zero-based LED coordinates and sequence milliseconds must be
+// typed whole JSON numbers. JSONObject.optInt silently truncates decimals.
+for (const required of [
+ 'private static boolean wholeNumber(Object value, long min, long max)',
+ '!wholeNumber(z.opt("start"), 0, 999999)',
+ '!wholeNumber(z.opt("length"), 1, 10000)',
+ '!wholeNumber(step.opt("ms"), 50, 600000)'
+]) assert(model.includes(required), 'Strict universal layout/sequence import regression: '+required);
+assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers'),
+  'Executable invalid-import regression missing');
+
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
 for (const required of ['private String committedJson;',
