@@ -5737,6 +5737,17 @@ int main() {
                           2050u,2073u,2200u,2400u,2600u,3000u,5000u,10000u} :
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u};
                     for(uint32_t t:frames) {
+                        /* Keep the pre-frame pixel/flag at the one remaining
+                         * 522px Colortwinkles divergence for arithmetic triage. */
+                        const uint32_t prior_ref74=(fx.id==74u && count>360u)
+                              ?(seg.pixels[360u]&0xffffffu):0u;
+                        const uint32_t prior_core74=(fx.id==74u && count>360u)
+                              ?pack(actual[360u]):0u;
+                        const int prior_ref_flag74=(fx.id==74u && count>360u && env.data)
+                              ?(int)((env.data[360u>>3]>>(360u&7u))&1u):-1;
+                        const int prior_core_flag74=(fx.id==74u && count>360u &&
+                                    state.scratch_bytes>(360u>>3))
+                              ?(int)((state.scratch[360u>>3]>>(360u&7u))&1u):-1;
                         strip.now=t;
                         fx.effect();
                         if(fx.id==49 && t!=0u && env.allocation.size() && env.data==nullptr)
@@ -5771,6 +5782,10 @@ int main() {
                                           raw[0],raw[1],raw[2],
                                           (unsigned)state.step,(unsigned)env.step,
                                           (unsigned)ref_rng_state,(unsigned)state.rng_state);
+                                        std::fprintf(stderr,
+                                          "Colortwinkles prevPixel src=%06X core=%06X prevFlag src=%d core=%d\\n",
+                                          (unsigned)prior_ref74,(unsigned)prior_core74,
+                                          prior_ref_flag74,prior_core_flag74);
                                     }
                                 }
                                 if((fx.id==79u || fx.id==99u) &&
