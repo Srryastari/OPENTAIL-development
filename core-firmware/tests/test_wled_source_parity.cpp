@@ -4916,6 +4916,7 @@ void mode_noise16_4() {
   }
 }
 /* Pinned FX.cpp 1D Stream, Oscillate, Candle and Candle Multi. */
+#define FRAMETIME_FIXED 23u
 void mode_running_random(void) {
   uint32_t cycleTime = 25 + (3 * (uint32_t)(255 - SEGMENT.speed));
   uint32_t it = strip.now / cycleTime;
@@ -5091,6 +5092,7 @@ void mode_candle()
   candle(false);
 }
 void mode_candle_multi(){candle(true);}
+#undef FRAMETIME_FIXED
 
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
