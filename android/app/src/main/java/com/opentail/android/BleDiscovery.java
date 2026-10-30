@@ -374,6 +374,7 @@ final class BleDiscovery {
         if (pairPending) return "pairing";
         if (challengePending || authPending) return "authorizing";
         if (cfgBusy) return cfgSaving ? "saving" : "reading";
+        if (triggerMapBusy) return triggerMapSavePending ? "saving trigger map" : "reading trigger map";
         return authorized ? "authorized" : "connected";
     }
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
@@ -713,7 +714,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -739,7 +740,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -771,6 +772,7 @@ final class BleDiscovery {
             command = service.getCharacteristic(COMMAND_UUID);
             reply = service.getCharacteristic(REPLY_UUID);
             fxCaps = service.getCharacteristic(FX_CAPS_UUID);
+            triggerMapping = service.getCharacteristic(TRIGGER_MAP_UUID);
             enroll = service.getCharacteristic(ENROLL_UUID);
             challenge = service.getCharacteristic(CHALLENGE_UUID);
             activeAddress=connection.getDevice().getAddress();
@@ -790,6 +792,7 @@ final class BleDiscovery {
             if (FRAME_RSP_UUID.equals(characteristic.getUuid())) { frameCapture.read(connection,value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
+            if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE connected · " + new String(value, StandardCharsets.UTF_8));
                 if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
@@ -810,6 +813,7 @@ final class BleDiscovery {
                     acceptReply(characteristic.getValue(),status);return;
                 }
                 if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
+                if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
                     byte[] value = characteristic.getValue();
                     notifyStatus("BLE connected · " + new String(value == null ? new byte[0] : value, StandardCharsets.UTF_8));
@@ -820,6 +824,7 @@ final class BleDiscovery {
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {frameCapture.written(connection,status);return;}
+            if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
@@ -863,7 +868,7 @@ final class BleDiscovery {
         frameCapture.cancel();
         connected = false;
         connecting = false;
-        authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");cfgWatchdog++;
+        authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;cfgWatchdog++;
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; }
