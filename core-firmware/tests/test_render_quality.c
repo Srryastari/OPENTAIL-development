@@ -65,11 +65,13 @@ int main(void){
         assert(ot_effects_1d_render(&c,&state,times[k],pixels,11));
         for(size_t i=0;i<11;i++)assert(pixels[i].r==expected[k]);
     }
-    /* Absent source port: Fireworks 1D is still a compatibility recipe,
-     * NOT a pixel-identical upstream implementation. */
+    /* Effect 90 (Exploding Fireworks) is now a source-derived port.
+     * Keep this presence check aligned with the independent golden-frame
+     * parity tests rather than falsely asserting it is still missing. */
     ot_wled_fx_metadata_t meta={0};
-    assert(!ot_wled_fx_metadata(90u,&meta));
+    assert(ot_wled_fx_metadata(90u,&meta));
+    assert(meta.id==90u);
     assert(ot_effects_1d_metadata(90u,&meta));
-    puts("CORE quality: monotonic fade endpoints, untouched guards, crisp strobe edges, and Fireworks parity gate passed (host only)");
+    puts("CORE quality: monotonic fades, untouched guards, crisp strobe edges, and source effect 90 registered (host only)");
     return 0;
 }
