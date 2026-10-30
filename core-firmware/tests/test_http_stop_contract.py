@@ -79,7 +79,7 @@ for body in starts[1:]:
     assert "if(ready)request_render_refresh();" in body
     assert body.index("portEXIT_CRITICAL(&state_lock);") < body.index("if(ready)request_render_refresh();")
 # One-shot legacy preset loads dispatch through the same FX function.
-assert "ot_ble_apply_fx_internal(&legacy.fx,true,NULL)" in starts[3]
+assert "ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL)" in starts[3]
 
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
 literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
