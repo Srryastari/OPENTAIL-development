@@ -33,7 +33,7 @@ assert "ot_palette_cmd_uuid" in ble and "ot_palette_rsp_uuid" in ble and "ot_pal
 assert "ot_palette_transfer_finish(&upload,index,now,&rec)" in wire
 assert "ot_palette_runtime_put(&rec,rec.revision-1u)" in wire
 assert "ot_ble_palette_in_use(index)" in wire
-assert "ot_palette_runtime_delete(index,e.revision)" in wire
+assert "ot_palette_runtime_delete(index,e.revision)" in wire\nassert "ot_palette_runtime_read_record(index,&record)" in wire\nassert "bool ot_palette_runtime_read_record(" in runtime
 assert "return palette<=72u||(palette>=73u&&palette<=200u);" in fx
 assert '"ot_output_cfg"' not in runtime and '"ot_trig_cfg"' not in runtime
 print("PASS: CORE palette v3 transport/persistence/frame integration contracts")
