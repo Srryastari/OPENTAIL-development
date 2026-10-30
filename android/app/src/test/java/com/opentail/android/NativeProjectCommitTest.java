@@ -114,6 +114,27 @@ public class NativeProjectCommitTest {
         assertEquals(0, project.trigger("Right Turn").getJSONArray("zones").length());
     }
 
+    @Test public void triggerStyleBatchIsAtomicAndRejectsIncompleteSelection() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        Set<String> selected = new HashSet<>(Arrays.asList("Brake", "Left Turn"));
+        int oldCommits = store.commits;
+        assertTrue(project.styleTriggers(selected, "Solid", "#112233"));
+        assertEquals(oldCommits + 1, store.commits);
+        assertEquals("#112233", project.trigger("Brake").getString("color"));
+        assertEquals("#112233", project.trigger("Left Turn").getString("color"));
+        assertFalse(project.styleTriggers(new HashSet<>(Arrays.asList("Brake", "UNKNOWN")), "Solid", "#ffffff"));
+        assertFalse(project.styleTriggers(selected, "Solid", "invalid"));
+        assertEquals(oldCommits + 1, store.commits);
+
+        String before = project.exportJson();
+        store.fail = true;
+        assertFalse(project.styleTriggers(selected, "Wipe", "#abcdef"));
+        assertEquals(before, project.exportJson());
+        assertEquals("#112233", project.trigger("Brake").getString("color"));
+        assertEquals("Solid", project.trigger("Left Turn").getString("pattern"));
+    }
+
     @Test public void failedReindexBeforeCommitCannotLeavePartialLayout() throws Exception {
         Storage store = new Storage();
         NativeProject project = new NativeProject(store.prefs);
