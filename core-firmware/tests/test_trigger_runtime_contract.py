@@ -238,7 +238,11 @@ save = between(core, "static int tm_commit(", "bool ot_ble_trigger_get(")
 assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save
 assert "raw_active || live_input_mask!=0" in save
 assert save.index("if(!tm_save(next))code=4") < save.index("ot_tm_stage(")
-assert "const uint8_t pins_after=tm_gpio_input_mask();" in save
+# A successful save ONLY stages; post-commit GPIO sampling is insufficient
+# to prove a quiet release. The debounced sampler owns activation.
+assert "const uint8_t pins_after=tm_gpio_input_mask();" not in save
+assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in save
+assert "released_samples>=OT_DEBOUNCE_TICKS" in sampler
 assert "ot_tm_stage(&tm_deferred,next)" in save
 assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," in sampler
