@@ -3644,6 +3644,40 @@ static void source_noise_pal() {
     SEGENV.aux0=(uint16_t)(SEGENV.aux0+source_beatsin8(10u,1u,4u));
 }
 
+/* Pinned FX.cpp short source bodies; only replace util.cpp beatsin8_t
+ * with the previously checked host beat adapter. */
+void mode_bpm() {
+  uint32_t stp = (strip.now / 20) & 0xFF;
+  uint8_t beat = source_beatsin8(SEGMENT.speed, 64, 255);
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(stp + (i * 2), false, PALETTE_SOLID_WRAP, 0, beat - stp + (i * 10)));
+  }
+}
+
+void mode_lake() {
+  unsigned sp = SEGMENT.speed/10;
+  int wave1 = source_beatsin8(sp +2, -64,64);
+  int wave2 = source_beatsin8(sp +1, -64,64);
+  int wave3 = source_beatsin8(sp +2,   0,80);
+
+  for (unsigned i = 0; i < SEGLEN; i++)
+  {
+    int index = cos8_t((i*15)+ wave1)/2 + cubicwave8((i*23)+ wave2)/2;
+    uint8_t lum = (index > wave3) ? index - wave3 : 0;
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, false, 0, lum));
+  }
+}
+
+void mode_wavesins(void) {
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint8_t bri = sin8_t(strip.now/4 + i * SEGMENT.intensity);
+    uint8_t index = source_beatsin8(SEGMENT.speed, SEGMENT.custom1, SEGMENT.custom1+SEGMENT.custom2, 0, i * (SEGMENT.custom3<<3)); // custom3 is reduced resolution slider
+    //SEGMENT.setPixelColor(i, ColorFromPalette(SEGPALETTE, index, bri, LINEARBLEND));
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0, bri));
+  }
+} // mode_waveins()
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3708,7 +3742,10 @@ static const RefCase refs[]={
     {101,source_pacifica,"Pacifica"},
     {90,mode_exploding_fireworks,"Fireworks 1D"},
     {185,mode_rocktaves,"Rocktaves"},
-    {107,source_noise_pal,"Noise Pal"}
+    {107,source_noise_pal,"Noise Pal"},
+    {68,mode_bpm,"BPM"},
+    {75,mode_lake,"Lake"},
+    {184,mode_wavesins,"Wavesins"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
