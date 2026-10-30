@@ -64,10 +64,10 @@ assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        compose.includes('Caption(bleMessage.value, t)'),
        'Connection status and transient diagnostics must remain separate');
 assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
-       compose.includes('frame.colorAt(first + i)') &&
-       compose.includes('First visible pixel') &&
-       compose.includes('NOT a simulated effect.'),
-  'Preview must show indexed project pixels rather than fabricated animation frames.');
+       compose.includes('Color(frame.colorAt(sample))') &&
+       compose.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
+       compose.includes('No invented animation: only trusted CORE RGB or local design colors.'),
+   'The approved three-row live preview must use actual indexed project or CORE RGB, not invented animation.');
 assert(compose.includes('if (offlinePreview.value) return') &&
        compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
        compose.includes('offlinePreview.value = true') &&
