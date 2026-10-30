@@ -31,8 +31,8 @@ for route in ["/dev", "/api/v1/status", "/api/v1/status-led",
     assert route in page, f"Developer dashboard missing operation: {route}"
 assert 'studio_embedded\\":false' in core
 assert 'developer_console\\":true' in core
-assert 'ot_ble_apply_fx_internal(&req,false,&spark)' in core, "Auto preview must use transient spark accents"
-assert 'ot_ble_apply_fx_internal(&req,false,NULL)' in core, "Regular effects must retain default accents"
+assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL)' in core, "Auto preview must use transient spark accents"
+assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay)' in core, "Regular effects must retain default accents"
 assert 'fx_bank.zones[o][z].spark=*spark' in core, "Spark style must remain volatile, not saved NVS"
 for control in ("eventSparkStyle","eventSparkPeak","eventSparkColor"):
     assert control in page, f"Developer console sparkle control missing: {control}"
