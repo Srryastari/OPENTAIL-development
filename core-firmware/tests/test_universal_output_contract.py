@@ -27,6 +27,27 @@ assert "#define OT_CHAIN_PIXELS OT_OM_MAX_PIXELS_PER_OUTPUT" in board
 assert "OT_SMALL_BENCH_LAYOUT" not in board
 assert "OT_LAYOUT_SECTIONS {6,6,6,6,6" not in board
 
+# Output Manager diagnostics must never acknowledge a partial mapping as a
+# valid 200 response when cJSON allocation fails under memory pressure.
+json_output=core.split("static cJSON *om_json_output(",1)[1].split(
+    "static esp_err_t om_get(",1
+)[0]
+om_get=core.split("static esp_err_t om_get(",1)[1].split(
+    "static esp_err_t om_post(",1
+)[0]
+assert "if(!cal)goto oom;" in json_output
+assert "if(!rgb||!w)goto oom;" in json_output
+assert "if(!r||!white){cJSON_Delete(r);cJSON_Delete(white);goto oom;}" in json_output
+assert "if(!entry)goto oom;" in json_output
+assert "cJSON_Delete(entry);goto oom;" in json_output
+assert "cJSON_Delete(item);" in json_output.split("oom:",1)[1]
+assert 'if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}' in om_get
+assert 'if(!entry){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}' in om_get
+assert 'for(int i=0;i<OT_OM_OUTPUTS;i++){' in om_get
+assert om_get.index("if(!entry){cJSON_Delete(obj);") < om_get.index("cJSON_PrintUnformatted(obj)")
+# Out-of-memory status must leave hardware-owned data and output config unchanged.
+assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
+
 # Runtime driver length must follow each saved output, not a global max.
 assert ".max_leds=pixels" in core
 assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
