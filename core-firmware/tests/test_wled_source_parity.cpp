@@ -5670,8 +5670,10 @@ int main() {
         for(unsigned count: zone_lengths) {
             if(fx.id==82u && count<5u)continue;
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
-            for(unsigned speed:{0u,16u,127u,255u}) {
-                for(unsigned intensity:{0u,64u,128u,200u,255u}) {
+            /* Add near-zero and near-maximum register values: branch behavior
+             * often differs at 1 and 254 even when 0 and 255 pass. */
+            for(unsigned speed:{0u,1u,16u,127u,254u,255u}) {
+                for(unsigned intensity:{0u,1u,64u,128u,200u,254u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
