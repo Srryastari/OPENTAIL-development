@@ -124,9 +124,9 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
        hardwareBlock.includes('Save to CORE · verify readback'),
  'Persistent hardware mapping requires explicit validated commit and readback.');
-assert(ble.includes('frameCapture.cancel(); // GATT close may never produce a disconnect callback') &&
+assert(ble.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
-       ble.includes('||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
+       ble.includes('||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
        'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
  'Preview must reuse authenticated CORE FX/STOP commands.');
@@ -138,7 +138,7 @@ const queuePump = ble.split('private void pumpQueue(){')[1]?.split('private Stri
 assert(stopQueue && queuePump &&
   stopQueue.includes('nextPacket=Arrays.copyOf(data,data.length);') &&
   stopQueue.includes('afterStopPacket=null;') &&
-  stopQueue.includes('frameCapture.busy() || nextPacket!=null) {') &&
+  stopQueue.includes('frameCapture.busy() || palette.busy() || nextPacket!=null) {') &&
   stopQueue.includes('else if (isStopPacket(nextPacket))') &&
   stopQueue.includes('afterStopPacket=Arrays.copyOf(data,data.length);') &&
   stopQueue.includes('frameCapture.abortForStop();') &&
