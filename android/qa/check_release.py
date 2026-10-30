@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Android v0.2.0-alpha3 release audit. Compilation is done separately."""
+"""Native Android v0.2.0-alpha4 release audit. Compilation is done separately."""
 from pathlib import Path
 import hashlib
 import re
@@ -30,8 +30,8 @@ effect = (source / "NativeEffectCatalog.java").read_text()
 ble = (source / "BleDiscovery.java").read_text()
 owner = (source / "BleOwnerVault.java").read_text()
 check("Android manifest and styles parse", manifest.tag == "manifest" and style.getroot().tag == "resources")
-check("Android v0.2.0-alpha3 native release numbers", 
-      "versionName '0.2.0-alpha3'" in gradle and "versionCode 33" in gradle and
+check("Android v0.2.0-alpha4 native release numbers", 
+      "versionName '0.2.0-alpha4'" in gradle and "versionCode 34" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
 check("Sole Kotlin Compose launcher; no Java UI entry or network transport permission",
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
