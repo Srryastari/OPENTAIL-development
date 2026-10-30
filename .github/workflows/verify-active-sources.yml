@@ -212,11 +212,11 @@ jobs:
           from pathlib import Path
           import re
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.120.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           assert not Path('android/app/src/main/assets/opentail.htm').exists(), 'Native Android must not bundle Studio HTML'
           assert not Path('android/app/src/main/assets/unified-shell.js').exists(), 'Native Android must not bundle WebView shell'
-          assert b'OpenTail Studio v0.19.118' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.120' in a, 'Unexpected Studio version'
           html=a.decode()
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',html,flags=re.S)
           assert scripts, 'No standalone Studio script'
