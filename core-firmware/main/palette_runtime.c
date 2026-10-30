@@ -57,6 +57,24 @@ static bool nvs_commit_record(const ot_palette_record_t *record){
     nvs_close(h);
     return e==ESP_OK;
 }
+bool ot_palette_runtime_read_record(uint8_t index,ot_palette_record_t *out){
+    if(index>=OT_PALETTE_SLOTS||!out)return false;
+    ot_palette_entry_t live={0};
+    if(!ot_palette_runtime_get(index,&live)||!live.present)return false;
+    char key[8];key_for(index,key);
+    nvs_handle_t h;
+    if(nvs_open("ot_palettes",NVS_READONLY,&h)!=ESP_OK)return false;
+    ot_palette_record_t stored={0};size_t n=sizeof(stored);
+    esp_err_t e=nvs_get_blob(h,key,&stored,&n);
+    nvs_close(h);
+    ot_wled_palette16_t checked;
+    if(e!=ESP_OK||n!=sizeof(stored)||stored.index!=index||
+       !ot_palette_record_valid(&stored,&checked))return false;
+    ot_palette_entry_t current={0};
+    if(!ot_palette_runtime_get(index,&current)||!current.present||
+       current.revision!=stored.revision)return false;
+    *out=stored;return true;
+}
 bool ot_palette_runtime_put(const ot_palette_record_t *record,uint32_t expected){
     ot_palette_entry_t next={0};
     if(!record||!ot_palette_entry_from_record(&next,record)||
