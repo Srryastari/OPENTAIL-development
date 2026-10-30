@@ -106,7 +106,8 @@ final class BleDiscovery {
     }
     private final ArrayAdapter<String> entries;
     private BluetoothLeScanner scanner;
-    private BluetoothGatt gatt;
+    // Updated by UI lifecycle, read by Android's asynchronous GATT callbacks.
+    private volatile BluetoothGatt gatt;
     private AlertDialog scanDialog;
     private volatile boolean scanning;
     private boolean stopped;
