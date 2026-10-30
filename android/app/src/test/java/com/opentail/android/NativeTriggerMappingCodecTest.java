@@ -62,6 +62,42 @@ public class NativeTriggerMappingCodecTest {
         assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(0,wanted));
     }
 
+    /** Client-side replay model only; CORE #49 owns actual NVS crash recovery. */
+    @Test public void stagedAndRebootReadbacksCannotMasqueradeAsAppliedRevision() {
+        int[] previous={1,2,3,4,5,6,7,8};
+        int[] desired={1,2,4,3,5,6,7,8};
+        byte[] wire={1,0,100,0,0,0,1,1,2,3,4,5,6,7,8};
+        NativeTriggerMappingCodec.Snapshot active=NativeTriggerMappingCodec.decode(wire);
+        assertTrue(active.persisted);
+        assertFalse(active.confirmsApplied(100,desired));
+
+        // Durable staged token advances, but active mapping remains previous,
+        // both before and after a simulated reconnect/reboot readback.
+        wire[2]=101;wire[6]=0;
+        NativeTriggerMappingCodec.Snapshot staged=NativeTriggerMappingCodec.decode(wire);
+        assertEquals(101,staged.revision);
+        assertFalse(staged.persisted);
+        assertArrayEquals(previous,staged.functions);
+        assertFalse(staged.confirmsApplied(100,desired));
+        NativeTriggerMappingCodec.Snapshot rebootPending=NativeTriggerMappingCodec.decode(wire.clone());
+        assertFalse(rebootPending.confirmsApplied(100,desired));
+
+        // After physical inputs release, CORE reports applied/persisted.
+        wire[6]=1;
+        for(int i=0;i<8;i++)wire[7+i]=(byte)desired[i];
+        NativeTriggerMappingCodec.Snapshot applied=NativeTriggerMappingCodec.decode(wire);
+        assertTrue(applied.confirmsApplied(100,desired));
+        assertFalse(applied.confirmsApplied(99,desired)); // stale client
+        assertTrue(NativeTriggerMappingCodec.decode(wire.clone()).confirmsApplied(100,desired));
+
+        // Final durable 16-bit token is readable but cannot be reused.
+        wire[2]=(byte)255;wire[3]=(byte)255;
+        assertTrue(NativeTriggerMappingCodec.decode(wire).confirmsApplied(65534,desired));
+        assertFalse(NativeTriggerMappingCodec.decode(wire).confirmsApplied(65535,desired));
+        assertThrows(IllegalArgumentException.class,
+            () -> NativeTriggerMappingCodec.encode(65535,desired));
+    }
+
     @Test public void exposesBusyStaleAndNvsFailureAsFailuresNotSuccess() {
         byte[] wire = {1, 3, 2, 0, 0, 0, 1, 1,2,3,4,5,6,7,8};
         assertEquals(3, NativeTriggerMappingCodec.decode(wire).status);
