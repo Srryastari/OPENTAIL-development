@@ -155,9 +155,59 @@ bool ot_wled_palette_build(uint8_t id, ot_wled_rgb_t primary,
  * or change current fixed-palette selection/transport semantics. */
 bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
                                ot_wled_palette16_t *out);
+/* Source fastled_slim.h loadDynamicGradientPalette(): 2–18 sorted
+ * [index,R,G,B] stops, last index=255. No JSON, NVS, BLE or ID allocation
+ * is performed here; external profile/transport owns those contracts.
+ * Invalid data fails atomically without changing *out. */
+bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
+                                          size_t stop_count,
+                                          ot_wled_palette16_t *out);
+/* Explicit source palette-ID lookup; arrays are caller-owned and ordered as
+ * WLED custom palette 200,199,... and usermod 255,254,... respectively.
+ * Built-ins 0,2-72 reuse verified fixed palettes; 1 reads the live shared
+ * random palette. Unprovided dynamic/custom IDs fail closed rather than
+ * fabricating fallback colors. No persistent or wire-format changes. */
+bool ot_wled_palette_resolve(uint8_t id,
+                              ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
+                              ot_wled_rgb_t tertiary,
+                              const ot_wled_palette16_t *live_random,
+                              const ot_wled_palette16_t *custom,
+                              size_t custom_count,
+                              const ot_wled_palette16_t *usermod,
+                              size_t usermod_count,
+                              ot_wled_palette16_t *out);
 ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
+
+/* WLED fastled_slim.cpp nblendPaletteTowardPalette(), RGB-only.
+ * These 16 RGB entries occupy 48 contiguous bytes in WLED's source order.
+ * Like the source, a decrement can move a channel two units per pass.
+ * The transition is shared by segments; callers own its lifecycle. */
+void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
+                                  const ot_wled_palette16_t *target,
+                                  uint8_t max_changes);
+
+/* Source FX_fcn.cpp handleRandomPalette() time/transition state. The WLED
+ * palette is GLOBAL across segments. Call this once per global FX frame, not
+ * independently per output or zone. The caller supplies a pre-generated
+ * source palette ONLY when a change is due (from the existing verified HSV4
+ * constructor or harmonic generator); this function never invents random
+ * values. For a requested change with no generated palette, it rejects
+ * atomically and leaves state untouched. */
+typedef struct {
+    ot_wled_palette16_t current;
+    ot_wled_palette16_t target;
+    uint16_t last_change_s;
+    uint16_t next_blend_ms;
+} ot_wled_palette_random_t;
+
+bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
+                                 uint32_t now_ms, uint16_t change_interval_s,
+                                 uint16_t frame_time_ms,
+                                 uint16_t transition_time_ms,
+                                 const ot_wled_palette16_t *generated_if_due);
+
 
 /* Optional measured audio peak provided by the external audio subsystem.
  * No synthetic FFT, microphone acquisition or BLE extension is embedded in

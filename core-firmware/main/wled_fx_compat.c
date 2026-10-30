@@ -283,6 +283,129 @@ ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *pal,
     return out;
 }
 
+/* Source fastled_slim.h loadDynamicGradientPalette(), RGB-only. WLED
+ * packs up to 18 gradient stops in [position,r,g,b] order (max 72 bytes).
+ * Preserve the source's extra-slot adjustment only when stop_count < 16.
+ * Unsigned indices and a sorted terminator prevent out-of-range access. */
+bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
+                                          size_t stop_count,
+                                          ot_wled_palette16_t *out) {
+    if(!stops||!out||stop_count<2u||stop_count>18u||
+       stops[(stop_count-1u)*4u]!=255u)return false;
+    for(size_t i=1;i<stop_count;i++)
+        if(stops[i*4u]<stops[(i-1u)*4u])return false;
+    ot_wled_palette16_t next={0};
+    int last_slot_used=-1;
+    unsigned indexstart=0u;
+    ot_wled_rgb_t rgbstart=(ot_wled_rgb_t){stops[1],stops[2],stops[3]};
+    for(size_t i=1;i<stop_count;i++) {
+        const unsigned indexend=stops[4u*i];
+        const ot_wled_rgb_t rgbend=(ot_wled_rgb_t){
+            stops[4u*i+1u],stops[4u*i+2u],stops[4u*i+3u]};
+        unsigned start=indexstart/16u,end=indexend/16u;
+        if(stop_count<16u && (int)start<=last_slot_used &&
+           last_slot_used<15) {
+            start=(unsigned)(last_slot_used+1);
+            if(end<start)end=start;
+        }
+        last_slot_used=(int)end;
+        palette_gradient(&next,start,rgbstart,end,rgbend);
+        indexstart=indexend;
+        rgbstart=rgbend;
+    }
+    *out=next;
+    return true;
+}
+
+/* Pinned WLED const.h/FX_fcn.cpp palette ID partitions: random=1,
+ * custom=200..73 descending, usermod=255..201 descending. No hidden
+ * global state or storage side effects. Missing IDs fail closed. */
+bool ot_wled_palette_resolve(uint8_t id,ot_wled_rgb_t primary,
+                              ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
+                              const ot_wled_palette16_t *live_random,
+                              const ot_wled_palette16_t *custom,
+                              size_t custom_count,
+                              const ot_wled_palette16_t *usermod,
+                              size_t usermod_count,
+                              ot_wled_palette16_t *out) {
+    if(!out||custom_count>128u||usermod_count>55u)return false;
+    if(id==1u) {
+        if(!live_random)return false;
+        *out=*live_random;
+        return true;
+    }
+    if(id<=72u)
+        return ot_wled_palette_build(id,primary,secondary,tertiary,out);
+    if(id<=200u) {
+        const size_t index=200u-(size_t)id;
+        if(!custom||index>=custom_count)return false;
+        *out=custom[index];
+        return true;
+    }
+    const size_t index=255u-(size_t)id;
+    if(!usermod||index>=usermod_count)return false;
+    *out=usermod[index];
+    return true;
+}
+
+/* Pinned fastled_slim.cpp nblendPaletteTowardPalette(), RGB byte order
+ * and stop-on-maxChanges semantics. No float, allocation or gamma. */
+void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
+                                  const ot_wled_palette16_t *target,
+                                  uint8_t max_changes) {
+    if(!current||!target)return;
+    uint8_t *a=(uint8_t*)current->entries;
+    const uint8_t *b=(const uint8_t*)target->entries;
+    unsigned changes=0u;
+    for(size_t i=0;i<sizeof(current->entries);i++) {
+        if(a[i]==b[i])continue;
+        if(a[i]<b[i]){++a[i];++changes;}
+        if(a[i]>b[i]) {
+            --a[i];++changes;
+            if(a[i]>b[i])--a[i];
+        }
+        if(changes>=max_changes)break;
+    }
+}
+
+/* Pinned FX_fcn.cpp Segment::handleRandomPalette(): preserve its 16-bit
+ * seconds/next-blend wrap, absolute transition window and per-frame blend
+ * budget. The upstream generated palette is caller-supplied to avoid
+ * changing the global WLED PRNG sequence or inventing random palettes. */
+bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
+                                 uint32_t now_ms,uint16_t change_interval_s,
+                                 uint16_t frame_time_ms,
+                                 uint16_t transition_time_ms,
+                                 const ot_wled_palette16_t *generated_if_due) {
+    if(!state||frame_time_ms<8u||frame_time_ms>1000u||
+       transition_time_ms<100u)return false;
+    ot_wled_palette_random_t next=*state;
+    const uint16_t now_s=(uint16_t)(now_ms/1000u);
+    const uint32_t now=(uint32_t)now_s*1000u+(now_ms%1000u);
+    if(now_s<next.last_change_s)next.last_change_s=0u;
+    if((uint32_t)now_s>(uint32_t)next.last_change_s+change_interval_s) {
+        if(!generated_if_due)return false;
+        next.target=*generated_if_due;
+        next.last_change_s=now_s;
+        next.next_blend_ms=(uint16_t)now;
+    }
+    if((uint16_t)now<next.next_blend_ms||
+       now>((uint32_t)next.last_change_s*1000u+
+             transition_time_ms+2u*(uint32_t)frame_time_ms)) {
+        *state=next;
+        return true;
+    }
+    const unsigned frames=frame_time_ms>transition_time_ms?1u:
+                          transition_time_ms/frame_time_ms;
+    const unsigned blends=frames>255u?1u:
+                          (255u+(frames>>1))/frames;
+    for(unsigned i=0;i<blends;i++)
+        ot_wled_palette_blend_toward(&next.current,&next.target,48u);
+    next.next_blend_ms=(uint16_t)(now+((frames>>8)*frame_time_ms));
+    *state=next;
+    return true;
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
@@ -1509,10 +1632,17 @@ static void stream2_frame(const ot_wled_fx_config_t *cfg,
                           uint32_t old_call,ot_wled_rgb_t *pixels,
                           size_t count) {
     if(old_call==0u) {
-        const uint8_t r=fx_rand8(state,256),g=fx_rand8(state,256),
-                      b=fx_rand8(state,256);
+        /* Pinned prng.h 16-bit sequence; GCC evaluates the source
+         * RGBW32(prng.random8(),...) arguments from right to left.
+         * Seed is injected by the per-zone RNG state (zero = default).
+         * Never consume unrelated shared WLED global PRNG state. */
+        uint16_t seed=(uint16_t)(state->rng_state?
+                                  state->rng_state:0x73a11c5du);
+        const uint8_t b=stream2_random8(&seed);
+        const uint8_t g=stream2_random8(&seed);
+        const uint8_t r=stream2_random8(&seed);
         state->step=((uint32_t)r<<16)|((uint32_t)g<<8)|b;
-        state->aux0=(uint16_t)fx_prng(state);
+        state->aux0=stream2_next(&seed);
     }
     const uint32_t it=now/(25u+3u*(255u-(uint32_t)cfg->speed));
     uint32_t color=state->step;
@@ -1936,11 +2066,14 @@ static void twinkle_frame(const ot_wled_fx_config_t *cfg,
  * during the stepped flash delays, and retained adjacent flash pixels. */
 static void chase_flash_random_frame(const ot_wled_fx_config_t *cfg,
                                       ot_wled_fx_state_t *state,uint32_t now,
+                                      uint32_t old_call,
                                       ot_wled_rgb_t *pixels,size_t count) {
     if(count<=1u){pixels[0]=scaled(cfg->foreground,cfg->brightness);return;}
     const bool advance=now>=state->step;
-    if(!advance && state->call)state->call--;
-    const unsigned flash_step=state->call%9u;
+    /* Source FX.cpp reads SEGENV.call before the per-frame increment.
+     * A held frame first decrements the count and reuses the prior phase. */
+    if(!advance)state->call--;
+    const unsigned flash_step=(old_call-(advance?0u:1u))%9u;
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     const ot_wled_rgb_t wheel=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
@@ -2197,7 +2330,8 @@ static bool meteor_frame(const ot_wled_fx_config_t *cfg,
             const uint8_t scale=(uint8_t)(128u+fx_rand8(state,127u));
             trail[i]=(uint8_t)(((uint16_t)trail[i]*(1u+scale))>>8);
             const uint8_t luminance=trail[i];
-            pixels[i]=scaled(scaled(cfg->foreground,luminance),cfg->brightness);
+            /* Source palette=0 applies video-aware color_fade before CORE cap. */
+            pixels[i]=scaled(fx_video_fade(cfg->foreground,luminance),cfg->brightness);
         }
     }
     const ot_wled_rgb_t full=scaled(cfg->foreground,cfg->brightness);
@@ -2277,11 +2411,15 @@ static int8_t fx_tristate8(uint8_t x,uint8_t pulse,uint8_t attack) {
     if(x<pulse)return (int8_t)(((int16_t)(pulse-x)*amplitude)/attack);
     return 0;
 }
-/* Pinned mode_washing_machine() sine and phase arithmetic; default
- * palette-index to RGB colors requires full palette mapper later. */
+/* Pinned mode_washing_machine() sine, phase and default Party palette. */
 static void washing_frame(const ot_wled_fx_config_t *cfg,
                            ot_wled_fx_state_t *state,uint32_t now,
                            ot_wled_rgb_t *pixels,size_t count) {
+    /* Source mode_washing_machine() samples default Party palette ID 0,
+     * not an interpolation between the user foreground/background colors. */
+    ot_wled_palette16_t source_palette;
+    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     const int speed=fx_tristate8((uint8_t)(now>>7),90u,15u);
     const int delta=(speed*2048)/(512-(int)cfg->speed);
     state->step+=(uint32_t)delta;
@@ -2289,18 +2427,22 @@ static void washing_frame(const ot_wled_fx_config_t *cfg,
         const uint32_t angle=(((uint32_t)cfg->intensity/25u+1u)*255u*
                               (uint32_t)i)/(uint32_t)count+(state->step>>7);
         const uint8_t color_index=wled_sin8((uint8_t)angle);
-        pixels[i]=scaled(blend_colors(cfg->background,cfg->foreground,
-                                       color_index),cfg->brightness);
+        pixels[i]=scaled(ot_wled_palette_sample(&source_palette,color_index,255u,
+                                      OT_WLED_PALETTE_LINEAR),cfg->brightness);
     }
 }
-/* Pinned mode_flow() 1D zigzag zones and rotating stripe indices.
- * The source palette mapping for mcol=255 still needs engine-wide parity. */
+/* Pinned mode_flow() 1D zigzag zones, rotating stripes and Party palette. */
 static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                        ot_wled_rgb_t *pixels,size_t count) {
     if(count<=1u) {
         pixels[0]=scaled(cfg->foreground,cfg->brightness);
         return;
     }
+    /* Upstream Flow uses color_from_palette(..., slot=255), which samples
+     * the WLED default Party palette (ID 0), not the two zone colors. */
+    ot_wled_palette16_t source_palette;
+    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     uint32_t counter=0u;
     if(cfg->speed)counter=(now*((uint32_t)(cfg->speed>>2)+1u))>>8;
     const unsigned max_zones=(unsigned)count/6u;
@@ -2323,14 +2465,12 @@ static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
             const unsigned led=(z&1u)?i:(zone_len-1u-i);
             const int32_t dst=pos+(int32_t)led;
             if(dst<0 || (size_t)dst>=count)continue;
-            pixels[dst]=scaled(blend_colors(cfg->background,cfg->foreground,index),
-                               cfg->brightness);
+            pixels[dst]=scaled(ot_wled_palette_sample(&source_palette,index,255u,
+                                      OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
     }
 }
-/* Pinned mode_sunrise() stage progress and center-out geometry. Upstream
- * Fire palette (ID 35) is not available yet; use the current two-color
- * interpolation only as a source-derived geometry port. */
+/* Pinned mode_sunrise() stage progress, center-out geometry and Fire palette 35. */
 static void sunrise_frame(const ot_wled_fx_config_t *cfg,
                           ot_wled_fx_state_t *state,uint32_t now,
                           uint32_t old_call,ot_wled_rgb_t *pixels,
@@ -2341,6 +2481,12 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
     if(old_call==0u || cfg->speed!=state->aux0) {
         state->step=now;state->aux0=cfg->speed;
     }
+    /* Upstream Sunrise metadata prescribes Fire palette 35 by default.
+     * Use exact pinned 16-entry source palette, not a foreground/background
+     * approximation; palette selection ABI remains unchanged (ID 0 only). */
+    ot_wled_palette16_t fire_palette;
+    (void)ot_wled_palette_build(35u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&fire_palette);
     uint32_t stage=0xffffu;
     uint32_t elapsed=(now-state->step)/100u;
     if(cfg->speed>120u) {
@@ -2360,8 +2506,9 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
         const uint32_t wave=wave16((uint16_t)angle);
         uint32_t luminance=(wave>>8)+((wave*(uint32_t)cfg->intensity)>>15);
         if(luminance>240u)luminance=240u;
-        const ot_wled_rgb_t c=scaled(blend_colors(cfg->background,cfg->foreground,
-                                        (uint8_t)luminance),cfg->brightness);
+        const ot_wled_rgb_t c=scaled(ot_wled_palette_sample(
+                         &fire_palette,(uint8_t)luminance,255u,
+                         OT_WLED_PALETTE_LINEAR),cfg->brightness);
         pixels[i]=c;
         pixels[count-1u-i]=c;
     }
@@ -2388,6 +2535,7 @@ static void fx_ripple_blend(ot_wled_rgb_t *pixels,size_t count,
 /* Upstream mode_ripple() and mode_ripple_rainbow() with the original
  * 1D four-tap propagation, wave birth, amplitude and lifetime. WLED
  * nonzero palette selection is still outside the current RGB-only profile. */
+static void fx_blur_1d(ot_wled_rgb_t *pixels,size_t count,uint8_t amount);
 static bool ripple_frame(const ot_wled_fx_config_t *cfg,
                          ot_wled_fx_state_t *state,uint32_t now,
                          uint32_t old_call,ot_wled_rgb_t *pixels,
@@ -2401,6 +2549,12 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
     ot_fx_ripple_t *ripples=(ot_fx_ripple_t*)fx_zone_scratch(
                                     state,max_ripples*sizeof(ot_fx_ripple_t));
     if(!ripples)return false;
+    /* Upstream color_from_palette(...,mcol=255) samples the default
+     * Party palette even when the selected palette ID is zero. */
+    ot_wled_palette16_t ripple_palette;
+    if(!ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+                              (ot_wled_rgb_t){0,0,0},&ripple_palette))
+        return false;
     ot_wled_rgb_t bg=cfg->background;
     if(rainbow) {
         if(old_call==0u) {
@@ -2413,6 +2567,8 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
         bg=blend_colors(wheel_rgb((uint8_t)state->aux0),
                         (ot_wled_rgb_t){0,0,0},235u);
     }
+    /* Source metadata sets Ripple custom1=0, check2=false by default:
+     * both variants start from a filled frame and have zero blur. */
     const ot_wled_rgb_t base=scaled(bg,cfg->brightness);
     for(size_t i=0;i<count;i++)pixels[i]=base;
     for(size_t i=0;i<max_ripples;i++) {
@@ -2426,8 +2582,9 @@ static bool ripple_frame(const ot_wled_fx_config_t *cfg,
             const uint32_t amplitude=ripple_state<17u?
                       fx_triwave8((uint8_t)((ripple_state-1u)*8u)):
                       255u-(ripple_state-17u)*253u/238u;
-            const ot_wled_rgb_t color=scaled(
-                    wheel_rgb(ripples[i].color),cfg->brightness);
+            const ot_wled_rgb_t color=scaled(ot_wled_palette_sample(
+                      &ripple_palette,ripples[i].color,255u,
+                      OT_WLED_PALETTE_NOWRAP),cfg->brightness);
             const int32_t left=(int32_t)ripples[i].pos-distance-1;
             const int32_t right=(int32_t)ripples[i].pos+distance+2;
             for(int v=0;v<4;v++) {
@@ -2457,22 +2614,34 @@ static ot_wled_rgb_t fx_scale256(ot_wled_rgb_t c,uint8_t amount) {
         (uint8_t)(((uint16_t)c.g*amount)>>8),
         (uint8_t)(((uint16_t)c.b*amount)>>8)};
 }
-static ot_wled_rgb_t fx_add_saturate(ot_wled_rgb_t a,ot_wled_rgb_t b) {
-    const unsigned r=(unsigned)a.r+b.r,g=(unsigned)a.g+b.g,
-                   blue=(unsigned)a.b+b.b;
-    return (ot_wled_rgb_t){(uint8_t)(r>255u?255u:r),
-                          (uint8_t)(g>255u?255u:g),
-                          (uint8_t)(blue>255u?255u:blue)};
+/* Exact pinned colors.cpp color_add(preserveCR=false), RGB-only.
+ * Preserve the packed two-lane arithmetic (including source carry
+ * behavior): independent per-channel clamp is NOT byte-for-byte equal. */
+static ot_wled_rgb_t fx_source_color_add(ot_wled_rgb_t a,ot_wled_rgb_t b) {
+    const uint32_t c1=((uint32_t)a.r<<16)|((uint32_t)a.g<<8)|a.b;
+    const uint32_t c2=((uint32_t)b.r<<16)|((uint32_t)b.g<<8)|b.b;
+    if(c1==0u)return b;
+    if(c2==0u)return a;
+    const uint32_t mask=0x00ff00ffu;
+    uint32_t rb=(c1&mask)+(c2&mask);
+    uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
+    rb|=((rb&0x01000100u)-((rb>>8)&0x00010001u))&mask;
+    wg|=((wg&0x01000100u)-((wg>>8)&0x00010001u))&mask;
+    wg<<=8;
+    const uint32_t result=rb|wg;
+    return (ot_wled_rgb_t){(uint8_t)(result>>16),
+                           (uint8_t)(result>>8),(uint8_t)result};
 }
-static void fx_blur16(ot_wled_rgb_t *pixels,size_t count) {
-    if(!count)return;
-    ot_wled_rgb_t carry=fx_scale256(pixels[0],8u);
-    pixels[0]=fx_scale256(pixels[0],239u);
+static void fx_blur_1d(ot_wled_rgb_t *pixels,size_t count,uint8_t amount) {
+    if(!count||!amount)return;
+    const uint8_t keep=(uint8_t)(255u-amount),seep=(uint8_t)(amount>>1);
+    ot_wled_rgb_t carry=fx_scale256(pixels[0],seep);
+    pixels[0]=fx_scale256(pixels[0],keep);
     for(size_t i=1;i<count;i++) {
         const ot_wled_rgb_t cur=pixels[i];
-        const ot_wled_rgb_t part=fx_scale256(cur,8u);
-        pixels[i]=fx_add_saturate(fx_scale256(cur,239u),carry);
-        pixels[i-1u]=fx_add_saturate(pixels[i-1u],part);
+        const ot_wled_rgb_t part=fx_scale256(cur,seep);
+        pixels[i]=fx_source_color_add(fx_scale256(cur,keep),carry);
+        pixels[i-1u]=fx_source_color_add(pixels[i-1u],part);
         carry=part;
     }
 }
@@ -2497,18 +2666,23 @@ static void fireworks_frame(const ot_wled_fx_config_t *cfg,
                                  (ot_wled_rgb_t){0,0,0};
         const ot_wled_rgb_t old_b=valid_b?pixels[state->aux1]:
                                  (ot_wled_rgb_t){0,0,0};
-        fx_blur16(pixels,count);
+        fx_blur_1d(pixels,count,16u);
         if(valid_a)pixels[state->aux0]=old_a;
         if(valid_b)pixels[state->aux1]=old_b;
     }
     const size_t bursts=count/20u?count/20u:1u;
     const uint32_t chance=129u-(cfg->intensity>>1);
-    const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    ot_wled_palette16_t palette;
+    /* Both Fireworks and Rain default to source palette 11 (Rainbow);
+     * random spark hues must sample it, not the foreground solid color. */
+    if(!ot_wled_palette_build(11u,cfg->foreground,cfg->background,
+                              (ot_wled_rgb_t){0,0,0},&palette))return;
     for(size_t j=0;j<bursts;j++) {
         if(fx_rand8(state,chance)==0u) {
             const size_t index=fx_rand_index(state,count);
-            (void)fx_rand8(state,256u); /* palette hue draw, mcol=0 */
-            pixels[index]=fg;
+            const uint8_t hue=fx_rand8(state,256u);
+            pixels[index]=scaled(ot_wled_palette_sample(&palette,hue,255u,
+                                OT_WLED_PALETTE_NOWRAP),cfg->brightness);
             state->aux1=state->aux0;
             state->aux0=(uint16_t)index;
         }
@@ -3087,17 +3261,11 @@ static void colortwinkle_frame(const ot_wled_fx_config_t *cfg,
         const uint8_t mask=(uint8_t)(1u<<(i&7u));
         if((bits[slot]&mask)!=0u) {
             const ot_wled_rgb_t inc=fox_video_fade(old,rise);
-            ot_wled_rgb_t out={
-                (uint8_t)((unsigned)old.r+inc.r>255u?255u:(unsigned)old.r+inc.r),
-                (uint8_t)((unsigned)old.g+inc.g>255u?255u:(unsigned)old.g+inc.g),
-                (uint8_t)((unsigned)old.b+inc.b>255u?255u:(unsigned)old.b+inc.b)
-            };
+            ot_wled_rgb_t out=fx_source_color_add(old,inc);
             if(out.r==255u||out.g==255u||out.b==255u)
                 bits[slot]&=(uint8_t)~mask;
             if(out.r==old.r&&out.g==old.g&&out.b==old.b) {
-                out.r=(uint8_t)((unsigned)out.r*2u>255u?255u:(unsigned)out.r*2u);
-                out.g=(uint8_t)((unsigned)out.g*2u>255u?255u:(unsigned)out.g*2u);
-                out.b=(uint8_t)((unsigned)out.b*2u>255u?255u:(unsigned)out.b*2u);
+                out=fx_source_color_add(out,out);
             }
             raw[i]=out;
         } else {
@@ -4100,11 +4268,11 @@ static void juggle_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         const size_t index=fx_beatsin88(bpm,(uint16_t)(count-1u),now);
         const ot_wled_rgb_t c=fx_hsv220(hue);
         const ot_wled_rgb_t dot=scaled(c,cfg->brightness);
-        const unsigned r=pixels[index].r|dot.r;
-        const unsigned g=pixels[index].g|dot.g;
-        const unsigned b=pixels[index].b|dot.b;
-        /* The bitwise OR of already scaled dots can exceed the output cap.
-         * Bound only this compositing step; preserve the source OR pattern. */
+        /* Pinned FastLED CRGB::operator|= is channel-wise maximum,
+         * not a bitwise OR. Preserve the original non-additive blend. */
+        const unsigned r=pixels[index].r>dot.r?pixels[index].r:dot.r;
+        const unsigned g=pixels[index].g>dot.g?pixels[index].g:dot.g;
+        const unsigned b=pixels[index].b>dot.b?pixels[index].b:dot.b;
         pixels[index]=(ot_wled_rgb_t){
             (uint8_t)(r>cfg->brightness?cfg->brightness:r),
             (uint8_t)(g>cfg->brightness?cfg->brightness:g),
@@ -4325,18 +4493,26 @@ static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
 
 /* Upstream FX.cpp Fill Noise, Noise 1–4 1D source animations. No WLED
  * runtime, Arduino global state or external LED bus is linked. */
+/* Source FX.cpp modes 69-73: Perlin spatial index selects the pinned
+ * default palette. The prior adapter calculated noise and discarded the
+ * index, leaving every pixel foreground-colored. Keep the WLED palette
+ * selection local; no BLE palette transport or zone geometry changes. */
 static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
                                ot_wled_fx_state_t *state,uint32_t now,
                                uint32_t old_call,ot_wled_rgb_t *pixels,
                                size_t count) {
+    const uint8_t default_pal=cfg->effect_id==OT_WLED_NOISE_1?20u:
+        cfg->effect_id==OT_WLED_NOISE_2?43u:
+        cfg->effect_id==OT_WLED_NOISE_3?35u:
+        cfg->effect_id==OT_WLED_NOISE_4?26u:0u;
+    ot_wled_palette16_t palette;
+    if(default_pal && !ot_wled_palette_build(default_pal,
+          cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return;
     if(cfg->effect_id==OT_WLED_FILL_NOISE) {
         if(old_call==0u)state->step=fx_prng(state);
-        for(size_t i=0;i<count;i++) {
-            const uint8_t index=fx_perlin8_2((uint16_t)((uint32_t)i*count),
-                                   (uint16_t)(state->step+(uint32_t)i*count));
-            (void)index;
+        for(size_t i=0;i<count;i++)
             pixels[i]=scaled(cfg->foreground,cfg->brightness);
-        }
         state->step+=fx_beatsin8(cfg->speed,1u,6u,now);
         return;
     }
@@ -4348,39 +4524,35 @@ static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
             const uint32_t sy=((uint32_t)i+state->step/42u)*320u;
             const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step)>>8);
             const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+            pixels[i]=scaled(ot_wled_palette_sample(&palette,index,255u,
+                          OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
         return;
     }
-    if(cfg->effect_id==OT_WLED_NOISE_2) {
-        state->step+=1u+((uint32_t)cfg->speed>>1);
+    if(cfg->effect_id==OT_WLED_NOISE_2 ||
+       cfg->effect_id==OT_WLED_NOISE_3) {
+        state->step+=cfg->effect_id==OT_WLED_NOISE_2?
+            1u+((uint32_t)cfg->speed>>1):1u+(uint32_t)cfg->speed;
         for(size_t i=0;i<count;i++) {
-            const uint32_t sx=((uint32_t)i+(state->step>>6))*1000u;
-            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,0u,4223u)>>8);
+            const uint32_t sx=cfg->effect_id==OT_WLED_NOISE_2?
+               ((uint32_t)i+(state->step>>6))*1000u:
+               ((uint32_t)i+4223u)*800u;
+            const uint32_t sy=cfg->effect_id==OT_WLED_NOISE_2?
+               0u:((uint32_t)i+1234u)*800u;
+            const uint32_t z=cfg->effect_id==OT_WLED_NOISE_2?
+               4223u:state->step*8u;
+            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,z)>>8);
             const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
-        }
-        return;
-    }
-    if(cfg->effect_id==OT_WLED_NOISE_3) {
-        state->step+=1u+(uint32_t)cfg->speed;
-        for(size_t i=0;i<count;i++) {
-            const uint32_t sx=((uint32_t)i+4223u)*800u;
-            const uint32_t sy=((uint32_t)i+1234u)*800u;
-            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step*8u)>>8);
-            const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
+            pixels[i]=scaled(ot_wled_palette_sample(&palette,index,noise,
+                          OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
         return;
     }
     const uint32_t phase=(now*(uint32_t)cfg->speed)>>7;
     for(size_t i=0;i<count;i++) {
-        const uint16_t index=fx_perlin16_2((uint32_t)i<<12,phase);
-        (void)index;
-        pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        const uint8_t index=(uint8_t)fx_perlin16_2((uint32_t)i<<12,phase);
+        pixels[i]=scaled(ot_wled_palette_sample(&palette,index,255u,
+                     OT_WLED_PALETTE_LINEAR),cfg->brightness);
     }
 }
 
@@ -4489,23 +4661,6 @@ static void pacifica_frame(const ot_wled_fx_config_t *cfg,ot_wled_fx_state_t *st
  * Usermod audio FFT_MajorPeak + magnitude. Do not synthesize those inputs. */
 /* Pinned colors.cpp color_add(..., preserveCR=true), needed by
  * mode_rocktaves() when repeated peaks overlap on the same pixel. */
-static uint32_t rocktaves_add(uint32_t c1,uint32_t c2) {
-    if(c1==0u)return c2;
-    if(c2==0u)return c1;
-    const uint32_t mask=0x00ff00ffu;
-    uint32_t rb=(c1&mask)+(c2&mask);
-    uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
-    if((rb|wg)&0x01000100u) {
-        const uint32_t red=rb>>16,blue=rb&0xffffu;
-        const uint32_t white=wg>>16,green=wg&0xffffu;
-        uint32_t max=red>green?(red>blue?red:blue):(green>blue?green:blue);
-        if(white>max)max=white;
-        const uint32_t scale=(255u<<8)/max;
-        rb=((rb*scale)>>8)&mask;
-        wg=(wg*scale)&~mask;
-    } else wg<<=8;
-    return rb|wg;
-}
 static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                              ot_wled_rgb_t *pixels,size_t count) {
     if(!cfg->audio_peak ||
@@ -4544,7 +4699,7 @@ static bool rocktaves_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     }
     const ot_wled_rgb_t dst=scaled(
            blend_colors(cfg->background,foreground,volume),cfg->brightness);
-    pixels[pos]=fx_unpack(rocktaves_add(fx_pack(pixels[pos]),fx_pack(dst)));
+    pixels[pos]=fx_source_color_add(pixels[pos],dst);
     return true;
 }
 
@@ -4836,7 +4991,7 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         return true;
     }
     if(cfg->effect_id==OT_WLED_CHASE_FLASH_RANDOM) {
-        chase_flash_random_frame(cfg,state,time_ms,pixels,count);
+        chase_flash_random_frame(cfg,state,time_ms,call,pixels,count);
         return true;
     }
     if(cfg->effect_id==OT_WLED_MULTI_COMET) {

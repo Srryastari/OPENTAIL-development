@@ -60,6 +60,42 @@ int main(void){
  assert(ot_fx_bank_apply_configured(&bank,&single,outputs,600,false));
  assert(bank.zones[1][2].request.effect_id==3);
  assert(bank.zones[0][0].request.effect_id==12);
+ /* Source effect -> volatile overlay: no zone restart, TTL extension or leaks. */
+ ot_fx_overlay_config_t glow={
+   .style=OT_FX_OVERLAY_SPARKS_FLARES,.peak=24,.density=128,
+   .radius=4,.fade_ms=120,.color={255,128,0}
+ };
+ const uint32_t z0_gen=bank.zones[0][0].generation;
+ const uint32_t z0_start=bank.zones[0][0].started_ms;
+ const uint32_t z2_gen=bank.zones[1][2].generation;
+ const uint32_t z2_start=bank.zones[1][2].started_ms;
+ assert(ot_fx_bank_set_overlay(&bank,outputs,3u,5u,700u,&glow));
+ assert(bank.zones[0][0].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ assert(bank.zones[1][0].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ assert(bank.zones[0][1].overlay.style==OT_FX_OVERLAY_OFF);
+ assert(bank.zones[1][1].overlay.style==OT_FX_OVERLAY_OFF);
+ assert(bank.zones[0][0].generation==z0_gen&&
+        bank.zones[0][0].started_ms==z0_start);
+ assert(bank.zones[1][2].generation==z2_gen&&
+        bank.zones[1][2].started_ms==z2_start);
+ /* Invalid configs and masks are atomic; disabled/phantom zones never apply. */
+ glow.style=4;
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,3u,5u,701u,&glow));
+ assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ glow.style=OT_FX_OVERLAY_FLARES;
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,2u,701u,&glow));
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,0u,4u,701u,&glow));
+ assert(ot_fx_bank_set_overlay(&bank,outputs,2u,4u,701u,&glow));
+ assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_FLARES);
+ assert(bank.zones[1][0].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ assert(bank.zones[0][0].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
+ /* Expired preview cannot be revived by an overlay-only edit. */
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,3u,5u,62000u,&glow));
+ ot_fx_bank_stop_temporary(&bank);
+ assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,4u,702u,&glow));
+ assert(ot_fx_bank_apply_configured(&bank,&single,outputs,800u,false));
+ assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_OFF);
  a.zone_mask=0;assert(!ot_fx_bank_apply(&bank,&a,10,false));
  a=make(1,3,255,1);
  assert(ot_fx_bank_apply(&bank,&a,UINT32_MAX-500u,false));
