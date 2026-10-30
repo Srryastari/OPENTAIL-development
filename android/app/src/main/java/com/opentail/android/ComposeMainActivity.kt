@@ -1129,7 +1129,7 @@ class ComposeMainActivity : ComponentActivity() {
                                 choosingDelete = true
                             }, contentAlignment = Alignment.Center) {
                             Canvas(Modifier.size(22.dp)) {
-                                val c = t.fg
+                                val c = t.red
                                 val u = size.width / 24f
                                 drawLine(c, Offset(5*u, 7*u), Offset(19*u, 7*u), strokeWidth=2*u)
                                 drawLine(c, Offset(9*u, 4*u), Offset(15*u, 4*u), strokeWidth=2*u)
