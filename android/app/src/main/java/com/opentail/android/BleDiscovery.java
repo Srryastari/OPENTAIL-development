@@ -110,7 +110,7 @@ final class BleDiscovery {
     private volatile BluetoothGatt gatt;
     private AlertDialog scanDialog;
     private volatile boolean scanning;
-    private int scanGeneration=0;
+    private volatile int scanGeneration=0;
     private boolean stopped;
     private volatile boolean connected = false;
     private volatile boolean connecting = false;
@@ -754,8 +754,9 @@ final class BleDiscovery {
         @Override public void onScanResult(int callbackType, ScanResult result) {
             final String name = result.getScanRecord() == null ? null : result.getScanRecord().getDeviceName();
             if (name == null || !name.startsWith("OpenTail CORE")) return;
+            final int scanLease=scanGeneration;
             ui.post(() -> {
-                if(stopped || !scanning)return;
+                if(stopped || !scanning || scanGeneration!=scanLease)return;
                 String address = result.getDevice().getAddress();
                 if (!found.containsKey(address)) {
                     found.put(address, result.getDevice());
@@ -771,7 +772,12 @@ final class BleDiscovery {
             });
         }
         @Override public void onScanFailed(int errorCode) {
-            ui.post(() -> { stopScan(); notifyStatus("BLE scan error " + errorCode); });
+            final int scanLease=scanGeneration;
+            ui.post(() -> {
+                if(stopped || !scanning || scanGeneration!=scanLease)return;
+                stopScan();
+                notifyStatus("BLE scan error " + errorCode);
+            });
         }
     };
 
