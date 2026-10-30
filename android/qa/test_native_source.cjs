@@ -357,6 +357,15 @@ for (const required of [
 assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers'),
   'Executable invalid-import regression missing');
 
+// Imported trigger dictionaries may omit older built-in defaults, but they
+// must not contain malformed entries. A read must never persist new profiles.
+assert(model.includes('if (inputProfiles.optJSONObject(profileName) == null)') &&
+       model.includes('throw new JSONException("Invalid trigger profile: " + profileName);') &&
+       model.includes('try { return defaultTrigger(name); }') &&
+       !model.includes('profiles().put(name, p);save();') &&
+       storageTest.includes('malformedTriggerProfilesNeverOverwriteSavedDataOnRead'),
+       'Trigger project imports/readers must never silently replace invalid profiles');
+
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
 for (const required of ['private String committedJson;',
