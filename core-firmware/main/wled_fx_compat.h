@@ -217,6 +217,25 @@ bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
                                  const ot_wled_palette16_t *generated_if_due);
 
 
+/* Pinned WLED colors.cpp generateRandomPalette(), non-harmonic source
+ * option. Draws twelve hardware-random BYTES in target GCC evaluation order
+ * (fourth CHSV first, each value/saturation/hue). ESP32 caller provides
+ * esp_random() low byte. Source random range uses (byte*range)>>8.
+ * No per-zone seed, heap allocation, or producer hidden in render calls. */
+typedef uint8_t (*ot_wled_random_byte_fn)(void *context);
+bool ot_wled_palette_generate_random(ot_wled_random_byte_fn draw,
+                                     void *context,ot_wled_palette16_t *out);
+/* WLED creates both global source palettes before any render service. */
+bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
+                                ot_wled_random_byte_fn draw,void *context);
+/* Call ONCE per CORE global frame; consumes exactly 12 hardware bytes
+ * only when source's generation-due predicate is true. Harmonic mode is
+ * deliberately separate and must not silently substitute this generator. */
+bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
+                                uint32_t now_ms,uint16_t interval_s,
+                                uint16_t frame_time_ms,uint16_t transition_ms,
+                                ot_wled_random_byte_fn draw,void *context);
+
 /* Optional measured audio peak provided by the external audio subsystem.
  * No synthetic FFT, microphone acquisition or BLE extension is embedded in
  * the rendering engine. This data is read only for FX 185 Rocktaves. */
