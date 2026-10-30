@@ -308,7 +308,7 @@ final class BleDiscovery {
     private volatile boolean cfgBusy=false;
     private volatile boolean cfgSaving=false,cfgWaitingWrite=false,cfgWaitingRead=false;
     private byte[] cfgBytes=new byte[BleConfigCodec.LENGTH],cfgExpected;
-    private int cfgIndex=0,cfgOffset=0,cfgCrc=0,cfgRevision=0,cfgPhase=0;
+    private int cfgIndex=0,cfgOffset=0,cfgCrc=0,cfgRevision=0,cfgPhase=0,cfgSaveBase=0;
     private final int[] cfgKnownRevision=new int[]{-1,-1};
     private final byte[][] cfgLatest=new byte[2][];
     private volatile int cfgWatchdog=0;
@@ -325,11 +325,12 @@ final class BleDiscovery {
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
         if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
+        if(cfgKnownRevision[index]>=65535){cfgNotify(false,"CORE output revision exhausted; no wrap or additional save permitted",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
         cfgExpected=Arrays.copyOf(cfgBytes,cfgBytes.length);
         cfgBusy=true;cfgSaving=true;cfgIndex=index;cfgPhase=3;cfgOffset=0;
-        cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];
+        cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];cfgSaveBase=cfgRevision;
         return cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
                 (byte)cfgCrc,(byte)(cfgCrc>>8),(byte)cfgRevision,(byte)(cfgRevision>>8)});
     }
@@ -411,6 +412,9 @@ final class BleDiscovery {
             if(BleConfigCodec.crc16(cfgBytes)!=cfgCrc){cfgFail("BLE output read checksum mismatch");return;}
             try{
                 org.json.JSONObject output=BleConfigCodec.decode(cfgBytes,cfgIndex);
+                if(cfgSaving && (cfgRevision<cfgSaveBase || cfgRevision>cfgSaveBase+1)) {
+                    cfgFail("CORE revision changed unexpectedly; reload output before another save");return;
+                }
                 if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))){
                     // A commit may be staged while physical inputs remain
                     // asserted; old active geometry is not a verified apply.
@@ -419,7 +423,11 @@ final class BleDiscovery {
                 }
                 cfgKnownRevision[cfgIndex]=cfgRevision;cfgLatest[cfgIndex]=Arrays.copyOf(cfgBytes,cfgBytes.length);
                 cfgBusy=false;cfgWatchdog++;
-                cfgNotify(true,cfgSaving?"Saved to CORE flash and verified over BLE":"Loaded from CORE over BLE",output,cfgIndex);
+                cfgNotify(true,cfgSaving?
+                    (cfgRevision==cfgSaveBase?
+                        "CORE active output already matched; no new revision committed":
+                        "Saved to CORE and active output verified over BLE"):
+                    "Loaded active output from CORE over BLE",output,cfgIndex);
                 cfgSaving=false;pumpQueue();return;
             }catch(Exception e){cfgFail("CORE returned invalid output: "+e.getMessage());return;}
         }
