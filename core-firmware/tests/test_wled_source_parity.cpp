@@ -4005,6 +4005,43 @@ void mode_percent(void) {
   }
 }
 
+/* WLED FX.cpp Dynamic and Dynamic Smooth, per-segment RNG and data. */
+void mode_dynamic(void) {
+  if (!SEGENV.allocateData(SEGLEN)) FX_FALLBACK_STATIC; //allocation failed
+
+  if(SEGENV.call == 0) {
+    //SEGMENT.fill(BLACK);
+    for (unsigned i = 0; i < SEGLEN; i++) SEGENV.data[i] = hw_random8();
+  }
+
+  uint32_t cycleTime = 50 + (255 - SEGMENT.speed)*15;
+  uint32_t it = strip.now / cycleTime;
+  if (it != SEGENV.step && SEGMENT.speed != 0) //new color
+  {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      if (hw_random8() <= SEGMENT.intensity) SEGENV.data[i] = hw_random8(); // random color index
+    }
+    SEGENV.step = it;
+  }
+
+  if (SEGMENT.check1) {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      SEGMENT.blendPixelColor(i, SEGMENT.color_wheel(SEGENV.data[i]), 16);
+    }
+  } else {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      SEGMENT.setPixelColor(i, SEGMENT.color_wheel(SEGENV.data[i]));
+    }
+  }
+}
+
+void mode_dynamic_smooth(void) {
+  bool old = SEGMENT.check1;
+  SEGMENT.check1 = true;
+  mode_dynamic();
+  SEGMENT.check1 = old;
+ }
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4083,7 +4120,9 @@ static const RefCase refs[]={
     {20,mode_sparkle,"Sparkle"},
     {103,mode_solid_glitter,"Solid Glitter"},
     {35,mode_traffic_light,"Traffic Light"},
-    {98,mode_percent,"Percent"}
+    {98,mode_percent,"Percent"},
+    {7,mode_dynamic,"Dynamic"},
+    {117,mode_dynamic_smooth,"Dynamic Smooth"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
