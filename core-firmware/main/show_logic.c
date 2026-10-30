@@ -27,8 +27,8 @@ const char *ot_show_name(ot_show_mode_t mode){
 bool ot_show_valid(const ot_show_t *s,const ot_layout_t *layout){
     return s && ot_layout_valid(layout) && s->mode>=OT_SHOW_OFF && s->mode<=OT_SHOW_RAINBOW &&
       s->brightness<=layout->brightness_cap && s->speed<=100u &&
-      s->chain_mask && !(s->chain_mask & ~3u) &&
-      s->section_mask && !(s->section_mask & ~255u);
+      s->chain_mask && !(s->chain_mask & ~((1u<<OT_CHAIN_COUNT)-1u)) &&
+      s->section_mask && !(s->section_mask & ~((1u<<OT_SECTION_COUNT)-1u));
 }
 ot_rgb_t ot_show_pixel(const ot_show_t *s,const ot_layout_t *layout,int chain,
                        unsigned pixel,uint32_t elapsed_ms){

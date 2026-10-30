@@ -71,6 +71,7 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic reply;
     private volatile BluetoothGattCharacteristic fxCaps;
     private volatile boolean fxCapsBusy=false;
+    private volatile boolean mtuNegotiating=false;
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
     @SuppressWarnings("MissingPermission")
@@ -90,7 +91,7 @@ final class BleDiscovery {
         fxCapsBusy=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
         int n=raw[1]&255;
-        if(n>9||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
+        if(n>127||raw.length!=2+n*2){fxNotify("[]");pumpQueue();return;}
         StringBuilder ids=new StringBuilder("[");
         for(int i=0;i<n;i++){
             if(i>0)ids.append(',');
@@ -554,8 +555,14 @@ final class BleDiscovery {
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 connecting = false;
                 connected = true;
-                notifyStatus("BLE connected · reading status…");
-                connection.discoverServices();
+                notifyStatus("BLE connected · negotiating MTU…");
+                try {
+                    mtuNegotiating=connection.requestMtu(247);
+                    if(!mtuNegotiating)connection.discoverServices();
+                } catch (SecurityException ex) {
+                    mtuNegotiating=false;
+                    connection.discoverServices();
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
@@ -563,6 +570,15 @@ final class BleDiscovery {
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
+            }
+        }
+
+        @SuppressWarnings("MissingPermission")
+        @Override public void onMtuChanged(BluetoothGatt connection, int mtu, int status) {
+            if(mtuNegotiating){
+                mtuNegotiating=false;
+                notifyStatus("BLE MTU "+mtu+"; discovering services…");
+                connection.discoverServices();
             }
         }
 

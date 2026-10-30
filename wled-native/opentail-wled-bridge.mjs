@@ -1,9 +1,7 @@
 /**
  * OpenTail -> native WLED state adapter.
- * This module contains ZERO pixel-generation code. It forwards canonical
- * WLED effect IDs and controls to the upstream WLED /json/state engine.
+ * Zero pixel-generation code: upstream WLED is the canonical renderer.
  * Source pin: wled/WLED@20e7a717664295eefc6ad77972cee1888d2da072
- * API: https://kno.wled.ge/interfaces/json-api/
  */
 const integer=(v,min,max,name)=>{
   if(!Number.isInteger(v)||v<min||v>max)
@@ -11,14 +9,52 @@ const integer=(v,min,max,name)=>{
   return v;
 };
 function color(value,name){
-  if(!Array.isArray(value)||(value.length!==3&&value.length!==4))
-    throw new TypeError(`${name} must be an RGB or RGBW array`);
+  // WLED segment JSON colors are logical RGB values. Bus order/channel
+  // conversion belongs to WLED's configured hardware bus, not this adapter.
+  if(!Array.isArray(value)||value.length!==3)
+    throw new TypeError(`${name} must be an RGB triplet`);
   return value.map((n,i)=>integer(n,0,255,`${name}[${i}]`));
 }
-/**
- * Outputs MUST use the bus starts configured in actual WLED hardware.
- * WLED stop is exclusive. Zones are 1D and receive distinct global IDs.
- */
+const splitList=value=>String(value??'').split(',').map(x=>x.trim());
+function parseDefaults(raw){
+  const result={};
+  for(const entry of String(raw??'').split(',')){
+    if(!entry.trim())continue;
+    const m=entry.trim().match(/^([a-zA-Z][a-zA-Z0-9]*)=(-?\d+)$/);
+    if(m)result[m[1]]=Number(m[2]);
+  }
+  return Object.freeze(result);
+}
+/** Parse the native WLED effect metadata format and preserve the raw source. */
+export function parseNativeWledEffectMetadata(id,name,raw){
+  integer(id,0,65535,'effect id');
+  if(typeof name!=='string'||!name.trim()||typeof raw!=='string')
+    throw new TypeError('Effect name and raw WLED metadata are required');
+  const fields=raw.split(';'),head=fields[0]??'',at=head.indexOf('@');
+  const canonicalName=(at<0?head:head.slice(0,at)).trim()||name.trim();
+  const parameterLabels=splitList(at<0?'':head.slice(at+1));
+  const flags=fields.length>3&&fields[3]!==''?fields[3]:'1';
+  if(!/^[0123vf]+$/.test(flags))
+    throw new TypeError(`WLED effect ${id}: unrecognized metadata flags`);
+  const colorLabels=splitList(fields[1]??'').filter(x=>x!==''&&x!=='-');
+  const defaults=parseDefaults(fields[4]??'');
+  const customControls=Object.freeze(Object.entries(defaults)
+    .filter(([key])=>/^c[1-5]$/.test(key)).map(([key,value])=>Object.freeze({key,value})));
+  const options=Object.freeze(Object.entries(defaults)
+    .filter(([key])=>/^o[1-3]$/.test(key)).map(([key,value])=>Object.freeze({key,value})));
+  return Object.freeze({
+    id,name:canonicalName,rawMetadata:raw,parameterLabels:Object.freeze(parameterLabels),
+    colorSlots:Object.freeze(colorLabels.map((label,index)=>Object.freeze({
+      index,label:label==='!'?`Color ${index+1}`:label
+    }))),
+    supportsPalette:fields.length>2&&fields[2]!==''&&fields[2]!=='-',
+    flags,requiresAudio:flags.includes('v')||flags.includes('f'),
+    dimensions:Object.freeze({oneD:flags.includes('1')||flags.includes('0'),
+      matrix:flags.includes('2')||flags.includes('3'),threeD:flags.includes('3')}),
+    defaults,customControls,options
+  });
+}
+/** Map each configured 1D zone to a stable WLED segment ID. */
 export function mapNativeWledZones(outputs,maxSegments=32){
   if(!Array.isArray(outputs)||outputs.length<1||outputs.length>12)
     throw new RangeError('Expected 1..12 configured physical outputs');
@@ -41,44 +77,62 @@ export function mapNativeWledZones(outputs,maxSegments=32){
       result.push(Object.freeze({id:nextId++,output,zone,start:index,stop:index+size}));
       index+=size;
     });
-    if(index!==stop)
-      throw new RangeError(`Output ${output} zones do not cover its configured pixel count`);
+    if(index!==stop)throw new RangeError(`Output ${output} zones do not cover its configured pixel count`);
   });
   return Object.freeze(result);
 }
 /**
- * accepted assignments: output, zone, effectId, speed, intensity, paletteId,
- * brightness, foreground, background, optional tertiary/reverse/mirror.
- * IDs MUST come from verified native WLED 1D capability discovery.
- * This is deliberately NOT a replacement for CORE's offline BLE transport.
+ * Build WLED /json/state segment assignments. metadataById must be obtained
+ * from the same native WLED build. Native metadata defaults are applied first;
+ * explicit OpenTail saved values override them. WLED remains the renderer.
  */
 export function buildNativeWledState(outputs,assignments,{
-  supported1DIds,maxSegments=32,transition=0
+  supported1DIds,maxSegments=32,transition=0,metadataById
 }={}){
   if(!(supported1DIds instanceof Set)||supported1DIds.size===0)
     throw new TypeError('A verified WLED-native 1D effect capability Set is required');
   if(!Array.isArray(assignments)||assignments.length===0)
     throw new RangeError('At least one output/zone assignment is required');
-  integer(transition,0,65535,'transition');
+  transition=integer(transition,0,65535,'transition');
   const zones=mapNativeWledZones(outputs,maxSegments),seen=new Set(),seg=[];
   for(const a of assignments){
     const out=integer(a?.output,0,outputs.length-1,'output');
     const zone=integer(a?.zone,0,outputs[out].zones.length-1,'zone');
     const mapping=zones.find(z=>z.output===out&&z.zone===zone);
-    if(!mapping||seen.has(mapping.id))
-      throw new RangeError('Missing or duplicate segment assignment');
+    if(!mapping||seen.has(mapping.id))throw new RangeError('Missing or duplicate segment assignment');
     seen.add(mapping.id);
     const fx=integer(a.effectId,0,65535,'effectId');
-    if(!supported1DIds.has(fx))
-      throw new RangeError(`WLED 1D mode ${fx} is not verified in this firmware`);
-    const sx=integer(a.speed,0,255,'speed');
-    const ix=integer(a.intensity,0,255,'intensity');
-    const pal=integer(a.paletteId,0,255,'paletteId');
-    const bri=integer(a.brightness,0,255,'brightness');
-    const col=[color(a.foreground,'foreground'),color(a.background,'background')];
-    if(a.tertiary!==undefined)col.push(color(a.tertiary,'tertiary'));
-    seg.push({id:mapping.id,start:mapping.start,stop:mapping.stop,fx,sx,ix,pal,bri,col,
-      on:true,rev:Boolean(a.reverse),mi:Boolean(a.mirror),frz:false});
+    if(!supported1DIds.has(fx))throw new RangeError(`WLED 1D mode ${fx} is not verified in this firmware`);
+    const meta=metadataById instanceof Map?metadataById.get(fx):undefined;
+    const d=meta?.defaults??{};
+    const resolve=(key,explicit,fallback,min,max)=>integer(explicit??d[key]??fallback,min,max,key);
+    const sx=resolve('sx',a.speed,128,0,255);
+    const ix=resolve('ix',a.intensity,128,0,255);
+    const pal=resolve('pal',a.paletteId,0,0,255);
+    const bri=integer(a.brightness??255,0,255,'brightness');
+    const provided=[a.foreground,a.background,a.tertiary].filter(v=>v!==undefined);
+    if(meta&&provided.length<meta.colorSlots.length)
+      throw new RangeError(`Effect ${fx} requires ${meta.colorSlots.length} declared color slots`);
+    if(meta&&meta.colorSlots.length>3)
+      throw new RangeError(`Effect ${fx} declares more than WLED's three segment color slots`);
+    const col=[
+      color(a.foreground??[255,255,255],'foreground'),
+      color(a.background??[0,0,0],'background'),
+      color(a.tertiary??[0,0,0],'tertiary')
+    ];
+    const segment={id:mapping.id,start:mapping.start,stop:mapping.stop,fx,sx,ix,pal,bri,col,
+      on:true,rev:Boolean(a.reverse),mi:Boolean(a.mirror),frz:false};
+    // Current WLED JSON state supports c1-c3/o1-o3. Reject metadata fields
+    // outside this transport rather than silently dropping effect controls.
+    for(const key of ['c1','c2','c3','o1','o2','o3']){
+      if(a[key]!==undefined||d[key]!==undefined)
+        segment[key]=integer(a[key]??d[key],0,255,key);
+    }
+    for(const key of ['c4','c5']){
+      if(a[key]!==undefined||d[key]!==undefined)
+        throw new RangeError(`WLED JSON state adapter does not yet support ${key}; refusing to drop metadata control`);
+    }
+    seg.push(segment);
   }
   return {on:true,transition,seg};
 }
@@ -88,38 +142,85 @@ export function assertNativeWledCapacity(info,outputs,maxSegmentsFallback=32){
   if(!leds||!Number.isInteger(leds.count)||!Number.isInteger(leds.maxseg))
     throw new TypeError('Expected native WLED /json/info with leds.count and leds.maxseg');
   const zones=mapNativeWledZones(outputs,Math.min(maxSegmentsFallback,leds.maxseg));
-  if(zones.some(z=>z.stop>leds.count))
-    throw new RangeError('Physical layout exceeds WLED configured LED count');
+  if(zones.some(z=>z.stop>leds.count))throw new RangeError('Physical layout exceeds WLED configured LED count');
   return true;
 }
-
-
-/**
- * Discover every compiled native WLED 1D-capable mode from /json/eff and
- * /json/fxdata metadata, not a hard-coded subset. WLED 1D flag defaults to 1;
- * 2D and 3D flags exclude the effect unless 1 or single-LED flag 0 is set.
- * v/f indicate effects whose native behavior depends on sound data.
- */
+/** Discover compiled 1D-capable effects from the actual WLED firmware metadata. */
 export function discoverNativeWled1DEffects(effectNames,fxdata,info){
-  if(!Array.isArray(effectNames)||!Array.isArray(fxdata)||
-     !Number.isInteger(info?.fxcount)||
+  if(!Array.isArray(effectNames)||!Array.isArray(fxdata)||!Number.isInteger(info?.fxcount)||
      effectNames.length!==info.fxcount||fxdata.length!==info.fxcount)
     throw new TypeError('Native WLED effect catalog and metadata must match info.fxcount');
   const effects=[];
   for(let id=0;id<info.fxcount;id++){
-    const name=effectNames[id],meta=fxdata[id];
-    if(typeof name!=='string'||!name.trim()||typeof meta!=='string')continue;
-    const fields=meta.split(';');
-    const flags=fields.length>3&&fields[3]!==''?fields[3]:'1';
-    if(!/^[0123vf]+$/.test(flags))
-      throw new TypeError(`WLED effect ${id}: unrecognized metadata flags`);
-    if((flags.includes('2')||flags.includes('3'))&&!flags.includes('1')&&!flags.includes('0'))
-      continue;
-    effects.push(Object.freeze({
-      id,name,metadata:meta,requiresAudio:flags.includes('v')||flags.includes('f'),
-      flags,supportsPalette:fields.length>2?fields[2]!=='' : true
-    }));
+    const name=effectNames[id],raw=fxdata[id];
+    if(typeof name!=='string'||!name.trim()||typeof raw!=='string')continue;
+    const metadata=parseNativeWledEffectMetadata(id,name,raw);
+    if(!metadata.dimensions.oneD)continue;
+    effects.push(metadata);
   }
   return Object.freeze({effects:Object.freeze(effects),
-    supported1DIds:new Set(effects.map(x=>x.id))});
+    supported1DIds:new Set(effects.map(x=>x.id)),
+    metadataById:new Map(effects.map(x=>[x.id,x]))});
+}
+
+/**
+ * Merge both providers into one UI catalog without conflating provider IDs.
+ * WLED IDs remain numeric/native; OpenTail effects use stable string keys.
+ * This catalog merge does not claim a native effect is executable until its
+ * provider is registered by the firmware coordinator.
+ */
+export function mergeUnifiedEffectCatalog(wledEffects,openTailEffects=[]){
+  if(!Array.isArray(wledEffects)||!Array.isArray(openTailEffects))
+    throw new TypeError('Both WLED and OpenTail effect catalogs must be arrays');
+  const result=[],seen=new Set();
+  for(const effect of wledEffects){
+    if(!effect||!Number.isInteger(effect.id)||effect.id<0||effect.id>65535)
+      throw new TypeError('WLED catalog entries require a native numeric ID');
+    if(effect.dimensions?.oneD!==true)
+      throw new RangeError(`WLED effect ${effect.id} is not verified as 1D`);
+    const catalogId=`wled:${effect.id}`;
+    if(seen.has(catalogId))throw new RangeError(`Duplicate effect catalog key ${catalogId}`);
+    seen.add(catalogId);
+    result.push(Object.freeze({...effect,catalogId,provider:'wled',providerId:effect.id}));
+  }
+  for(const effect of openTailEffects){
+    if(!effect||typeof effect.key!=='string'||! /^[a-z][a-z0-9_-]{0,47}$/.test(effect.key))
+      throw new TypeError('OpenTail effects require a stable lowercase key');
+    if(typeof effect.name!=='string'||!effect.name.trim())
+      throw new TypeError('OpenTail effect name is required');
+    if(effect.dimensions?.oneD!==true)
+      throw new RangeError(`OpenTail effect ${effect.key} is not declared 1D`);
+    if(!Array.isArray(effect.colorSlots)||effect.colorSlots.length>3)
+      throw new RangeError(`OpenTail effect ${effect.key} must declare at most three color slots`);
+    const catalogId=`opentail:${effect.key}`;
+    if(seen.has(catalogId))throw new RangeError(`Duplicate effect catalog key ${catalogId}`);
+    seen.add(catalogId);
+    result.push(Object.freeze({...effect,catalogId,provider:'opentail',providerId:effect.key}));
+  }
+  return Object.freeze(result);
+}
+
+/** Metadata for the native 1D effects compiled into the WLED compositor hook. */
+export function getOpenTailNativeEffectMetadata(){
+  const colorSlots=[
+    Object.freeze({index:0,label:'Foreground'}),
+    Object.freeze({index:1,label:'Background'})
+  ];
+  const make=(key,name,parameterLabels,defaults,description)=>Object.freeze({
+    key,name,provider:'opentail',dimensions:Object.freeze({oneD:true,matrix:false,threeD:false}),
+    requiresAudio:false,supportsPalette:false,colorSlots:Object.freeze(colorSlots.slice()),
+    parameterLabels:Object.freeze(parameterLabels),defaults:Object.freeze(defaults),description
+  });
+  return Object.freeze([
+    make('embers','Embers',['Intensity','Period'],{intensity:180,periodMs:120},
+      'Deterministic heat-like flicker blending foreground and background.'),
+    make('materialize_sparks','Materialize Sparks',['Intensity','Period'],{intensity:100,periodMs:120},
+      'Scattered foreground sparks over a configurable background.'),
+    make('random_materialize','Random Materialize',['Intensity','Period'],{intensity:80,periodMs:120},
+      'Scattered rainbow materialization with bright white accents.'),
+    make('smooth_fade','Smooth Fade',['Intensity','Period'],{intensity:220,periodMs:500},
+      'Smooth periodic blend between foreground and background.'),
+    make('plasma_sweep','Plasma Sweep',['Intensity','Period'],{intensity:200,periodMs:300},
+      'Traveling sinusoidal color sweep across a one-dimensional zone.')
+  ]);
 }

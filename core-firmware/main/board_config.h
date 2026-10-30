@@ -1,5 +1,6 @@
 #pragma once
 #include "core_logic.h"
+#include "output_manager.h"
 
 // Provisional wiring map: verify pin labels on your exact hiBCTR N16R8 before connecting.
 #define OT_OUT_LEFT_GPIO 16    // pixel output 1 (direct GPIO bench or buffered data stage)
@@ -9,19 +10,11 @@
 // Set to 0 if the measured optocoupler output goes 3.3 V HIGH when 12 V is applied.
 #define OT_INPUT_ACTIVE_LOW 1
 
-// Use 522-pixel per-output bench allocation; retained 30-pixel NVS mappings remain intact.
-#define OT_SMALL_BENCH_LAYOUT 0
-#if OT_SMALL_BENCH_LAYOUT
-#define OT_CHAIN_PIXELS 30
-#define OT_LAYOUT_SECTIONS {6,6,6,6,6,0,0,0}
-#else
-// The physical driver ALLOCATES 522 pixels per output; this is NOT a vehicle-specific map.
-// Output Manager configuration stored in NVS determines real zone positions, names and roles.
-// Neutral placeholder layout exists for show command validation only.
-// It is NOT applied to a vehicle or saved to NVS.
-#define OT_CHAIN_PIXELS 522
-#define OT_LAYOUT_SECTIONS {522,0,0,0,0,0,0,0}
-#endif
+// Compile-time memory safety budget; neither a default zone length nor an
+// active strip length. Actual per-output strip drivers follow saved NVS counts.
+// The synthetic layout is only an internal bounds-validity fixture.
+#define OT_CHAIN_PIXELS OT_OM_MAX_PIXELS_PER_OUTPUT
+#define OT_LAYOUT_SECTIONS {OT_OM_MAX_PIXELS_PER_OUTPUT,0,0,0,0,0,0,0}
 #define OT_MAX_BRIGHTNESS 32 // <= 12.5% channel brightness; not a measured current limiter.
 #define OT_DEBOUNCE_TICKS 4 // four 10ms samples
 #define OT_DEMO_MAX_MS 10000

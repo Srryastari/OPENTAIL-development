@@ -29,7 +29,8 @@ assert.equal(offline.events.hardware,0,'Disconnected test must never send a cont
 assert.equal(offline.api.isOpen(),true,'Testing section should stay expanded after toggling');
 assert.equal(offline.api.active('Brake'),true);
 assert.match(offline.state.triggerStatus,/Local preview only/);
-assert.match(offline.api.preview(),/SIMULATED · no vehicle commands/);
+assert.match(offline.api.preview(),/aria-label="Offline simulated trigger LED strips"/);
+assert.match(offline.api.preview(),/class="ot-mini">Simulated<\/span>/);
 assert.equal((offline.api.preview().match(/data-ot-led-index=/g)||[]).length,48,'Three demo zones should display 16 pixels each');
 offline.api.toggle('Hazards');
 assert.deepEqual(offline.otSim.triggers,['Brake','Hazards']);

@@ -1,5 +1,8 @@
 #include "status_logic.h"
 
+ot_st_mode_t ot_st_connection_mode(bool wifi_session,bool ble_connected){
+    return (wifi_session||ble_connected)?OT_ST_CONNECTED:OT_ST_DISCONNECTED;
+}
 const char *ot_st_mode_name(ot_st_mode_t mode) {
     switch(mode) {
         case OT_ST_STARTUP:return "startup";
@@ -14,50 +17,63 @@ const char *ot_st_mode_name(ot_st_mode_t mode) {
     }
 }
 static ot_st_rgb_t rgb(uint8_t r,uint8_t g,uint8_t b,uint8_t pct){
-    return (ot_st_rgb_t){(uint8_t)(r*pct/100u),(uint8_t)(g*pct/100u),(uint8_t)(b*pct/100u)};
+    return (ot_st_rgb_t){(uint8_t)((uint16_t)r*pct/100u),
+                         (uint8_t)((uint16_t)g*pct/100u),
+                         (uint8_t)((uint16_t)b*pct/100u)};
 }
-static uint8_t portion(uint32_t phase,uint32_t peak,uint32_t end){
-    if(phase>=end)return 0;
-    if(phase<=peak)return (uint8_t)(phase*100u/(peak?peak:1u));
-    return (uint8_t)((end-phase)*100u/(end-peak));
+static bool double_pulse(uint32_t t){
+    const uint32_t p=t%2200u;
+    return p<180u || (p>=320u && p<500u);
+}
+static uint8_t wifi_pulse(uint32_t t){
+    const uint32_t p=t%1000u;
+    if(p<250u)return (uint8_t)(p*100u/250u);
+    if(p<650u)return (uint8_t)((650u-p)*100u/400u);
+    return 0;
 }
 ot_st_rgb_t ot_st_render(ot_st_mode_t mode,uint32_t t,uint8_t brightness,bool enabled){
-    if(brightness>100)brightness=100;
-    /* Fault remains visible even if users disabled ordinary status LEDs. */
+    if(brightness>100u)brightness=100u;
+    /* Fault is always visible. Ordinary indications respect the enabled setting. */
     if(!enabled && mode!=OT_ST_FAULT)return (ot_st_rgb_t){0,0,0};
     switch(mode){
-        case OT_ST_STARTUP:{
-            /* Crisp three-pulse white strobe, finishes at 780 ms. */
-            uint32_t q=t%1000u;
-            bool on=(q<100u)||(q>=240u&&q<340u)||(q>=480u&&q<580u);
-            return t<780u&&on?rgb(255,255,255,brightness):rgb(0,0,0,0);
+        case OT_ST_STARTUP:
+            /* Approved startup white flash; the startup state ends at 780 ms. */
+            return (t<160u)?rgb(255,255,255,brightness):(ot_st_rgb_t){0,0,0};
+        case OT_ST_WIFI: {
+            /* Wi-Fi ready: one cyan breathing pulse per second. */
+            uint8_t level=wifi_pulse(t);
+            return rgb(0,255,255,(uint8_t)((uint16_t)brightness*level/100u));
         }
-        case OT_ST_WIFI: case OT_ST_DISCONNECTED:{
-            /* Saturated amber standby: never red, never blue ambiguity. */
-            uint8_t wave=portion(t%2200u,250u,650u);
-            return rgb(255,145,0,(uint8_t)((brightness*wave)/100u));
-        }
-        case OT_ST_CONNECTED:return rgb(0,255,0,brightness);
-        case OT_ST_BLE:return rgb(140,0,255,brightness); /* Slightly bluer saturated purple */
-        case OT_ST_BOTH:return rgb(0,255,145,brightness); /* More green/cyan: less sky blue */
-        case OT_ST_SHOW:{
-            /* Slow, smoothly interpolated six-color saturated HSV wheel. */
-            static const uint8_t wheel[7][3]={{255,0,0},{255,255,0},{0,255,0},{0,255,255},{0,0,255},{255,0,255},{255,0,0}};
-            const uint32_t cycle=3600u;
-            uint32_t phase=t%cycle;
-            uint32_t scaled=phase*6u;
-            uint32_t idx=scaled/cycle,frac=scaled%cycle;
+        case OT_ST_CONNECTED:
+            /* Connected: two green pulses every ~2.2 seconds. */
+            return double_pulse(t)?rgb(0,255,0,brightness):(ot_st_rgb_t){0,0,0};
+        case OT_ST_DISCONNECTED:
+            /* Disconnected: two red pulses every ~2.2 seconds. */
+            return double_pulse(t)?rgb(255,0,0,brightness):(ot_st_rgb_t){0,0,0};
+        case OT_ST_BLE:
+        case OT_ST_BOTH:
+            /* Legacy transport-specific modes retain ABI but use approved Connected green. */
+            return double_pulse(t)?rgb(0,255,0,brightness):(ot_st_rgb_t){0,0,0};
+        case OT_ST_SHOW: {
+            /* Smooth rainbow loops every 1.4 s as approved for Show Mode. */
+            static const uint8_t wheel[7][3]={{255,0,0},{255,255,0},{0,255,0},
+                {0,255,255},{0,0,255},{255,0,255},{255,0,0}};
+            const uint32_t cycle=1400u;
+            uint32_t phase=t%cycle,scaled=phase*6u,idx=scaled/cycle,frac=scaled%cycle;
             uint8_t c[3];
-            for(int i=0;i<3;i++)c[i]=(uint8_t)((wheel[idx][i]*(cycle-frac)+wheel[idx+1][i]*frac)/cycle);
+            for(unsigned i=0;i<3;i++)
+                c[i]=(uint8_t)(((uint32_t)wheel[idx][i]*(cycle-frac)+
+                                (uint32_t)wheel[idx+1u][i]*frac)/cycle);
             return rgb(c[0],c[1],c[2],brightness);
         }
         case OT_ST_FAULT:
-            return (t%180u)<90u?rgb(255,0,0,brightness<30u?30u:brightness):rgb(0,0,0,0);
+            /* Continuous red fault blink: 90 ms on / 90 ms off. */
+            return (t%180u)<90u?rgb(255,0,0,brightness):(ot_st_rgb_t){0,0,0};
         default:return (ot_st_rgb_t){0,0,0};
     }
 }
-
 bool ot_st_test_window_active(ot_st_mode_t mode,uint32_t now_ms,uint32_t deadline_ms){
     uint32_t remain=deadline_ms-now_ms;
-    return (mode==OT_ST_SHOW || mode==OT_ST_FAULT) && remain!=0u && remain<0x80000000u;
+    return (mode==OT_ST_SHOW || mode==OT_ST_FAULT) &&
+           remain!=0u && remain<0x80000000u;
 }

@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "software_baseline": {
+    "commit": "0354e0c699ed3ad2bc64ef17ca275871906babc2",
+    "description": "Last successful combined CORE, Studio and Android GitHub CI before OTA/update changes (not a physical hardware pass)",
+    "workflow": "https://github.com/Srryastari/OPENTAIL-development/actions/runs/40889711205"
+  },
+  "physical_baseline": {
+    "version": "0.1.28-alpha",
+    "note": "Historical user-observed bench results only; no v0.1.30 physical pass has been recorded. The 0.1.28 flash SHA is not evidenced."
+  },
+  "physical_cases": [
+    {
+      "id": "inputs_gpio_mask",
+      "description": "Genuine PC817 IN1–IN8 masks GPIO4–11; combinations 0,12,14,15,31,224,255",
+      "domain": "core"
+    },
+    {
+      "id": "brake_park_priority",
+      "description": "Brake overrides park; lights only in assigned zones",
+      "domain": "core"
+    },
+    {
+      "id": "hazards_turn_priority",
+      "description": "Both turns and brake+hazards with real opto inputs",
+      "domain": "core"
+    },
+    {
+      "id": "reverse_overlay",
+      "description": "Reverse overrides only reverse zones; other effects continue",
+      "domain": "core"
+    },
+    {
+      "id": "show_resume_phase",
+      "description": "Show uninterrupted in unrelated zones and resumes after trigger release",
+      "domain": "core"
+    },
+    {
+      "id": "pixel_chain_independence",
+      "description": "GPIO16 and GPIO17 independently drive configured output lengths",
+      "domain": "core"
+    },
+    {
+      "id": "full_1246_dual_lane",
+      "description": "Actual independently configured 623+623 WS2815 data lanes (1246 total); observe every pixel, Stop off, actual measured FPS and frame jitter, no flicker or RMT fault; 522/30 NVS migration unchanged",
+      "domain": "core"
+    },
+    {
+      "id": "universal_zones",
+      "description": "Non-GS400 arbitrary zone counts, zero-based offsets, no hardcoded roles",
+      "domain": "core"
+    },
+    {
+      "id": "color_order_brightness",
+      "description": "GRB correct red/amber/white and bench cap observed, power current measured",
+      "domain": "core"
+    },
+    {
+      "id": "nvs_v1_v2_persistence",
+      "description": "Existing output/trigger/preset configs survive flash and power restart, v1 migration",
+      "domain": "core"
+    },
+    {
+      "id": "status_led_patterns",
+      "description": "White/cyan/green/red/rainbow/fault physical timing and colors",
+      "domain": "core"
+    },
+    {
+      "id": "stop_restore",
+      "description": "Emergency Stop, effect expiry and trigger restoration on actual LEDs",
+      "domain": "core"
+    },
+    {
+      "id": "ble_auth_reconnect",
+      "description": "Actual Android BLE authorize, disconnect/reconnect, profile read/write",
+      "domain": "core"
+    },
+    {
+      "id": "render_fps_low_brightness",
+      "description": "Measured FPS on 522/30 LEDs and smooth fades at low brightness",
+      "domain": "core"
+    },
+    {
+      "id": "strobe_edges",
+      "description": "Measured physical strobe rise/fall, no easing or missed input preemption",
+      "domain": "core"
+    },
+    {
+      "id": "event_horizon_shutdown",
+      "description": "Event Horizon final color, Singularity shutdown full black, startup previews",
+      "domain": "core"
+    },
+    {
+      "id": "effect_source_parity",
+      "description": "Borrowed effects: true source-equivalent frames/Fireworks 1D and particle behavior",
+      "domain": "core"
+    },
+    {
+      "id": "ota_usb_partition_migration",
+      "description": "Legacy single-app to OTA dual-slot migration preserves NVS, no full erase",
+      "domain": "core"
+    },
+    {
+      "id": "ota_success_rollback",
+      "description": "OTA upload validation, reboot health and failed-image rollback",
+      "domain": "core"
+    },
+    {
+      "id": "ota_authorization",
+      "description": "Reject arbitrary LAN clients/cross-origin, invalid/older firmware, truncation",
+      "domain": "core"
+    },
+    {
+      "id": "studio_interactive_ui",
+      "description": "Browser visual verification against locked OLED UI, layout edits, trigger tests, sequences",
+      "domain": "ui"
+    },
+    {
+      "id": "android_native_ui",
+      "description": "On-device native Android UI, BLE controls, no WebView substituted for required native screens",
+      "domain": "android"
+    }
+  ]
+}

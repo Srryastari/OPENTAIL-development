@@ -1,6 +1,12 @@
 #include <assert.h>
 #include "fx_preset_record.h"
+#include "board_config.h"
 int main(void){
+ /* Prior saved v1 FX blobs and v2 scenes must stay binary compatible.
+  * Spark accent fields live in volatile per-zone state, not these records. */
+ assert(sizeof(ot_ble_fx_packet_t)==16u);
+ assert(sizeof(ot_fx_preset_record_t)==24u);
+ assert(sizeof(ot_fx_scene_record_t)==268u);
  ot_ble_fx_packet_t input={0};
  input.effect_id=32768;input.chain_mask=3;input.zone_mask=255;
  input.r=255;input.g=40;input.b=5;
@@ -18,6 +24,12 @@ int main(void){
  record.version++;
  assert(!ot_fx_preset_valid(&record));
  record.version--;
+ input.chain_mask=(uint8_t)(1u<<OT_OM_OUTPUTS);
+ assert(!ot_fx_preset_pack(&record,&input));
+ input.chain_mask=3;
+ input.brightness=(uint8_t)(OT_MAX_BRIGHTNESS+1u);
+ assert(!ot_fx_preset_pack(&record,&input));
+ input.brightness=20;
  input.palette_id=10;
  assert(!ot_fx_preset_pack(&record,&input));
  input.palette_id=0;input.effect_id=999;

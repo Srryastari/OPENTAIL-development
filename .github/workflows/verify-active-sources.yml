@@ -1,18 +1,32 @@
 name: Verify OpenTail active sources
 on:
   push:
-    branches: [work/extract-active-sources]
+    branches: [main, work/extract-active-sources]
   pull_request:
-    paths:
-      - 'core-firmware/**'
-      - 'wled-native/**'
-      - 'android/**'
-      - 'web-studio/**'
-      - '.github/workflows/verify-active-sources.yml'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: verify-active-${{ github.workflow }}-${{ github.ref }}
+  # PR 19 is integrating CORE + source effects concurrently; let its running
+  # ESP-IDF compile finish. GitHub still retains only one pending run per group.
+  cancel-in-progress: ${{ github.event_name != 'pull_request' || github.event.pull_request.number != 19 }}
 jobs:
+  change-impact-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare all changed files to last verified successful CI baseline
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+      - name: Verify OTA layout and local-update contract without asserting hardware success
+        run: python3 core-firmware/tests/test_ota_contract.py
+      - name: Test that missing hardware proof, stale commits and unclassified changes are rejected
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
   core-host-tests:
     runs-on: ubuntu-latest
     defaults:
@@ -20,17 +34,32 @@ jobs:
         working-directory: core-firmware
     steps:
       - uses: actions/checkout@v4
+      - name: Enforce locked release contract and evidence separation
+        working-directory: .
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          contract=Path('docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md').read_text()
+          matrix=Path('docs/verified-bench-regression-matrix.md').read_text()
+          required=['Universal', 'v0.1.25', 'v0.1.26', 'WLED-native', 'bench-only', 'flasher_args.json', 'status LED']
+          for term in required:
+              assert term.lower() in contract.lower(), f'Locked release contract missing: {term}'
+          assert 'Not repeated' in matrix or 'Not yet' in matrix, 'Physical verification must be distinguished from software checks'
+          print('Locked CORE contract and physical-evidence separation verified')
+          PY
       - name: Run native firmware logic tests
         run: bash tests/run-host-tests.sh
-      - name: Regression-test native WLED bridge and OpenTail overlay
-        working-directory: .
-        run: bash wled-native/tests/run-native-host-tests.sh
 
   core-espidf-build:
+    # CORE build depends only on CORE regression checks, not on an Android
+    # release or Studio UI. All three products keep independent CI jobs.
+    needs: [core-host-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Assert firmware embeds only the CORE dev console
+        run: python3 core-firmware/tests/test_dev_console_contract.py
       - name: Compile ESP32-S3 firmware with ESP-IDF 5.5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -58,19 +87,76 @@ jobs:
               assert p.is_file() and p.stat().st_size>0, f'Missing referenced flash image: {p}'
           print('Validated flash images and flasher offsets:',list(files))
           PY
+      - name: Create versioned CORE app binary
+        shell: bash
+        run: |
+          mkdir -p core-firmware/releases
+          cp core-firmware/build/opentail_core_alpha.bin core-firmware/releases/opentail-core-v0.1.31-alpha-app.bin
       - name: Upload flashable CORE bench firmware package
         uses: actions/upload-artifact@v4
         with:
-          name: opentail-core-esp32s3-bench-firmware
+          name: opentail-core-v0.1.31-alpha-esp32s3-bench-firmware
           path: |
             core-firmware/build/opentail_core_alpha.bin
+            core-firmware/releases/opentail-core-v0.1.31-alpha-app.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
             core-firmware/build/flash_args
+            core-firmware/build/ota_data_initial.bin
             core-firmware/build/project_description.json
           if-no-files-found: error
           retention-days: 14
+
+  github-flash-package-check:
+    # Validate the actual downloaded GitHub artifact on Windows, not just the
+    # files left in the Linux build workspace. Do not access a serial port.
+    needs: [core-espidf-build]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify GitHub-to-device installer with released artifact (no flash)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          & ./scripts/flash-from-github.ps1 -RunId ${{ github.run_id }} -Version '0.1.31-alpha' -VerifyOnly
+
+  release-evidence-gate:
+    # Intentionally BLOCKS release until actual physical evidence is supplied
+    # for the exact commit. A green host build is NOT hardware approval.
+    if: always()
+    needs:
+      - change-impact-audit
+      - core-host-tests
+      - core-espidf-build
+      - github-flash-package-check
+      - web-studio-check
+      - android-debug-apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require every software job to have succeeded on this candidate
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          results=json.loads(os.environ['JOB_RESULTS'])
+          problems=[f'{name}: {value["result"]}' for name,value in results.items()
+                    if value['result']!='success']
+          assert not problems,'CI software jobs failed or skipped: '+', '.join(problems)
+          print('All required firmware/UI/Android/installer jobs passed in this run.')
+          PY
+      - name: Require current physical test evidence and full effect provenance
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode release
 
   android-debug-apk:
     runs-on: ubuntu-latest
@@ -107,6 +193,8 @@ jobs:
           assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
           console.log('Android WebView integration contract checks passed (static checks only).');
           JS
+      - name: Run full Android release contract audit
+        run: python3 android/qa/check_release.py
       - name: Compile debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
@@ -131,16 +219,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Run standalone Studio UI and interaction regressions
+        run: node --test web-studio/tests/*.test.cjs
       - name: Check deployment and versioned Studio copies
         run: |
           python3 - <<'PY'
           from pathlib import Path
           a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.57.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
           assert a == b, 'Stable and versioned Studio copies differ'
           bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
           assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.57' in a, 'Unexpected Studio version'
+          assert b'OpenTail Studio v0.19.118' in a, 'Unexpected Studio version'
           print('All Studio copies match (web deployment, versioned, Android bundle).')
           PY
       - name: Validate Studio JavaScript and offline pixel preview
@@ -186,7 +276,7 @@ jobs:
             'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
           assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
             'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
-          assert(shell.includes('Android v0.1.27')&&gradle.includes("versionName '0.1.27'"),
+          assert(shell.includes('Android v0.1.29')&&gradle.includes("versionName '0.1.29'"),
             'Android app and shell version must match');
           console.log('Android editor routing and version assertions passed (static).');
           JS

@@ -1,48 +1,91 @@
-# OpenTail / WLED native 1D renderer migration (prototype)
+# OpenTail unified rendering integration
 
-**Goal (owner-locked October 27, 2026):** WLED's actual 1D renderer, not OpenTail look-alike algorithms. No 2D LED map required; keep per-output and per-zone routing.
+**Status: integration in progress.** This specification makes OpenTail the owner of the complete rendering lifecycle while combining the pinned WLED renderer and OpenTail-native effects in one output pipeline.
 
-## Non-negotiable implementation decision
+## Ownership model: one controller, one render pipeline
 
-For **1:1 effect behavior**, native WLED must perform the rendering. Reimplementing a subset of `FX.cpp` in isolated C, even with the same numeric IDs, cannot claim full parity without the original segment runtime, palettes, scheduling, persistent effect data, blending, transitions, particle physics, random state, and audio inputs.
+OpenTail owns the unified renderer coordinator: effect selection and scheduling, per-zone state, saved profiles/scenes, color/parameter state, frame timing, trigger arbitration, output-profile validation, brightness/current limits, and final output authorization.
 
-- **Upstream pinned source:** [wled/WLED commit `20e7a717664295eefc6ad77972cee1888d2da072`](https://github.com/wled/WLED/tree/20e7a717664295eefc6ad77972cee1888d2da072). Do **not** silently update the pin.
-- **Renderer:** WLED `wled00/FX.cpp`, `FX.h`, `FX_fcn.cpp`, `FXparticleSystem.cpp`, `colors.cpp`, and WLED Segment / bus runtime. Keep upstream source intact whenever possible.
-- **Control plane:** OpenTail Layout, Show Modes, Triggers and saved profiles. Their purpose is to select WLED segment configurations, not to generate per-pixel frames.
-- **Current native bridge:** `opentail-wled-bridge.mjs` converts independently assigned OpenTail 1D zones to the real WLED `/json/state` `seg` schema, preserving effect IDs, palette IDs, speed, intensity, colors, brightness, reverse and mirror. It never contains a pseudo-WLED effect loop. Tests run with `node --test wled-native/tests/native-bridge.test.mjs`.
-- **WLED catalog:** obtain deployed firmware's `/json/eff`, `/json/fxdata`, `/json/info`; maintain an audited upstream 1D/2D capability classification. Don't expose 2D-only or absent IDs or claim audio-reactive parity without the proper audio data source. Native effect/palette metadata and options remain WLED-owned, not fabricated by Studio.
-- **Preservation:** Current `core-firmware/` ESP-IDF alpha and verified Output Manager NVS, GPIO16/17 wiring, BLE pairing, trigger/arbitration and PR #12 remain intact. No forced migration or erase-flash. The native adapter does **not** yet replace the CORE ESP-IDF renderer or provide offline BLE transport.
+The coordinator combines two rendering providers:
+1. **Upstream WLED provider** — execute the exact effect implementations from pinned WLED source `20e7a717664295eefc6ad77972cee1888d2da072`, preserving native effect state, palettes, transitions, random state, particle simulation, and native color handling.
+2. **OpenTail-native provider** — run original effects (including Embers and materialize/startup/shutdown effects) under the same coordinator and zone-state contract. They must not be a second independent output task or compete with WLED's LED bus.
 
-## Path to an actual WLED-native OpenTail CORE firmware
+Both providers publish their effect metadata to **one catalog** and render only the zones assigned by OpenTail. The final arbitration/output stage applies vehicle triggers to assigned zones and commits frames through the configured output driver. There is one owner of physical pixel writes, not two renderers racing over the LEDs.
 
-1. Build a fork or pinned WLED checkout for the **ESP32-S3 N16R8 (16MB flash, 8MB PSRAM)**, using WLED's official PlatformIO Arduino-based environment. The ESP-IDF `led_strip_rmt` alpha is NOT wire-compatible with the native engine just by importing effects.
-2. Add an OpenTail WLED usermod / firmware bridge that maps authenticated CORE BLE effect packets and Output Manager layouts onto real WLED `Segment` state. Reconcile WLED native flash, partition layout, pairing/NVS namespaces and boot/rollback before any flash. The JavaScript JSON bridge is a reference control-plane adapter, **not a BLE implementation**.
-3. Establish one global 1D segment mapping per physical chain with stable IDs; preserve independent background effects while parking acts as baseline. Brake, turns, hazards and reverse overlay only assigned zones and release to the same native effect state; don't restart unaffected segments. Validate correct WLED transitions and per-segment brightness.
-4. Register all **actually compiled** WLED 1D IDs—including random, noise, palette, 1D particle and audio-reactive effects where source + dependencies are enabled—from the pinned native engine. 2D-only modes stay hidden. Validate the IDs/metadata against upstream and return capabilities over BLE; no placeholder or fake implementations.
-5. Regression tests: upstream build and exact ID catalog, WLED /json/state roundtrip, CRC/persistence migration, BLE authorization, parallel-zone independence, Stop/off frame, trigger arbitration/return, WLED effects/palettes and native random/particle behavior. On actual 522 LEDs, verify GPIO16 vs GPIO17 at low brightness with level-shifted data and correctly rated fused power.
-6. Maintain WLED attribution and **EUPL-1.2-or-later** licensing obligations for adapted source, notices and redistribution.
+For WLED effects, use the upstream WLED runtime as the provider to preserve pixel parity. For original OpenTail effects, preserve their algorithm but adapt them to the shared frame/output interface. A fail-closed build patch now inserts `opentailNativePostRender(_pixels, totalLen)` at the pinned WLED compositor seam in `wled00/FX_fcn.cpp`, after WLED segment blending and before gamma/color conversion and bus mapping. This is a real integration hook. The compiled hook now invokes a fail-closed OpenTail-native 1D effect engine before applying vehicle-trigger overlays. Local vehicle-input state is now explicitly independent of BLE session authorization: disconnecting the app must never suppress an active physical Brake, Turn, Reverse, or Park signal. A local-input C ABI exists for a future GPIO/opto sampler, but the WLED build deliberately does not claim physical input sampling is connected. Five native effect implementations are present: Embers, Materialize Sparks, Random Materialize, Smooth Fade, and Plasma Sweep. Their metadata is published into the shared catalog adapter. They remain inactive by default because authenticated BLE/profile transport is not yet connected. Added internal, non-HTTP C ABIs (`opentailNativeConfigureZonesV1`, `opentailNativeConfigureOverlayZonesV1`, `opentailNativeSetControlSessionV1`, and `opentailNativeSetVehicleInputsLocalV1`) as the trusted bridge seam: it requires an explicit authenticated-session flag, validates effect IDs and zone ranges transactionally, and revokes on invalid input. It is not itself authentication and is not yet called by CORE BLE/GATT. The build script rejects unexpected source drift rather than patching a different function.
 
-## Status gates (not yet passed)
+## OpenTail automotive control plane
 
-- [x] Architecture decision and upstream source pinned.
-- [x] Native WLED segment-mapping adapter with six host tests.
-- [ ] Build a native WLED ESP32-S3 firmware image containing the OpenTail integration.
-- [ ] Native CORE BLE/GATT adapter, saved zone settings and Show Modes capability readback.
-- [ ] Demonstrate every enabled 1D mode is native WLED code with exact ID and metadata.
-- [ ] On-device segment, palette, brightness, 522-pixel stability and Stop/trigger validation.
-- [ ] WLED licensing and firmware distribution review.
+OpenTail remains authoritative for:
+- authenticated BLE control and session authorization;
+- vehicle trigger inputs, priority arbitration and trigger-specific zones;
+- Output Manager profiles: physical outputs, zones, counts, pixel ranges, protocol, color order and supported channel types;
+- saved effects/scenes, parameters, options, every declared color slot, palette and transition state;
+- trigger overlays after the underlying effect has rendered, preserving the effect phase so it resumes unchanged;
+- Stop/global-off, fault state, brightness cap, output validation and fail-closed behavior.
 
-**Do not label v0.1.25 ESP-IDF CORE or this adapter as a completed 1:1 WLED port.** Native integration is under development and unmerged; physical safety/failover remains separately unverified.
+Locked priority remains: Reverse overrides show on reverse-assigned zones; hazards drive both turn zones; Brake overrides Park; show effects can continue on unassigned zones; releasing triggers restores the underlying effect without resetting its phase. Stop/global off must never be overridden by an overlay.
 
+The existing CORE firmware remains the recovery reference until the WLED-native image has a verified BLE/profile migration path. Do not attempt to run two independent LED-bus drivers against the same physical pixels.
 
-## October 27: optional WLED-native firmware build and regression gates
+## Metadata-driven unified Effects catalog
 
-- `usermods/opentail_native/opentail_native.cpp` uses WLED's official v2 usermod `handleOverlayDraw()` hook after WLED's own 1D FX renderer. It never intercepts effect IDs, rewrites output pins or resets per-segment show state.
-- `ot_native_overlay.h` offers a bounded, allocation-free per-zone trigger overlay with user-provided colors. Parking is a baseline only when a zone has no active show; brake, turn and reverse remain local to explicitly assigned zones.
-- `platformio_override.ini` extends the pinned upstream WLED ESP32-S3 16MB/QIO + 8MB/OPI PSRAM environment. `build-native.sh` clones the exact pinned WLED commit into a NEW directory and builds; it **never flashes or erases** a controller.
-- `tests/run-native-host-tests.sh` checks native JSON mapping, input priority, 522+30 pixel bounds, disabled/no-op defaults, transactional invalid-profile rejection and independent zones.
-- Existing `verify-active-sources.yml` runs the new host regressions alongside unchanged ESP-IDF CORE, Studio and Android checks. Separate `native-wled-build.yml` builds upstream WLED with our optional usermod.
+Read metadata from the exact compiled WLED image: `/json/eff`, `/json/fxdata`, `/json/pal`, and `/json/info`. Metadata is runtime data, not a hand-maintained imitation.
 
-**Integration remains incomplete:** The native WLED module defaults disabled and currently has no authenticated OpenTail BLE/profile bridge feeding its overlay. It cannot replace the current ESP-IDF firmware or reproduce OpenTail Output Manager settings yet. Native effect rendering, if successfully compiled, belongs to upstream WLED itself; *1:1 BLE-powered OpenTail functionality is not yet achieved*.
+- Preserve native effect IDs and compiled 1D/audio capability flags; exclude unsupported matrix-only effects from 1D output.
+- Parse each effect's declared parameter labels, options, defaults, palette support and color slots. Dual-color effects retain both colors independently; never assume all effects use the same number or meaning of colors.
+- Preserve OpenTail-native effect metadata in the same catalog and namespace without collisions with native WLED IDs.
+- Keep per-zone effect state independent across save/load, BLE disconnect/reconnect and reboot.
+- The bridge parser in `opentail-wled-bridge.mjs` is a host/reference adapter. It is not the firmware BLE bridge and is not by itself a complete effect UI.
+- Never silently drop a metadata field that the active transport cannot encode. Extend the versioned BLE payload or reject that operation explicitly.
 
-**Release gates:** Original CI and native target compilation, full effect capability metadata, BLE authorization, Output Manager NVS compatibility, no phase-reset on triggers, Stop black-frame correctness, and level-shifted/fused 522 LED physical testing. Existing CORE images and GPIO assignments are retained for rollback; no firmware flashing or profile migration is performed.
+## LED profile and color pipeline
+
+Current physical bench strips are WS2815 12 V RGB. Validate the selected bus, GPIO, count and GRB/BRG order using known-color frames. WLED must perform its native bus conversion once; OpenTail overlays must use logical colors and pass through the same final color/bus conversion exactly once.
+
+RGBW, RGB+CCT/dual-white and white-only channel controls are permitted only when both the physical LEDs and selected output driver support those channels. Do not fake unsupported channels on RGB-only WS2815. Keep the bench brightness cap distinct from WLED brightness/current limiting. Reject profile/bus mismatches before output.
+
+## Automatic verification
+
+`.github/workflows/wled-native-integration.yml` now schedules checks on relevant PRs and pushes:
+- Node host tests for metadata parsing, native WLED state mapping, and the five OpenTail-native effect catalog entries;
+- strict C++17 host tests for trigger overlays, native effect rendering/fail-closed gating, and the coordinator;
+- a no-flash build of the pinned WLED source with the OpenTail usermod and actual compositor hook;
+- a source-patch self-test for idempotence and fail-closed behavior;
+- an unflashed firmware artifact upload if the build succeeds.
+
+CI success proves only the software checks/build. It cannot prove exact pixel parity, safe current, status LED timing, BLE behavior, or physical trigger arbitration. Those require golden-frame comparisons and the bench acceptance tests below.
+
+## Required integration stages
+
+1. [partial] Patch the pinned WLED compositor and invoke the OpenTail-native 1D effect engine before trigger overlays. Five native effect algorithms and catalog metadata now exist and are covered by host tests. Still wire authenticated BLE/profile/zone controls and prove that WLED and native providers share saved per-zone state; keep native effects disabled until trusted configuration is complete.
+2. [partial] Add fail-closed internal ABIs for native-effect and trigger-zone profile configuration, session revocation, and a local-only physical input sampler hook. The overlay logic no longer gates physical inputs on BLE auth. Still connect the ABIs to the existing CORE BLE/GATT/profile code and actual WLED GPIO/opto input sampler; neither integration is complete.
+3. Connect the existing trigger manager/arbitration to post-render zone overlays and phase-preserving restoration.
+4. Generate the unified catalog from compiled WLED metadata plus registered OpenTail-native metadata; wire all supported color slots and parameters into Studio and Android.
+5. Reconcile partition/NVS schema, authorization and rollback before any flash. Keep a recoverable CORE image and preserve user settings.
+6. Add deterministic golden-frame tests against the same pinned WLED source for every claimed WLED effect/profile; classify nondeterministic effects explicitly and compare every output channel.
+7. Bench validate status LED patterns, BLE readback/authorization, dual colors, palettes, saved scenes, both outputs, IN1–IN8 arbitration, trigger phase resume, Stop/global off, color order, current limits and measured FPS.
+
+## Current verified scope and release gates
+
+- [x] Upstream WLED commit pinned.
+- [x] OpenTail-to-WLED zone/state mapping adapter exists.
+- [x] Metadata parser and host tests cover declared color slots, dual colors, defaults, palette/capability flags and unsupported controls.
+- [x] Automatic CI workflow added for host checks and the native WLED build.
+- [x] Build script applies a narrow, idempotent compositor patch and fails closed if the pinned source anchor changes.
+- [ ] Verify the new compositor-hook commit passes CI and the patched native image compiles.
+- [ ] Confirm CI runs green on this exact branch head.
+- [ ] OpenTail-owned render coordinator wired into the actual WLED render loop and shared physical output stage.
+- [ ] OpenTail-native effects registered into the shared catalog/coordinator.
+- [ ] Authenticated BLE bridge and Output Manager/profile/scene integration in the WLED firmware.
+- [ ] Full parameter/color/options/palette round-trip in Studio and Android.
+- [ ] Golden-frame pixel parity for every effect/profile claimed as supported.
+- [ ] Physical bench validation and migration/rollback review.
+
+Do not describe the combined runtime as complete until these gates pass. Do not flash the experimental image until the native build, BLE, settings migration and bench gates pass. This alpha is not independently verified as a safety-rated or fail-safe road-lighting controller.
+
+## Local vehicle input sampler (new, hardware-independent)
+
+`usermods/opentail_native/ot_vehicle_input_sampler.h` now provides a tested, GPIO-independent 8-input debouncer. A board adapter supplies an electrical-level bitmask every 10 ms and selects active-low or active-high polarity. The default mapping follows the locked IN1..IN8 order (Park, Brake, Left, Right, Reverse, Aux1..Aux3); road-light overlay output currently represents Park/Brake/Left/Right/Reverse. Each channel requires four consecutive samples by default, simultaneous signals remain simultaneous for the downstream arbitration layer, and mapping updates are validated transactionally.
+
+**Integration boundary:** this sampler is not yet called by the WLED usermod and does not configure GPIO pins. Do not treat it as physical-input integration until a board-specific adapter confirms pin ownership, optocoupler polarity, startup-safe levels and actual sample cadence. The WLED-native build remains an experimental alternative image, not the flashed CORE firmware.

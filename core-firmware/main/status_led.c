@@ -17,7 +17,7 @@
 static const char *TAG="OT_STATUS_LED";
 static portMUX_TYPE lock=portMUX_INITIALIZER_UNLOCKED;
 static led_strip_handle_t status_pixel=NULL;
-static bool available=false,wifi_ready=false,had_session=false,show_active=false,fault=false,ble_connected=false;
+static bool available=false,wifi_ready=false,had_session=false,had_ble_session=false,show_active=false,fault=false,ble_connected=false;
 static uint32_t startup_ms=0,last_heartbeat_ms=0;
 /* No NVS persistence; 5-second diagnostic test affects ONLY onboard WS2812. */
 static ot_st_mode_t self_test_mode=OT_ST_OFF;
@@ -35,10 +35,8 @@ static ot_st_mode_t mode_at(uint32_t now){
     /* Native Show Mode indication returns whenever a real show is rendering. */
     if(show_active)return OT_ST_SHOW;
     bool wifi_session=had_session && (uint32_t)(now-last_heartbeat_ms)<OT_ST_HEARTBEAT_TIMEOUT_MS;
-    if(wifi_session && ble_connected)return OT_ST_BOTH;
-    if(ble_connected)return OT_ST_BLE;
-    if(wifi_session)return OT_ST_CONNECTED;
-    if(had_session)return OT_ST_DISCONNECTED;
+    if(wifi_session || ble_connected)return ot_st_connection_mode(wifi_session,ble_connected);
+    if(had_session || had_ble_session)return OT_ST_DISCONNECTED;
     if(wifi_ready)return OT_ST_WIFI;
     return OT_ST_OFF;
 }
@@ -69,7 +67,12 @@ bool ot_st_self_test(ot_st_mode_t mode){
     portEXIT_CRITICAL(&lock);
     return ok;
 }
-void ot_st_ble_connected(bool active){portENTER_CRITICAL(&lock);ble_connected=active;portEXIT_CRITICAL(&lock);}
+void ot_st_ble_connected(bool active){
+    portENTER_CRITICAL(&lock);
+    ble_connected=active;
+    if(active)had_ble_session=true;
+    portEXIT_CRITICAL(&lock);
+}
 void ot_st_wifi_ready(void){portENTER_CRITICAL(&lock);wifi_ready=true;portEXIT_CRITICAL(&lock);}
 void ot_st_set_fault(const char *reason){
     portENTER_CRITICAL(&lock);fault=true;portEXIT_CRITICAL(&lock);
@@ -91,7 +94,7 @@ void ot_st_format_json(char *buf,size_t size){
         (unsigned long)s.self_test_remaining_ms);
 }
 static void status_task(void *arg){
-    (void)arg;ot_st_rgb_t prior={255,255,255};
+    (void)arg;ot_st_rgb_t prior={0,0,0};bool prior_valid=false;
     while(1){
         uint32_t now=ms_now();ot_st_snapshot_t s;ot_st_snapshot(&s);
         /* Show/rainbow self-test starts its cycle from zero, not from uptime. */
@@ -102,14 +105,14 @@ static void status_task(void *arg){
             portEXIT_CRITICAL(&lock);
         }
         ot_st_rgb_t c=ot_st_render(s.mode,phase,s.brightness,s.enabled);
-        if(status_pixel && (c.r!=prior.r||c.g!=prior.g||c.b!=prior.b)){
+        if(status_pixel && (!prior_valid||c.r!=prior.r||c.g!=prior.g||c.b!=prior.b)){
             esp_err_t e=led_strip_set_pixel(status_pixel,0,c.r,c.g,c.b);
             if(e==ESP_OK)e=led_strip_refresh(status_pixel);
             if(e!=ESP_OK){ESP_LOGE(TAG,"Onboard RGB update failed: %s",esp_err_to_name(e));
                 portENTER_CRITICAL(&lock);available=false;portEXIT_CRITICAL(&lock);status_pixel=NULL;
             }
         }
-        prior=c;
+        prior=c;prior_valid=true;
         vTaskDelay(pdMS_TO_TICKS(OT_ST_TICK_MS));
     }
 }

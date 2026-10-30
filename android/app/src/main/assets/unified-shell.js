@@ -1,4 +1,4 @@
-/* OpenTail Android v0.1.27: single-shell mobile UI. Enhances existing Studio without
+/* OpenTail Android v0.1.29: single-shell mobile UI. Enhances existing Studio without
    replacing its working CORE APIs, settings storage, trigger logic, or BLE GATT path. */
 (function () {
   'use strict';
@@ -25,7 +25,7 @@
   style.textContent = `
   html,html[data-ot-theme],body{background:#080d0a!important;color:#eaf4ee!important;color-scheme:dark!important}
   body{margin:0!important;min-width:0;font-family:Roboto,Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  #app>.shell{padding:9px 14px 118px!important;max-width:960px}
+  #app>.shell{padding:9px 14px 24px!important;max-width:960px}
   #app .top,#app nav.tabs,#app nav.bottomnav{display:none!important}
   #app .ot-page-intro{margin-top:4px!important}
   body.ot-show-active #app .ot-page-intro{display:none!important}
@@ -48,11 +48,12 @@
   .ot-connection-card[data-active=false] svg{color:#9ca8a1}
   .ot-connection-card strong{display:block;font-size:13px;line-height:1.3}
   .ot-connection-card small{display:block;color:#a1afa6;font-size:11px;margin-top:3px}
-  .ot-native-nav{position:fixed;bottom:0;left:0;right:0;z-index:1050;display:flex;justify-content:space-around;align-items:stretch;gap:3px;background:#0c140f;border-top:1px solid #293a30;padding:8px 6px calc(10px + env(safe-area-inset-bottom,0px));box-shadow:0 -8px 24px #0008}
-  .ot-native-nav button{appearance:none;flex:1;min-width:0;min-height:52px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;border:0;border-radius:12px;background:transparent;color:#99aca0;font:600 10px/1.15 Roboto,Inter,sans-serif;cursor:pointer}
-  .ot-native-nav button[aria-current=page]{background:#1b3023;color:#84e5a9}
-  .ot-native-nav button svg{width:21px;height:21px}
-  .ot-settings-page{display:none;padding:10px 16px 130px;max-width:960px;margin:auto}
+  .ot-native-nav{position:relative;display:flex;align-items:center;gap:7px;width:100%;max-width:960px;margin:0 auto 12px;padding:6px 14px 10px;background:transparent;border:0;box-shadow:none;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .ot-native-nav::-webkit-scrollbar{display:none}
+  .ot-native-nav button{appearance:none;flex:0 0 auto;min-width:max-content;min-height:42px;display:flex;flex-direction:row;justify-content:center;align-items:center;gap:7px;padding:9px 13px;border:1px solid #293a30;border-radius:999px;background:#111713;color:#99aca0;font:600 12px/1.15 Roboto,Inter,sans-serif;cursor:pointer;white-space:nowrap}
+  .ot-native-nav button[aria-current=page]{background:#1b3023;color:#84e5a9;border-color:#426d4e}
+  .ot-native-nav button svg{width:18px;height:18px;flex:0 0 auto}
+  .ot-settings-page{display:none;padding:10px 16px 28px;max-width:960px;margin:auto}
   body.ot-settings-active .ot-settings-page{display:block}
   body.ot-settings-active #app{display:none}
   .ot-settings-page h2{font-size:20px;margin:6px 0 7px}
@@ -148,14 +149,14 @@
     </details>
     <details class="ot-settings-group">
       <summary>About ${icon('arrow')}</summary>
-      <p class="ot-settings-copy">OpenTail Android v0.1.27 · Studio v0.19.57</p>
+      <p class="ot-settings-copy">OpenTail Android v0.1.29 · Studio v0.19.118</p>
       <button type="button" class="ot-quick-action" data-ot-native="about">Version history and technical notes ${icon('arrow')}</button>
     </details>
     <p class="ot-settings-help">Bluetooth lighting remains bench-only. Never rely on this prototype as the sole road-lighting safety system.</p>`;
   const nav = document.createElement('nav');
   nav.className = 'ot-native-nav';
   nav.setAttribute('aria-label', 'OpenTail main navigation');
-  // Canonical six-tab OpenTail navigation; Studio's competing concept nav is suppressed below.
+  // Canonical six-destination OpenTail pill navigation; Studio's competing concept nav is suppressed below.
   const destinations = [
     ['home','Home','home'],
     ['scenes','Show Modes','shows'],

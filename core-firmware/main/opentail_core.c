@@ -1,4 +1,4 @@
-/* OpenTail CORE Alpha 0.1.25 — 522-pixel + status semantics, NOT vehicle lighting firmware.
+/* OpenTail CORE Alpha — universal user-profile pixel counts, hardware-budgeted, not road firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
  * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
  */
@@ -23,11 +23,14 @@
 #include "led_strip.h"
 #include "led_strip_rmt.h"
 #include "board_config.h"
+#include "ot_version.h"
+#include "ot_ota_update.h"
 #include "status_led.h"
 #include "show_logic.h"
 #include "ble_command.h"
 #include "ble_fx_command.h"
 #include "effects_1d.h"
+#include "ot_auto_effects.h"
 #include "ot_transition.h"
 #include "fx_preset_record.h"
 #include "fx_zone_bank.h"
@@ -37,19 +40,36 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_app_desc.h"
+#include "ot_fps_pacer.h"
+#include "ot_frame_contract.h"
+#include "ot_frame_snapshot.h"
 
-#define OT_FW "0.1.25-alpha"
+#define OT_FW OT_FW_VERSION
+/* No hard-coded bench-derived FPS: frame rate is constrained by each output's
+ * actual pixel length, transfer backend and render processing time. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
-extern void ot_ble_start(void);
+extern bool ot_ble_start(void);
+extern bool ot_ble_radio_ever_ready(void);
 extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
 static led_strip_handle_t strip[OT_CHAIN_COUNT]={0};
+static uint16_t strip_capacity[OT_CHAIN_COUNT]={0}; /* Currently allocated/transmitted pixel count per lane. */
 static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGHTNESS};
-static ot_inputs_t inputs={0};
+static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
+/* Control-plane Stop must wake the render owner instead of waiting for the
+ * next adaptive frame timer. All strip writes still belong to led_task. */
+static void request_render_refresh(void){
+    TaskHandle_t task=NULL;
+    portENTER_CRITICAL(&state_lock);
+    task=render_task_handle;
+    portEXIT_CRITICAL(&state_lock);
+    if(task)xTaskNotifyGive(task);
+}
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -57,15 +77,21 @@ static ot_demo_t demo={OT_DEMO_OFF,{0,0,0},0};
 static TickType_t demo_deadline=0;
 static uint32_t frame_index=0;
 static uint32_t measured_fps=0;
+static uint16_t adaptive_target_fps=OT_FPS_PREFERRED_HIGH;
 static uint32_t frame_window_start_ms=0,frame_window_frames=0;
 /* Software-side evidence only: successful driver refresh != observed pixel state. */
 static uint32_t output_refreshes[OT_CHAIN_COUNT]={0};
+/* Render iterations that did not complete every configured lane. */
+static uint32_t incomplete_frames=0;
+static uint32_t output_runtime_fault_mask=0; /* Latched physical RMT lanes; bench diagnostics. */
 static uint32_t stop_request_generation=0,stop_render_generation=0;
 /* Single render-task owner of physical outputs; HTTP handlers only modify copied state. */
 static ot_show_t native_show={0};
 static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
+static bool ble_startup_ready=false; /* Set once before render task creation. */
+static bool http_startup_ready=false; /* Diagnostics are required to confirm a new OTA image. */
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
@@ -77,7 +103,7 @@ static ot_ble_fx_packet_t ble_fx_request={0};
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
-static uint16_t om_revision[OT_OM_OUTPUTS]={1,1};
+static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
 static bool tm_persistent=false;
@@ -127,44 +153,60 @@ typedef struct {
 _Static_assert(sizeof(ot_om_output_v1_t)==sizeof(char[25])+3+150+2,"v1 NVS ABI changed");
 static void om_load(void){
     ot_om_defaults(om_outputs);
+    om_persistent=false;
     nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READONLY,&h)!=ESP_OK){om_persistent=false;return;}
-    size_t n=0;
-    /* Keep legacy v1 key untouched so rollback to v0.1.16 remains possible. */
-    const char *key="profile_v2";
-    esp_err_t e=nvs_get_blob(h,key,NULL,&n);
-    if(e==ESP_ERR_NVS_NOT_FOUND){key="profile";e=nvs_get_blob(h,key,NULL,&n);}
-    if(e!=ESP_OK){nvs_close(h);om_persistent=false;return;}
-    if(n==sizeof(ot_om_store_t)){
-        ot_om_store_t stored={0};
-        e=nvs_get_blob(h,key,&stored,&n);
-        if(e==ESP_OK&&stored.magic==OT_OM_STORAGE_MAGIC&&stored.version==OT_OM_VERSION&&
-           ot_om_valid(&stored.outputs[0])&&ot_om_valid(&stored.outputs[1])){
-            memcpy(om_outputs,stored.outputs,sizeof(om_outputs));om_persistent=true;
-        }
-    }else if(n==sizeof(ot_om_store_v1_t)){
-        ot_om_store_v1_t old={0};
-        e=nvs_get_blob(h,key,&old,&n);
-        if(e==ESP_OK&&old.magic==OT_OM_STORAGE_MAGIC&&old.version==1){
-            bool ok=true;
-            for(int i=0;i<OT_OM_OUTPUTS;i++){
-                ot_om_output_t *dst=&om_outputs[i];const ot_om_output_v1_t *src=&old.outputs[i];
-                memcpy(dst->name,src->name,OT_OM_NAME_LEN);
-                dst->active_pixels=src->active_pixels;dst->color_order=src->color_order;
-                dst->zone_count=5;
-                for(int j=0;j<5;j++){
-                    memcpy(dst->zones[j].name,src->zones[j].name,OT_OM_NAME_LEN);
-                    dst->zones[j].pixels=src->zones[j].pixels;dst->zones[j].role=src->zones[j].role;
-                }
-                for(int k=0;k<3;k++){dst->rgb_gain[k]=255;dst->white_gain[k]=255;}
-                dst->gamma_enabled=false;
-                if(!ot_om_valid(dst))ok=false;
+    if(nvs_open("ot_output_cfg",NVS_READONLY,&h)!=ESP_OK)return;
+    /* A corrupt newer record must not mask the older, previously tested
+     * profile. Never erase or rewrite either key during boot migration. */
+    const char *const keys[]={"profile_v2","profile"};
+    for(unsigned attempt=0;attempt<sizeof(keys)/sizeof(keys[0])&&!om_persistent;attempt++){
+        const char *key=keys[attempt];
+        size_t n=0;
+        esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+        if(e!=ESP_OK)continue;
+        if(n==sizeof(ot_om_store_t)){
+            ot_om_store_t stored={0};
+            e=nvs_get_blob(h,key,&stored,&n);
+            bool valid=e==ESP_OK&&stored.magic==OT_OM_STORAGE_MAGIC&&
+                       stored.version==OT_OM_VERSION;
+            for(unsigned i=0;valid&&i<OT_OM_OUTPUTS;i++)
+                valid=ot_om_valid(&stored.outputs[i]);
+            if(valid){
+                memcpy(om_outputs,stored.outputs,sizeof(om_outputs));
+                om_persistent=true;
             }
-            if(ok){om_persistent=true;ESP_LOGI(TAG,"Migrated v1 output mapping into RAM; will upgrade NVS schema on next save");}
+        }else if(n==sizeof(ot_om_store_v1_t)){
+            ot_om_store_v1_t old={0};
+            e=nvs_get_blob(h,key,&old,&n);
+            if(e==ESP_OK&&old.magic==OT_OM_STORAGE_MAGIC&&old.version==1){
+                bool ok=true;
+                for(int i=0;i<OT_OM_OUTPUTS;i++){
+                    ot_om_output_t *dst=&om_outputs[i];const ot_om_output_v1_t *src=&old.outputs[i];
+                    memcpy(dst->name,src->name,OT_OM_NAME_LEN);
+                    dst->active_pixels=src->active_pixels;dst->color_order=src->color_order;
+                    dst->zone_count=5;
+                    for(int j=0;j<5;j++){
+                        memcpy(dst->zones[j].name,src->zones[j].name,OT_OM_NAME_LEN);
+                        dst->zones[j].pixels=src->zones[j].pixels;dst->zones[j].role=src->zones[j].role;
+                    }
+                    for(int k=0;k<3;k++){dst->rgb_gain[k]=255;dst->white_gain[k]=255;}
+                    dst->gamma_enabled=false;
+                    if(!ot_om_valid(dst))ok=false;
+                }
+                if(ok){
+                    om_persistent=true;
+                    ESP_LOGI(TAG,"Migrated v1 output mapping into RAM; will upgrade NVS schema on next save");
+                }
+            }
         }
+        if(!om_persistent)
+            ESP_LOGW(TAG,"Stored output mapping %s unavailable or invalid; checking prior profile",key);
     }
     nvs_close(h);
-    if(!om_persistent){ot_om_defaults(om_outputs);ESP_LOGW(TAG,"Output settings invalid; restored neutral bench defaults");}
+    if(!om_persistent){
+        ot_om_defaults(om_outputs);
+        ESP_LOGW(TAG,"No valid output profile; restored neutral unconfigured mapping");
+    }
 }
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
@@ -241,33 +283,47 @@ static bool om_string(const cJSON *obj,const char *key,char dst[OT_OM_NAME_LEN])
 }
 static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask,uint8_t show_zones){
     cJSON *item=cJSON_CreateObject();if(!item)return NULL;
-    cJSON_AddNumberToObject(item,"index",id);
-    cJSON_AddNumberToObject(item,"pin",(int)out_pin[id]);
-    cJSON_AddStringToObject(item,"name",o->name);
-    cJSON_AddNumberToObject(item,"pixels",o->active_pixels);
-    cJSON_AddNumberToObject(item,"zone_count",o->zone_count);
+    if(!cJSON_AddNumberToObject(item,"index",id) ||
+       !cJSON_AddNumberToObject(item,"pin",(int)out_pin[id]) ||
+       !cJSON_AddStringToObject(item,"name",o->name) ||
+       !cJSON_AddNumberToObject(item,"pixels",o->active_pixels) ||
+       !cJSON_AddNumberToObject(item,"zone_count",o->zone_count))goto oom;
     cJSON *cal=cJSON_AddObjectToObject(item,"calibration");
+    if(!cal)goto oom;
     cJSON *rgb=cJSON_AddArrayToObject(cal,"rgb_gain");
     cJSON *w=cJSON_AddArrayToObject(cal,"white_gain");
-    for(int k=0;k<3;k++){cJSON_AddItemToArray(rgb,cJSON_CreateNumber(o->rgb_gain[k]));cJSON_AddItemToArray(w,cJSON_CreateNumber(o->white_gain[k]));}
-    cJSON_AddBoolToObject(cal,"gamma_enabled",o->gamma_enabled);
-    cJSON_AddStringToObject(item,"color_order",ot_om_order_name(o->color_order));
+    if(!rgb||!w)goto oom;
+    for(int k=0;k<3;k++){
+        cJSON *r=cJSON_CreateNumber(o->rgb_gain[k]);
+        cJSON *white=cJSON_CreateNumber(o->white_gain[k]);
+        if(!r||!white){cJSON_Delete(r);cJSON_Delete(white);goto oom;}
+        (void)cJSON_AddItemToArray(rgb,r);(void)cJSON_AddItemToArray(w,white);
+    }
+    if(!cJSON_AddBoolToObject(cal,"gamma_enabled",o->gamma_enabled) ||
+       !cJSON_AddStringToObject(item,"color_order",ot_om_order_name(o->color_order)))goto oom;
     cJSON *zones=cJSON_AddArrayToObject(item,"zones");
+    if(!zones)goto oom;
     for(int i=0;i<o->zone_count;i++){
         const ot_om_zone_t *z=&o->zones[i];
         cJSON *entry=cJSON_CreateObject();
-        cJSON_AddStringToObject(entry,"name",z->name);
-        cJSON_AddNumberToObject(entry,"pixels",z->pixels);
-        cJSON_AddStringToObject(entry,"role",ot_om_role_name(z->role));
+        if(!entry)goto oom;
         const bool show_here=(show_zones&(1u<<i))!=0;
         ot_rgb_t overlay={0,0,0};
         bool trigger_here=ot_om_trigger_overlay(z->role,mask,show_here,
                                                  OT_MAX_BRIGHTNESS,&overlay);
-        cJSON_AddBoolToObject(entry,"trigger_active",trigger_here);
-        cJSON_AddBoolToObject(entry,"effect_selected",show_here);
-        cJSON_AddItemToArray(zones,entry);
+        if(!cJSON_AddStringToObject(entry,"name",z->name) ||
+           !cJSON_AddNumberToObject(entry,"pixels",z->pixels) ||
+           !cJSON_AddStringToObject(entry,"role",ot_om_role_name(z->role)) ||
+           !cJSON_AddBoolToObject(entry,"trigger_active",trigger_here) ||
+           !cJSON_AddBoolToObject(entry,"effect_selected",show_here)){
+            cJSON_Delete(entry);goto oom;
+        }
+        (void)cJSON_AddItemToArray(zones,entry);
     }
     return item;
+oom:
+    cJSON_Delete(item);
+    return NULL;
 }
 static esp_err_t om_get(httpd_req_t *r){
     ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
@@ -291,17 +347,27 @@ static esp_err_t om_get(httpd_req_t *r){
     portEXIT_CRITICAL(&state_lock);
     cJSON *obj=cJSON_CreateObject();
     if(!obj)return respond_err(r,500,"out of memory");
-    cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
-    cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
-    cJSON_AddBoolToObject(obj,"bench_only",true);
-    cJSON_AddNumberToObject(obj,"physical_outputs",2);
-    cJSON_AddNumberToObject(obj,"future_outputs_target",12);
-    cJSON_AddNumberToObject(obj,"allocated_pixels_per_output",OT_CHAIN_PIXELS);
-    cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES);
-    cJSON_AddBoolToObject(obj,"dynamic_zones",true);
-    cJSON_AddNumberToObject(obj,"effective_mask",mask);
+    if(!cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION) ||
+       !cJSON_AddBoolToObject(obj,"saved_on_device",persistent) ||
+       !cJSON_AddBoolToObject(obj,"bench_only",true) ||
+       !cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT) ||
+       !cJSON_AddNumberToObject(obj,"future_outputs_target",12) ||
+       /* Hardware build budget, not an active pixel count. */
+       !cJSON_AddNumberToObject(obj,"pixel_buffer_budget_per_output",OT_CHAIN_PIXELS) ||
+       !cJSON_AddNumberToObject(obj,"max_configurable_pixels_per_output",OT_OM_MAX_PIXELS_PER_OUTPUT) ||
+       !cJSON_AddNumberToObject(obj,"max_total_pixels",OT_OM_MAX_TOTAL_PIXELS) ||
+       !cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES) ||
+       !cJSON_AddBoolToObject(obj,"dynamic_zones",true) ||
+       !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
+        cJSON_Delete(obj);return respond_err(r,500,"out of memory");
+    }
     cJSON *outputs=cJSON_AddArrayToObject(obj,"outputs");
-    for(int i=0;i<OT_OM_OUTPUTS;i++)cJSON_AddItemToArray(outputs,om_json_output(&copy[i],i,mask,show_zones[i]));
+    if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+    for(int i=0;i<OT_OM_OUTPUTS;i++){
+        cJSON *entry=om_json_output(&copy[i],i,mask,show_zones[i]);
+        if(!entry){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+        (void)cJSON_AddItemToArray(outputs,entry);
+    }
     char *payload=cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
     if(!payload)return respond_err(r,500,"out of memory");
@@ -352,7 +418,7 @@ static esp_err_t om_post(httpd_req_t *r){
     }
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
-    if(!valid)return respond_err(r,400,"invalid output mapping: 1-8 zones must sum to 1..522 active pixels");
+    if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
     TickType_t now=xTaskGetTickCount();
@@ -475,20 +541,35 @@ static esp_err_t tm_post(httpd_req_t *r){
 }
 static esp_err_t show_get(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
-    ot_show_t cfg;bool active;uint32_t remaining;bool ready;
+    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false;
     bool fx_active=false;uint16_t fx_effect_id=0;
     portENTER_CRITICAL(&state_lock);
     cfg=native_show;active=show_window(now);
-    if(active && ble_fx_enabled){fx_active=true;fx_effect_id=ble_fx_request.effect_id;}
-    remaining=active?(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS):0;
+    if(active && ble_fx_enabled){
+        fx_active=true;fx_effect_id=ble_fx_request.effect_id;
+        /* The FX bank, not the legacy show deadline, owns per-zone TTLs.
+         * Loaded standalone scenes do not expire after the preview TTL. */
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
+            const ot_fx_zone_slot_t *slot=&fx_bank.zones[o][z];
+            if(!ot_fx_slot_active(slot,ms))continue;
+            if(slot->standalone){persistent=true;continue;}
+            const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
+            const uint32_t elapsed=ms-slot->started_ms;
+            if(duration-elapsed>remaining)remaining=duration-elapsed;
+        }
+        if(persistent)remaining=0;
+    }else if(active){
+        remaining=(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS);
+    }
     ready=native_outputs_ready;
     portEXIT_CRITICAL(&state_lock);
     ot_wled_fx_metadata_t meta;
     const char *active_name=fx_active&&ot_effects_1d_metadata(fx_effect_id,&meta)?
       meta.name:ot_show_name(cfg.mode);
     char buf[390];
-    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?active_name:"off",(unsigned long)remaining,
+    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
+      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
@@ -503,13 +584,26 @@ static esp_err_t show_start(httpd_req_t *r){
     }
     if(mode==OT_SHOW_OFF){cJSON_Delete(obj);return respond_err(r,400,"unknown native effect");}
     ot_show_t cfg={.mode=mode,.color={255,0,0},.brightness=24,.speed=50,
-       .chain_mask=3,.section_mask=255};
-    const char *channels="both";
-    field=cJSON_GetObjectItemCaseSensitive(obj,"chain");
-    if(field){if(!cJSON_IsString(field)){cJSON_Delete(obj);return respond_err(r,400,"chain must be a string");}channels=field->valuestring;}
-    if(!strcmp(channels,"left"))cfg.chain_mask=1;
-    else if(!strcmp(channels,"right"))cfg.chain_mask=2;
-    else if(strcmp(channels,"both")){cJSON_Delete(obj);return respond_err(r,400,"chain must be left, right or both");}
+       .chain_mask=(uint8_t)((1u<<OT_CHAIN_COUNT)-1u),.section_mask=(uint16_t)((1u<<OT_SECTION_COUNT)-1u)};
+    /* Canonical generic output selector; old left/right chain aliases stay
+     * read-compatible for existing bench utilities, not as vehicle defaults. */
+    const cJSON *output_mask=cJSON_GetObjectItemCaseSensitive(obj,"output_mask");
+    const cJSON *legacy_chain=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    if(output_mask && legacy_chain){cJSON_Delete(obj);return respond_err(r,400,"use output_mask or legacy chain, not both");}
+    if(output_mask){
+        const unsigned valid_mask=(1u<<OT_CHAIN_COUNT)-1u;
+        if(!cJSON_IsNumber(output_mask)||output_mask->valuedouble!=output_mask->valueint||
+           output_mask->valueint<1||(unsigned)output_mask->valueint>valid_mask){
+            cJSON_Delete(obj);return respond_err(r,400,"output_mask must select one or more available outputs");
+        }
+        cfg.chain_mask=(uint8_t)output_mask->valueint;
+    }else if(legacy_chain){
+        if(!cJSON_IsString(legacy_chain)){cJSON_Delete(obj);return respond_err(r,400,"legacy chain must be a string");}
+        const char *channels=legacy_chain->valuestring;
+        if(!strcmp(channels,"left")||!strcmp(channels,"output1"))cfg.chain_mask=1u;
+        else if(!strcmp(channels,"right")||!strcmp(channels,"output2"))cfg.chain_mask=2u;
+        else if(strcmp(channels,"both")){cJSON_Delete(obj);return respond_err(r,400,"unknown legacy chain name");}
+    }
     field=cJSON_GetObjectItemCaseSensitive(obj,"section_mask");
     if(field){if(!cJSON_IsNumber(field) || field->valuedouble!=field->valueint || field->valueint<1||field->valueint>255){cJSON_Delete(obj);return respond_err(r,400,"section_mask must be 1..255");}cfg.section_mask=(uint16_t)field->valueint;}
     const char *keys[]={"r","g","b","brightness","speed","ttl_ms"};
@@ -531,6 +625,7 @@ static esp_err_t show_start(httpd_req_t *r){
       native_show_started_ms=start_ms;}
     portEXIT_CRITICAL(&state_lock);
     if(!ready)return respond_err(r,409,"pixel outputs not initialized");
+    request_render_refresh();
     return send_json(r,"{\"ok\":true,\"active\":true,\"bench_only\":true,\"message\":\"native effect started on configured bench outputs; real trigger inputs always override\"}");
 }
 static esp_err_t show_stop(httpd_req_t *r){
@@ -539,6 +634,7 @@ static esp_err_t show_stop(httpd_req_t *r){
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"active\":false}");
 }
@@ -572,16 +668,19 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)request->ttl_sec*1000u);}
     portEXIT_CRITICAL(&state_lock);
+    if(ready)request_render_refresh();
     return ready;
 }
 /* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
  * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
-static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone){
+static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
+                                      const ot_fx_spark_style_t *spark){
     ot_wled_fx_metadata_t meta;
     if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
-       req->chain_mask<1||req->chain_mask>3||req->zone_mask==0||
+       req->chain_mask==0||
+       (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
        req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60)
         return false;
     const TickType_t now=xTaskGetTickCount();
@@ -592,6 +691,19 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
+        if(ready&&spark){
+            /* Optional sparkle tuning is transient per-zone state. Preserve
+             * legacy fixed-size BLE FX packets and saved NVS profile layout. */
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+                if(!(req->chain_mask&(1u<<o)))continue;
+                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                    if(!(req->zone_mask&(1u<<z))||
+                       om_outputs[o].zones[z].pixels==0||
+                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                    fx_bank.zones[o][z].spark=*spark;
+                }
+            }
+        }
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
@@ -607,14 +719,182 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
     }
     portEXIT_CRITICAL(&state_lock);
+    if(ready)request_render_refresh();
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL); /* live 60-sec bench preview */
+}
+/* Firmware-driven effect capability catalog for the CORE developer page.
+ * Only the renderer implementations compiled into this firmware are listed.
+ * Original and source-derived modes remain distinct from compatibility
+ * recipes: the catalog is NEVER evidence of upstream pixel parity.
+ */
+static esp_err_t fx_catalog_get(httpd_req_t *r){
+    uint16_t ids[254]={0};
+    const size_t total=ot_effects_1d_supported_ids(ids,254u);
+    if(total>254u)return respond_err(r,500,"effect catalog exceeds firmware limit");
+    cJSON *root=cJSON_CreateObject();
+    if(!root)return respond_err(r,500,"out of memory");
+    cJSON_AddBoolToObject(root,"bench_only",true);
+    cJSON_AddNumberToObject(root,"count",(double)total);
+    cJSON *items=cJSON_AddArrayToObject(root,"effects");
+    if(!items){cJSON_Delete(root);return respond_err(r,500,"out of memory");}
+    for(size_t i=0;i<total;i++){
+        ot_wled_fx_metadata_t meta={0};
+        if(!ot_effects_1d_metadata(ids[i],&meta))continue;
+        cJSON *entry=cJSON_CreateObject();
+        if(!entry){cJSON_Delete(root);return respond_err(r,500,"out of memory");}
+        cJSON_AddNumberToObject(entry,"id",ids[i]);
+        cJSON_AddStringToObject(entry,"name",meta.name);
+        const char *kind=ids[i]>=OT_FX_EMBERS?"original":
+                ot_wled_fx_metadata(ids[i],&meta)?"source-derived":"compatibility";
+        cJSON_AddStringToObject(entry,"implementation",kind);
+        cJSON_AddBoolToObject(entry,"palette_supported",meta.supports_palette);
+        cJSON_AddItemToArray(items,entry);
+    }
+    char *data=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!data)return respond_err(r,500,"out of memory");
+    const esp_err_t result=send_json(r,data);
+    free(data);
+    return result;
+}
+/* HTTP effect preview is strictly for the WPA2 isolated bench AP and
+ * retains CORE's existing zone validation, software brightness limit,
+ * render state, physical-trigger arbitration and Stop path.
+ * It MUST NOT be exposed on production vehicle networks unchanged.
+ */
+/* Preview endpoints use physical output bit indices, never vehicle sides.
+ * Keep legacy left/right input aliases only for existing bench clients. */
+static bool preview_output_mask(const cJSON *obj,uint8_t *mask){
+    const cJSON *selection=cJSON_GetObjectItemCaseSensitive(obj,"output_mask");
+    const cJSON *legacy=cJSON_GetObjectItemCaseSensitive(obj,"chain");
+    const unsigned all=(1u<<OT_CHAIN_COUNT)-1u;
+    if(!mask||all>UINT8_MAX|| (selection&&legacy))return false;
+    *mask=(uint8_t)all;
+    if(selection){
+        if(!cJSON_IsNumber(selection)||selection->valuedouble!=selection->valueint||
+           selection->valueint<1||(unsigned)selection->valueint>all)return false;
+        *mask=(uint8_t)selection->valueint;
+    }else if(legacy){
+        if(!cJSON_IsString(legacy))return false;
+        if(!strcmp(legacy->valuestring,"left")||!strcmp(legacy->valuestring,"output1"))
+            *mask=1u;
+        else if(!strcmp(legacy->valuestring,"right")||!strcmp(legacy->valuestring,"output2"))
+            *mask=2u;
+        else if(strcmp(legacy->valuestring,"both"))return false;
+        if((*mask&~all)!=0u)return false;
+    }
+    return true;
+}
+static esp_err_t fx_preview_post(httpd_req_t *r){
+    cJSON *obj=NULL;
+    int status=recv_json(r,&obj);
+    if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
+    unsigned id=0,zone=0,bri=0,speed=0,intensity=0,palette=0,ttl=0;
+    unsigned fg[3],bg[3];
+    const char *names[]={"r","g","b","bg_r","bg_g","bg_b"};
+    unsigned values[6]={0};
+    bool valid=om_number(obj,"effect_id",&id,0,65535)&&
+        om_number(obj,"zone_mask",&zone,1,255)&&
+        om_number(obj,"brightness",&bri,0,OT_MAX_BRIGHTNESS)&&
+        om_number(obj,"speed",&speed,0,255)&&
+        om_number(obj,"intensity",&intensity,0,255)&&
+        om_number(obj,"palette_id",&palette,0,255)&&
+        om_number(obj,"ttl_sec",&ttl,1,60);
+    for(unsigned i=0;i<6&&valid;i++)
+        valid=om_number(obj,names[i],&values[i],0,255);
+    uint8_t chain_mask=0;
+    valid=valid&&preview_output_mask(obj,&chain_mask);
+    if(!valid){cJSON_Delete(obj);return respond_err(r,400,"invalid effect preview parameters");}
+    for(unsigned i=0;i<3;i++){fg[i]=values[i];bg[i]=values[i+3];}
+    ot_ble_fx_packet_t req={
+        .effect_id=(uint16_t)id,.chain_mask=chain_mask,.zone_mask=(uint8_t)zone,
+        .r=(uint8_t)fg[0],.g=(uint8_t)fg[1],.b=(uint8_t)fg[2],
+        .bg_r=(uint8_t)bg[0],.bg_g=(uint8_t)bg[1],.bg_b=(uint8_t)bg[2],
+        .brightness=(uint8_t)bri,.speed=(uint8_t)speed,
+        .intensity=(uint8_t)intensity,.palette_id=(uint8_t)palette,
+        .ttl_sec=(uint8_t)ttl
+    };
+    cJSON_Delete(obj);
+    if(!ot_ble_apply_fx_internal(&req,false,NULL))
+        return respond_err(r,409,"unsupported effect, palette, or no configured zones");
+    char payload[152];
+    snprintf(payload,sizeof(payload),
+        "{\"ok\":true,\"effect_id\":%u,\"ttl_sec\":%u,\"bench_only\":true,\"trigger_priority_preserved\":true}",
+        id,ttl);
+    return send_json(r,payload);
+}
+
+/* Manual BENCH preview only. No ignition trigger registration, NVS event
+ * enablement, external LED task or power-off path. Reuse the current CORE
+ * authenticated-BLE effect renderer's validated zone bank/physical arbitration.
+ * Like /show/start, this endpoint is available only to clients on the
+ * controller's password-protected BENCH AP; it is not a road-ready API.
+ */
+static esp_err_t auto_preview_post(httpd_req_t *r){
+    cJSON *obj=NULL;
+    const int status=recv_json(r,&obj);
+    if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
+    cJSON *fx=cJSON_GetObjectItemCaseSensitive(obj,"effect");
+    if(!cJSON_IsString(fx)){cJSON_Delete(obj);return respond_err(r,400,"effect is required");}
+    uint16_t id=0;
+    const char *key=fx->valuestring;
+    if(!strcmp(key,"materialize_sparks"))id=OT_FX_MATERIALIZE_SPARKS;
+    else if(!strcmp(key,"random_materialize"))id=OT_FX_RANDOM_MATERIALIZE;
+    else if(!strcmp(key,"smooth_fade"))id=OT_FX_SMOOTH_FADE;
+    else if(!strcmp(key,"plasma_sweep"))id=OT_FX_PLASMA_SWEEP;
+    else if(!strcmp(key,"smooth_fade_out"))id=OT_FX_SMOOTH_FADE_OUT;
+    else{cJSON_Delete(obj);return respond_err(r,400,"unsupported automatic event preview");}
+    /* Preserve the allowlisted label before deleting the request JSON. */
+    char event_key[32]={0};
+    snprintf(event_key,sizeof(event_key),"%s",key);
+    uint8_t chain_mask=0;
+    if(!preview_output_mask(obj,&chain_mask)){
+        cJSON_Delete(obj);return respond_err(r,400,"invalid output_mask or legacy chain");
+    }
+    const char *keys[]={"r","g","b","brightness","speed","intensity",
+                         "spark_style","spark_peak","spark_r","spark_g","spark_b"};
+    for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,keys[i]);
+        if(v&&(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint)){
+            cJSON_Delete(obj);return respond_err(r,400,"integer parameters required");
+        }
+    }
+    const uint8_t speed=(uint8_t)bounded_int(obj,"speed",180,0,255);
+    const ot_ble_fx_packet_t req={
+        .effect_id=id,.chain_mask=chain_mask,.zone_mask=255,
+        .r=(uint8_t)bounded_int(obj,"r",255,0,255),
+        .g=(uint8_t)bounded_int(obj,"g",31,0,255),
+        .b=(uint8_t)bounded_int(obj,"b",20,0,255),
+        .bg_r=0,.bg_g=0,.bg_b=0,
+        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
+        .speed=speed,
+        .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
+        .palette_id=0,.ttl_sec=6
+    };
+    const ot_fx_spark_style_t spark={
+        .style=(uint8_t)bounded_int(obj,"spark_style",0,0,3),
+        .peak=(uint8_t)bounded_int(obj,"spark_peak",32,1,32),
+        .color={
+            (uint8_t)bounded_int(obj,"spark_r",255,0,255),
+            (uint8_t)bounded_int(obj,"spark_g",255,0,255),
+            (uint8_t)bounded_int(obj,"spark_b",255,0,255)
+        }
+    };
+    cJSON_Delete(obj);
+    if(!ot_ble_apply_fx_internal(&req,false,&spark))
+        return respond_err(r,409,"no configured active output zones or outputs not ready");
+    char payload[185];
+    snprintf(payload,sizeof(payload),
+       "{\"ok\":true,\"event\":\"%s\",\"duration_ms\":%lu,\"preview_ttl_sec\":6,\"brightness_cap\":%u,\"bench_only\":true}",
+       event_key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
+    return send_json(r,payload);
 }
 void ot_ble_stop_show(void){
     const TickType_t now=xTaskGetTickCount();
-    bool stopped=false;
+    bool stopped=false,refresh_requested=false;
     portENTER_CRITICAL(&state_lock);
     /* STOP cancels all active BLE-owned zones, including a scene whose
      * ownership bit was cleared during a pending disconnect. A genuine
@@ -626,13 +906,15 @@ void ot_ble_stop_show(void){
         native_show.mode=OT_SHOW_OFF;
         native_show_deadline=now;
         stop_request_generation++;
-        stopped=true;
+        stopped=true;refresh_requested=true;
     }else if(native_show.mode==OT_SHOW_OFF || !show_window(now)){
         /* Stop may be pressed after the 60-second FX timeout. Record the
          * requested post-stop refresh even when no show is still owned. */
         stop_request_generation++;
+        refresh_requested=true;
     }
     portEXIT_CRITICAL(&state_lock);
+    if(refresh_requested)request_render_refresh();
     /* Restore the previous status indication immediately, rather than
      * leaving a stale rainbow until the next BLE preview TTL expires. */
     if(stopped)ot_st_show_active(false);
@@ -676,7 +958,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -718,6 +1000,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      }
  }
  portEXIT_CRITICAL(&state_lock);
+ if(ready)request_render_refresh();
  return ready;
 }
 bool ot_ble_delete_fx_preset(uint8_t slot){
@@ -733,7 +1016,10 @@ void ot_ble_disconnect_show(void){
  /* Disconnect expires only temporary zones; explicitly loaded NVS effects
   * remain local on CORE. Vehicle inputs override only their assigned zones.
   * A legacy HTTP show is not owned by the BLE session. */
+ bool owned_before,enabled_before,owned_after,enabled_after,active_after;
  portENTER_CRITICAL(&state_lock);
+ owned_before=ble_owns_show;
+ enabled_before=ble_fx_enabled;
  if(ble_owns_show){
      ot_fx_bank_stop_temporary(&fx_bank);
      bool active=ble_fx_enabled&&
@@ -743,12 +1029,20 @@ void ot_ble_disconnect_show(void){
          stop_request_generation++;
      }
  }
+ owned_after=ble_owns_show;
+ enabled_after=ble_fx_enabled;
+ active_after=show_window(xTaskGetTickCount());
  portEXIT_CRITICAL(&state_lock);
+ if(owned_before)request_render_refresh();
+ ESP_LOGI(TAG,"BLE disconnect cleanup: owned=%d->%d enabled=%d->%d active_after=%d",
+          owned_before,owned_after,enabled_before,enabled_after,active_after);
 }
+
 static esp_err_t status_get(httpd_req_t *r) {
     TickType_t now=xTaskGetTickCount();
-    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active;ot_demo_mode_t mode;uint32_t frames;ot_show_t show_cfg;
-    uint32_t refresh0,refresh1,stop_requested,stop_rendered;
+    uint8_t physical,sim;ot_tm_profile_t tm;bool sim_active,demo_active,show_active,outputs_ready;ot_demo_mode_t mode;uint32_t frames;uint16_t target_fps;
+    uint32_t refresh0,refresh1,stop_requested,stop_rendered,partial_frames,observed_fps,faulted_outputs;
+    uint16_t configured_pixels[OT_CHAIN_COUNT];
     portENTER_CRITICAL(&state_lock);
     physical=live_input_mask;tm=tm_profile;
     sim_active=before_deadline(now,sim_deadline);
@@ -756,38 +1050,58 @@ static esp_err_t status_get(httpd_req_t *r) {
     demo_active=before_deadline(now,demo_deadline);
     mode=demo_active?demo.mode:OT_DEMO_OFF;
     frames=frame_index;
+    target_fps=adaptive_target_fps;
+    observed_fps=measured_fps;
     show_active=show_window(now);
-    show_cfg=native_show;
+    outputs_ready=native_outputs_ready;
+
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
+    partial_frames=incomplete_frames;
+    faulted_outputs=output_runtime_fault_mask;
     portEXIT_CRITICAL(&state_lock);
+    const bool ble_radio_ready=ot_ble_radio_ever_ready();
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
-    char arb_json[600];
+    /* Runtime telemetry is universal and reflects configured output zones.
+     * Historical left/right tail examples belong exclusively in host tests. */
+    char arb_json[480];
     snprintf(arb_json,sizeof(arb_json),
-      "{\"mode\":\"%s\",\"mapping\":\"legacy_example_zone_local\",\"hazards\":%s,\"brake_over_parking\":%s,\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,\"demo_requested\":%s,\"demo_suppressed\":%s,"
-      "\"left\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"},"
-      "\"right\":{\"tail\":\"%s\",\"turn\":\"%s\",\"reverse\":\"%s\"}}",
+      "{\"mode\":\"%s\",\"mapping\":\"configured_output_zones\",\"hazards\":%s,\"brake_over_parking\":%s,"
+      "\"show_requested\":%s,\"show_suppressed\":%s,\"show_rendering\":%s,"
+      "\"demo_requested\":%s,\"demo_suppressed\":%s}",
       ot_arb_mode_name(arb.mode),arb.hazards?"true":"false",arb.brake_over_parking?"true":"false",
-      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",arb.show_requested?"true":"false",
-      arb.demo_requested?"true":"false",arb.demo_suppressed?"true":"false",
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TOP,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_TURN,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,0,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_TOP,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_TURN,show_cfg.chain_mask,show_cfg.section_mask)),
-      ot_zone_mode_name(ot_arb_zone(&arb,1,OT_REVERSE,show_cfg.chain_mask,show_cfg.section_mask)));
+      arb.show_requested?"true":"false",arb.show_suppressed?"true":"false",
+      arb.show_requested?"true":"false",arb.demo_requested?"true":"false",
+      arb.demo_suppressed?"true":"false");
+    char active_pixels_json[OT_CHAIN_COUNT*6u+3u];
+    size_t used=0;
+    active_pixels_json[used++]='[';
+    for(unsigned i=0;i<OT_CHAIN_COUNT;i++){
+        int written=snprintf(active_pixels_json+used,sizeof(active_pixels_json)-used,
+                             "%s%u",i?",":"",(unsigned)configured_pixels[i]);
+        if(written<0||(size_t)written>=sizeof(active_pixels_json)-used)
+            return respond_err(r,500,"output status formatting overflow");
+        used+=(size_t)written;
+    }
+    active_pixels_json[used++]=']';
+    active_pixels_json[used]=0;
+    char elf_sha256[65]={0};
+    (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
-       OT_FW,OT_SMALL_BENCH_LAYOUT?"30-pixel-bench":"universal-522-bench",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+       OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
+       outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
-       (unsigned long)frames,(unsigned long)measured_fps,(unsigned)layout.chain_pixels,(unsigned)layout.brightness_cap,
-       (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
+       (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
+       (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"BRG\",\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -807,29 +1121,6 @@ static esp_err_t status_self_test_post(httpd_req_t *r){
     return send_json(r,test==OT_ST_OFF?
         "{\"ok\":true,\"self_test_active\":false,\"message\":\"normal status restored\"}":
         "{\"ok\":true,\"self_test_active\":true,\"duration_ms\":5000,\"message\":\"onboard RGB only; no real fault or show started\"}");
-}
-static const char status_self_test_page[]=
-"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-"<title>OpenTail RGB Self-Test</title><style>body{background:#000;color:#fff;font:15px system-ui,sans-serif;max-width:560px;margin:auto;padding:24px}"
-".card{border:1px solid #2b2b2b;border-radius:20px;padding:22px}h1{font-size:22px;margin:0 0 8px}p{color:#aaa;line-height:1.6}"
-"button{background:#161616;border:1px solid #363636;color:white;border-radius:13px;padding:13px 17px;margin:5px 5px 5px 0;min-height:48px;cursor:pointer}"
-"button:disabled{opacity:.5}a{color:#aaa}#info{font-size:13px;color:#ddd;background:#0a0a0a;border-radius:12px;padding:14px;white-space:pre-wrap}</style></head>"
-"<body><div class='card'><h1>CORE RGB Self-Test</h1><p>BENCH ONLY. Tests affect only the onboard RGB chip for 5 seconds."
-"No physical fault, Show Mode, or external LED output is activated.</p>"
-"<button onclick=\"run('rainbow')\">Rainbow · 5s</button>"
-"<button onclick=\"run('stop')\">Stop / Restore</button>"
-"<p id='info' role='status' aria-live='polite'>Reading status…</p>"
-"<p><a href='/studio'>Back to Studio</a></p></div><script>"
-"async function run(mode){try{const res=await fetch('/api/v1/status-led/self-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode})});"
-"const j=await res.json();if(!res.ok)throw Error(j.error||'Request failed');await update()}catch(e){document.getElementById('info').textContent='Error: '+e.message}}"
-"async function update(){try{const s=await(await fetch('/api/v1/status-led',{cache:'no-store'})).json();"
-"document.getElementById('info').textContent=s.self_test_active?('TEST: '+s.self_test_mode+' · '+(s.self_test_remaining_ms/1000).toFixed(1)+'s remaining')"
-":('NORMAL STATUS: '+s.mode+(s.available?'':' (RGB unavailable)'))}catch(e){document.getElementById('info').textContent='Status error: '+e.message}}"
-"setInterval(update,300);update()</script></body></html>";
-static esp_err_t status_self_test_get(httpd_req_t *r){
-    httpd_resp_set_type(r,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    return httpd_resp_sendstr(r,status_self_test_page);
 }
 static esp_err_t status_session_post(httpd_req_t *r){
     cJSON *obj=NULL;int status=recv_json(r,&obj);
@@ -888,51 +1179,47 @@ static esp_err_t stop_post(httpd_req_t *r) {
     portENTER_CRITICAL(&state_lock);
     demo.mode=OT_DEMO_OFF;demo_deadline=now;
     sim_mask=0;sim_deadline=now;
-    ble_owns_show=false;native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);
+    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
-static const char page[]=
-"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>OpenTail CORE Alpha</title><style>body{background:#0b0f0d;color:#f3fff4;font:16px system-ui;max-width:620px;margin:auto;padding:18px}"
-"button{background:#193924;border:1px solid #39ff70;border-radius:12px;color:white;padding:12px;margin:5px;min-height:45px}"
-"pre{white-space:pre-wrap;background:#171c19;padding:14px;border-radius:12px}h1{color:#39ff70}small{color:#afb9b1}</style></head><body>"
-"<h1>OpenTail CORE Alpha</h1><p>BENCH ONLY - no road lighting or failover</p>"
-"<p><a style=\"color:#39ff70;font-weight:bold\" href=\"/studio\">Open OpenTail Studio v0.19.51 →</a></p>"
-"<p><a style=\"color:#aaa\" href=\"/status-self-test\">Onboard RGB self-test (bench only) →</a></p>"
-"<h3>Inputs (2 second test)</h3><div id=signals></div>"
-"<h3>Color demos (3 second test)</h3><div id=colors></div>"
-"<p><button onclick=post('/api/v1/stop',{})>STOP DEMO</button></p>"
-"<h3>Controller Status</h3><pre id=status>Connecting...</pre><small>OpenTail Alpha uses its own API. Current Studio WLED connection mode is not compatible.</small>"
-"<script>async function post(p,b){try{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});"
-"if(!r.ok)alert(await r.text());await refresh()}catch(e){alert(e.message)}}"
-"async function refresh(){try{document.getElementById('status').textContent=JSON.stringify(await(await fetch('/api/v1/status')).json(),null,2)}catch(e){document.getElementById('status').textContent=e.message}}"
-"for(const n of ['park','brake','left','right','reverse']){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/simulate',{signals:[n],ttl_ms:2000});document.getElementById('signals').append(b)}"
-"for(const [n,c] of Object.entries({Red:[255,0,0],Green:[0,255,0],Blue:[0,0,255],White:[255,255,255]})){let b=document.createElement('button');b.textContent=n;b.onclick=()=>post('/api/v1/demo',{mode:'solid',r:c[0],g:c[1],b:c[2],brightness:24,ttl_ms:3000});document.getElementById('colors').append(b)}"
-"setInterval(refresh,1000);refresh()</script></body></html>";
-/* OpenTail Studio v0.19.51 is served locally from the CORE access point.
- * Gzip is embedded into the application at compile time; no filesystem or WLED needed.
- * Browser uses same-origin /api/v1/... and does not require broad CORS access. */
-extern const uint8_t studio_gz_start[] asm("_binary_studio_htm_gz_start");
-extern const uint8_t studio_gz_end[] asm("_binary_studio_htm_gz_end");
-static esp_err_t studio_get(httpd_req_t *r) {
+/* CORE ships only its own developer console. The approved Studio is
+ * distributed independently as web-studio/opentail.htm and via Android.
+ * CMake embeds this static page; no WLED runtime or browser network access
+ * beyond the CORE bench AP is needed.
+ */
+extern const uint8_t ot_dev_console_start[] asm("_binary_dev_console_htm_start");
+static esp_err_t dev_get(httpd_req_t *r){
     httpd_resp_set_type(r,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(r,"Content-Encoding","gzip");
     httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    return httpd_resp_send(r,(const char *)studio_gz_start,(ssize_t)(studio_gz_end-studio_gz_start));
+    return httpd_resp_sendstr(r,(const char *)ot_dev_console_start);
 }
-static esp_err_t root_get(httpd_req_t *r) {httpd_resp_set_type(r,"text/html; charset=utf-8");return httpd_resp_sendstr(r,page);}
-static void http_start(void) {
-    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=22;cfg.stack_size=8192;
+static esp_err_t legacy_dev_redirect(httpd_req_t *r){
+    httpd_resp_set_status(r,"302 Found");
+    httpd_resp_set_hdr(r,"Location","/dev");
+    return httpd_resp_sendstr(r,"Controller tools have moved to /dev. OpenTail Studio is a separate design app.");
+}
+static bool http_start(void) {
+    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;cfg.recv_wait_timeout=30;
     httpd_handle_t server=NULL;
-    ESP_ERROR_CHECK(httpd_start(&server,&cfg));
+    esp_err_t e=httpd_start(&server,&cfg);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE HTTP server startup failed: %s",esp_err_to_name(e));
+        return false;
+    }
     const httpd_uri_t routes[]={
-        {.uri="/",.method=HTTP_GET,.handler=root_get},
-        {.uri="/studio",.method=HTTP_GET,.handler=studio_get},
+        {.uri="/",.method=HTTP_GET,.handler=dev_get},
+        {.uri="/dev",.method=HTTP_GET,.handler=dev_get},
+        {.uri="/studio",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status",.method=HTTP_GET,.handler=status_get},
+        {.uri="/api/v1/ota",.method=HTTP_GET,.handler=ot_ota_status_get},
+        {.uri="/api/v1/ota",.method=HTTP_POST,.handler=ot_ota_upload_post},
         {.uri="/api/v1/status-led",.method=HTTP_GET,.handler=status_led_get},
-        {.uri="/status-self-test",.method=HTTP_GET,.handler=status_self_test_get},
+        {.uri="/status-self-test",.method=HTTP_GET,.handler=legacy_dev_redirect},
         {.uri="/api/v1/status-led/self-test",.method=HTTP_POST,.handler=status_self_test_post},
         {.uri="/api/v1/status-led/session",.method=HTTP_POST,.handler=status_session_post},
         {.uri="/api/v1/capabilities",.method=HTTP_GET,.handler=caps_get},
@@ -943,22 +1230,45 @@ static void http_start(void) {
         {.uri="/api/v1/show",.method=HTTP_GET,.handler=show_get},
         {.uri="/api/v1/show/start",.method=HTTP_POST,.handler=show_start},
         {.uri="/api/v1/show/stop",.method=HTTP_POST,.handler=show_stop},
+        {.uri="/auto-events/test",.method=HTTP_GET,.handler=legacy_dev_redirect},
+        {.uri="/api/v1/auto-events/preview",.method=HTTP_POST,.handler=auto_preview_post},
+        {.uri="/api/v1/fx/catalog",.method=HTTP_GET,.handler=fx_catalog_get},
+        {.uri="/api/v1/fx/preview",.method=HTTP_POST,.handler=fx_preview_post},
         {.uri="/api/v1/outputs",.method=HTTP_GET,.handler=om_get},
         {.uri="/api/v1/triggers",.method=HTTP_GET,.handler=tm_get},
         {.uri="/api/v1/triggers",.method=HTTP_POST,.handler=tm_post},
         {.uri="/api/v1/outputs",.method=HTTP_POST,.handler=om_post}
     };
-    for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);++i) ESP_ERROR_CHECK(httpd_register_uri_handler(server,&routes[i]));
+    for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);++i){
+        e=httpd_register_uri_handler(server,&routes[i]);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"CORE HTTP route %s failed: %s",routes[i].uri,esp_err_to_name(e));
+            (void)httpd_stop(server);
+            return false;
+        }
+    }
+    return true;
 }
-static void wifi_ap_init(void) {
+static bool wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
     size_t n=strlen(psk);
-    if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");abort();}
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
+    if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");return false;}
+    esp_err_t e=esp_netif_init();
+    if(e==ESP_OK)e=esp_event_loop_create_default();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi networking init failed: %s",esp_err_to_name(e));
+        return false;
+    }
+    if(!esp_netif_create_default_wifi_ap()){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed");
+        return false;
+    }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init));
+    e=esp_wifi_init(&init);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi driver init failed: %s",esp_err_to_name(e));
+        return false;
+    }
     wifi_config_t conf={0};
     strncpy((char*)conf.ap.ssid,OT_AP_SSID,sizeof(conf.ap.ssid)-1);
     conf.ap.ssid_len=strlen(OT_AP_SSID);
@@ -966,64 +1276,162 @@ static void wifi_ap_init(void) {
     conf.ap.channel=1;
     conf.ap.max_connection=2;
     conf.ap.authmode=WIFI_AUTH_WPA2_PSK;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,&conf));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    e=esp_wifi_set_mode(WIFI_MODE_AP);
+    if(e==ESP_OK)e=esp_wifi_set_config(WIFI_IF_AP,&conf);
+    if(e==ESP_OK)e=esp_wifi_start();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s",esp_err_to_name(e));
+        return false;
+    }
     ot_st_wifi_ready();
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
+    return true;
 }
-static void input_init(void) {
+static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
         gpio_config_t cfg={.pin_bit_mask=1ULL<<input_pin[i],.mode=GPIO_MODE_INPUT,
                            .pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,
                            .intr_type=GPIO_INTR_DISABLE};
-        ESP_ERROR_CHECK(gpio_config(&cfg));
-    }
-}
-static bool strip_init(void) {
-    for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
-        const led_strip_config_t cfg={
-            .strip_gpio_num=out_pin[ch],.max_leds=OT_CHAIN_PIXELS,
-            .led_model=LED_MODEL_WS2812, // WS2815 uses compatible nominal 800kHz data; scope verification required.
-            .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}}, // B-R-G
-            .flags={.invert_out=false}
-        };
-        const led_strip_rmt_config_t rmt={
-            .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
-            /* ESP32-S3 DMA uses this as its DMA buffer size. 64 symbols forced
-             * frequent refills on a 522-pixel stream; 1024 is Espressif's
-             * documented example for lower CPU overhead and better throughput.
-             * Output 2 stays on its independently tested non-DMA setting. */
-            .mem_block_symbols=(ch==0?1024:64),
-            .flags={.with_dma=(ch==0)}
-        };
-        esp_err_t e=led_strip_new_rmt_device(&cfg,&rmt,&strip[ch]);
-        if(e==ESP_OK)e=led_strip_clear(strip[ch]);
-        if(e!=ESP_OK){ESP_LOGE(TAG,"RMT output %d failed: %s",ch,esp_err_to_name(e));
-            ot_st_set_fault("external pixel RMT initialization failed");return false;}
+        const esp_err_t e=gpio_config(&cfg);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"Trigger input IN%u GPIO setup failed: %s",
+                     (unsigned)(i+1),esp_err_to_name(e));
+            return false;
+        }
     }
     return true;
 }
+/* RMT drivers are created to the SAVED output length, never the board-wide
+ * memory safety budget. Resizing is render-task-owned; old pixels are cleared
+ * before releasing the old bus so a shorter replacement cannot leave ghosts. */
+static bool strip_configure_channel(unsigned ch,unsigned pixels){
+    if(ch>=OT_CHAIN_COUNT||pixels<1u||pixels>OT_CHAIN_PIXELS)return false;
+    if(strip[ch]&&strip_capacity[ch]==pixels)return true;
+    if(strip[ch]){
+        /* Never replace a running output unless its old pixels were
+         * successfully cleared. A failed clear must not be ignored. */
+        esp_err_t e=led_strip_clear(strip[ch]);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"RMT output %u clear before resize failed: %s",ch,esp_err_to_name(e));
+            ot_st_set_fault("external pixel RMT clear failed");return false;
+        }
+        e=led_strip_del(strip[ch]);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"RMT output %u teardown failed: %s",ch,esp_err_to_name(e));
+            ot_st_set_fault("external pixel RMT teardown failed");return false;
+        }
+        strip[ch]=NULL;strip_capacity[ch]=0;
+    }
+    const led_strip_config_t cfg={
+        .strip_gpio_num=out_pin[ch],.max_leds=pixels,
+        .led_model=LED_MODEL_WS2812, // WS2815-compatible nominal 800 kHz; physical timing remains unverified.
+        .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}},
+        .flags={.invert_out=false}
+    };
+    const led_strip_rmt_config_t rmt={
+        .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
+        .mem_block_symbols=(ch==0?1024:64),
+        .flags={.with_dma=(ch==0)}
+    };
+    led_strip_handle_t next=NULL;
+    esp_err_t e=led_strip_new_rmt_device(&cfg,&rmt,&next);
+    if(e==ESP_OK)e=led_strip_clear(next);
+    if(e!=ESP_OK){
+        if(next)(void)led_strip_del(next);
+        ESP_LOGE(TAG,"RMT output %u resize to %u pixels failed: %s",ch,pixels,esp_err_to_name(e));
+        ot_st_set_fault("external pixel RMT initialization failed");return false;
+    }
+    strip[ch]=next;strip_capacity[ch]=(uint16_t)pixels;
+    return true;
+}
+static bool strip_init(void){
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+        if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
+    return true;
+}
+/* The input sampler is independent of FPS. Four 10ms samples stay 40ms,
+ * not four display frames. Wakes pixel rendering after a trigger transition. */
+static void input_sampler_task(void *arg){
+    (void)arg;
+    ot_inputs_t sampler={0};
+    TickType_t last_wake=xTaskGetTickCount();
+    TickType_t period=pdMS_TO_TICKS(10u);
+    if(!period)period=1u;
+    for(;;){
+        bool levels[OT_IN_COUNT];
+        for(unsigned i=0;i<OT_IN_COUNT;i++){
+            const int level=gpio_get_level(input_pin[i]);
+            levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+        }
+        uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
+        TaskHandle_t target=NULL;
+        portENTER_CRITICAL(&state_lock);
+        if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+        portEXIT_CRITICAL(&state_lock);
+        if(target)xTaskNotifyGive(target);
+        vTaskDelayUntil(&last_wake,period);
+    }
+}
+static void frame_wake_callback(void *arg){
+    TaskHandle_t target=(TaskHandle_t)arg;
+    if(target)xTaskNotifyGive(target);
+}
+/* Do not panic/reboot all lighting when one RMT lane fails. The failed handle
+ * stays owned by the render task and is not reused or blindly destroyed.
+ * Hardware recovery and takeover require a separately verified failover path. */
+static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
+    ESP_LOGE(TAG,"RMT output %u %s failed: %s",ch,step,esp_err_to_name(error));
+    ot_st_set_fault("external pixel RMT runtime failure");
+    portENTER_CRITICAL(&state_lock);
+    native_outputs_ready=false;
+    output_runtime_fault_mask|=(1u<<ch);
+    portEXIT_CRITICAL(&state_lock);
+}
 static void led_task(void *p) {
     (void)p;
+    bool output_failed[OT_CHAIN_COUNT]={false};
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    /* Retain effect pixels only while the same universal zone is active.
+     * Stateful source effects (scanners/trails/particles) need their last frame.
+     * Never reuse stale pixels after a zone move, resize or effect replacement. */
+    static unsigned prior_fx_offset[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static unsigned prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    ot_fps_pacer_t pacer;
+    ot_fps_pacer_init(&pacer);
+    bool boot_frame_verified=false;
+    uint32_t previous_frame_ms=0;
+    TaskHandle_t self=xTaskGetCurrentTaskHandle();
+    esp_timer_handle_t frame_timer=NULL;
+    esp_timer_create_args_t timer_args={
+        .callback=frame_wake_callback,.arg=(void*)self,
+        .dispatch_method=ESP_TIMER_TASK,.name="ot-frame-pacer"
+    };
+    if(esp_timer_create(&timer_args,&frame_timer)!=ESP_OK){
+        ot_st_set_fault("adaptive frame timer initialization failed");
+        portENTER_CRITICAL(&state_lock);
+        native_outputs_ready=false;
+        portEXIT_CRITICAL(&state_lock);
+        vTaskDelete(NULL);
+        return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    render_task_handle=self;
+    native_outputs_ready=true; /* RMT and frame timer initialized; ready to render. */
+    portEXIT_CRITICAL(&state_lock);
     while(1){
-       bool levels[OT_IN_COUNT];
-       for(int i=0;i<OT_IN_COUNT;++i) {
-           int pin=gpio_get_level(input_pin[i]);
-           levels[i]=OT_INPUT_ACTIVE_LOW?(pin==0):(pin!=0);
-       }
-       uint8_t physical=ot_debounce(&inputs,levels,OT_DEBOUNCE_TICKS);
+       const int64_t frame_started_us=esp_timer_get_time();
        TickType_t now=xTaskGetTickCount();
+       uint8_t physical=0;
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
        uint32_t local_stop_generation=0;
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
-       live_input_mask=physical;
+       physical=live_input_mask;
        memcpy(local_outputs,om_outputs,sizeof(local_outputs));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
@@ -1040,20 +1448,54 @@ static void led_task(void *p) {
        /* Vehicle inputs no longer pause the show engine. Effects render behind
         * per-zone trigger overlays and resume at their current phase. */
        bool native_rendering=decision.show_requested;
+       uint16_t longest_pixels=0; /* Only successfully refreshed RMT lanes. */
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
+           bool frame_ready[OT_CHAIN_COUNT]={false};
+           bool frame_submitted[OT_CHAIN_COUNT]={false};
+           bool frame_captured[OT_CHAIN_COUNT]={false};
+           /* Reconfigure only after the preceding frame's async RMT transfers
+            * have completed, and before starting ANY new lane transfer. */
+           for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+               if(!output_failed[ch]){
+                   frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+                   if(!frame_ready[ch]){
+                       /* A failed resize may leave an old handle or no handle.
+                        * Never retry teardown/allocation on every render frame. */
+                       output_runtime_fault(ch,"reconfigure",ESP_FAIL);
+                       output_failed[ch]=true;
+                   }
+               }
+               if(!frame_ready[ch])ot_frame_snapshot_unavailable((uint8_t)ch);
+           }
+           /* A saved mapping can fail to reconfigure its RMT lane at runtime.
+            * Keep good lanes rendering, but do not advertise all outputs ready. */
+           const bool all_configured=ot_frame_all_submitted(frame_ready,OT_CHAIN_COUNT);
+           portENTER_CRITICAL(&state_lock);
+           native_outputs_ready=all_configured && output_runtime_fault_mask==0u;
+           portEXIT_CRITICAL(&state_lock);
            const uint32_t frame_ms=(uint32_t)(esp_timer_get_time()/1000LL);
            uint32_t elapsed=(uint32_t)(frame_ms-show_started);
+           uint32_t frame_delta_ms=previous_frame_ms?(uint32_t)(frame_ms-previous_frame_ms):8u;
+           previous_frame_ms=frame_ms;
+           if(frame_delta_ms<1u)frame_delta_ms=1u;
+           if(frame_delta_ms>65535u)frame_delta_ms=65535u;
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
+               if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
                ot_layout_t zone_layout;
                if(!ot_om_layout(output,&zone_layout)){
-                   ot_st_set_fault("invalid output mapping");break;
+                   ot_st_set_fault("invalid output mapping");
+                   frame_ready[ch]=false;
+                   ot_frame_snapshot_unavailable((uint8_t)ch);
+                   continue; /* No async transfer was submitted. */
                }
                /* Render each selected zone once, even if the native frame is indexed by
                 * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
                if(native_rendering && local_fx_enabled){
-                   memset(fx_frame[ch],0,sizeof(fx_frame[ch]));
+                   /* Do not clear the entire frame: source-pinned WLED fade_out()
+                    * and overlay modes must see the preceding zone frame.
+                    * Inactive/replaced/moved zones are cleared individually. */
                    unsigned offset=0;
                    for(int z=0;z<output->zone_count;z++){
                        unsigned len=output->zones[z].pixels;
@@ -1063,31 +1505,61 @@ static void led_task(void *p) {
                           offset+len<=OT_CHAIN_PIXELS){
                            /* Reset ONLY this zone on replacement. Unrelated zone
                             * particle motion and effect phase are preserved. */
-                           if(prior_fx_generation[ch][z]!=slot->generation){
+                           if(!prior_fx_active[ch][z] ||
+                              prior_fx_generation[ch][z]!=slot->generation ||
+                              prior_fx_offset[ch][z]!=offset ||
+                              prior_fx_length[ch][z]!=len){
+                               memset(&fx_frame[ch][offset],0,
+                                      (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_effects_1d_reset(&fx_state[ch][z],
                                    0x1234u+ch*97u+(unsigned)z*19u+slot->generation);
                                prior_fx_generation[ch][z]=slot->generation;
+                               prior_fx_offset[ch][z]=offset;
+                               prior_fx_length[ch][z]=len;
                            }
+                           prior_fx_active[ch][z]=true;
                            const ot_ble_fx_packet_t *fx=&slot->request;
                            ot_wled_fx_config_t cfg={
                                .effect_id=fx->effect_id,
                                .speed=fx->speed,.intensity=fx->intensity,
                                .brightness=fx->brightness,
-                               .palette_id=fx->palette_id,.frame_time_ms=23,
+                               .palette_id=fx->palette_id,.frame_time_ms=(uint16_t)frame_delta_ms,
                                .foreground={fx->r,fx->g,fx->b},
-                               .background={fx->bg_r,fx->bg_g,fx->bg_b}
+                               .background={fx->bg_r,fx->bg_g,fx->bg_b},
+                               .spark_style=slot->spark.style,
+                               .spark_peak=slot->spark.peak,
+                               .spark_color=slot->spark.color
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
-                                                &fx_frame[ch][offset],len))
+                                                &fx_frame[ch][offset],len)){
+                               memset(&fx_frame[ch][offset],0,
+                                      (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                           }
+                       } else {
+                           prior_fx_active[ch][z]=false;
                        }
                        offset+=len;
                    }
+               } else {
+                   /* Stop, shutdown and show disable invalidate all historical
+                    * effect pixels without displaying stale retained frames. */
+                   for(int z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
-               for(unsigned px=0;px<layout.chain_pixels;++px){
+               /* ot_om_layout() above validated zone totals and ordering.
+                * Visit each contiguous zone only once rather than performing
+                * a full ot_om_valid() plus name checks for every LED.
+                * This keeps the mapping universal and reduces render latency. */
+               ot_om_zone_cursor_t zone_cursor={0};
+               /* Capture one requested output, after CORE overlays/calibration,
+                * before driver color-order packing. No work in normal frames. */
+               frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
+                                        output->active_pixels,frame_index+1u);
+               bool pixel_write_failed=false;
+               for(unsigned px=0;px<output->active_pixels;++px){
                    ot_rgb_t c={0,0,0};
-                   int zone=ot_om_section(output,px);
+                   int zone=ot_om_section_next(output,&zone_cursor,px);
                    if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
                        const uint8_t role=output->zones[zone].role;
                        const bool fx_here=native_rendering&&local_fx_enabled&&
@@ -1122,16 +1594,59 @@ static void led_task(void *p) {
                            if(decorated)c=ot_om_calibrate(c,output);
                        }
                    }
+                   if(frame_captured[ch])
+                       ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
-                   ESP_ERROR_CHECK(led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b));
+                   esp_err_t e=led_strip_set_pixel(strip[ch],px,c.r,c.g,c.b);
+                   if(e!=ESP_OK){
+                       output_runtime_fault((unsigned)ch,"pixel write",e);
+                       output_failed[ch]=true;
+                       if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                       pixel_write_failed=true;
+                       break;
+                   }
                }
-               // Driver reserves 522 pixels per channel; unused pixels remain black.
-               ESP_ERROR_CHECK(led_strip_refresh(strip[ch]));
+               if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
+               // Hardware driver transmits only this output's configured active length.
+               esp_err_t e=led_strip_refresh_async(strip[ch]);
+               if(e!=ESP_OK){
+                   output_runtime_fault((unsigned)ch,"transfer submit",e);
+                   output_failed[ch]=true;
+                   if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                   continue;
+               }
+               frame_submitted[ch]=true;
+           }
+           /* Start both output transfers before waiting, so RMT lanes overlap.
+            * Wait for both before reusing their pixel buffers on the next frame. */
+           for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
+               if(!frame_submitted[ch])continue;
+               esp_err_t e=led_strip_refresh_async_done(strip[ch]);
+               if(e!=ESP_OK){
+                   output_runtime_fault((unsigned)ch,"transfer completion",e);
+                   output_failed[ch]=true;
+                   frame_submitted[ch]=false; /* No complete-frame/Stop/OTA credit. */
+                   if(frame_captured[ch])ot_frame_snapshot_complete(false);
+                   continue;
+               }
+               if(frame_captured[ch])ot_frame_snapshot_complete(true);
+               /* A failed lane must not throttle the surviving vehicle lights. */
+               if(local_outputs[ch].active_pixels>longest_pixels)
+                   longest_pixels=local_outputs[ch].active_pixels;
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
            }
-           if(!native_rendering){
+           /* Acknowledged Stop and FPS must represent complete multi-output
+            * refreshes, not only whichever lane happened to succeed. */
+           const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
+           /* A created FreeRTOS task does not prove the image can render.
+            * Confirm OTA only after every configured RMT lane completes its
+            * first frame; startup faults must leave rollback available. */
+           if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&
+              ot_ble_radio_ever_ready() && !boot_frame_verified)
+               boot_frame_verified=ot_ota_confirm_boot(true);
+           if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
                 * observed. This cannot establish the actual light state. */
@@ -1140,32 +1655,72 @@ static void led_task(void *p) {
                portEXIT_CRITICAL(&state_lock);
            }
            uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
-           frame_window_frames++;
+           if(full_frame)frame_window_frames++;
+           else{
+               portENTER_CRITICAL(&state_lock);
+               incomplete_frames++;
+               portEXIT_CRITICAL(&state_lock);
+           }
            if(frame_window_start_ms==0)frame_window_start_ms=ms;
            uint32_t span=ms-frame_window_start_ms;
-           if(span>=1000u){measured_fps=(frame_window_frames*1000u)/span;frame_window_frames=0;frame_window_start_ms=ms;}
+           if(span>=1000u){
+               const uint32_t fps=(frame_window_frames*1000u)/span;
+               portENTER_CRITICAL(&state_lock);
+               measured_fps=fps;
+               portEXIT_CRITICAL(&state_lock);
+               frame_window_frames=0;frame_window_start_ms=ms;
+           }
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
        }
-       vTaskDelay(pdMS_TO_TICKS(1)); /* yield; real FPS is limited by RMT frame length */
+       /* Observe measured work + RGB800 wire minimum. At overload there is
+        * no extra delay; actual FPS may dip below the preferred 53 FPS. */
+       int64_t work_elapsed=esp_timer_get_time()-frame_started_us;
+       uint32_t work_us=work_elapsed<=0?0u:
+           (uint32_t)(work_elapsed>2000000LL?2000000LL:work_elapsed);
+       ot_fps_pacer_observe(&pacer,work_us,longest_pixels);
+       portENTER_CRITICAL(&state_lock);
+       adaptive_target_fps=pacer.target_fps;
+       portEXIT_CRITICAL(&state_lock);
+       const uint32_t wait_us=ot_fps_pacer_wait_us(&pacer,work_us);
+       if(wait_us>=100u){
+           if(esp_timer_start_once(frame_timer,wait_us)==ESP_OK){
+               /* Input sampler can wake the frame early on a trigger change. */
+               const TickType_t timeout=(TickType_t)ot_fps_pacer_wait_ticks(
+                   wait_us,configTICK_RATE_HZ);
+               (void)ulTaskNotifyTake(pdTRUE,timeout);
+               (void)esp_timer_stop(frame_timer);
+           }else vTaskDelay(1);
+       }else taskYIELD();
     }
 }
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
     om_load();
     tm_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
-    input_init();
-    bool outputs_ready=strip_init();
-    portENTER_CRITICAL(&state_lock);native_outputs_ready=outputs_ready;portEXIT_CRITICAL(&state_lock);
-    wifi_ap_init();
+    const bool inputs_ready=input_init();
+    if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
+    const bool sampler_ready=inputs_ready &&
+        xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
+    if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    bool outputs_ready=sampler_ready&&strip_init();
+    /* Do not advertise renderer readiness until led_task initializes its timer. */
+    const bool wifi_started=wifi_ap_init();
+    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
     om_write_mutex=xSemaphoreCreateMutex();
-    if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}
-    ot_ble_start();
-    http_start();
+    /* Configuration writes already reject a missing mutex. Keep local
+     * trigger-driven rendering alive rather than rebooting on this fault. */
+    if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
+    ble_startup_ready=ot_ble_start();
+    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
+    http_startup_ready=wifi_started&&http_start();
+    if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
     if(outputs_ready){
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
         if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
+        /* OTA validation is deferred until led_task finishes its first full frame. */
     }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
 }

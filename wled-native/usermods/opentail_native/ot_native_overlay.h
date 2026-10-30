@@ -29,20 +29,31 @@ class Overlay final {
     count_=count; return true;
   }
   void setEnabled(bool v) { enabled_=v; }
-  // A paired controller must explicitly authorize each control session.
-  // This is a policy gate, not a substitute for cryptographic verification.
-  void setSessionAuthorized(bool v) { authorized_=v; if (!v) inputs_=0; }
+  // Session authorization gates remote profile/configuration writes only.
+  // Physical vehicle inputs are local hardware signals and must remain active
+  // even when BLE is disconnected or unauthorized.
+  void setSessionAuthorized(bool v) { authorized_=v; }
   bool sessionAuthorized() const { return authorized_; }
   void clearInputs() { inputs_=0; }
   bool enabled() const { return enabled_; }
-  void setInputs(uint8_t mask) { if (authorized_) inputs_=mask & 31u; }
+  // Call only from the local GPIO/opto input sampler, never from BLE/network data.
+  void setVehicleInputsLocal(uint8_t mask) { inputs_=mask & 31u; }
   uint8_t inputs() const { return inputs_; }
   void setShowActive(std::size_t zoneIndex,bool active) {
     if(zoneIndex < count_) zones_[zoneIndex].showActive=active;
   }
   std::size_t zoneCount() const { return count_; }
+  // Paint into WLED's logical packed-color frame, before WLED conversion.
+  // This does not access a bus or commit output.
+  void applyToFrame(uint32_t* pixels, std::size_t ledCount) const {
+    if (!pixels || !ledCount) return;
+    forEachActiveSpan([pixels, ledCount](Span s) {
+      const std::size_t stop = s.stop < ledCount ? s.stop : ledCount;
+      for (std::size_t p = s.start; p < stop; ++p) pixels[p] = s.color;
+    });
+  }
   template<class Fn> void forEachActiveSpan(Fn fn) const {
-    if (!enabled_ || !authorized_ || !inputs_) return;
+    if (!enabled_ || !inputs_) return;
     for (std::size_t i=0; i<count_; ++i) {
       const Zone& z=zones_[i];
       const uint8_t present=z.role & inputs_;
@@ -61,6 +72,6 @@ class Overlay final {
   std::size_t count_=0;
   uint8_t inputs_=0;
   bool enabled_=false;
-  bool authorized_=false;
+  bool authorized_=false; // profile/control session only; not an input gate
 };
 }

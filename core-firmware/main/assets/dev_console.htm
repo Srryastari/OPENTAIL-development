@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#050607">
+<title>OpenTail CORE · Developer Bench</title>
+<style>
+:root{font:14px system-ui,-apple-system,Segoe UI,sans-serif;color:#f3f5f6;background:#050607;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0}header{padding:22px max(16px,calc((100vw - 1180px)/2));border-bottom:1px solid #202225;background:#090a0c}header h1{font-size:23px;margin:4px 0 5px;letter-spacing:-.5px}header p{color:#a8adaf;max-width:750px;line-height:1.55;margin:8px 0}.brand{font-size:11px;letter-spacing:.18em;color:#82ceae;text-transform:uppercase;font-weight:700}.stamp{display:inline-block;background:#1b2022;border-radius:999px;padding:5px 11px;font-size:11px;color:#c0c9cc}
+nav{position:sticky;top:0;z-index:2;background:#090a0cf5;border-bottom:1px solid #222628;overflow-x:auto;white-space:nowrap;padding:9px max(16px,calc((100vw - 1180px)/2))}
+nav a{display:inline-block;color:#dadfe0;text-decoration:none;background:#1c2022;border-radius:999px;padding:10px 15px;margin:2px 3px 2px 0}
+nav a:hover,button:hover{filter:brightness(1.15)}main{max-width:1180px;margin:auto;padding:18px 16px 90px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,390px),1fr));gap:14px}.card{background:#111315;border:1px solid #25292b;border-radius:22px;padding:18px;min-width:0}section{scroll-margin-top:85px;margin:20px 0}h2{font-size:20px;margin:4px 0 14px}h3{font-size:15px;margin:0 0 10px}p{line-height:1.5}.muted,small{color:#abb1b5}small{display:block;line-height:1.45;margin:8px 0}.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0}button,select,input,textarea{font:inherit;color:#f7f8f9;background:#222629;border:1px solid #363c3e;border-radius:14px;padding:10px 12px;max-width:100%}
+button{cursor:pointer;min-height:42px;border-radius:999px;padding:10px 16px}button.primary{background:#335c49;border-color:#477b61}button.danger{background:#59272e;border-color:#913b46}button:disabled{opacity:.5;cursor:not-allowed}label{display:block;margin:10px 0;color:#c6ced0}label input,label select{display:block;width:100%;margin-top:6px}input[type=range]{padding:0;accent-color:#83bca0}input[type=color]{padding:3px;height:43px}input[type=checkbox]{width:auto;display:inline-block;margin-right:6px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:7px 12px}
+pre{white-space:pre-wrap;word-break:break-word;background:#090b0c;border:1px solid #202426;padding:12px;border-radius:13px;line-height:1.5;min-height:52px;max-height:360px;overflow:auto}textarea{width:100%;min-height:190px;resize:vertical;font:12px/1.5 ui-monospace,Consolas,monospace;border-radius:13px}
+a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px}.metric{background:#1a1d1f;padding:12px;border-radius:15px;min-height:70px}.metric span{display:block;color:#a7adb1;font-size:11px}.metric b{display:block;font-size:20px;margin-top:5px;overflow-wrap:anywhere}.input-grid{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.input-grid label{background:#1d2022;border:1px solid #34393b;padding:10px 12px;border-radius:999px;margin:0;cursor:pointer}.warning{color:#ead8ad}.status{min-height:32px;color:#9ee2b5}.hidden{display:none!important}
+@media(max-width:480px){.card{padding:14px}header{padding:18px 16px}nav a{padding:9px 12px}button{min-height:44px}}
+</style>
+</head>
+<body>
+<header>
+<div class="brand">OpenTail · CORE / Developer Tools · /dev</div>
+<h1>Controller Bench Dashboard <span class="stamp">BENCH ONLY</span></h1>
+<p>Live controller diagnostics, pixel and trigger testing, output configuration, original effects and automatic-event previews. This is firmware-owned; <strong>OpenTail Studio remains a separate animation/sequence design application</strong>.</p>
+<p class="warning">Only use on a fused, isolated bench. Physical trigger inputs retain priority. Brightness 32/255 is a software cap, not a current limiter. No validated safety failover.</p>
+<div class="bar"><button class="primary" id="refresh" onclick="refreshAll()">Refresh controller</button><button class="danger" id="stop" onclick="stopAll()">Stop ALL tests</button><span id="connection" class="status" role="status">Connecting…</span></div>
+</header>
+<nav aria-label="Developer tools">
+<a href="#overview">Overview</a><a href="#lighting">Lighting Tests</a><a href="#events">Startup / Shutdown</a><a href="#effects">Effects</a><a href="#inputs">Triggers</a><a href="#outputs">Outputs</a><a href="#statusled">Status LED</a><a href="#firmware">Firmware Update</a><a href="#api">API / Diagnostics</a>
+</nav>
+<main>
+<section id="overview">
+<h2>Controller overview</h2>
+<div class="metrics">
+<div class="metric"><span>Firmware</span><b id="fw">—</b></div>
+<div class="metric"><span>Measured FPS</span><b id="fps">—</b></div>
+<div class="metric"><span>Physical input mask</span><b id="mask">—</b></div>
+<div class="metric"><span>Show running</span><b id="show">—</b></div>
+<div class="metric"><span>Outputs ready</span><b id="ready">—</b></div>
+<div class="metric"><span>Output refreshes</span><b id="refreshes">—</b></div>
+</div>
+<div class="grid" style="margin-top:14px">
+<div class="card"><h3>Live status</h3><pre id="statusJson">No data yet</pre></div>
+<div class="card"><h3>Output and trigger summary</h3><pre id="summary">No data yet</pre></div>
+</div>
+</section>
+
+<section id="lighting">
+<h2>Native lighting &amp; short demos</h2>
+<div class="grid">
+<div class="card"><h3>Native Show</h3>
+<small>Exercises the CORE five-mode bench show engine, not the effect-ID catalog. Physical triggers still override their own zones.</small>
+<div class="fields">
+<label>Mode<select id="showMode"><option value="solid">Solid</option><option value="chase">Chase</option><option value="breathe">Breathe</option><option value="wipe">Wipe</option><option value="rainbow">Rainbow</option></select></label>
+<label>Output<select id="showChain"><option value="both">Both</option><option value="left">Output 1</option><option value="right">Output 2</option></select></label>
+<label>Color<input id="showColor" type="color" value="#ff0000"></label>
+<label>Brightness<input id="showBri" type="number" min="0" max="32" value="16"></label>
+<label>Speed (0–100)<input id="showSpeed" type="range" min="0" max="100" value="50"></label>
+<label>TTL (ms)<input id="showTtl" type="number" min="1000" max="60000" value="15000"></label>
+</div>
+<div class="bar"><button class="primary" onclick="nativeShow()">Start native show</button><button onclick="stopShow()">Stop show</button></div>
+<pre id="nativeResult">No show requested</pre>
+</div>
+<div class="card"><h3>Pixel demo</h3>
+<small>Legacy short bench demo, bounded to ten seconds. No persistent changes.</small>
+<div class="fields">
+<label>Mode<select id="demoMode"><option value="solid">Solid</option><option value="chase">Chase</option><option value="off">Off</option></select></label>
+<label>Color<input type="color" id="demoColor" value="#00ff40"></label>
+<label>Brightness<input type="number" id="demoBri" min="0" max="32" value="12"></label>
+<label>TTL (ms)<input id="demoTtl" type="number" min="100" max="10000" value="2000"></label>
+</div>
+<div class="bar"><button onclick="demo()">Run demo</button><button class="danger" onclick="stopAll()">Stop ALL</button></div>
+<pre id="demoResult">No demo requested</pre>
+</div>
+</div>
+</section>
+<section id="events">
+<h2>Startup &amp; Shutdown</h2>
+<div class="grid">
+<div class="card">
+<h3>Original one-shot animations</h3>
+<small>Manual preview; no ACC detection, startup automation or controller power-off. Animation runs only on configured active zones.</small>
+<div class="fields">
+<label>Output<select id="eventChain"><option value="both">Both</option><option value="left">Output 1</option><option value="right">Output 2</option></select></label>
+<label>Foreground<input type="color" id="eventColor" value="#ff3014"></label>
+<label>Brightness (0–32)<input type="number" id="eventBri" min="0" max="32" value="16"></label>
+<label>Speed (0–255)<input type="range" id="eventSpeed" min="0" max="255" value="180"></label>
+<label>Spark strength<input type="range" id="eventIntensity" min="0" max="255" value="220"></label>
+<label>Spark color style<select id="eventSparkStyle"><option value="0">Original</option><option value="1">Random bright shades</option><option value="2">Rainbow + white</option><option value="3">Custom color</option></select></label>
+<label>Spark peak brightness (1–32)<input type="number" id="eventSparkPeak" min="1" max="32" value="32"></label>
+<label>Custom spark color<input type="color" id="eventSparkColor" value="#ffffff"></label>
+</div>
+<div class="bar"><button class="primary" onclick="previewEvent('materialize_sparks')">Materialize Sparks</button><button class="primary" onclick="previewEvent('random_materialize')">Random Materialize</button><button onclick="previewEvent('smooth_fade')">Smooth Fade In</button><button onclick="previewEvent('plasma_sweep')">Plasma Sweep</button><button class="danger" onclick="previewEvent('smooth_fade_out')">Smooth Fade Out</button></div>
+<small>Startup previews finish at the selected foreground color; Smooth Fade Out finishes at black. Preview expires after six seconds.</small>
+</div>
+<div class="card"><h3>Manual preview response</h3><pre id="eventResult">Choose an animation</pre><button onclick="stopAll()">Stop / Restore</button></div>
+</div>
+</section>
+
+<section id="effects"><h2>All CORE effects</h2>
+<div class="grid"><div class="card">
+<h3>Live source &amp; compatibility catalog</h3>
+<small>Catalog loads from the running firmware, not a hardcoded Studio list. Source-derived, original and compatibility-only modes are distinguished in the selector.</small>
+<label>Effect<select id="fxId"><option value="">Loading firmware effects…</option></select></label>
+<div class="fields">
+<label>Output<select id="fxChain"><option value="both">Both</option><option value="left">Output 1</option><option value="right">Output 2</option></select></label>
+<label>Zone mask<input type="number" id="fxZones" min="1" max="255" value="255"></label>
+<label>Foreground<input type="color" id="fxFg" value="#ff303e"></label>
+<label>Background<input type="color" id="fxBg" value="#000000"></label>
+<label>Brightness<input type="number" id="fxBri" min="0" max="32" value="16"></label>
+<label>Speed<input type="range" id="fxSpeed" min="0" max="255" value="140"></label>
+<label>Intensity<input type="range" id="fxIntensity" min="0" max="255" value="150"></label>
+<label>Palette ID<input type="number" id="fxPal" min="0" max="255" value="0"></label>
+<label>Time-to-live (s)<input type="number" id="fxTtl" min="1" max="60" value="15"></label>
+</div>
+<div class="bar"><button class="primary" onclick="previewEffect()">Start effect</button><button onclick="stopShow()">Stop show</button><button onclick="loadCatalog()">Reload catalog</button></div>
+<small>Palette IDs are accepted only where CORE's renderer supports them. The firmware rejects invalid configurations.</small>
+</div><div class="card"><h3>Effect response</h3><pre id="fxResult">No effect started</pre><h3>Current show</h3><pre id="showJson">—</pre></div></div>
+</section>
+
+<section id="inputs"><h2>Physical inputs &amp; simulated triggers</h2>
+<div class="grid"><div class="card"><h3>Temporary isolated trigger simulation</h3><small>Select combinations. Hazard simulation = both turn signals. This does not change physical GPIO assignments or saved mapping.</small>
+<div class="input-grid" id="signals">
+<label><input type="checkbox" value="park">Park</label><label><input type="checkbox" value="brake">Brake</label><label><input type="checkbox" value="left">Left</label><label><input type="checkbox" value="right">Right</label><label><input type="checkbox" value="reverse">Reverse</label>
+</div>
+<label>Simulation TTL (ms)<input id="simTtl" type="number" min="100" max="10000" value="3000"></label>
+<div class="bar"><button class="primary" onclick="simulateSignals()">Apply simulation</button><button onclick="clearSimulation()">Clear simulation</button><button onclick="stopAll()">Stop ALL</button></div>
+<pre id="simResult">No simulation sent</pre></div>
+<div class="card"><h3>Trigger mapping (NVS)</h3><small>Reads the live IN1–IN8 map. Saving changes the controller's persistent trigger assignments. All previews and physical triggers must be off to save.</small>
+<div class="bar"><button onclick="loadTriggers()">Read mapping</button><button class="danger" onclick="saveTriggers()">Save edited mapping</button></div>
+<textarea id="triggerEditor" spellcheck="false" aria-label="Trigger map JSON"></textarea>
+<pre id="triggerResult">Read the map first</pre>
+</div></div></section>
+
+<section id="outputs"><h2>Universal outputs &amp; zones</h2>
+<div class="grid"><div class="card"><h3>Live configuration</h3>
+<small>No fixed vehicle zones. Edit the selected output's actual zone lengths, names, color order and assigned roles. Firmware validates zone totals before saving to NVS.</small>
+<div class="bar"><select id="outputIndex" onchange="chooseOutput()"><option value="0">Output 1</option><option value="1">Output 2</option></select>
+<button onclick="loadOutputs()">Read outputs</button><button class="danger" onclick="saveOutput()">Save edited output</button></div>
+<textarea id="outputEditor" spellcheck="false" aria-label="Output map JSON"></textarea>
+<pre id="outputResult">Read the controller configuration first</pre>
+</div><div class="card"><h3>Output summary</h3><pre id="outputSummary">—</pre>
+<small>A successful save requires a fresh readback. Keep all inputs released and all effects stopped when changing output maps.</small></div></div>
+</section>
+
+<section id="statusled"><h2>Onboard status LED</h2>
+<div class="grid"><div class="card"><h3>RGB self-test</h3>
+<small>Tests the onboard indicator only; does not issue a real vehicle fault or change external pixels. Test automatically expires after five seconds.</small>
+<div class="bar"><button class="primary" onclick="statusRgb('rainbow')">Rainbow · 5 seconds</button><button onclick="statusRgb('stop')">Stop / Restore</button></div>
+<pre id="ledResult">Ready</pre>
+<h3>Indicator session simulation</h3><small>Developer-only. Forces Connected/Disconnected status indication, without altering actual BLE authorization. Real BLE connection events may override it.</small>
+<div class="bar"><button onclick="sessionLed(true)">Show connected</button><button onclick="sessionLed(false)">Show disconnected</button></div>
+</div><div class="card"><h3>Status LED telemetry</h3><pre id="ledJson">—</pre><button onclick="readLed()">Refresh indicator</button></div></div>
+</section>
+
+<section id="firmware"><h2>Firmware update</h2>
+<div class="grid"><div class="card"><h3>Local CORE OTA · inactive firmware slot</h3>
+<small>Requires one-time USB installation of the dual-slot firmware. This is a BENCH-ONLY update path on the controller's private Wi-Fi AP. It does not install WLED, Android, Studio, or an entire GitHub ZIP. Select the CORE application .bin. User zone settings stay in NVS.</small>
+<pre id="otaStatus">Check whether dual-slot OTA is installed</pre>
+<div class="bar"><button onclick="otaCheck()">Check OTA support</button></div>
+<label>Verified CORE application binary (.bin)<input type="file" id="otaFile" accept=".bin,application/octet-stream"></label>
+<div class="bar"><button class="danger" id="otaSend" onclick="otaSend()">Confirm and install firmware</button></div>
+<pre id="otaResult">No OTA update requested. Do not update while connected to vehicle lighting.</pre>
+<small class="warning">The upload must be completed over the controller's own Wi-Fi with a stable power supply. Flashing an invalid image leaves the current slot intact; initial dual-slot conversion cannot be performed OTA. Real rollback remains a mandatory physical regression test.</small>
+</div></div></section>
+
+<section id="api"><h2>API &amp; diagnostics</h2>
+<div class="grid">
+<div class="card"><h3>Read-only endpoints</h3>
+<div class="bar"><button onclick="readApi('/api/v1/status')">Status</button><button onclick="readApi('/api/v1/capabilities')">Capabilities</button><button onclick="readApi('/api/v1/outputs')">Outputs</button><button onclick="readApi('/api/v1/triggers')">Triggers</button><button onclick="readApi('/api/v1/show')">Show</button><button onclick="readApi('/api/v1/fx/catalog')">Effect catalog</button></div>
+<pre id="apiResult">Choose a read-only diagnostic endpoint</pre>
+</div>
+<div class="card"><h3>Bench API notes</h3><small>This dashboard runs entirely on CORE's local WPA2 bench AP. BLE authentication and saved scene transport remain separate; no token is read automatically.</small>
+<div class="bar"><button onclick="readToken()">Show temporary BLE enrollment token</button></div>
+<pre id="tokenResult">Token not requested</pre>
+<small class="warning">Sensitive: the enrollment token is temporary and should never be shared or copied into public logs.</small>
+</div>
+</div>
+</section>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const integer=(id,min,max)=>{const v=Number($(id).value);if(!Number.isInteger(v)||v<min||v>max)throw Error(id+' must be between '+min+' and '+max);return v};
+function rgb(id){const s=$(id).value;if(!/^#[0-9a-f]{6}$/i.test(s))throw Error('Invalid color');return [1,3,5].map(i=>parseInt(s.slice(i,i+2),16))}
+function pretty(v){return JSON.stringify(v,null,2)}
+async function request(path,method='GET',body){
+ const opts={method,cache:'no-store'};
+ if(method!=='GET'){opts.headers={'Content-Type':'application/json'};opts.body=JSON.stringify(body??{})}
+ const res=await fetch(path,opts);const txt=await res.text();let data;
+ try{data=JSON.parse(txt)}catch{throw Error('HTTP '+res.status+' non-JSON response: '+txt.slice(0,200))}
+ if(!res.ok)throw Error('HTTP '+res.status+': '+(data.error||txt));
+ return data;
+}
+async function act(out,path,body){$(out).textContent='Sending…';try{const data=await request(path,'POST',body);$(out).textContent=pretty(data);return data}catch(e){$(out).textContent='Error: '+e.message;return null}}
+async function readApi(path){$('apiResult').textContent='Reading…';try{$('apiResult').textContent=pretty(await request(path))}catch(e){$('apiResult').textContent=e.message}}
+function measure(status,show){$('fw').textContent=status.version||'CORE';$('fps').textContent=status.measured_fps??'—';$('mask').textContent=status.input_mask??'—';$('ready').textContent=show.outputs_ready===undefined?'—':String(show.outputs_ready);$('show').textContent=status.native_show_active??'—';$('refreshes').textContent=Array.isArray(status.output_refreshes)?status.output_refreshes.join(' / '):'—'}
+async function refreshStatus(){
+ try{
+ const [status,show,led]=await Promise.all([
+ request('/api/v1/status'),request('/api/v1/show'),request('/api/v1/status-led')]);
+ measure(status,show);$('statusJson').textContent=pretty(status);
+ $('showJson').textContent=pretty(show);$('ledJson').textContent=pretty(led);
+ $('connection').textContent='CORE responding · bench AP';return status
+ }catch(e){$('connection').textContent='Connection error: '+e.message;return null}
+}
+let catalog=[];
+async function loadCatalog(){const node=$('fxId');try{
+ const data=await request('/api/v1/fx/catalog');
+ if(!Array.isArray(data.effects))throw Error('Invalid catalog');
+ catalog=data.effects;node.replaceChildren();
+ for(const f of catalog){const option=document.createElement('option');option.value=String(f.id);option.textContent=f.name+' · '+f.id+' · '+f.implementation;node.append(option)}
+ $('fxResult').textContent='Firmware reports '+catalog.length+' modes; original and compatibility effects are distinguished.'
+ }catch(e){$('fxResult').textContent='Catalog error: '+e.message}}
+let outputsSnapshot=null,triggerSnapshot=null;
+async function loadOutputs(){try{outputsSnapshot=await request('/api/v1/outputs');$('outputSummary').textContent=pretty(outputsSnapshot);$('summary').textContent=outputsSnapshot.outputs.map(o=>'Output '+(o.index+1)+': '+o.name+' · '+o.pixels+' pixels · '+o.color_order+' · '+o.zone_count+' zones').join('\n');chooseOutput();}catch(e){$('outputResult').textContent=e.message}}
+function chooseOutput(){if(!outputsSnapshot?.outputs?.length)return;const i=integer('outputIndex',0,1);const v=outputsSnapshot.outputs[i];if(!v)return;
+ const edit={index:v.index,name:v.name,pixels:v.pixels,color_order:v.color_order,calibration:v.calibration,
+ zones:v.zones.map(z=>({name:z.name,pixels:z.pixels,role:z.role}))};
+ $('outputEditor').value=pretty(edit);$('outputResult').textContent='Read successfully. No changes saved.'
+}
+async function saveOutput(){if(!outputsSnapshot){$('outputResult').textContent='Read the current mapping before saving';return}
+let data;try{data=JSON.parse($('outputEditor').value);if(data.index!==integer('outputIndex',0,1))throw Error('Output index mismatch')}catch(e){$('outputResult').textContent=e.message;return}
+if(!confirm('Save persistent output zone mapping to CORE? Stop all effects and release physical inputs first.'))return;
+const ok=await act('outputResult','/api/v1/outputs',data);if(ok){await loadOutputs();$('outputResult').textContent='Saved. Latest controller configuration read back.'}
+}
+async function loadTriggers(){try{triggerSnapshot=await request('/api/v1/triggers');$('triggerEditor').value=pretty({revision:triggerSnapshot.revision,inputs:triggerSnapshot.inputs.map(x=>({index:x.index,function:x.function}))});$('triggerResult').textContent='Current mapping loaded.'; }catch(e){$('triggerResult').textContent=e.message}}
+async function saveTriggers(){if(!triggerSnapshot){$('triggerResult').textContent='Read the mapping before saving';return}
+let obj;try{obj=JSON.parse($('triggerEditor').value)}catch(e){$('triggerResult').textContent=e.message;return}
+if(!confirm('Save IN1–IN8 trigger assignments to CORE NVS? All triggers must be released.'))return;
+const ok=await act('triggerResult','/api/v1/triggers',obj);
+if(ok){await loadTriggers();$('triggerResult').textContent='Saved. Controller map read back.'}
+}
+async function refreshAll(){await Promise.all([refreshStatus(),loadOutputs(),loadTriggers(),loadCatalog()])}
+async function nativeShow(){try{const [r,g,b]=rgb('showColor');const body={effect:$('showMode').value,chain:$('showChain').value,r,g,b,brightness:integer('showBri',0,32),speed:integer('showSpeed',0,100),ttl_ms:integer('showTtl',1000,60000)};await act('nativeResult','/api/v1/show/start',body);await refreshStatus()}catch(e){$('nativeResult').textContent=e.message}}
+async function demo(){try{const [r,g,b]=rgb('demoColor');const body={mode:$('demoMode').value,r,g,b,brightness:integer('demoBri',0,32),ttl_ms:integer('demoTtl',100,10000)};await act('demoResult','/api/v1/demo',body);await refreshStatus()}catch(e){$('demoResult').textContent=e.message}}
+async function sessionLed(connected){await act('ledResult','/api/v1/status-led/session',{connected});await readLed()}
+async function stopAll(){const x=await act('simResult','/api/v1/stop',{});if(x){$('eventResult').textContent='Global Stop accepted; physical triggers still take precedence.';$('fxResult').textContent='Global Stop accepted.';await refreshStatus()}}
+async function stopShow(){await act('fxResult','/api/v1/show/stop',{});await refreshStatus()}
+async function previewEvent(effect){try{
+ const [r,g,b]=rgb('eventColor');
+ const [spark_r,spark_g,spark_b]=rgb('eventSparkColor');
+ const data={effect,chain:$('eventChain').value,r,g,b,
+   brightness:integer('eventBri',0,32),speed:integer('eventSpeed',0,255),
+   intensity:integer('eventIntensity',0,255),spark_style:integer('eventSparkStyle',0,3),
+   spark_peak:integer('eventSparkPeak',1,32),spark_r,spark_g,spark_b};
+ await act('eventResult','/api/v1/auto-events/preview',data);await refreshStatus();
+ }catch(e){$('eventResult').textContent=e.message}}
+async function previewEffect(){try{
+ const id=Number($('fxId').value);if(!catalog.some(f=>f.id===id))throw Error('Select a firmware-reported effect');
+ const [r,g,b]=rgb('fxFg'),[bg_r,bg_g,bg_b]=rgb('fxBg');
+ const data={effect_id:id,chain:$('fxChain').value,zone_mask:integer('fxZones',1,255),r,g,b,bg_r,bg_g,bg_b,
+ brightness:integer('fxBri',0,32),speed:integer('fxSpeed',0,255),intensity:integer('fxIntensity',0,255),
+ palette_id:integer('fxPal',0,255),ttl_sec:integer('fxTtl',1,60)};
+ await act('fxResult','/api/v1/fx/preview',data);await refreshStatus();
+ }catch(e){$('fxResult').textContent=e.message}}
+async function simulateSignals(){let arr=[...document.querySelectorAll('#signals input:checked')].map(x=>x.value);
+try{await act('simResult','/api/v1/simulate',{signals:arr,ttl_ms:integer('simTtl',100,10000)});await refreshStatus()}catch(e){$('simResult').textContent=e.message}}
+async function clearSimulation(){document.querySelectorAll('#signals input').forEach(x=>x.checked=false);await act('simResult','/api/v1/simulate',{signals:[],ttl_ms:100});await refreshStatus()}
+async function statusRgb(mode){await act('ledResult','/api/v1/status-led/self-test',{mode});await readLed()}
+async function readLed(){try{$('ledJson').textContent=pretty(await request('/api/v1/status-led'))}catch(e){$('ledJson').textContent=e.message}}
+async function readToken(){if(!confirm('Display the temporary BLE enrollment token? Keep it private.'))return;try{$('tokenResult').textContent=pretty(await request('/api/v1/ble/session'))}catch(e){$('tokenResult').textContent=e.message}}
+async function otaCheck(){
+ try{const status=await request('/api/v1/ota');$('otaStatus').textContent=pretty(status);return status}
+ catch(e){$('otaStatus').textContent='OTA unavailable: '+e.message;return null}
+}
+async function otaSend(){
+ const output=$('otaResult'),button=$('otaSend'),file=$('otaFile').files[0];
+ try{
+  if(!file||!file.name.toLowerCase().endsWith('.bin'))throw Error('Choose a CORE application .bin file');
+  const status=await otaCheck();
+  if(!status?.available)throw Error('Two-slot OTA not installed; migrate once by USB before using local OTA.');
+  if(status.busy)throw Error('An update is already running');
+  if(file.size<32768)throw Error('Firmware image too small');
+  if(!confirm('BENCH ONLY. Install '+file.name+' ('+file.size+' bytes) on the inactive OpenTail CORE slot and reboot? Verify this binary came from the expected GitHub CI release.'))return;
+  button.disabled=true;output.textContent='Uploading firmware… Do not disconnect power.';
+  const res=await fetch('/api/v1/ota',{method:'POST',cache:'no-store',
+   headers:{'Content-Type':'application/octet-stream','X-OpenTail-Update':'confirmed'},
+   body:file});
+  const text=await res.text();let reply;
+  try{reply=JSON.parse(text)}catch{throw Error('Firmware upload returned HTTP '+res.status)}
+  if(!res.ok)throw Error(reply.error||'HTTP '+res.status);
+  output.textContent=pretty(reply)+'\nController rebooting. Reconnect to Wi-Fi and confirm firmware version.';
+ }catch(e){output.textContent='Update not installed: '+e.message}
+ finally{button.disabled=false}
+}
+refreshAll();
+setInterval(()=>{if(!document.hidden)refreshStatus()},3000);
+</script>
+</body>
+</html>

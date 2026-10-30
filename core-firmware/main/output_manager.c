@@ -1,5 +1,7 @@
 #include "output_manager.h"
+#include "board_config.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *const role_names[]={"off","park_brake","parking","brake","left_turn","right_turn","reverse","aux1","aux2","aux3","decorative"};
 static const char *const order_names[]={"RGB","RBG","GRB","GBR","BRG","BGR"};
@@ -16,24 +18,33 @@ static bool name_ok(const char *s){
     }
     return false;
 }
+/* Fresh device: a single inert placeholder per physical output.
+ * Never infer a vehicle's lighting zones, trigger roles or pixel geometry.
+ * Saved v1/v2 profiles are restored by om_load(), NOT replaced with defaults.
+ * An installation must explicitly configure and validate its lighting zones.
+ */
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]){
     if(!outputs)return;
+    /* Universal, inert first-boot profile. Vehicle names, pixel counts and trigger
+     * assignments belong to the user's saved profile, never firmware defaults.
+     * Existing persisted profiles are loaded/migrated unchanged by om_load(). */
     memset(outputs,0,sizeof(ot_om_output_t)*OT_OM_OUTPUTS);
-    const char *const labels[]={"Tail A","Turn","Reverse","Tail B","Tail C"};
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
         ot_om_output_t *c=&outputs[o];
-        memcpy(c->name,o?"Pixel OUT 2":"Pixel OUT 1",12);
-        c->active_pixels=30;c->color_order=OT_OM_BRG;c->zone_count=5;
-        for(int k=0;k<3;k++){c->rgb_gain[k]=255;c->white_gain[k]=255;}
-        for(unsigned z=0;z<c->zone_count;z++){
-            strncpy(c->zones[z].name,labels[z],OT_OM_NAME_LEN-1);
-            c->zones[z].pixels=6;
-            c->zones[z].role=(z==1?(o?OT_OM_RIGHT:OT_OM_LEFT):(z==2?OT_OM_REVERSE:OT_OM_PARK_BRAKE));
-        }
+        snprintf(c->name,OT_OM_NAME_LEN,"Pixel OUT %u",o+1u);
+        c->active_pixels=1;
+        c->color_order=OT_OM_GRB;
+        c->zone_count=1;
+        c->rgb_gain[0]=c->rgb_gain[1]=c->rgb_gain[2]=255;
+        c->white_gain[0]=c->white_gain[1]=c->white_gain[2]=255;
+        snprintf(c->zones[0].name,OT_OM_NAME_LEN,"Zone 1");
+        c->zones[0].pixels=1;
+        c->zones[0].role=OT_OM_OFF;
     }
 }
+
 bool ot_om_valid(const ot_om_output_t *o){
-    if(!o||!name_ok(o->name)||o->active_pixels<1||o->active_pixels>522||o->zone_count<1||o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
+    if(!o||!name_ok(o->name)||o->active_pixels<1||o->active_pixels>OT_OM_MAX_PIXELS_PER_OUTPUT||o->zone_count<1||o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
     unsigned sum=0;
     for(int z=0;z<o->zone_count;z++){
         const ot_om_zone_t *a=&o->zones[z];
@@ -50,7 +61,7 @@ int ot_om_section(const ot_om_output_t *o,unsigned pixel){
 }
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout){
     if(!ot_om_valid(o)||!layout)return false;
-    *layout=(ot_layout_t){.chain_pixels=o->active_pixels,.brightness_cap=32u};
+    *layout=(ot_layout_t){.chain_pixels=o->active_pixels,.brightness_cap=OT_MAX_BRIGHTNESS};
     for(int i=0;i<o->zone_count;i++)layout->sections[i]=o->zones[i].pixels;
     return ot_layout_valid(layout);
 }
@@ -58,7 +69,7 @@ static ot_rgb_t scaled(unsigned r,unsigned g,unsigned b,unsigned v){
     return (ot_rgb_t){(uint8_t)((r*v+127)/255),(uint8_t)((g*v+127)/255),(uint8_t)((b*v+127)/255)};
 }
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness){
-    if(brightness>32u)brightness=32u;
+    if(brightness>OT_MAX_BRIGHTNESS)brightness=OT_MAX_BRIGHTNESS;
     switch(role){
         case OT_OM_PARK_BRAKE:
             if(mask&OT_SIG_BRAKE)return scaled(255,0,0,brightness);
@@ -117,8 +128,8 @@ ot_rgb_t ot_om_calibrate(ot_rgb_t c,const ot_om_output_t *cfg){
         unsigned n=(v[i]*cfg->rgb_gain[i]+127u)/255u;
         if(neutral)n=(n*cfg->white_gain[i]+127u)/255u;
         if(cfg->gamma_enabled){ /* mild gamma approximation, bounded and monotonic */
-            n=(n*n+16u)/32u;
-            if(n>32u)n=32u;
+            n=(n*n+OT_MAX_BRIGHTNESS/2u)/OT_MAX_BRIGHTNESS;
+            if(n>OT_MAX_BRIGHTNESS)n=OT_MAX_BRIGHTNESS;
         }
         v[i]=(uint8_t)n;
     }

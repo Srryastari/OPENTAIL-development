@@ -35,7 +35,7 @@ ET.parse(main / 'res/values/strings.xml')
 ET.parse(main / 'res/values/styles.xml')
 
 check('Android XML parses correctly', manifest.tag == 'manifest')
-check('Studio v0.19.57 bundled, pinned checksum', b"const OT_VERSION='0.19.57'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
+check('Studio v0.19.118 bundled, pinned checksum', b"const OT_VERSION='0.19.118'" in studio and hashlib.sha256(studio).hexdigest() == read('qa/studio-sha256.txt').strip())
 check('CORE endpoint fixed to known AP', 'http://192.168.4.1' in core_java and '/api/v1/capabilities' in core_java)
 check('CORE protocol validated before opening web controls', 'opentail-core-alpha-v1' in core_java and 'CoreConnection.verify()' in main_java)
 check('Untrusted URLs blocked', 'shouldOverrideUrlLoading' in main_java and 'External navigation blocked' in main_java)
@@ -50,7 +50,7 @@ check('Legacy Wi-Fi token remains optional, not the sole authorization', 'CoreCo
 check('Physical trigger mappings remain not writable over BLE', 'writeTrigger' not in ble_java and 'writeOutput' not in ble_java)
 check('Android 12+ BLE permissions included', all(f'android.permission.{p}' in read(xml_path) for p in ('BLUETOOTH_SCAN','BLUETOOTH_CONNECT')))
 check('Only CORE AP HTTP exception', len(net.findall('./domain-config/domain')) == 1 and net.findtext('./domain-config/domain') == '192.168.4.1' and net.find('./base-config').attrib.get('cleartextTrafficPermitted') == 'false')
-check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionCode 27','versionName \'0.1.27\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
+check('Release/build versions pinned', all(v in read('app/build.gradle') for v in ('compileSdk 35','minSdk 26','targetSdk 35','versionCode 29','versionName \'0.1.29\'')) and 'gradle-8.11.1-bin.zip' in read('gradle/wrapper/gradle-wrapper.properties'))
 check('Bundled Studio output & trigger editors retained', b'Universal Output Manager' in studio and b'Universal Trigger Manager' in studio)
 check('BLE bench-only limitation explicitly documented', 'BENCH' in ble_java.upper() and 'do not use for road lighting' in read('README.md').lower() and 'not a compiled apk' in read('README.md').lower())
 # Android v0.1.4 feature regressions: these are structural/source checks, not physical assertions.
@@ -70,7 +70,7 @@ check('Preferred BLE address stored only after validating expected OpenTail serv
 check('BLE reconnection bounded; control authorization cleared after BLE disconnect',
       'RECONNECT_DELAY_MS' in ble_java and 'beginScan(true)' in ble_java and 'authorized=false' in ble_java)
 
-# Current Android v0.1.27: native Studio owns the CORE BLE Effects controls.
+# Current Android v0.1.29: native Studio owns the CORE BLE Effects controls.
 # Removed legacy scripts must remain absent; no duplicate picker or bottom tabs.
 unified = (main / 'assets/unified-shell.js').read_text(encoding='utf-8')
 panel = (main / 'assets/ble-output-panel.js').read_text(encoding='utf-8')
@@ -116,7 +116,7 @@ check('Native Studio BLE effect and six-tab regression suites pass',
                          cwd=root.parent,capture_output=True,text=True).returncode == 0)
 check('Web and Android Studio deployment copies are identical',
       studio == (root.parent/'web-studio/opentail.htm').read_bytes()
-      and studio == (root.parent/'web-studio/opentail-v0.19.57.htm').read_bytes())
+      and studio == (root.parent/'web-studio/opentail-v0.19.118.htm').read_bytes())
 # Decode the injected Java string and syntax-check the exact JavaScript shipped in MainActivity.
 import json
 m = re.search(r'private static final String STUDIO_HAPTIC_JS = (.*?);\n', main_java, re.S)

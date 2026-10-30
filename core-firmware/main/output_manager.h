@@ -3,8 +3,27 @@
 #include <stdbool.h>
 #include "core_logic.h"
 
-/* Two present physical RMT outputs. Twelve outputs are NOT implemented. */
-#define OT_OM_OUTPUTS 2
+/* Physical channels are defined by the board driver, never by a vehicle profile.
+ * The board build selects a resource-budgeted, changeable buffer capacity.
+ * This is a memory allocation limit, NOT a preset pixel count or FPS promise. */
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#else
+/* Host tests use an independent representative build-time resource budget. */
+#ifndef CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT
+#define CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT 2048
+#endif
+#endif
+#if !defined(CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT) ||     CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT < 1 ||     CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT > 65535
+#error "OpenTail pixel buffer budget must fit the uint16_t profile wire format"
+#endif
+#define OT_OM_OUTPUTS OT_CHAIN_COUNT
+#define OT_OM_MAX_PIXELS_PER_OUTPUT ((unsigned)CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT)
+#define OT_OM_MAX_TOTAL_PIXELS (OT_OM_OUTPUTS * OT_OM_MAX_PIXELS_PER_OUTPUT)
+
+/* Inert one-pixel placeholder until an installer explicitly configures output.
+ * This is not a vehicle layout nor the capacity of the hardware. */
+#define OT_OM_UNCONFIGURED_PIXELS 1u
 #define OT_OM_ZONES 8
 #define OT_OM_NAME_LEN 25
 #define OT_OM_VERSION 2
@@ -22,9 +41,9 @@ typedef struct {
 } ot_om_zone_t;
 typedef struct {
     char name[OT_OM_NAME_LEN];
-    uint16_t active_pixels; /* 1..522 for this bench hardware */
+    uint16_t active_pixels; /* 1..OT_OM_MAX_PIXELS_PER_OUTPUT; saved profiles preserved */
     uint8_t color_order;
-    uint8_t zone_count; /* 1..8 user-managed zones, migrated from v1 5-zone model */
+    uint8_t zone_count; /* 1..8 configured zones; newly initialized device has one neutral zone */
     uint8_t rgb_gain[3]; /* per-output decorative RGB calibration, 0..255 */
     uint8_t white_gain[3]; /* additional tint correction for neutral whites */
     bool gamma_enabled; /* optional soft gamma; OFF by default to preserve colors */
@@ -38,6 +57,23 @@ int ot_om_order_from_name(const char *order);
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]);
 bool ot_om_valid(const ot_om_output_t *o);
 int ot_om_section(const ot_om_output_t *o,unsigned pixel);
+/* O(1) amortized sequential-zone lookup for the pixel output loop.
+ * Only use after ot_om_layout() validates an output and only with
+ * ascending pixel indices. Zero-length zones are safely skipped.
+ * Standalone/random-access callers must keep using ot_om_section(). */
+typedef struct {
+    uint8_t next_zone;
+    uint16_t end;
+} ot_om_zone_cursor_t;
+static inline int ot_om_section_next(const ot_om_output_t *o,
+                                      ot_om_zone_cursor_t *cursor,unsigned pixel){
+    if(!o||!cursor||pixel>=o->active_pixels)return -1;
+    while(cursor->next_zone<o->zone_count && pixel>=cursor->end){
+        cursor->end=(uint16_t)(cursor->end+o->zones[cursor->next_zone].pixels);
+        cursor->next_zone++;
+    }
+    return cursor->next_zone?(int)cursor->next_zone-1:-1;
+}
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout);
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness);
 /* Inputs overlay only assigned zone roles. Parking is the baseline and yields
