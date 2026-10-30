@@ -4640,6 +4640,77 @@ void mode_chase_flash_random(void) {
 }
 #undef FLASH_COUNT
 
+/* Verbatim pinned FX.cpp Dissolve / Dissolve Rnd, isolated source fixture. */
+void dissolve(uint32_t color) {
+  unsigned dataSize = sizeof(uint32_t) * SEGLEN;
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  uint32_t* pixels = reinterpret_cast<uint32_t*>(SEGENV.data);
+
+  if (SEGENV.call == 0) {
+    for (unsigned i = 0; i < SEGLEN; i++) pixels[i] = SEGCOLOR(1);
+    SEGENV.aux0 = 1;
+  }
+
+  for (unsigned j = 0; j <= SEGLEN / 15; j++) {
+    if (hw_random8() <= SEGMENT.intensity) {
+      for (size_t times = 0; times < 10; times++) { //attempt to spawn a new pixel 10 times
+        unsigned i = hw_random16(SEGLEN);
+        if (SEGENV.aux0) { //dissolve to primary/palette
+          if (pixels[i] == SEGCOLOR(1)) {
+            uint32_t c = color == SEGCOLOR(0) ? SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0) : color;
+            if (SEGMENT.check2 && c == SEGCOLOR(1)) c ^= 0x00000001;  // change the color slightly so the effect doesn't get stuck in Complete mode if color is same as bkg color
+            pixels[i] = c;
+            break; //only spawn 1 new pixel per frame
+          }
+        } else { //dissolve to secondary
+          if (pixels[i] != SEGCOLOR(1)) {
+            pixels[i] = SEGCOLOR(1);
+            break;
+          }
+        }
+      }
+    }
+  }
+  unsigned incompletePixels = 0;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, pixels[i]); // fix for #4401
+    if (SEGMENT.check2) {
+      if (SEGENV.aux0) {
+        if (pixels[i] == SEGCOLOR(1)) incompletePixels++;
+      } else {
+        if (pixels[i] != SEGCOLOR(1)) incompletePixels++;
+      }
+    }
+  }
+
+  if (SEGENV.step > (255 - SEGMENT.speed) + 15U) {
+    SEGENV.aux0 = !SEGENV.aux0;
+    SEGENV.step = 0;
+  } else {
+    if (SEGMENT.check2) {
+      if (incompletePixels == 0)
+        SEGENV.step++; // only advance step once all pixels have changed
+    } else
+      SEGENV.step++;
+  }
+}
+
+
+/*
+ * Blink several LEDs on and then off
+ */
+void mode_dissolve(void) {
+  dissolve(SEGMENT.check1 ? SEGMENT.color_wheel(hw_random8()) : SEGCOLOR(0));
+}
+
+
+/*
+ * Blink several LEDs on and then off in random colors
+ */
+void mode_dissolve_random(void) {
+  dissolve(SEGMENT.color_wheel(hw_random8()));
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4725,6 +4796,8 @@ static const RefCase refs[]={
     {21,mode_flash_sparkle,"Sparkle Dark"},
     {22,mode_hyper_sparkle,"Sparkle+"},
     {17,mode_twinkle,"Twinkle"},
+    {18,mode_dissolve,"Dissolve"},
+    {19,mode_dissolve_random,"Dissolve Rnd"},
     {111,mode_chunchun,"Chunchun"},
     {59,mode_multi_comet,"Multi Comet"},
     {12,mode_fade,"Fade"},
