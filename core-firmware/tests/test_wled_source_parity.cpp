@@ -4251,6 +4251,32 @@ void mode_color_sweep_random(void) {
   color_wipe(true, true);
 }
 
+void mode_random_color(void) {
+  uint32_t cycleTime = 200 + (255 - SEGMENT.speed)*50;
+  uint32_t it = strip.now / cycleTime;
+  uint32_t rem = strip.now % cycleTime;
+  unsigned fadedur = (cycleTime * SEGMENT.intensity) >> 8;
+
+  uint32_t fade = 255;
+  if (fadedur) {
+    fade = (rem * 255) / fadedur;
+    if (fade > 255) fade = 255;
+  }
+
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = hw_random8();
+    SEGENV.step = 2;
+  }
+  if (it != SEGENV.step) //new color
+  {
+    SEGENV.aux1 = SEGENV.aux0;
+    SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0); //aux0 will store our random color wheel index
+    SEGENV.step = it;
+  }
+
+  SEGMENT.fill(color_blend(SEGMENT.color_wheel(SEGENV.aux1), SEGMENT.color_wheel(SEGENV.aux0), uint8_t(fade)));
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4342,7 +4368,8 @@ static const RefCase refs[]={
     {3,mode_color_wipe,"Wipe"},
     {6,mode_color_sweep,"Sweep"},
     {4,mode_color_wipe_random,"Wipe Random"},
-    {36,mode_color_sweep_random,"Sweep Random"}
+    {36,mode_color_sweep_random,"Sweep Random"},
+    {5,mode_random_color,"Random Colors"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
