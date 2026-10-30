@@ -16,6 +16,23 @@ const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/Na
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
 const gradle=fs.readFileSync('android/app/build.gradle','utf8');
 const web=fs.readFileSync('web-studio/opentail.htm','utf8');
+
+// Approved OpenTail chrome is monochrome in BOTH themes; editor effect colors
+// (including green as a configurable RGB LED color) remain untouched.
+const nativeUi=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeUi.java','utf8');
+const style=fs.readFileSync('android/app/src/main/res/values/styles.xml','utf8');
+const launcherIcon=fs.readFileSync('android/app/src/main/res/drawable/ic_opentail.xml','utf8');
+for(const forbidden of ['0xFF226E45', '0xFF79D99B', '0xFF71DFA0',
+  '0xff226e45', '0xff79d99b', '#64E38B', '#0C1310']) {
+  assert(![compose,nativeUi,style,launcherIcon].some(s=>s.includes(forbidden)),
+    'Green/tinted launcher accent regressed: '+forbidden);
+}
+assert(compose.includes('Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color(0xFFF5F5F5)') &&
+       compose.includes('Color(0xFF181818), Color(0xFF606060), Color(0xFF181818)') &&
+       nativeUi.includes('accent=light?0xff181818:0xfff5f5f5;') &&
+       style.includes('<item name="android:colorAccent">#F5F5F5</item>') &&
+       launcherIcon.includes('android:fillColor="#F5F5F5"'),
+       'Locked OLED black / white monochrome UI colors differ from approved design');
 assert(!/new WebView\(|WebViewAssetLoader|@JavascriptInterface|evaluateJavascript\(|loadUrl\(|appassets\.androidplatform/.test(compose),
   'Android launch activity cannot contain WebView, JavaScript bridges, or loadUrl');
 assert(!/implementation\s+['"]androidx\.webkit:/.test(gradle),
@@ -156,7 +173,7 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.busy()') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
-assert(gradle.includes("versionName '0.2.0-alpha1'"));
+assert(gradle.includes("versionName '0.2.0-alpha2'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
