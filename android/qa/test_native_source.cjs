@@ -357,6 +357,14 @@ for (const required of [
 assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers'),
   'Executable invalid-import regression missing');
 
+// Imported/restored project names must refresh Compose's remembered field,
+// and a failed zone write must not close the editor or remove confirmation.
+assert(compose.includes('var name by remember(revision.intValue) { mutableStateOf(project.name()) }') &&
+       compose.includes('fun applyLiveZone(): Boolean') &&
+       compose.includes('if (applyLiveZone()) editingId = null') &&
+       compose.includes('if (project.removeZone(id)) {'),
+       'Layout must follow committed project revisions and retain failed edit dialogs');
+
 // Imported trigger dictionaries may omit older built-in defaults, but they
 // must not contain malformed entries. A read must never persist new profiles.
 assert(model.includes('if (inputProfiles.optJSONObject(profileName) == null)') &&
