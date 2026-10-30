@@ -188,6 +188,37 @@ public class NativeProjectCommitTest {
         assertEquals(999992, project.zone(0).getInt("start"));
     }
 
+    @Test public void malformedOptionalDesignerSectionsCannotEraseImportedWork() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.addZoneAt("My zone", 12, 0));
+        String before = project.exportJson();
+        int committed = storage.commits;
+
+        for (String field : new String[]{"sequence", "savedPresets", "effectFavorites", "selectedPixels"}) {
+            JSONObject malformed = new JSONObject(before);
+            malformed.put(field, "not a designer collection");
+            assertFalse("Must reject malformed " + field, project.importJson(malformed.toString()));
+            assertEquals(before, project.exportJson());
+            assertEquals(committed, storage.commits);
+            malformed.put(field, JSONObject.NULL);
+            assertFalse("Must reject null " + field, project.importJson(malformed.toString()));
+            assertEquals(before, project.exportJson());
+            assertEquals(committed, storage.commits);
+        }
+
+        // An older project may omit optional collections without being corrupt.
+        JSONObject legacy = new JSONObject(before).put("version", 3);
+        for (String field : new String[]{"sequence", "savedPresets", "effectFavorites", "selectedPixels"})
+            legacy.remove(field);
+        assertTrue(project.importJson(legacy.toString()));
+        JSONObject upgraded = new JSONObject(project.exportJson());
+        assertEquals(4, upgraded.getInt("version"));
+        assertEquals(0, upgraded.getJSONArray("sequence").length());
+        assertEquals(0, upgraded.getJSONArray("savedPresets").length());
+        assertNotNull(upgraded.getJSONObject("selectedPixels"));
+    }
+
     @Test public void malformedTriggerProfilesNeverOverwriteSavedDataOnRead() throws Exception {
         Storage storage = new Storage();
         NativeProject project = new NativeProject(storage.prefs);
