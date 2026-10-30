@@ -4,6 +4,7 @@ Source contract evidence only; not ESP-IDF, GPIO, BLE radio or optical proof.
 """
 from pathlib import Path
 import subprocess
+import re
 
 PINS = {
     "pinned-core49": "adcdff0b2f43061bc3e222d1d77de0a34b095c0a",
@@ -70,6 +71,32 @@ require_text("pinned-effects50/core-firmware/tests/test_effects_render_safety_co
 require_text("pinned-effects50/core-firmware/tests/test_effects_oem_safety_matrix.c",
     "256", "gamma",
 )
+# Prove the entire original 120-mode catalog matches firmware exact IDs and
+# names. CORE alone decides which modes can be deployed via live capabilities.
+core_modes = [
+    (int(m.group(1)), m.group(2))
+    for m in re.finditer(
+        r'^\\s*\\{(\\d+),"[^"]+","([^"]+)",\\d+\\},',
+        Path("pinned-core49/core-firmware/main/wled_1d.c").read_text(), re.M
+    )
+]
+android_modes = [
+    (int(m.group(1)), m.group(2))
+    for m in re.finditer(
+        r'new Effect\\((\\d+),\\s*"([^"]+)"\\)',
+        Path("android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java").read_text()
+    )
+    if int(m.group(1)) < 32768
+]
+assert len(core_modes) == 120, f"CORE #49 effects catalog changed: {len(core_modes)}"
+assert len(android_modes) == 120, f"Android effects catalog changed: {len(android_modes)}"
+assert core_modes == android_modes, "Android 120 effect ID/name catalog diverges from CORE #49"
+require_text("android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+    "supportedIds.value", "effectId !in supportedIds.value",
+    "NativePaletteEngine.coreSupports(effectId, paletteId)",
+    "ExactLedFrame.fromProjectModel(project)",
+)
+
 # Android has one readback protocol implementation, not a second renderer.
 android = require_text("android/app/src/main/java/com/opentail/android/BleDiscovery.java",
     "PALETTE_CMD_UUID", "PALETTE_RSP_UUID", "PALETTE_CAP_UUID",
