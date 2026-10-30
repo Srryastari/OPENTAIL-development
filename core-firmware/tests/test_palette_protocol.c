@@ -8,7 +8,17 @@
  * new profile, then simulate reboot by restoring the durable slot. */
 static ot_palette_entry_t live[OT_PALETTE_SLOTS],saved[OT_PALETTE_SLOTS];
 static ot_palette_record_t raw_saved[OT_PALETTE_SLOTS];
-static bool fail_commit=false,used=false;
+static bool fail_commit=false,used=false,busy_input=false,save_locked=false;
+static unsigned render_wakes=0;
+bool ot_ble_palette_mutation_begin(void){
+    if(busy_input||save_locked)return false;
+    save_locked=true;return true;
+}
+void ot_ble_palette_mutation_end(bool changed){
+    assert(save_locked);
+    save_locked=false;
+    if(changed)render_wakes++;
+}
 void ot_palette_runtime_load(void){memcpy(live,saved,sizeof(saved));}
 bool ot_palette_runtime_get(uint8_t i,ot_palette_entry_t *out){
     if(i>=OT_PALETTE_SLOTS||!out)return false;
@@ -85,6 +95,7 @@ int main(void){
     const uint8_t commit[]={3,3,0};
     assert(result(commit,sizeof(commit),103)==0);
     assert(live[0].present&&live[0].revision==1&&reply[11]==1);
+    assert(!save_locked&&render_wakes==1u);
     const uint8_t first_read[]={3,7,0,0};
     assert(result(first_read,sizeof(first_read),105)==0);
     assert(reply[4]==0&&reply[5]==6&&memcmp(reply+6,stops,6)==0);
@@ -106,15 +117,27 @@ int main(void){
     assert(result(commit,sizeof(commit),202)==1);assert(live[0].revision==1);
     begin(0,2,1,crc,300);chunk(0,stops,8,301);
     fail_commit=true;assert(result(commit,sizeof(commit),302)==4);
+    assert(!save_locked&&render_wakes==1u);
     assert(live[0].revision==1&&saved[0].revision==1);
     fail_commit=false;
     begin(0,2,1,crc,400);chunk(0,stops,8,401);
-    assert(result(commit,sizeof(commit),402)==0);
+    /* Asserted GPIO must prevent flash without consuming the upload.
+     * Retrying the same completed upload before its timeout is supported. */
+    busy_input=true;
+    assert(result(commit,sizeof(commit),402)==2);
+    assert(live[0].revision==1u&&!save_locked&&render_wakes==1u);
+    busy_input=false;
+    assert(result(commit,sizeof(commit),403)==0);
     assert(live[0].revision==2);
     const uint8_t deletion[]={3,4,0,2,0,0,0};
+    busy_input=true;
+    assert(result(deletion,sizeof(deletion),449)==2);
+    assert(live[0].present&&live[0].revision==2&&!save_locked);
+    busy_input=false;
     used=true;assert(result(deletion,sizeof(deletion),450)==2);
     used=false;assert(result(deletion,sizeof(deletion),451)==0);
     assert(!live[0].present&&live[0].revision==3);
+    assert(!save_locked&&render_wakes==3u);
     assert(result(first_read,sizeof(first_read),452)==1);
     assert(result(deletion,sizeof(deletion),452)==3);
     ot_palette_runtime_load();
