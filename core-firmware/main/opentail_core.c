@@ -125,12 +125,14 @@ static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
 static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
-static uint16_t om_revision[OT_OM_OUTPUTS];
+static uint16_t om_revision[OT_OM_OUTPUTS]; /* latest durably staged edit token */
+static uint16_t om_active_revision[OT_OM_OUTPUTS]; /* currently rendered geometry */
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
 static ot_tm_pending_t tm_deferred; /* Persisted mapping awaits release. */
 static bool tm_persistent=false;
-static uint16_t tm_revision=1u;
+static uint16_t tm_revision=1u; /* latest durably staged edit token */
+static uint16_t tm_active_revision=1u;
 typedef struct {
     uint32_t magic, version;
     ot_tm_profile_t profile;
@@ -149,41 +151,61 @@ static void tm_load(void){
     /* Pending always wins at boot, even if power failed AFTER writing the
      * future active key. Its previous image is the only safe old routing. */
 }
+/* Size/version-aware reader preserves draft-v1 records and the older
+ * profile_v1 key. A corrupt newer journal never falls back to legacy. */
+static esp_err_t tm_journal_read(nvs_handle_t h,const char *key,ot_tm_journal_t *out){
+    size_t n=0;esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+    if(e!=ESP_OK)return e;
+    if(n==sizeof(*out)){
+        e=nvs_get_blob(h,key,out,&n);
+        return e==ESP_OK&&ot_tm_journal_valid(out)?ESP_OK:ESP_ERR_INVALID_CRC;
+    }
+    if(n==sizeof(ot_tm_journal_v1_t)){
+        ot_tm_journal_v1_t old={0};
+        e=nvs_get_blob(h,key,&old,&n);
+        return e==ESP_OK&&ot_tm_journal_upgrade_v1(&old,out)?
+               ESP_OK:ESP_ERR_INVALID_CRC;
+    }
+    return ESP_ERR_INVALID_SIZE;
+}
 static void tm_journal_load(void){
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_trig_cfg",NVS_READONLY,&h);
     if(e==ESP_ERR_NVS_NOT_FOUND)return;
     if(e!=ESP_OK){config_recovery_fault=true;return;}
     ot_tm_journal_t active={0},stage={0};
-    size_t n=sizeof(active);
-    esp_err_t a=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active,&n);
-    bool has_a=a==ESP_OK;
-    if(has_a&&n!=sizeof(active))config_recovery_fault=true;
-    else if(a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
-    n=sizeof(stage);
-    esp_err_t b=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n);
-    bool has_b=b==ESP_OK;
-    if(has_b&&n!=sizeof(stage))config_recovery_fault=true;
-    else if(b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    const esp_err_t a=tm_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active);
+    const esp_err_t b=tm_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
+    if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
+       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
     nvs_close(h);
     if(!config_recovery_fault&&!ot_tm_journal_recover(
         has_a?&active:NULL,has_b?&stage:NULL,&tm_profile,&tm_deferred))
         config_recovery_fault=true;
     if(config_recovery_fault){ot_tm_defaults(&tm_profile);tm_persistent=false;return;}
-    if(has_a||has_b)tm_persistent=true;
+    if(has_a||has_b){
+        /* Even after stage erasure, the active journal retains its prior
+         * mapping: reboot always holds the old routing until a quiet sampler. */
+        const ot_tm_journal_t *r=has_b?&stage:&active;
+        tm_active_revision=r->previous_revision;
+        tm_revision=r->candidate_revision;
+        if(!tm_deferred.pending)tm_active_revision=tm_revision;
+        tm_persistent=true;
+    }
 }
 static bool tm_save(const ot_tm_profile_t *p){
     if(!ot_tm_valid(p))return false;
-    ot_tm_profile_t old;
+    ot_tm_profile_t old;uint16_t old_rev,new_rev;
     portENTER_CRITICAL(&state_lock);
-    old=tm_profile;
+    old=tm_profile;old_rev=tm_active_revision;new_rev=tm_revision;
     portEXIT_CRITICAL(&state_lock);
+    if(new_rev==UINT16_MAX)return false; /* BLE 16-bit token cannot wrap. */
     ot_tm_journal_t staged={0};
-    if(!ot_tm_journal_build(&staged,&old,p))return false;
+    if(!ot_tm_journal_build_revisions(&staged,&old,p,old_rev,(uint16_t)(new_rev+1u)))
+        return false;
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    /* Stage candidate separately. Never overwrite the live active key
-     * before GPIO-qualified promotion; preserve v1 compatibility key. */
     esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
@@ -264,36 +286,63 @@ static void om_load(void){
         ESP_LOGW(TAG,"No valid output profile; restored neutral unconfigured mapping");
     }
 }
+static esp_err_t om_journal_read(nvs_handle_t h,const char *key,ot_om_journal_t *out){
+    size_t n=0;esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+    if(e!=ESP_OK)return e;
+    if(n==sizeof(*out)){
+        e=nvs_get_blob(h,key,out,&n);
+        return e==ESP_OK&&ot_om_journal_valid(out)?ESP_OK:ESP_ERR_INVALID_CRC;
+    }
+    if(n==sizeof(ot_om_journal_v1_t)){
+        ot_om_journal_v1_t old={0};
+        e=nvs_get_blob(h,key,&old,&n);
+        return e==ESP_OK&&ot_om_journal_upgrade_v1(&old,out)?
+               ESP_OK:ESP_ERR_INVALID_CRC;
+    }
+    return ESP_ERR_INVALID_SIZE;
+}
 static void om_journal_load(void){
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_output_cfg",NVS_READONLY,&h);
     if(e==ESP_ERR_NVS_NOT_FOUND)return;
     if(e!=ESP_OK){config_recovery_fault=true;return;}
     ot_om_journal_t active={0},stage={0};
-    size_t n=sizeof(active);
-    esp_err_t a=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active,&n);
-    bool has_a=a==ESP_OK;
-    if(has_a&&n!=sizeof(active))config_recovery_fault=true;
-    else if(a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
-    n=sizeof(stage);
-    esp_err_t b=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n);
-    bool has_b=b==ESP_OK;
-    if(has_b&&n!=sizeof(stage))config_recovery_fault=true;
-    else if(b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)config_recovery_fault=true;
+    const esp_err_t a=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active);
+    const esp_err_t b=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
+    if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
+       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
     nvs_close(h);
     if(!config_recovery_fault&&!ot_om_journal_recover(
         has_a?&active:NULL,has_b?&stage:NULL,om_outputs,&om_deferred))
         config_recovery_fault=true;
     if(config_recovery_fault){ot_om_defaults(om_outputs);om_persistent=false;return;}
-    if(has_a||has_b)om_persistent=true;
+    if(has_a||has_b){
+        const ot_om_journal_t *r=has_b?&stage:&active;
+        memcpy(om_active_revision,r->previous_revision,sizeof(om_active_revision));
+        memcpy(om_revision,r->candidate_revision,sizeof(om_revision));
+        if(!om_deferred.pending)
+            memcpy(om_active_revision,om_revision,sizeof(om_revision));
+        om_persistent=true;
+    }
 }
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     ot_om_output_t old[OT_OM_OUTPUTS];
+    uint16_t old_rev[OT_OM_OUTPUTS],new_rev[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
     memcpy(old,om_outputs,sizeof(old));
+    memcpy(old_rev,om_active_revision,sizeof(old_rev));
+    memcpy(new_rev,om_revision,sizeof(new_rev));
     portEXIT_CRITICAL(&state_lock);
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        if(memcmp(&old[i],&items[i],sizeof(old[i]))!=0){
+            if(new_rev[i]==UINT16_MAX)return false;
+            new_rev[i]++;
+        }
+    }
     ot_om_journal_t staged={0};
-    if(!ot_om_journal_build(&staged,old,items))return false;
+    if(!ot_om_journal_build_revisions(&staged,old,items,old_rev,new_rev))
+        return false;
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
     esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
@@ -404,10 +453,13 @@ oom:
 }
 static esp_err_t om_get(httpd_req_t *r){
     ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
+    uint16_t active_revisions[OT_OM_OUTPUTS],staged_revisions[OT_OM_OUTPUTS];
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
+    memcpy(active_revisions,om_active_revision,sizeof(active_revisions));
+    memcpy(staged_revisions,om_revision,sizeof(staged_revisions));
     persistent=om_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
@@ -440,6 +492,18 @@ static esp_err_t om_get(httpd_req_t *r){
        !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
         cJSON_Delete(obj);return respond_err(r,500,"out of memory");
     }
+    /* Schema revision stays 2; these arrays expose per-output durable edit
+     * revisions, with outputs[] reflecting ONLY the active geometry. */
+    cJSON *rev_active=cJSON_AddArrayToObject(obj,"active_config_revisions");
+    cJSON *rev_staged=cJSON_AddArrayToObject(obj,"config_revisions");
+    if(!rev_active||!rev_staged){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        cJSON *a=cJSON_CreateNumber(active_revisions[i]);
+        cJSON *b=cJSON_CreateNumber(staged_revisions[i]);
+        if(!a||!b){cJSON_Delete(a);cJSON_Delete(b);cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+        cJSON_AddItemToArray(rev_active,a);
+        cJSON_AddItemToArray(rev_staged,b);
+    }
     cJSON *outputs=cJSON_AddArrayToObject(obj,"outputs");
     if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
     for(int i=0;i<OT_OM_OUTPUTS;i++){
@@ -455,7 +519,7 @@ static esp_err_t om_get(httpd_req_t *r){
 static esp_err_t om_post(httpd_req_t *r){
     cJSON *obj=NULL;int status=recv_json(r,&obj);
     if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
-    unsigned index=0,pixels=0;
+    unsigned index=0,pixels=0,expected_rev=0;
     const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,"color_order");
     const char *order=cJSON_IsString(v)?v->valuestring:NULL;
     int order_id=ot_om_order_from_name(order);
@@ -496,6 +560,7 @@ static esp_err_t om_post(httpd_req_t *r){
         }
     }
     if(valid)valid=ot_om_valid(&next);
+    if(valid)valid=om_number(obj,"expected_config_revision",&expected_rev,1,UINT16_MAX);
     cJSON_Delete(obj);
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)
@@ -512,6 +577,15 @@ static esp_err_t om_post(httpd_req_t *r){
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stop shows and release all 12V triggers before saving output mapping");}
+    portENTER_CRITICAL(&state_lock);
+    const bool stale=om_revision[index]!=(uint16_t)expected_rev;
+    const bool exhausted=om_revision[index]==UINT16_MAX;
+    portEXIT_CRITICAL(&state_lock);
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stale or exhausted output edit revision");}
+    /* Idempotent REST save is a readback, not a new configuration revision. */
+    if(memcmp(&next_all[index],&next,sizeof(next))==0){
+        xSemaphoreGive(om_write_mutex);return om_get(r);
+    }
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
@@ -548,8 +622,12 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
-    int result=busy?2:stale?3:0;
+    int result=busy?2:(stale||om_revision[index]==UINT16_MAX)?3:0;
     if(!result){
+        /* A no-op BLE write must not publish a revision absent from NVS. */
+        if(memcmp(&next_all[index],next,sizeof(*next))==0){
+            xSemaphoreGive(om_write_mutex);return 0;
+        }
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
@@ -595,7 +673,7 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
         show_window(now);
     const bool stale=require_revision&&tm_revision!=expected;
     portEXIT_CRITICAL(&state_lock);
-    int code=busy?2:stale?3:0;
+    int code=busy?2:(stale||tm_revision==UINT16_MAX)?3:0;
     if(!code){
         if(!tm_save(next))code=4;
         else {
@@ -634,17 +712,19 @@ int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision;
+    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision,active_config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     cfg=tm_profile;pending=tm_deferred.pending;saved=tm_persistent&&!pending;
     physical=live_input_mask;config_revision=tm_revision;
+    active_config_revision=tm_active_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
     /* An incomplete trigger map must never be acknowledged as HTTP 200. */
     if(!cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION) ||
        !cJSON_AddNumberToObject(root,"config_revision",config_revision) ||
+       !cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision) ||
        !cJSON_AddBoolToObject(root,"saved_on_device",saved) ||
        !cJSON_AddBoolToObject(root,"config_apply_pending",pending) ||
        !cJSON_AddBoolToObject(root,"bench_only",true) ||
@@ -707,6 +787,7 @@ static esp_err_t tm_post(httpd_req_t *r){
     }
     cJSON_Delete(root);
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
+    if(!require_revision)return respond_err(r,409,"expected_config_revision required; read current revision");
     /* Same transaction and busy policy as authenticated BLE. The HTTP
      * 'revision' field is a schema version, not the BLE edit revision. */
     const int result=tm_commit(&next,(uint16_t)expected_config_revision,require_revision);
@@ -1661,58 +1742,110 @@ static bool config_write_active(nvs_handle_t h,const void *data,size_t n){
 static bool config_clear_stage(nvs_handle_t h){
     esp_err_t e=nvs_erase_key(h,OT_CFG_JOURNAL_KEY_STAGED);
     if(e==ESP_OK)e=nvs_commit(h);
-    return e==ESP_OK;
+    if(e!=ESP_OK)return false;
+    /* Explicitly verify the NVS marker is no longer readable. */
+    size_t n=0;
+    return nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
 }
+/* The durable active record retains BOTH the prior and the desired profile.
+ * After stage erasure, a concurrent GPIO edge may veto RAM publication.
+ * A later promoter retries from active_v3; reboot does likewise. No edge
+ * can make the newer profile active merely because stage_v3 disappeared. */
 static void tm_promote(uint32_t epoch){
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_tm_journal_t stage={0};size_t n=sizeof(stage);
-    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
-                     n==sizeof(stage)&&ot_tm_journal_valid(&stage);
-    if(!valid){
+    ot_tm_journal_t stage={0};
+    esp_err_t read=tm_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool staged=read==ESP_OK;
+    if(read==ESP_ERR_NVS_NOT_FOUND)
+        read=tm_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
+    if(read!=ESP_OK){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("trigger journal invalid during promotion");return;
     }
+    bool matches=false;
+    portENTER_CRITICAL(&state_lock);
+    matches=tm_deferred.pending&&
+        tm_revision==stage.candidate_revision&&
+        tm_active_revision==stage.previous_revision&&
+        memcmp(&tm_profile,&stage.previous,sizeof(tm_profile))==0&&
+        memcmp(&tm_deferred.profile,&stage.candidate,sizeof(tm_deferred.profile))==0;
+    portEXIT_CRITICAL(&state_lock);
+    if(!matches){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("trigger staging revision mismatch");return;
+    }
     if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    const bool durable=config_write_active(h,&stage,sizeof(stage));
-    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(staged){
+        if(!config_write_active(h,&stage,sizeof(stage))||
+           !config_activation_idle(epoch)){nvs_close(h);return;}
+        /* CRITICAL ORDER: erase staged recovery marker BEFORE publishing
+         * to active RAM, never after; active_v3 itself keeps prior recovery. */
+        if(!config_clear_stage(h)){
+            nvs_close(h);config_recovery_fault=true;
+            ot_st_set_fault("trigger journal finalization failed");return;
+        }
+    }
+    /* GPIO can change during NVS erase; no RAM swap occurs unless the
+     * complete durable boundary and the original edge epoch remain quiet. */
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+       tm_gpio_input_mask()==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         applied=ot_tm_apply_if_released(&tm_profile,&tm_deferred,0u,0u);
+        if(applied)tm_active_revision=stage.candidate_revision;
+    }
     portEXIT_CRITICAL(&state_lock);
     if(applied)request_render_refresh();
-    if(applied&&!config_clear_stage(h)){
-        config_recovery_fault=true;
-        ot_st_set_fault("trigger journal finalization failed");
-    }
     nvs_close(h);
 }
 static void om_promote(uint32_t epoch){
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_om_journal_t stage={0};size_t n=sizeof(stage);
-    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
-                     n==sizeof(stage)&&ot_om_journal_valid(&stage);
-    if(!valid){
+    ot_om_journal_t stage={0};
+    esp_err_t read=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool staged=read==ESP_OK;
+    if(read==ESP_ERR_NVS_NOT_FOUND)
+        read=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
+    if(read!=ESP_OK){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("output journal invalid during promotion");return;
     }
+    bool matches=false;
+    portENTER_CRITICAL(&state_lock);
+    matches=om_deferred.pending&&
+        memcmp(om_revision,stage.candidate_revision,sizeof(om_revision))==0&&
+        memcmp(om_active_revision,stage.previous_revision,sizeof(om_active_revision))==0&&
+        memcmp(om_outputs,stage.previous,sizeof(om_outputs))==0&&
+        memcmp(om_deferred.outputs,stage.candidate,sizeof(om_deferred.outputs))==0;
+    portEXIT_CRITICAL(&state_lock);
+    if(!matches){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("output staging revision mismatch");return;
+    }
     if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    const bool durable=config_write_active(h,&stage,sizeof(stage));
-    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(staged){
+        if(!config_write_active(h,&stage,sizeof(stage))||
+           !config_activation_idle(epoch)){nvs_close(h);return;}
+        if(!config_clear_stage(h)){
+            nvs_close(h);config_recovery_fault=true;
+            ot_st_set_fault("output journal finalization failed");return;
+        }
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+       tm_gpio_input_mask()==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         applied=ot_om_apply_if_released(om_outputs,&om_deferred,0u,0u);
+        if(applied)memcpy(om_active_revision,stage.candidate_revision,
+                          sizeof(om_active_revision));
+    }
     portEXIT_CRITICAL(&state_lock);
     if(applied)request_render_refresh();
-    if(applied&&!config_clear_stage(h)){
-        config_recovery_fault=true;
-        ot_st_set_fault("output journal finalization failed");
-    }
     nvs_close(h);
 }
 static void config_activation_task(void *unused){
@@ -2125,7 +2258,7 @@ void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
     ot_palette_runtime_load();
-    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=1u;
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
     om_load();
     tm_load();
     om_journal_load();

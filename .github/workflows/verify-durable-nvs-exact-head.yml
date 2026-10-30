@@ -1,7 +1,7 @@
 name: Verify durable CORE NVS journal exact commit
 on:
   pull_request:
-    branches: [firmware/core38-effects39-harmonic-integration]
+    branches: [firmware/core38-effects39-harmonic-integration, firmware/durable-active-staged-nvs-recovery]
   workflow_dispatch:
 permissions:
   contents: read
@@ -9,7 +9,7 @@ permissions:
 # evidence gate remains untouched and cannot be satisfied by this workflow.
 jobs:
   core-effects-triggers-ble-host:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/durable-active-staged-nvs-recovery'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/finalization-revisions-v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
           PY
 
   android-compatibility-exact-head:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/durable-active-staged-nvs-recovery'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/finalization-revisions-v2'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -93,7 +93,7 @@ jobs:
           gradle --no-daemon :app:assembleDebug
 
   studio-compatibility-exact-head:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/durable-active-staged-nvs-recovery'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/finalization-revisions-v2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
