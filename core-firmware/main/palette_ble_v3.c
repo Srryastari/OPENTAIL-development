@@ -3,6 +3,8 @@
 #include "palette_runtime.h"
 #include <string.h>
 extern bool ot_ble_palette_in_use(uint8_t index);
+extern bool ot_ble_palette_mutation_begin(void);
+extern void ot_ble_palette_mutation_end(bool changed);
 static ot_palette_transfer_t upload;
 static uint8_t response[OT_PALETTE_REPLY_BYTES]={OT_PALETTE_WIRE_VERSION};
 static uint32_t read32(const uint8_t *p){
@@ -54,20 +56,34 @@ void ot_palette_ble_process(const uint8_t *p,size_t n,uint32_t now){
         break;
       }
       case 3: { /* COMMIT [v,3,index], durable NVS first */
-        if(n!=3u)break;
+        if(n!=3u){ot_palette_transfer_reset(&upload);break;}
+        /* Never initiate flash writes under an asserted vehicle input.
+         * Busy leaves the upload intact for a retry within its TTL. */
+        if(!ot_ble_palette_mutation_begin()){status=2u;break;}
         ot_palette_record_t rec={0};
-        if(!ot_palette_transfer_finish(&upload,index,now,&rec))break;
-        status=ot_palette_runtime_put(&rec,rec.revision-1u)?0u:4u;
+        const bool complete=ot_palette_transfer_finish(&upload,index,now,&rec);
+        const bool committed=complete&&ot_palette_runtime_put(&rec,rec.revision-1u);
+        status=committed?0u:complete?4u:1u;
+        ot_ble_palette_mutation_end(committed);
         break;
       }
       case 4: { /* DELETE [v,4,index,base_revisionLE32] */
         ot_palette_transfer_reset(&upload);
         if(n!=7u||index>=OT_PALETTE_SLOTS)break;
-        if(ot_ble_palette_in_use(index)){status=2u;break;}
-        ot_palette_entry_t e={0};
-        if(!ot_palette_runtime_get(index,&e))break;
-        if(e.revision!=read32(p+3)){status=3u;break;}
-        status=ot_palette_runtime_delete(index,e.revision)?0u:4u;
+        if(!ot_ble_palette_mutation_begin()){status=2u;break;}
+        bool deleted=false;
+        if(ot_ble_palette_in_use(index))status=2u;
+        else{
+            ot_palette_entry_t e={0};
+            if(ot_palette_runtime_get(index,&e)){
+                if(e.revision!=read32(p+3))status=3u;
+                else{
+                    deleted=ot_palette_runtime_delete(index,e.revision);
+                    status=deleted?0u:4u;
+                }
+            }
+        }
+        ot_ble_palette_mutation_end(deleted);
         break;
       }
       case 5: { /* QUERY [v,5,index] */
