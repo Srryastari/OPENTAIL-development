@@ -310,7 +310,8 @@ for (const required of [
  'if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}'
 ]) assert(bleSource.includes(required), 'Authenticated GATT trigger map integration regressed: '+required);
 assert(compose.includes('CoreTriggerMappingPage(t)') &&
-       compose.includes('if (!ble.canMapTriggers()) return') &&
+       compose.includes('val canMap = remember(bleMessage.value) { ble.canMapTriggers() }') &&
+       compose.includes('if (!canMap) return // Older firmware keeps offline authoring intact') &&
        compose.includes('ble.readTriggerMap()') &&
        compose.includes('ble.saveTriggerMap(snapshot.revision, draft.toIntArray())') &&
        compose.includes('Save mapping to CORE · verify readback') &&
