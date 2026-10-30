@@ -349,7 +349,10 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        servicesBlock.includes('if (!infoStarted) {') &&
        servicesBlock.includes('ui.post(thisAutoAuth());') &&
        servicesBlock.includes('catch (SecurityException ex)') &&
-       bleSource.includes('if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());'),
+       bleSource.includes('if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)') &&
+       bleSource.includes('if (status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
+       bleSource.includes('finishInfoRead(value,status);') &&
+       bleSource.includes('finishInfoRead(characteristic.getValue(),status);'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
 // GATT callback ownership must be checked on both modern/legacy Android
