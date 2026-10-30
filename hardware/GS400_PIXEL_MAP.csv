@@ -1,4 +1,4 @@
-chain,planned_data_lane,side,zone,start_zero_based,end_zero_based,pixel_count,trigger_role,physical_order,frozen_pr51_522px_output_compatible
+chain,planned_data_lane,side,zone,start_zero_based,end_zero_based,pixel_count,trigger_role,physical_order,historical_522_pixel_bench_fixture_covered
 LEFT_SERPENTINE,PIX1,LEFT,Top,0,117,118,park_brake,1,YES
 LEFT_SERPENTINE,PIX1,LEFT,Turn Amber,118,226,109,left_turn,2,YES
 LEFT_SERPENTINE,PIX1,LEFT,Reverse,227,268,42,reverse,3,YES
