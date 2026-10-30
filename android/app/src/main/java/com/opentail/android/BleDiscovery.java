@@ -179,12 +179,22 @@ final class BleDiscovery {
         }
         return true;
     }
+    // A new mapping read/write invalidates the last verified snapshot.
+    // An uncertain BLE outcome must never leave a stale mapping editable.
+    private void invalidateTriggerReadback(BluetoothGatt owner){
+        if(triggerMapListener!=null)ui.post(()->{
+            if(!stopped && owner==gatt && triggerMapListener!=null)
+                triggerMapListener.accept(null);
+        });
+    }
     @SuppressWarnings("MissingPermission")
     boolean readTriggerMap(){
         if(!triggerMapAvailable())return false;
         triggerMapBusy=true;triggerMapSavePending=false;triggerMapExpected=null;
         try {
-            if(gatt.readCharacteristic(triggerMapping))return true;
+            if(gatt.readCharacteristic(triggerMapping)){
+                invalidateTriggerReadback(gatt);return true;
+            }
         }catch(SecurityException ignored){}
         triggerMapBusy=false;notifyStatus("Trigger map read could not start");pumpQueue();return false;
     }
@@ -208,7 +218,7 @@ final class BleDiscovery {
                 started=gatt.writeCharacteristic(triggerMapping);
             }
         }catch(SecurityException ignored){}
-        if(started)return true;
+        if(started){invalidateTriggerReadback(gatt);return true;}
         triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
         notifyStatus("Trigger map write could not start");pumpQueue();return false;
     }
