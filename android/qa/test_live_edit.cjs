@@ -31,10 +31,15 @@ assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx
   'Authoring layout must never directly write a physical output mapping.');
 
 for(const required of [
-  'fun applyTriggerStyle(): Boolean','applyTriggerStyle()','project.assignMany(',
+  'var selections by remember',
   'project.assignMany(selections,zoneId,!checked)',
-  'if (applyTriggerStyle()) editing = false', 'confirmButton = { Pill("Done"',
-]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
+  'confirmButton = { Pill("Done",t,true) { editing=false }',
+  'Pill("Assign zones · " + selections.size + " selected"'
+]) assert(triggerBlock.includes(required), 'Live assignment-only trigger regression: '+required);
+assert(!triggerBlock.includes('applyTriggerStyle') &&
+       !triggerBlock.includes('chosenFx') &&
+       !triggerBlock.includes('chosenColor'),
+       'Trigger edit must only assign zones, never effects or colors');
 assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
 
@@ -43,7 +48,7 @@ for(const required of [
   'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
 ]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
 
-assert(triggerBlock.includes('project.assignMany(selections, zoneId, !checked)') &&
+assert(triggerBlock.includes('project.assignMany(selections,zoneId,!checked)') &&
        !triggerBlock.includes('selections.forEach { project.assign('),
        'Multi-select assignments must commit once, not partially save per trigger');
 
