@@ -699,7 +699,8 @@ assert(bleSource.includes('if(cfgKnownRevision[index]>=65535)') &&
 assert(bleSource.includes('if(expectedRevision>=65535)') &&
        bleSource.includes('CORE trigger revision exhausted; cannot save or wrap') &&
        compose.includes('snapshot.revision in 1..65534') &&
-       compose.includes('snapshot.persisted && snapshot.status == 0'),
+       compose.includes('snapshot.persisted && snapshot.revision in 1..65534') &&
+       compose.includes('active map read; last save rejected'),
        'CORE #49 trigger saves must require active profile and non-exhausted revision');
 
 // CORE #38, exact pinned contract: f9614060b892f474e97501dc46a41e6242f60ec3
