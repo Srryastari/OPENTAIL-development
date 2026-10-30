@@ -309,6 +309,31 @@ assert(compose.includes('CoreTriggerMappingPage(t)') &&
        !compose.includes('gpio = '),
        'Input mapping must stay native, optional and explicitly saved after readback');
 
+// Provider-controlled OpenDocument streams must be bounded before parsing
+// and CreateDocument must report failure when no writable stream is returned.
+const documentIo=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/NativeProjectDocumentIo.java','utf8');
+const documentIoTest=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativeProjectDocumentIoTest.java','utf8');
+for(const required of ['static final int MAX_CHARS = 2_000_000;',
+  'static String readBounded(Reader input) throws IOException',
+  'if (count > MAX_CHARS - text.length())',
+  'text.append(chunk, 0, count);']) {
+  assert(documentIo.includes(required), 'Untrusted v4 import size guard regressed: '+required);
+}
+for(const required of ['acceptsExactImportLimitAndPreservesCharacters',
+  'rejectsOneCharacterOverTheLimitWithoutReturningPartialData',
+  'propagatesRealDocumentIoErrors']) {
+  assert(documentIoTest.includes(required), 'Bounded project reader unit tests missing: '+required);
+}
+assert(compose.includes('NativeProjectDocumentIo.readBounded(reader)') &&
+       compose.includes('?: throw java.io.IOException("Cannot open selected document")') &&
+       compose.includes('?: throw java.io.IOException("Cannot open output document")') &&
+       compose.includes('output.bufferedWriter().use { it.write(project.exportJson()) }') &&
+       !compose.includes('openInputStream(uri)?.bufferedReader()?.use { it.readText() }') &&
+       !compose.includes('openOutputStream(uri)?.bufferedWriter()?.use'),
+       'Project import/export must reject unavailable document providers without false success');
+
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
 for (const required of ['private String committedJson;',
