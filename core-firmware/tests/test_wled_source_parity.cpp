@@ -4466,6 +4466,7 @@ static const RefCase refs[]={
     {36,mode_color_sweep_random,"Sweep Random"},
     {5,mode_random_color,"Random Colors"},
     {28,mode_chase_color,"Chase"},
+    {29,mode_chase_random,"Chase Random"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
