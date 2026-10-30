@@ -5676,12 +5676,18 @@ int main() {
                 for(unsigned intensity:{0u,1u,64u,128u,200u,254u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
+                    /* A second independent scene exercises zero-background
+                     * and saturated channel paths that the original warm
+                     * foreground / blue background cannot cover. */
+                    for(unsigned color_case=0u;color_case<2u;color_case++) {
+                    const uint32_t fg=color_case?0x00ff0000u:0x007b3809u;
+                    const uint32_t bg=color_case?0x00000000u:0x000358aeu;
                     PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
-                    seg.colors[0]=0x007B3809u; // configured primary 123,56,9
-                    seg.colors[1]=0x000358AEu; // secondary 3,88,174
+                    seg.colors[0]=fg;
+                    seg.colors[1]=bg;
                     seg.colors[2]=0u;         // missing CORE tertiary stays black
                     current_segment=&seg;current_environment=&env;
                     ref_rng_state=0x73a11c5du;
@@ -5697,7 +5703,8 @@ int main() {
                         source_audio_major=measured.major_peak_hz;
                         source_audio_mag=measured.magnitude;
                     }
-                    cfg.foreground={123,56,9};cfg.background={3,88,174};
+                    cfg.foreground={(uint8_t)(fg>>16),(uint8_t)(fg>>8),(uint8_t)fg};
+                    cfg.background={(uint8_t)(bg>>16),(uint8_t)(bg>>8),(uint8_t)bg};
                     ot_wled_fx_state_t state{};
                     /* Source uses a global 16-bit PRNG. Inject one fixed
                      * segment seed shared with CORE for reproducible frames. */
@@ -5738,14 +5745,15 @@ int main() {
                             if(pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
                                !mismatch_reported) {
                                 std::fprintf(stderr,
-                                  "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
-                                  fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
+                                  "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
+                                  fx.id,fx.name,(unsigned)pal,color_case,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
                                 mismatch_reported=true;
                                 mismatched_modes++;
                             }
                             checked++;
                         }
+                    }
                     }
                     }
                 }
