@@ -37,6 +37,8 @@ public class NativeTriggerMappingCodecTest {
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.decode(invalidId));
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(-1, new int[8]));
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(65536, new int[8]));
+        assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(65535, new int[8]));
+        assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(0, new int[8]));
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(1, new int[7]));
         int[] bad = new int[8]; bad[6] = 9;
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(1, bad));
@@ -54,9 +56,10 @@ public class NativeTriggerMappingCodecTest {
         assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
         read[2] = 2;read[14] = 7; // revision advanced, wrong mapping
         assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
-        // Revision rolls over as unsigned 16-bit, while mapping must still match.
+        // Firmware #49 rejects exhausted tokens instead of recycling 65535 -> 0.
         read[14] = 8;read[2] = 0;read[3] = 0;
-        assertTrue(NativeTriggerMappingCodec.decode(read).confirmsApplied(65535,wanted));
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(65535,wanted));
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(0,wanted));
     }
 
     @Test public void exposesBusyStaleAndNvsFailureAsFailuresNotSuccess() {
