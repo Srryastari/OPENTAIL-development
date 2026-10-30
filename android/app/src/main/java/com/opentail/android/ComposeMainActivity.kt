@@ -319,9 +319,9 @@ class ComposeMainActivity : ComponentActivity() {
                             val fg: Color, val muted: Color, val accent: Color, val red: Color)
     private fun tone(light: Boolean): Tone = if (light)
         Tone(Color.White, Color(0xFFF4F4F4), Color(0xFFE6E6E6),
-             Color(0xFF181818), Color(0xFF606060), Color(0xFF226E45), Color(0xFFBD3842))
+             Color(0xFF181818), Color(0xFF606060), Color(0xFF242424), Color(0xFFBD3842))
     else Tone(Color.Black, Color(0xFF101010), Color(0xFF1B1B1B),
-              Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color(0xFF79D99B), Color(0xFFED6472))
+              Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color.White, Color(0xFFED6472))
 
     @Composable
     private fun OpenTailShell() {
@@ -384,12 +384,15 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun Pill(label: String, t: Tone, selected: Boolean = false, action: () -> Unit) {
-        Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(if (selected) t.accent else t.raised)
-                .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 11.dp),
+        // Selected surfaces are neutral graphite, not colored brand accents.
+        val fill = if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
+            else Color(0xFFDEDEDE)) else t.raised
+        Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(99.dp))
+                .background(fill)
+                .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                 color = if (selected) t.bg else t.fg, maxLines = 1)
+                 color = t.fg, maxLines = 1)
         }
     }
     // Native vector glyphs preserve the approved icon meanings without
@@ -397,9 +400,13 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
-        val fg = if (selected) t.bg else t.fg
-        Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(if (selected) t.accent else t.raised)
+        val fg = t.fg
+        val fill = if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
+            else Color(0xFFDEDEDE)) else t.bg
+        Row(Modifier.heightIn(min = 46.dp).clip(RoundedCornerShape(99.dp))
+                .background(fill)
+                .border(1.dp, if(selected) t.muted.copy(alpha = 0.7f)
+                        else t.muted.copy(alpha = 0.25f), RoundedCornerShape(99.dp))
                 .clickable(onClick = action).padding(horizontal = 14.dp, vertical = 11.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -644,7 +651,7 @@ class ComposeMainActivity : ComponentActivity() {
         "left_turn", "right_turn" -> Color(0xFFFFB300)
         "reverse" -> Color.White
         "aux1", "aux2", "aux3" -> Color(0xFFB083F5)
-        "decorative" -> Color(0xFF71DFA0)
+        "decorative" -> Color(0xFF9D9D9D)
         else -> Color(0xFF333333)
     }
 
