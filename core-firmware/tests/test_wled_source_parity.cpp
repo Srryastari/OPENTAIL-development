@@ -26,7 +26,8 @@ extern "C" {
 #define WHITE 0x00FFFFFFu
 #define BLACK 0u
 #define PALETTE_SOLID_WRAP true
-#define FRAMETIME 23u
+static uint16_t source_frame_time_ms=23u;
+#define FRAMETIME source_frame_time_ms
 static long map(long x,long a,long b,long c,long d) {return (x-a)*(d-c)/(b-a)+c;}
 // Tests use lengths >=2; upstream's 1-pixel mode_static fallback is excluded.
 #define FX_FALLBACK_STATIC { return; }
@@ -5680,6 +5681,10 @@ int main() {
                      * and saturated channel paths that the original warm
                      * foreground / blue background cannot cover. */
                     for(unsigned color_case=0u;color_case<2u;color_case++) {
+                    /* Compare distinct source render cadence, keeping the
+                     * production default 23ms and a slower 42ms frame. */
+                    for(unsigned frame_time_ms:{23u,42u}) {
+                    source_frame_time_ms=(uint16_t)frame_time_ms;
                     const uint32_t fg=color_case?0x00ff0000u:0x007b3809u;
                     const uint32_t bg=color_case?0x00000000u:0x000358aeu;
                     PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
@@ -5694,7 +5699,7 @@ int main() {
                     ot_wled_fx_config_t cfg{};
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
-                    cfg.frame_time_ms=23;cfg.palette_id=pal;
+                    cfg.frame_time_ms=(uint16_t)frame_time_ms;cfg.palette_id=pal;
                     const ot_wled_audio_peak_t measured={
                         speed==0u?110.0f:speed==16u?220.0f:speed==127u?440.0f:880.0f,
                         (float)(intensity+40u)*16.0f};
@@ -5745,14 +5750,15 @@ int main() {
                             if(pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
                                !mismatch_reported) {
                                 std::fprintf(stderr,
-                                  "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
-                                  fx.id,fx.name,(unsigned)pal,color_case,count,speed,intensity,t,i,
+                                  "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u frame_ms=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
+                                  fx.id,fx.name,(unsigned)pal,color_case,frame_time_ms,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
                                 mismatch_reported=true;
                                 mismatched_modes++;
                             }
                             checked++;
                         }
+                    }
                     }
                     }
                     }
