@@ -191,8 +191,16 @@ assert(events.includes('listOf("Startup", "Shutdown")') &&
        events.includes('eventUiEnabled') &&
        events.includes('eventUiFadeMs') &&
        events.includes('eventDuration') &&
-       events.includes('Preview offline'),
-  'Optional startup/shutdown design regressed');
+       events.includes('Preview offline') &&
+       events.includes('project.setAutoEvent(event, field, value)') &&
+       events.includes('if (saved) refresh()') &&
+       events.includes('Could not save '),
+  'Optional startup/shutdown design and explicit persistence errors regressed');
+assert(model.includes('synchronized boolean setAutoEvent(String event, String key, Object value)') &&
+       model.includes('if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;') &&
+       model.includes('if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0)') &&
+       model.includes('return save();'),
+       'Event authoring must be validated and saved atomically');
 assert(hardware.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
        !hardware.includes('623') &&
        hardware.includes('it.put("pixels", remaining)') &&
@@ -240,6 +248,7 @@ for (const required of [
  'failedCommitRestoresEveryNestedEditAndExport',
  'triggerMultiSelectCommitsOnceOrNotAtAll',
  'triggerStyleBatchIsAtomicAndRejectsIncompleteSelection',
+ 'autoEventsAreValidatedAndCommittedAtomically',
  'failedReindexBeforeCommitCannotLeavePartialLayout',
  'store.fail = true',
  'assertEquals(before, project.exportJson())'
