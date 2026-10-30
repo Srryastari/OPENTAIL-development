@@ -3959,6 +3959,52 @@ void mode_traffic_light(void) {
   }
 }
 
+/* Pinned WLED FX.cpp Percent transition state. */
+void mode_percent(void) {
+
+  unsigned percent = SEGMENT.intensity;
+  percent = constrain(percent, 0, 200);
+  unsigned active_leds = (percent < 100) ? roundf(SEGLEN * percent / 100.0f)
+                                         : roundf(SEGLEN * (200 - percent) / 100.0f);
+
+  unsigned size = (1 + ((SEGMENT.speed * SEGLEN) >> 11));
+  if (SEGMENT.speed == 255) size = 255;
+
+  if (percent <= 100) {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+    	if (i < SEGENV.aux1) {
+        if (SEGMENT.check1)
+          SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(map(percent,0,100,0,255), false, false, 0));
+        else
+          SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    	}
+    	else {
+        SEGMENT.setPixelColor(i, SEGCOLOR(1));
+    	}
+    }
+  } else {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+    	if (i < (SEGLEN - SEGENV.aux1)) {
+        SEGMENT.setPixelColor(i, SEGCOLOR(1));
+    	}
+    	else {
+        if (SEGMENT.check1)
+          SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(map(percent,100,200,255,0), false, false, 0));
+        else
+          SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    	}
+    }
+  }
+
+  if(active_leds > SEGENV.aux1) {  // smooth transition to the target value
+    SEGENV.aux1 += size;
+    if (SEGENV.aux1 > active_leds) SEGENV.aux1 = active_leds;
+  } else if (active_leds < SEGENV.aux1) {
+    if (SEGENV.aux1 > size) SEGENV.aux1 -= size; else SEGENV.aux1 = 0;
+    if (SEGENV.aux1 < active_leds) SEGENV.aux1 = active_leds;
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4036,7 +4082,8 @@ static const RefCase refs[]={
     {78,mode_railway,"Railway"},
     {20,mode_sparkle,"Sparkle"},
     {103,mode_solid_glitter,"Solid Glitter"},
-    {35,mode_traffic_light,"Traffic Light"}
+    {35,mode_traffic_light,"Traffic Light"},
+    {98,mode_percent,"Percent"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
