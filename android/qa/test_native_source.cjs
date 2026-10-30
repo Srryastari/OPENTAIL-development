@@ -286,6 +286,7 @@ for (const required of [
  'boolean canMapTriggers()',
  'boolean readTriggerMap()',
  'boolean saveTriggerMap(int expectedRevision,int[] mapping)',
+ 'if(connection!=gatt || !triggerMapBusy || !canMapTriggers())return;',
  'triggerMapBusy',
  'NativeTriggerMappingCodec.decode(raw)',
  'triggerMapBaseRevision+1',
