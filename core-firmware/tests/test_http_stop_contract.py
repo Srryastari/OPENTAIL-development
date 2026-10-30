@@ -63,6 +63,24 @@ assert "if(!native_rendering && full_frame)" in render
 assert "stop_render_generation=local_stop_generation;" in render
 assert "ulTaskNotifyTake(pdTRUE,timeout)" in render
 
+# Display control changes should schedule an immediate render as Stop does.
+# Do not wake for a rejected request or hold the state spinlock while doing it.
+starts = (
+    section("static esp_err_t show_start(httpd_req_t *r){", "static esp_err_t show_stop("),
+    section("bool ot_ble_apply_show(const ot_ble_show_packet_t *request){",
+            "/* Runtime control over BLE"),
+    section("static bool ot_ble_apply_fx_internal(", "bool ot_ble_apply_fx("),
+    section("bool ot_ble_play_fx_preset(uint8_t slot){",
+            "bool ot_ble_delete_fx_preset("),
+)
+assert "if(!ready)return respond_err(r,409" in starts[0]
+assert starts[0].index('if(!ready)return respond_err(r,409') < starts[0].index("request_render_refresh();")
+for body in starts[1:]:
+    assert "if(ready)request_render_refresh();" in body
+    assert body.index("portEXIT_CRITICAL(&state_lock);") < body.index("if(ready)request_render_refresh();")
+# One-shot legacy preset loads dispatch through the same FX function.
+assert "ot_ble_apply_fx_internal(&legacy.fx,true,NULL)" in starts[3]
+
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
 literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
 assert literal, "Capabilities must return valid static JSON"
