@@ -37,7 +37,8 @@ final class NativeTriggerMappingCodec {
          * newer revision, the exact logical map, and active persistence. */
         boolean confirmsApplied(int baseRevision, int[] expected) {
             return status == 0 && persisted &&
-                revision == ((baseRevision + 1) & 0xffff) && matches(expected);
+                baseRevision >= 1 && baseRevision < 65535 &&
+                revision == baseRevision + 1 && matches(expected);
         }
     }
 
@@ -55,7 +56,9 @@ final class NativeTriggerMappingCodec {
     }
 
     static byte[] encode(int expectedRevision, int[] functions) {
-        if (expectedRevision < 0 || expectedRevision > 65535 ||
+        // Firmware #49 persists monotonic uint16 edit tokens; 65535
+        // cannot be saved or wrapped, and zero is not a valid v2 token.
+        if (expectedRevision < 1 || expectedRevision >= 65535 ||
             functions == null || functions.length != INPUTS)
             throw new IllegalArgumentException("Invalid trigger mapping request");
         byte[] wire = new byte[WRITE_BYTES];
