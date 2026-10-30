@@ -1145,11 +1145,19 @@ class ComposeMainActivity : ComponentActivity() {
                 Text(z.optString("name"), color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 Caption("Pixels " + length + " · start " + start + " · end " + (start + length - 1), t)
                 Caption("Next zone starts at " + (start + length), t)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                Pill(if (editingId == id) "Close editor" else "Edit", t) {
+                    editingId = if (editingId == id) null else id
+                }
+                // The approved Add / Remove pair is always fully visible,
+                // even on a narrow phone. No horizontal scrolling or hiding.
+                Row(Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Edit", t) { editingId = id }
-                    Pill("+ Add next", t) { addZoneAfter(i) }
-                    Pill("Remove", t) { deleteId = id }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        Pill("+ Add next", t) { addZoneAfter(i) }
+                    }
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Pill("Remove", t) { deleteId = id }
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("Move ↑", t) { if (project.moveZone(i, i - 1)) refresh() }
