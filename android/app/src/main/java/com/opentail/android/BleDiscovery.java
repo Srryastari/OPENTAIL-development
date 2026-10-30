@@ -871,7 +871,7 @@ final class BleDiscovery {
             if (!infoStarted) {
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
                 if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
-                    ui.post(thisAutoAuth());
+                    ui.post(thisAutoAuth(connection));
             }
         }
 
@@ -886,7 +886,7 @@ final class BleDiscovery {
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid())) {
-                finishInfoRead(value,status);
+                finishInfoRead(connection,value,status);
             }
         }
 
@@ -905,7 +905,7 @@ final class BleDiscovery {
                 if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
                 if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid())) {
-                    finishInfoRead(characteristic.getValue(),status);
+                    finishInfoRead(connection,characteristic.getValue(),status);
                 }
             }
         }
@@ -935,15 +935,19 @@ final class BleDiscovery {
     // INFO is optional metadata, not a prerequisite for owner authentication.
     // Both API-level GATT read callbacks must continue the same auth flow,
     // including when a started read returns a failure status.
-    private void finishInfoRead(byte[] value,int status) {
+    private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
         if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
             notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
         else notifyStatus("BLE connected; information read failed: " + status);
         if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
-            ui.post(thisAutoAuth());
+            ui.post(thisAutoAuth(connection));
     }
 
-    private Runnable thisAutoAuth(){return ()->authorizeStored();}
+    private Runnable thisAutoAuth(BluetoothGatt owner) {
+        return ()->{
+            if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();
+        };
+    }
 
     private void acceptReply(byte[] raw,int status){
         readReplyPending=false;
