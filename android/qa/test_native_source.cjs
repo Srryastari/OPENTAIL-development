@@ -257,6 +257,51 @@ const buildFile=fs.readFileSync('android/app/build.gradle','utf8');
 assert(buildFile.includes("testImplementation 'org.json:json:20240303'"),
   'Native project failure-injection tests require executable JSONObject implementation');
 
+// Trigger-team contract V1 is optional on older CORE. Android may edit a
+// physical IN1–IN8 map only after owner auth, explicit Save, readback and
+// revision/mapping verification. No speculative GPIO hardcoding or writes.
+const triggerCodec=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/NativeTriggerMappingCodec.java','utf8');
+const triggerCodecTest=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativeTriggerMappingCodecTest.java','utf8');
+for (const required of [
+ 'static final int READ_BYTES = 15;',
+ 'static final int WRITE_BYTES = 11;',
+ 'wire[0] = VERSION;',
+ 'wire[1] = (byte)expectedRevision;',
+ 'wire[2] = (byte)(expectedRevision >>> 8);',
+ 'functions[i] < 0 || functions[i] > 8',
+ 'final boolean persisted;',
+ 'return Arrays.equals(functions, expected);'
+]) assert(triggerCodec.includes(required), 'Trigger team GATT V1 codec regressed: '+required);
+for (const required of [
+ 'decodesExactFifteenByteReadbackIncludingAuxAndPendingApply',
+ 'encodesExactlyElevenBytesWithRevisionAndDuplicateFunctions',
+ 'rejectsMalformedVersionsAndInvalidFunctionIds',
+ 'exposesBusyStaleAndNvsFailureAsFailuresNotSuccess'
+]) assert(triggerCodecTest.includes(required),
+  'Byte-accurate trigger-mapping JUnit contract missing: '+required);
+for (const required of [
+ 'TRIGGER_MAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2c")',
+ 'boolean canMapTriggers()',
+ 'boolean readTriggerMap()',
+ 'boolean saveTriggerMap(int expectedRevision,int[] mapping)',
+ 'triggerMapBusy',
+ 'NativeTriggerMappingCodec.decode(raw)',
+ 'triggerMapBaseRevision+1',
+ 'result.matches(triggerMapExpected)',
+ 'if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}'
+]) assert(bleSource.includes(required), 'Authenticated GATT trigger map integration regressed: '+required);
+assert(compose.includes('CoreTriggerMappingPage(t)') &&
+       compose.includes('if (!ble.canMapTriggers()) return') &&
+       compose.includes('ble.readTriggerMap()') &&
+       compose.includes('ble.saveTriggerMap(snapshot.revision, draft.toIntArray())') &&
+       compose.includes('Save mapping to CORE · verify readback') &&
+       compose.includes('Save physical input mapping?') &&
+       !compose.includes('GPIO4–11') &&
+       !compose.includes('gpio = '),
+       'Input mapping must stay native, optional and explicitly saved after readback');
+
 // Local editor mutations must not masquerade as saved after a failed
 // SharedPreferences commit, including multi-selected trigger zone assignments.
 for (const required of ['private String committedJson;',
