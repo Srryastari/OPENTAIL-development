@@ -231,6 +231,7 @@ int main(void){
     printf("CORE unified resolved palette dispatch: 4 source modes, 5 external IDs, 2 independent zones, global frame-snapshot invariants PASS.\\n");
   }
   cfg.resolved_palette=NULL;
+  cfg.palette_id=0u; /* Restore legacy fixture for Theater regression. */
 
   /* Theater's phase is per-zone and is never shared across outputs. */
   ot_effects_1d_state_t zone_a,zone_b;
