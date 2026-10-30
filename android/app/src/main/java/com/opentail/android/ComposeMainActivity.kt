@@ -295,8 +295,9 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         val preferred = prefs.getString("preferred_ble_address", null)
-        if (!preferred.isNullOrBlank()) ble.tryReconnect(preferred)
-        else if (ble.isConnected() && !ble.canControl()) ble.authorizeOrPair()
+        if (ble.isConnected()) {
+            if (!ble.canControl()) ble.authorizeOrPair()
+        } else if (!preferred.isNullOrBlank()) ble.tryReconnect(preferred)
     }
     override fun onStop() {
         ble.cancelAutomaticAuthorization()
