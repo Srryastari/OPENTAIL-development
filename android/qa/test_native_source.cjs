@@ -192,22 +192,24 @@ for(const required of ['project.previewZoneOffsets(id, n)',
 }
 assert(!layout.includes('ble.saveOutput(') && !layout.includes('ble.showFx('),
  'Local layout authoring must not persist or command physical outputs');
-for(const required of ['var selections by remember', 'selections=if(selected) selections-name else selections+name',
-  'editing=true', 'fun applyTriggerStyle(): Boolean',
-  'project.styleTriggers(selections, chosenFx, chosenColor)',
-  'project.customTrigger(newTrigger)', 'project.deleteTrigger(name)',
-  'project.assignMany(selections, zoneId, !checked)', 'Pill("Edit "+selections.size+" selected Triggers"',
-  'chosenFx=fx.name', 'chosenColor = it.take(7)',
-  'CoreTriggerMappingPage(t)']) {
-  assert(triggers.includes(required),'Editable Compose triggers regressed: '+required);
-}
-assert(triggers.includes('contentDescription = "Delete custom trigger"') &&
-       triggers.includes('val canDelete = selections.size == 1') &&
-       triggers.includes('project.trigger(selections.first()).optString("kind") == "trigger-custom"') &&
+for(const required of [
+  'var selections by remember', 'selections=if(selected) selections-name else selections+name',
+  'editing=true', 'project.customTrigger(newTrigger)', 'project.deleteTrigger(target)',
+  'project.assignMany(selections,zoneId,!checked)',
+  'Pill("Assign zones · " + selections.size + " selected"',
+  'CoreTriggerMappingPage(t)'
+]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
+assert(triggers.includes('profile.optString("kind") == "trigger-custom"') &&
+       triggers.includes('.semantics { contentDescription = "Delete " + name }') &&
+       triggers.includes('triggerToDelete = name') &&
+       triggers.includes('triggerToDelete?.let { target ->') &&
        triggers.includes('Delete custom trigger?') &&
+       !triggers.includes('var removeConfirm') &&
+       !triggers.includes('chosenFx') && !triggers.includes('chosenColor') &&
+       !triggers.includes('applyTriggerStyle') &&
        !triggers.includes('▷ Test') && !triggers.includes('■ Stop') &&
        !triggers.includes('var testing by remember'),
-       'Triggers must retain universal edits and safe custom deletion but move developer testing to Settings');
+       'Default triggers must remain editable and undeletable; custom trash is per card; testing belongs in Settings');
 const settings=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
   .split('private fun HardwareOutputEditor(')[0];
 assert(settings.includes('Developer · Trigger Testing') &&
