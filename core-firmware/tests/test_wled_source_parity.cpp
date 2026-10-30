@@ -1315,6 +1315,80 @@ uint16_t perlin16(uint32_t x, uint32_t y) {
 }
 
 
+// Pinned 3D and 2D Perlin overloads for noise golden tests.
+static inline __attribute__((always_inline)) int32_t gradient3D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy, uint32_t z0, int32_t dz) {
+  // fast and good entropy hash from corner coordinates
+  uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D) ^ (z0 * 0x1B56C4E9);
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  return ((hashToGradient(h) * dx + hashToGradient(h>>(1+PERLIN_SHIFT)) * dy + hashToGradient(h>>(1 + 2*PERLIN_SHIFT)) * dz) * 85) >> (8 + PERLIN_SHIFT); // scale to 16bit, x*85 >> 8 = x/3
+}
+
+
+int32_t perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit) {
+  int32_t x0 = x >> 16;
+  int32_t y0 = y >> 16;
+  int32_t z0 = z >> 16;
+  int32_t x1 = x0 + 1;
+  int32_t y1 = y0 + 1;
+  int32_t z1 = z0 + 1;
+
+  if(is16bit) {
+    x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+    y1 = y1 & 0xFF;
+    z1 = z1 & 0xFF;
+  }
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dy0 = y & 0xFFFF;
+  int32_t dz0 = z & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  int32_t dy1 = dy0 - 0x10000;
+  int32_t dz1 = dz0 - 0x10000;
+
+  int32_t g000 = gradient3D(x0, dx0, y0, dy0, z0, dz0);
+  int32_t g001 = gradient3D(x0, dx0, y0, dy0, z1, dz1);
+  int32_t g010 = gradient3D(x0, dx0, y1, dy1, z0, dz0);
+  int32_t g011 = gradient3D(x0, dx0, y1, dy1, z1, dz1);
+  int32_t g100 = gradient3D(x1, dx1, y0, dy0, z0, dz0);
+  int32_t g101 = gradient3D(x1, dx1, y0, dy0, z1, dz1);
+  int32_t g110 = gradient3D(x1, dx1, y1, dy1, z0, dz0);
+  int32_t g111 = gradient3D(x1, dx1, y1, dy1, z1, dz1);
+
+  uint32_t tx = smoothstep(dx0);
+  uint32_t ty = smoothstep(dy0);
+  uint32_t tz = smoothstep(dz0);
+
+  int32_t nx0 = lerpPerlin(g000, g100, tx);
+  int32_t nx1 = lerpPerlin(g010, g110, tx);
+  int32_t nx2 = lerpPerlin(g001, g101, tx);
+  int32_t nx3 = lerpPerlin(g011, g111, tx);
+  int32_t ny0 = lerpPerlin(nx0, nx1, ty);
+  int32_t ny1 = lerpPerlin(nx2, nx3, ty);
+
+  int32_t noise = lerpPerlin(ny0, ny1, tz);
+  return noise;
+}
+
+
+uint16_t perlin16(uint32_t x, uint32_t y, uint32_t z) {
+  return ((perlin3D_raw(x, y, z) * 1731) >> 10) + 33147; //scale to 16bit and offset (fastled range: about 4766 to 60840)
+}
+
+uint8_t perlin8(uint16_t x) {
+  return (((perlin1D_raw((uint32_t)x << 8, true) * 1353) >> 10) + 32769) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+
+uint8_t perlin8(uint16_t x, uint16_t y) {
+  return (((perlin2D_raw((uint32_t)x << 8, (uint32_t)y << 8, true) * 1620) >> 10) + 32771) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+
+uint8_t perlin8(uint16_t x, uint16_t y, uint16_t z) {
+  return (((perlin3D_raw((uint32_t)x << 8, (uint32_t)y << 8, (uint32_t)z << 8, true) * 2015) >> 10) + 33168) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+
+
 #undef PERLIN_SHIFT
 // END UPSTREAM util.cpp 2D Perlin source.
 
@@ -4779,6 +4853,72 @@ void mode_comet(void) {
   SEGENV.aux0 = index++;
 }
 
+/* Pinned-source 1D noise effects. */
+static uint8_t beatsin8_t(uint16_t bpm,uint8_t lo=0u,uint8_t hi=255u,uint32_t tb=0u,uint8_t phase=0u){return source_beatsin8(bpm,lo,hi,tb,phase);}
+void mode_fillnoise8() {
+  if (SEGENV.call == 0) SEGENV.step = hw_random();
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned index = perlin8(i * SEGLEN, SEGENV.step + i * SEGLEN);
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+  SEGENV.step += beatsin8_t(SEGMENT.speed, 1, 6); //10,1,4
+}
+
+void mode_noise16_1() {
+  unsigned scale = 320;                                       // the "zoom factor" for the noise
+  SEGENV.step += (1 + SEGMENT.speed/16);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = beatsin8_t(11);                          // the x position of the noise field swings @ 17 bpm
+    unsigned shift_y = SEGENV.step/42;                        // the y position becomes slowly incremented
+    unsigned real_x = (i + shift_x) * scale;                  // the x position of the noise field swings @ 17 bpm
+    unsigned real_y = (i + shift_y) * scale;                  // the y position becomes slowly incremented
+    uint32_t real_z = SEGENV.step;                            // the z position becomes quickly incremented
+    unsigned noise = perlin16(real_x, real_y, real_z) >> 8;   // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                         // map LED color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+}
+
+void mode_noise16_2() {
+  unsigned scale = 1000;                                        // the "zoom factor" for the noise
+  SEGENV.step += (1 + (SEGMENT.speed >> 1));
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = SEGENV.step >> 6;                        // x as a function of time
+    uint32_t real_x = (i + shift_x) * scale;                    // calculate the coordinates within the noise field
+    unsigned noise = perlin16(real_x, 0, 4223) >> 8;            // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                           // map led color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0, noise));
+  }
+}
+
+void mode_noise16_3() {
+  unsigned scale = 800;                                       // the "zoom factor" for the noise
+  SEGENV.step += (1 + SEGMENT.speed);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = 4223;                                  // no movement along x and y
+    unsigned shift_y = 1234;
+    uint32_t real_x = (i + shift_x) * scale;                  // calculate the coordinates within the noise field
+    uint32_t real_y = (i + shift_y) * scale;                  // based on the precalculated positions
+    uint32_t real_z = SEGENV.step*8;
+    unsigned noise = perlin16(real_x, real_y, real_z) >> 8;   // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                         // map led color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0, noise));
+  }
+}
+
+void mode_noise16_4() {
+  uint32_t stp = (strip.now * SEGMENT.speed) >> 7;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    int index = perlin16(uint32_t(i) << 12, stp);
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+}
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4884,6 +5024,11 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {69,mode_fillnoise8,"Fill Noise"},
+    {70,mode_noise16_1,"Noise 1"},
+    {71,mode_noise16_2,"Noise 2"},
+    {72,mode_noise16_3,"Noise 3"},
+    {73,mode_noise16_4,"Noise 4"},
     {40,mode_larson_scanner,"Scanner"},
     {60,mode_dual_larson_scanner,"Scanner Dual"},
     {41,mode_comet,"Lighthouse"},
@@ -5009,7 +5154,7 @@ int main() {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
+                    PinnedSeg seg(count);seg.palette=(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
