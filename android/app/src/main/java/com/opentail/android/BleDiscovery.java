@@ -96,6 +96,7 @@ final class BleDiscovery {
         },this::pumpQueue);
     void setPaletteListener(java.util.function.Consumer<NativePaletteBleTransport.Result> cb){paletteListener=cb;}
     boolean canTransferPalettes(){return canControl() && palette.supported();}
+    void cancelPaletteTransfer(){palette.abortForStop();}
     private boolean paletteGate(){
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
