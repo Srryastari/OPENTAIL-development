@@ -4126,6 +4126,40 @@ void mode_chunchun(void)
   }
 }
 
+/* Source 8-comet state machine and per-segment data allocation. */
+#define MAX_COMETS 8
+void mode_multi_comet(void) {
+  uint32_t cycleTime = 10 + (uint32_t)(255 - SEGMENT.speed);
+  uint32_t it = strip.now / cycleTime;
+  if (SEGENV.step == it) return;
+  if (!SEGENV.allocateData(sizeof(uint16_t) * MAX_COMETS)) FX_FALLBACK_STATIC; //allocation failed
+
+  SEGMENT.fade_out(SEGMENT.intensity/2 + 128);
+
+  uint16_t* comets = reinterpret_cast<uint16_t*>(SEGENV.data);
+
+  for (unsigned i=0; i < MAX_COMETS; i++) {
+    if(comets[i] < SEGLEN) {
+      unsigned index = comets[i];
+      if (SEGCOLOR(2) != 0)
+      {
+        SEGMENT.setPixelColor(index, i % 2 ? SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0) : SEGCOLOR(2));
+      } else
+      {
+        SEGMENT.setPixelColor(index, SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0));
+      }
+      comets[i]++;
+    } else {
+      if(!hw_random16(SEGLEN)) {
+        comets[i] = 0;
+      }
+    }
+  }
+
+  SEGENV.step = it;
+}
+
+#undef MAX_COMETS
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4211,7 +4245,8 @@ static const RefCase refs[]={
     {21,mode_flash_sparkle,"Sparkle Dark"},
     {22,mode_hyper_sparkle,"Sparkle+"},
     {17,mode_twinkle,"Twinkle"},
-    {111,mode_chunchun,"Chunchun"}
+    {111,mode_chunchun,"Chunchun"},
+    {59,mode_multi_comet,"Multi Comet"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
