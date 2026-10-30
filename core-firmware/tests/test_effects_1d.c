@@ -128,6 +128,30 @@ int main(void){
       ot_wled_fx_reset(&reference);
     }
   }
+  /* Four newly ported source modes must accept their pinned fixed
+   * palettes across the complete CORE dispatcher, including audio input. */
+  const uint16_t completed_ids[]={OT_WLED_EXPLODING_FIREWORKS,
+       OT_WLED_PACIFICA,OT_WLED_NOISE_PAL,OT_WLED_ROCKTAVES};
+  const ot_wled_audio_peak_t peak={440.0f,1900.0f};
+  for(size_t n=0u;n<sizeof(completed_ids)/sizeof(completed_ids[0]);n++){
+    for(unsigned palette=2u;palette<=72u;palette+=35u) {
+      ot_effects_1d_state_t unified={0};
+      ot_wled_fx_state_t source={0};
+      cfg.effect_id=completed_ids[n];cfg.palette_id=(uint8_t)palette;
+      cfg.audio_peak=cfg.effect_id==OT_WLED_ROCKTAVES?&peak:NULL;
+      cfg.brightness=255u;cfg.speed=128u;cfg.intensity=128u;
+      ot_wled_rgb_t dispatched[71]={0},expected[71]={0};
+      for(unsigned frame=0u;frame<12u;frame++) {
+        const uint32_t ms=frame*471u;
+        assert(ot_effects_1d_render(&cfg,&unified,ms,dispatched,71u));
+        assert(ot_wled_fx_render(&cfg,&source,ms,expected,71u));
+        assert(memcmp(dispatched,expected,sizeof(dispatched))==0);
+      }
+      ot_effects_1d_reset(&unified,1u);
+      ot_wled_fx_reset(&source);
+    }
+  }
+  cfg.audio_peak=NULL;
   cfg.palette_id=0u;
 
   /* Theater's phase is per-zone and is never shared across outputs. */
