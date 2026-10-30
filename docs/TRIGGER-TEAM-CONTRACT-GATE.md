@@ -1,4 +1,13 @@
 # OpenTail Trigger Integration — team contract gate
+
+## Active integration candidate for review (PR #25)
+
+**Current source of truth for reviewing trigger changes:** [draft PR #25](https://github.com/Srryastari/OPENTAIL-development/pull/25), created directly from CORE firmware PR #19 commit `c97a98feb0b3ee6843b4bae072e8ced7c6e2da3d`. The older [PR #24](https://github.com/Srryastari/OPENTAIL-development/pull/24) remains historical source/provenance and must **not** be merged again as a second copy of the same trigger integration. The older exact-head table below documents its preceding cross-team audit; it is **not** the current combined source or evidence of consent.
+
+The candidate's scoped source adds authenticated BLE mapping, 15-second AUX simulation, readback revision checks, deferred post-NVS activation of user-defined input mappings/output roles, sampler wakeup, and host contracts. The firmware's error-aware RMT output/OTA/BOOT/advertising/fingerprint protections remain on the current CORE source. This is not a combined candidate with independent Effects PRs #23+#22 or native Android #21; final owner approval and one complete pinned integration SHA are still missing.
+
+**Testing policy:** exact-head trigger and software CI may be run for source correctness, while physical/optical/12V/phone/vehicle tests and all flashing remain **deferred until 100% cross-team source/ABI agreement**. Software CI passing does not change the mandatory hardware/release acceptance gates. PR #25 is draft, unmerged, and has no auto-merge authorization.
+
 **Status:** BLOCKED — source/ABI reconciliation incomplete. **Physical testing is deferred until 100% of cross-team contracts below are agreed and reconciled.**
 
 **Engineering rules:** Simplicity first; solve root causes; minimum necessary code impact. Trigger/audit owner may merge **only trigger or audit PRs**. Cross-team comments are handoffs, **not permission to merge** firmware, effects, Android, Studio, or their mixed-scope PRs. No physical acceptance can be inferred from a host check or an earlier flashed build.
