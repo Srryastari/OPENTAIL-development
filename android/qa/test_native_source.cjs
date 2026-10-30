@@ -347,12 +347,13 @@ const servicesBlock=bleSource.split('void onServicesDiscovered(')[1]
   ?.split('void onCharacteristicRead(')[0];
 assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readCharacteristic(info);') &&
        servicesBlock.includes('if (!infoStarted) {') &&
-       servicesBlock.includes('ui.post(thisAutoAuth());') &&
+       servicesBlock.includes('ui.post(thisAutoAuth(connection));') &&
        servicesBlock.includes('catch (SecurityException ex)') &&
        bleSource.includes('if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)') &&
        bleSource.includes('if (status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
-       bleSource.includes('finishInfoRead(value,status);') &&
-       bleSource.includes('finishInfoRead(characteristic.getValue(),status);'),
+       bleSource.includes('finishInfoRead(connection,value,status);') &&
+       bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
+       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
 // MTU negotiation failures fall through to guarded service discovery.
