@@ -5981,6 +5981,83 @@ static void certifyPinnedHarmonicPalette(){
     std::puts("Pinned harmonic random palette source: 240 seeded traces, all 5 harmony families, shared byte draw order and 3840 exact RGB samples PASS.");
 }
 
+/* End-to-end pinned source scheduler: harmonic RNG and per-frame palette
+ * blending must advance as ONE global producer, not once per zone. Earlier
+ * tests independently checked the RNG generator and blend math; this
+ * catches their cross-frame integration and draw counts in the same trace. */
+static void certifyHarmonicGlobalSchedulerAgainstSource(){
+    unsigned frames=0u,generations=0u;
+    const uint32_t times[]={
+       0u,100u,500u,1000u,4999u,5000u,5001u,5001u,
+       5078u,5150u,6000u,10002u,11010u,15004u,20005u,
+       65534000u,65535000u,65536000u,65536000u,65537100u,
+       65542000u,65549000u,65555000u,65570000u
+    };
+    for(unsigned seed=0;seed<48u;seed++){
+        GlobalPaletteByteStream actual{},source{};
+        for(unsigned b=0;b<256u;b++)
+            actual.bytes[b]=source.bytes[b]=(uint8_t)(
+                seed*59u+b*73u+(b*(seed+3u)>>4));
+        ot_wled_palette_random_t live{};
+        if(!ot_wled_palette_global_init(&live,nextPaletteByte,&actual))
+            std::abort();
+        /* Initial two random palettes have a separate pinned-source
+         * constructor oracle. Start the lifecycle from those verified RGB
+         * values so this test isolates harmonic scheduling and blending. */
+        SourceRandomPaletteState expected{};
+        std::memcpy(&expected.current,&live.current,sizeof(expected.current));
+        std::memcpy(&expected.target,&live.target,sizeof(expected.target));
+        source.draws=actual.draws;
+        for(uint32_t ms:times){
+            const uint16_t interval=(uint16_t)(1u+(seed%6u));
+            const uint16_t frametime=(uint16_t)(
+                   seed%3u==0u?8u:seed%3u==1u?23u:1000u);
+            const uint16_t transition=(uint16_t)(
+                   seed%4u==0u?100u:seed%4u==1u?700u:
+                   seed%4u==2u?1200u:20000u);
+            const uint16_t sec=(uint16_t)(ms/1000u);
+            const uint16_t last=sec<expected.lastChange?0u:expected.lastChange;
+            const bool due=(uint32_t)sec>(uint32_t)last+interval;
+            SourcePalette48 candidate=expected.target;
+            if(due){
+                ot_wled_palette16_t current{};
+                std::memcpy(&current,&expected.current,sizeof(current));
+                uint8_t type=0xffu;
+                const CRGBPalette16 pal=sourceHarmonicPalette(
+                                       current,&source,&type);
+                for(unsigned i=0;i<16u;i++){
+                    candidate.entries[i].r=pal.entries[i].r;
+                    candidate.entries[i].g=pal.entries[i].g;
+                    candidate.entries[i].b=pal.entries[i].b;
+                }
+                ++generations;
+            }
+            source_handleRandomPalette(expected,ms,interval,
+                                       frametime,transition,candidate);
+            if(!ot_wled_palette_global_tick(&live,ms,interval,frametime,
+                        transition,true,nextPaletteByte,&actual)||
+               source.draws!=actual.draws||
+               std::memcmp(&live.current,&expected.current,
+                           sizeof(expected.current))!=0||
+               std::memcmp(&live.target,&expected.target,
+                           sizeof(expected.target))!=0||
+               live.last_change_s!=expected.lastChange||
+               live.next_blend_ms!=expected.nextBlend){
+                std::fprintf(stderr,
+                   "Harmonic global lifecycle mismatch seed=%u ms=%u draw=%u/%u last=%u/%u next=%u/%u\\n",
+                   seed,(unsigned)ms,(unsigned)actual.draws,
+                   (unsigned)source.draws,(unsigned)live.last_change_s,
+                   (unsigned)expected.lastChange,(unsigned)live.next_blend_ms,
+                   (unsigned)expected.nextBlend);
+                std::abort();
+            }
+            ++frames;
+        }
+    }
+    std::printf("Pinned harmonic global lifecycle: %u independently sourced frames, %u regeneration events, exact RNG-byte counts, RGB and 16-bit blend timing PASS.\\n",
+             frames,generations);
+}
+
 static void certifyGlobalHardwarePaletteProducer() {
     GlobalPaletteByteStream stream{};
     for(unsigned i=0;i<256u;i++)
@@ -6096,6 +6173,7 @@ static void certifyPinnedGammaRgbStage(){
 
 int main() {
     certifyPinnedHarmonicPalette();
+    certifyHarmonicGlobalSchedulerAgainstSource();
     certifyPinnedGammaRgbStage();
     certifyGlobalHardwarePaletteProducer();
     certifyLivePaletteInjection();
