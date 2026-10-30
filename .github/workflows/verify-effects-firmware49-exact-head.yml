@@ -1,0 +1,70 @@
+name: Verify Effects OEM safety against exact Firmware 49 commit
+on:
+  pull_request:
+    branches: [firmware/finalization-revisions-v2]
+  workflow_dispatch:
+permissions:
+  contents: read
+# Effects-owned host/build evidence only. Release and physical safety gates
+# are deliberately not changed, triggered or bypassed by this workflow.
+jobs:
+  effects-oem-exact-head:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'effects/firmware49-safety-render-contract-20261030'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Assert exact effects integration commit
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Effects exact head: $EXPECTED_SHA"
+      - name: Run complete CORE host, 120 source goldens, OEM/FX matrix, NVS and trigger regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Run independent historical change-impact audit
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  effects-espidf-exact-head:
+    needs: effects-oem-exact-head
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same immutable commit as host
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "ESP-IDF exact head: $EXPECTED_SHA"
+      - name: ESP32-S3 CORE with ESP-IDF v5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Validate app, bootloader, partition, flasher manifest (NO FLASH)
+        run: |
+          set -euo pipefail
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d=Path("core-firmware/build")
+          files=json.loads((d/"flasher_args.json").read_text())["flash_files"]
+          assert len(files)>=3
+          for image in files.values():
+              assert (d/image).is_file() and (d/image).stat().st_size>0
+          print("Exact SHA, ESP32-S3 manifest verified; no device was flashed")
+          PY
