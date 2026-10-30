@@ -203,6 +203,13 @@ typedef struct {
     uint16_t next_blend_ms;
 } ot_wled_palette_random_t;
 
+/* Call once per global FX frame BEFORE drawing HSV/RNG values for palette
+ * ID 1. Matches the pinned source's 16-bit seconds wrap and strict > interval.
+ * Pure/no mutation: all zones share one producer and its resulting snapshot. */
+bool ot_wled_palette_random_generation_due(
+    const ot_wled_palette_random_t *state,uint32_t now_ms,
+    uint16_t change_interval_s);
+
 bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
                                  uint32_t now_ms, uint16_t change_interval_s,
                                  uint16_t frame_time_ms,
