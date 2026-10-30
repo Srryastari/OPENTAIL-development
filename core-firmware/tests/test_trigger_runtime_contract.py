@@ -94,6 +94,19 @@ assert "ot_frame_snapshot_unavailable(" in renderer
 assert "static bool input_init(void)" in core
 assert "boot_enrollment_ready" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
+# An authenticated owner's session must survive rejected or stale
+# secondary central events. Both owner session resets must clear only the
+# trigger GATT's transient last status, never the physical inputs.
+advertise = between(ble, "static void advertise(void){", "static int gap_event(struct ble_gap_event *ev,void *arg){")
+gap = between(ble, "static int gap_event(struct ble_gap_event *ev,void *arg){", "static void on_sync(")
+assert "if(active_conn!=BLE_HS_CONN_HANDLE_NONE)return;" in advertise
+assert "ble_gap_terminate(ev->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM)" in gap
+assert gap.index("if(active_conn!=BLE_HS_CONN_HANDLE_NONE){") < gap.index("active_conn=ev->connect.conn_handle;")
+assert "if(ev->disconnect.conn.conn_handle!=active_conn)return 0;" in gap
+assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < gap.index(
+    "active_conn=BLE_HS_CONN_HANDLE_NONE;")
+assert gap.count("trigger_last_status=0;") == 2
+assert "ot_ble_disconnect_show();" in gap and "live_input_mask=" not in gap
 assert "elf_sha256" in core  # running-image identity, not physical proof
 
 # 7: time-limited logical bench simulation is not a raw pin mask and
