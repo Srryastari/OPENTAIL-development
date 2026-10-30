@@ -5663,19 +5663,26 @@ int main() {
     unsigned mismatched_modes=0;
     for(const RefCase& fx:refs) {
         bool mismatch_reported=false;
-        const std::vector<unsigned> zone_lengths=
-            (fx.id==89u || fx.id==44u || fx.id==90u ||
-             fx.id==104u || fx.id==110u || fx.id==113u) ?
+        const bool already_extended=(fx.id==89u || fx.id==44u ||
+             fx.id==90u || fx.id==104u || fx.id==110u || fx.id==113u);
+        const std::vector<unsigned> zone_lengths=already_extended ?
             std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
-            std::vector<unsigned>{2u,3u,7u,16u,31u};
+            std::vector<unsigned>{2u,3u,7u,16u,31u,522u};
         for(unsigned count: zone_lengths) {
+            /* New long-zone coverage is deliberately a representative
+             * profile, not the entire Cartesian product of parameters.
+             * Previously comprehensive 522-pixel cases remain unchanged. */
+            const bool new_long_profile=count==522u && !already_extended;
             if(fx.id==82u && count<5u)continue;
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
             /* Add near-zero and near-maximum register values: branch behavior
              * often differs at 1 and 254 even when 0 and 255 pass. */
             for(unsigned speed:{0u,1u,16u,127u,254u,255u}) {
+                if(new_long_profile && speed!=127u && speed!=255u)continue;
                 for(unsigned intensity:{0u,1u,64u,128u,200u,254u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+                    if(new_long_profile && intensity!=128u && intensity!=255u)continue;
+                    const std::vector<uint8_t> palette_ids=new_long_profile?
+                      std::vector<uint8_t>{0u}:(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
                     /* A second independent scene exercises zero-background
                      * and saturated channel paths that the original warm
@@ -5684,6 +5691,7 @@ int main() {
                     /* Compare 8ms high-FPS, 23ms reference, and slower 42ms
                      * source render cadences without bypassing any test. */
                     for(unsigned frame_time_ms:{8u,23u,42u}) {
+                    if(new_long_profile && frame_time_ms!=23u)continue;
                     source_frame_time_ms=(uint16_t)frame_time_ms;
                     const uint32_t fg=color_case?0x00ff0000u:0x007b3809u;
                     const uint32_t bg=color_case?0x00000000u:0x000358aeu;
