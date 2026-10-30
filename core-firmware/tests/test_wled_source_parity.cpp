@@ -3924,11 +3924,14 @@ void mode_sparkle(void) {
   SEGMENT.setPixelColor(SEGENV.aux0, SEGCOLOR(0));
 }
 
+#define ULTRAWHITE 0x00FFFFFFu /* pinned WLED RGB-only host definition */
 void mode_solid_glitter()
 {
   SEGMENT.fill(SEGCOLOR(0));
   glitter_base(SEGMENT.intensity, SEGCOLOR(2) ? SEGCOLOR(2) : ULTRAWHITE);
 }
+
+#undef ULTRAWHITE
 
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
