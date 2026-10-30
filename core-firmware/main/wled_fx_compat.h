@@ -155,6 +155,13 @@ bool ot_wled_palette_build(uint8_t id, ot_wled_rgb_t primary,
  * or change current fixed-palette selection/transport semantics. */
 bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
                                ot_wled_palette16_t *out);
+/* Source fastled_slim.h loadDynamicGradientPalette(): 2–18 sorted
+ * [index,R,G,B] stops, last index=255. No JSON, NVS, BLE or ID allocation
+ * is performed here; external profile/transport owns those contracts.
+ * Invalid data fails atomically without changing *out. */
+bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
+                                          size_t stop_count,
+                                          ot_wled_palette16_t *out);
 ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
