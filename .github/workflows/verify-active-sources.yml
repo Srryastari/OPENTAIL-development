@@ -167,51 +167,36 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android SDK command line tools
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Validate Android WebView JavaScript syntax and output integration contract
+      - name: Verify native Compose source, BLE contract and offline editor
         run: |
-          node --check android/qa/test_unified_ble_fx.cjs
-          node android/qa/test_unified_ble_fx.cjs
-          node --check android/app/src/main/assets/ble-output-panel.js
-          node --check android/app/src/main/assets/output-control-motion.js
-          node --check android/app/src/main/assets/direct-ble-dashboard.js
-          node android/qa/test_ble_output_pending.cjs
-          node - <<'JS'
-          const fs=require('fs'),assert=require('assert');
-          const ble=fs.readFileSync('android/app/src/main/assets/ble-output-panel.js','utf8');
-          const ui=fs.readFileSync('android/app/src/main/assets/output-control-motion.js','utf8');
-          assert(ble.includes("getSelectedIndex(){return selected;}"),'BLE selected index API missing');
-          assert(ble.includes("announceSelection();load(selected);"),'Selection event must precede reload');
-          assert(!ui.includes("manager.before(card)") && !ui.includes("let mode='independent',target='one';"),
-            'Unimplemented Output Control development card must not be injected');
-          assert(ble.includes('main.append(node)'), 'Functional BLE manager must follow the approved Layout editor');
-          console.log('Android WebView integration contract checks passed (static checks only).');
-          JS
-      - name: Run full Android release contract audit
-        run: python3 android/qa/check_release.py
-      - name: Compile debug APK
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - name: Native Kotlin/Java debug unit tests
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Build native Android debug APK
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
-      - name: Read Android version from Gradle
+      - name: Read native Android version
         id: apk-version
         shell: bash
         run: |
           version=$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+['\"]([^'\"]+)['\"].*/\\1/p" android/app/build.gradle | head -n 1)
           test -n "$version" || { echo 'Missing Android versionName'; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Name debug APK using its actual version
-        shell: bash
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "android/app/build/outputs/apk/debug/opentail-android-v${{ steps.apk-version.outputs.version }}-debug.apk"
+      - name: Name the APK using actual Gradle version
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "android/app/build/outputs/apk/debug/opentail-native-android-v${{ steps.apk-version.outputs.version }}-debug.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: opentail-android-v${{ steps.apk-version.outputs.version }}-debug-apk
-          path: android/app/build/outputs/apk/debug/opentail-android-v${{ steps.apk-version.outputs.version }}-debug.apk
+          name: opentail-native-android-v${{ steps.apk-version.outputs.version }}-debug-apk
+          path: android/app/build/outputs/apk/debug/opentail-native-android-v${{ steps.apk-version.outputs.version }}-debug.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -219,64 +204,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run standalone Studio UI and interaction regressions
+      - name: Run standalone Studio UI and offline authoring regressions
         run: node --test web-studio/tests/*.test.cjs
-      - name: Check deployment and versioned Studio copies
+      - name: Verify deployed Studio remains independent of native Android
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          a=Path('web-studio/opentail.htm').read_bytes()
-          b=Path('web-studio/opentail-v0.19.118.htm').read_bytes()
-          assert a == b, 'Stable and versioned Studio copies differ'
-          bundled=Path('android/app/src/main/assets/opentail.htm').read_bytes()
-          assert a == bundled, 'Android APK bundles a stale Studio file'
-          assert b'OpenTail Studio v0.19.118' in a, 'Unexpected Studio version'
-          print('All Studio copies match (web deployment, versioned, Android bundle).')
-          PY
-      - name: Validate Studio JavaScript and offline pixel preview
-        run: |
-          python3 - <<'PY'
           import re
-          from pathlib import Path
-          html=Path('web-studio/opentail.htm').read_text()
+          a=Path('web-studio/opentail.htm').read_bytes()
+          b=Path('web-studio/opentail-v0.19.120.htm').read_bytes()
+          assert a == b, 'Stable and versioned Studio copies differ'
+          assert not Path('android/app/src/main/assets/opentail.htm').exists(), 'Native Android must not bundle Studio HTML'
+          assert not Path('android/app/src/main/assets/unified-shell.js').exists(), 'Native Android must not bundle WebView shell'
+          assert b'OpenTail Studio v0.19.120' in a, 'Unexpected Studio version'
+          html=a.decode()
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',html,flags=re.S)
-          assert len(scripts)>=1, 'No Studio scripts found'
-          for i,src in enumerate(scripts):
-              Path(f'/tmp/opentail-script-{i}.js').write_text(src)
-          print('Extracted',len(scripts),'Studio scripts')
+          assert scripts, 'No standalone Studio script'
+          for i,src in enumerate(scripts): Path(f'/tmp/opentail-script-{i}.js').write_text(src)
+          print('Standalone Studio source remains versioned and independent from the native Android app')
           PY
           for file in /tmp/opentail-script-*.js; do node --check "$file"; done
-          node --check web-studio/tests/offline-trigger-preview.test.cjs
-          node web-studio/tests/offline-trigger-preview.test.cjs
-          node --check web-studio/tests/layout-history.test.cjs
-          node web-studio/tests/layout-history.test.cjs
-          node --check web-studio/tests/offline-trigger-panel.test.cjs
-          node web-studio/tests/offline-trigger-panel.test.cjs
-          node --check web-studio/tests/pixel-direction-and-ui.test.cjs
-          node web-studio/tests/pixel-direction-and-ui.test.cjs
-          node --check web-studio/tests/exact-live-indexed.test.cjs
-          node web-studio/tests/exact-live-indexed.test.cjs
-          node --check web-studio/tests/approved-chat-ui.test.cjs
-          node web-studio/tests/approved-chat-ui.test.cjs
-          node --check android/app/src/main/assets/unified-shell.js
-          node android/qa/test_unified_shell.js
-          node - <<'JS'
-          const fs=require('node:fs'),assert=require('node:assert/strict');
-          const shell=fs.readFileSync('android/app/src/main/assets/unified-shell.js','utf8');
-          const studio=fs.readFileSync('web-studio/opentail.htm','utf8');
-          const gradle=fs.readFileSync('android/app/build.gradle','utf8');
-          assert(shell.includes("const showing=route==='home';"),'Android shell still hides approved Layout or Triggers behind a summary');
-          assert(studio.includes('builder:()=>builder()+')&&studio.includes('layout:()=>layout()+'),
-            'CORE full editors must appear before advanced hardware panels');
-          assert(studio.includes('CORE physical trigger input mapping · Advanced'));
-          assert(studio.includes('CORE hardware output mapping · Advanced'));
-          const scene=studio.slice(studio.indexOf('function scenes(){'),studio.indexOf('let otPresetEditorId=null;'));
-          assert(scene.indexOf('ot-subnav')>=0 && scene.indexOf('ot-subnav')<scene.indexOf('otPixelPreview()') &&
-            scene.indexOf('otPixelPreview()')<scene.indexOf("otSub==='Effects'"),
-            'Approved Show Modes order: Effects/Sequences/Presets then preview then inline editor');
-          assert(!scene.includes('otNativeShowPanel()') && scene.includes('otBleFxMode()'),
-            'One Show Modes editor must own CORE Bluetooth effects; no second native picker');
-          assert(shell.includes('Android v0.1.29')&&gradle.includes("versionName '0.1.29'"),
-            'Android app and shell version must match');
-          console.log('Android editor routing and version assertions passed (static).');
-          JS

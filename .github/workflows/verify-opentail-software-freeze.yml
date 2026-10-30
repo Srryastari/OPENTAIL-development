@@ -1,0 +1,141 @@
+name: OpenTail final software candidate exact HEAD (not physical release)
+on:
+  pull_request:
+    branches: [firmware/finalization-revisions-v2]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  immutable-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert single exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Verify all four approved source trees and untouched release gate
+        run: python3 scripts/check_final_software_contracts.py
+      - name: Ensure Android is native and separate from Studio
+        run: |
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+  core-effects-triggers-nvs:
+    needs: immutable-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: CORE full host suite plus Trigger 48 and Effects 50 regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Change-impact audit without release waiver
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+  esp32s3-exact-build:
+    needs: core-effects-triggers-nvs
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert same exact source SHA as host
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF v5.5.5 / ESP32-S3 native compile (no flash)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify bootloader, app, partition and flasher manifest
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path('core-firmware/build')
+          for x in ('opentail_core_alpha.bin','bootloader/bootloader.bin',
+                    'partition_table/partition-table.bin','flasher_args.json'):
+              assert (b/x).is_file() and (b/x).stat().st_size>0,x
+          files=json.loads((b/'flasher_args.json').read_text())['flash_files']
+          assert len(files)>=3 and all((b/x).is_file() for x in files.values())
+          print("ESP32-S3 build manifest complete; no hardware flashed")
+          PY
+  native-android-exact:
+    needs: immutable-provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert composite HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - uses: actions/checkout@v4
+        with:
+          ref: adcdff0b2f43061bc3e222d1d77de0a34b095c0a
+          path: pinned-core49
+      - uses: actions/checkout@v4
+        with:
+          ref: e44a98fcaa51ecbf5e9c15bf85b8d129adb4e1a9
+          path: pinned-trigger48
+      - uses: actions/checkout@v4
+        with:
+          ref: 1767b144e193ed6978816899ebb5eba237ee6e2d
+          path: pinned-effects50
+      - name: Independently pin Android BLE/REST and 120-mode CORE ABI
+        run: python3 android/qa/check_pinned_core49_contract.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Native Compose unit tests
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Build native Android APK
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-final-software-native-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+  standalone-studio-exact:
+    needs: immutable-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Standalone Studio UI regression suite
+        run: node --test web-studio/tests/*.test.cjs
+
+# Passing this workflow is software-only. Required physical release-evidence
+# job in verify-active-sources.yml remains unchanged and fail-closed.
