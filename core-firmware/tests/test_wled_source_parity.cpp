@@ -4546,6 +4546,27 @@ void mode_washing_machine(void) {
   }
 }
 
+void tricolor_chase(uint32_t color1, uint32_t color2) {
+  uint32_t cycleTime = 50 + ((255 - SEGMENT.speed)<<1);
+  uint32_t it = strip.now / cycleTime;  // iterator
+  unsigned width = (1 + (SEGMENT.intensity>>4)); // value of 1-16 for each colour
+  unsigned index = it % (width*3);
+
+  for (unsigned i = 0; i < SEGLEN; i++, index++) {
+    if (index > (width*3)-1) index = 0;
+
+    uint32_t color = color1;
+    if (index > (width<<1)-1) color = SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1);
+    else if (index > width-1) color = color2;
+
+    SEGMENT.setPixelColor(SEGLEN - i -1, color);
+  }
+}
+
+void mode_tricolor_chase(void) {
+  tricolor_chase(SEGCOLOR(2), SEGCOLOR(0));
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4647,6 +4668,7 @@ static const RefCase refs[]={
     {110,mode_flow,"Flow"},
     {104,mode_sunrise,"Sunrise"},
     {113,mode_washing_machine,"Washing Machine"},
+    {54,mode_tricolor_chase,"Chase 3"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
