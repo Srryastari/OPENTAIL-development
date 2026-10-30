@@ -38,6 +38,7 @@
 #include "arbitration_logic.h"
 #include "output_manager.h"
 #include "trigger_manager.h"
+#include "ot_config_journal.h"
 #include "nvs.h"
 #include "esp_timer.h"
 #include "esp_random.h"
@@ -121,6 +122,8 @@ static uint16_t om_revision[OT_OM_OUTPUTS];
 static ot_tm_profile_t tm_profile;
 static ot_tm_pending_t tm_deferred; /* Persisted mapping awaits release. */
 static bool tm_persistent=false;
+/* Invalid newer journal records must fail closed, not silently migrate stale NVS. */
+static bool config_recovery_fault=false;
 static uint16_t tm_revision=1u;
 typedef struct {
     uint32_t magic, version;
@@ -128,10 +131,35 @@ typedef struct {
 } ot_tm_store_t;
 static void tm_load(void){
     ot_tm_defaults(&tm_profile);
+    tm_persistent=false;
     nvs_handle_t h;
-    if(nvs_open("ot_trig_cfg",NVS_READONLY,&h)!=ESP_OK){tm_persistent=false;return;}
-    ot_tm_store_t stored={0};size_t size=sizeof(stored);
-    esp_err_t e=nvs_get_blob(h,"profile_v1",&stored,&size);
+    if(nvs_open("ot_trig_cfg",NVS_READONLY,&h)!=ESP_OK)return;
+    size_t size=0;
+    esp_err_t e=nvs_get_blob(h,"pair_v1",NULL,&size);
+    if(e!=ESP_ERR_NVS_NOT_FOUND){
+        ot_cfg_tm_journal_t pair={0};
+        ot_tm_profile_t requested={0};
+        bool valid=e==ESP_OK&&size==sizeof(pair);
+        if(valid)valid=nvs_get_blob(h,"pair_v1",&pair,&size)==ESP_OK &&
+                       ot_cfg_tm_unpack(&pair,&tm_profile,&requested);
+        nvs_close(h);
+        if(valid){
+            tm_deferred.profile=requested;
+            tm_deferred.pending=memcmp(&tm_profile,&requested,sizeof(requested))!=0;
+            tm_persistent=true;
+            return;
+        }
+        /* An invalid newer record may represent a torn or corrupt write.
+         * Never activate a stale legacy profile or arbitrary default mapping. */
+        memset(&tm_profile,0,sizeof(tm_profile));
+        config_recovery_fault=true;
+        ESP_LOGE(TAG,"Invalid durable trigger recovery journal; all trigger routes disabled");
+        return;
+    }
+    /* Legacy migration is read-only. The first new save writes the paired
+     * journal atomically, preserving the legacy record as a fallback artifact. */
+    ot_tm_store_t stored={0};size=sizeof(stored);
+    e=nvs_get_blob(h,"profile_v1",&stored,&size);
     nvs_close(h);
     tm_persistent=e==ESP_OK && size==sizeof(stored) &&
         stored.magic==OT_TM_MAGIC && stored.version==OT_TM_VERSION && ot_tm_valid(&stored.profile);
@@ -139,11 +167,11 @@ static void tm_load(void){
     else ESP_LOGI(TAG,"No valid trigger profile; preserving original IN1..IN8 defaults");
 }
 static bool tm_save(const ot_tm_profile_t *p){
-    if(!ot_tm_valid(p))return false;
-    ot_tm_store_t stored={.magic=OT_TM_MAGIC,.version=OT_TM_VERSION,.profile=*p};
+    ot_cfg_tm_journal_t pair={0};
+    if(!ot_cfg_tm_pack(&tm_profile,p,&pair))return false;
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"profile_v1",&stored,sizeof(stored));
+    esp_err_t e=nvs_set_blob(h,"pair_v1",&pair,sizeof(pair));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
@@ -171,6 +199,26 @@ static void om_load(void){
     om_persistent=false;
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READONLY,&h)!=ESP_OK)return;
+    size_t pair_size=0;
+    esp_err_t pair_error=nvs_get_blob(h,"pair_v1",NULL,&pair_size);
+    if(pair_error!=ESP_ERR_NVS_NOT_FOUND){
+        ot_cfg_om_journal_t pair={0};
+        ot_om_output_t requested[OT_OM_OUTPUTS]={0};
+        bool valid=pair_error==ESP_OK&&pair_size==sizeof(pair);
+        if(valid)valid=nvs_get_blob(h,"pair_v1",&pair,&pair_size)==ESP_OK &&
+                       ot_cfg_om_unpack(&pair,om_outputs,requested);
+        nvs_close(h);
+        if(valid){
+            memcpy(om_deferred.outputs,requested,sizeof(requested));
+            om_deferred.pending=memcmp(om_outputs,requested,sizeof(requested))!=0;
+            om_persistent=true;
+            return;
+        }
+        ot_om_defaults(om_outputs); /* Explicitly inert instead of stale legacy. */
+        config_recovery_fault=true;
+        ESP_LOGE(TAG,"Invalid durable output recovery journal; output roles disabled");
+        return;
+    }
     /* A corrupt newer record must not mask the older, previously tested
      * profile. Never erase or rewrite either key during boot migration. */
     const char *const keys[]={"profile_v2","profile"};
@@ -224,11 +272,11 @@ static void om_load(void){
     }
 }
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
-    ot_om_store_t stored={.magic=OT_OM_STORAGE_MAGIC,.version=OT_OM_VERSION};
-    memcpy(stored.outputs,items,sizeof(stored.outputs));
+    ot_cfg_om_journal_t pair={0};
+    if(!ot_cfg_om_pack(om_outputs,items,&pair))return false;
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"profile_v2",&stored,sizeof(stored));
+    esp_err_t e=nvs_set_blob(h,"pair_v1",&pair,sizeof(pair));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
@@ -1563,6 +1611,7 @@ static void input_sampler_task(void *arg){
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
+    unsigned released_samples=0u;
     for(;;){
         bool levels[OT_IN_COUNT];
         uint8_t instantaneous=0;
@@ -1572,15 +1621,21 @@ static void input_sampler_task(void *arg){
             if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
+        /* Do not promote a saved candidate on the first idle GPIO read
+         * after boot or a noisy release: require consecutive clean samples. */
+        if(instantaneous||physical)released_samples=0u;
+        else if(released_samples<OT_DEBOUNCE_TICKS)released_samples++;
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
         /* This is the only deferred activation point. Do not swap mappings
          * while either a raw pin or its settled level is asserted. */
-        if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
-                                   instantaneous,physical))target=render_task_handle;
-        if(ot_om_apply_if_released(om_outputs,&om_deferred,
-                                   instantaneous,physical))target=render_task_handle;
+        if(released_samples>=OT_DEBOUNCE_TICKS){
+            if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
+                                       instantaneous,physical))target=render_task_handle;
+            if(ot_om_apply_if_released(om_outputs,&om_deferred,
+                                       instantaneous,physical))target=render_task_handle;
+        }
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
@@ -1950,6 +2005,7 @@ void app_main(void) {
     tm_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
+    if(config_recovery_fault)ot_st_set_fault("durable config journal corrupt; mappings fail closed");
     const bool inputs_ready=input_init();
     if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
     const bool sampler_ready=inputs_ready &&
