@@ -16,7 +16,10 @@ static bool settings_ok(const ot_ble_fx_packet_t *fx){
  ot_wled_fx_metadata_t info;
  return fx&&ot_effects_1d_metadata(fx->effect_id,&info)&&
    fx->chain_mask>=1&&fx->chain_mask<=3&&fx->zone_mask>=1&&
-   fx->brightness<=32&&ot_palette_1d_supported(fx->effect_id,fx->palette_id)&&fx->ttl_sec>=1&&fx->ttl_sec<=60;
+   fx->brightness<=32&&
+   (ot_palette_1d_supported(fx->effect_id,fx->palette_id)||
+    ot_palette_1d_external_supported(fx->effect_id,fx->palette_id))&&
+   fx->ttl_sec>=1&&fx->ttl_sec<=60;
 }
 bool ot_fx_preset_pack(ot_fx_preset_record_t *rec,const ot_ble_fx_packet_t *fx){
  if(!rec||!settings_ok(fx))return false;
