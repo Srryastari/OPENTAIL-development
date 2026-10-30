@@ -222,7 +222,7 @@ typedef struct {
     uint8_t speed;          /* WLED 0..255 */
     uint8_t intensity;      /* WLED 0..255 (Blink duty-cycle) */
     uint8_t brightness;     /* 0..255 post-effect linear cap; WLED bus brightness is separate */
-    uint8_t palette_id;     /* 0=mode default; 2-72 built-in on palette-enabled effects */
+    uint8_t palette_id;     /* 0=default; 2-72 built-in; 1/73-255 require resolved_palette */
     uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
     ot_wled_rgb_t foreground;
     ot_wled_rgb_t background;
@@ -237,6 +237,10 @@ typedef struct {
     const ot_wled_audio_peak_t *audio_peak; /* nullable, source FX 185 only */
     uint8_t active_segments;   /* FX 90 WLED spark budget, 0=isolated 1D zone */
     uint8_t max_segments;      /* FX 90 WLED spark budget, 0=64 (ESP32-S3) */
+    /* Optional frame-scoped, already resolved global/user palette (ID 1 or
+     * 73-255). Owned by the caller; never retained or modified by CORE.
+     * No wire, persistence, or generation/scheduling behavior is implied. */
+    const ot_wled_palette16_t *resolved_palette;
 } ot_wled_fx_config_t;
 typedef struct {
     uint16_t pos;
