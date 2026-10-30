@@ -4160,6 +4160,15 @@ void mode_multi_comet(void) {
 }
 
 #undef MAX_COMETS
+void mode_fade(void) {
+  unsigned counter = (strip.now * ((SEGMENT.speed >> 3) +10));
+  uint8_t lum = triwave16(counter) >> 8;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), lum));
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4246,7 +4255,8 @@ static const RefCase refs[]={
     {22,mode_hyper_sparkle,"Sparkle+"},
     {17,mode_twinkle,"Twinkle"},
     {111,mode_chunchun,"Chunchun"},
-    {59,mode_multi_comet,"Multi Comet"}
+    {59,mode_multi_comet,"Multi Comet"},
+    {12,mode_fade,"Fade"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
