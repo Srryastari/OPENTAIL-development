@@ -284,6 +284,53 @@ for begin,end,persist in (
     assert op.index("if(!input_sampler_ready)") < op.index(persist)
     assert "tm_gpio_input_mask()" in op
 
+# Combined CORE #38 + Effects #39 final draw-order / role-isolation fence.
+# Host source assertions prevent a future FX port from drawing *over* a
+# physical trigger. They do not certify RMT timing or 12V optocouplers.
+for term in ("ot_palette_runtime_snapshot(", "ot_wled_palette_global_tick(",
+             "ot_effects_1d_render(", "ot_fx_overlay_apply(",
+             "ot_om_trigger_overlay(role,combined,",
+             "ot_frame_snapshot_pixel(", "ot_om_swizzle(c,output->color_order)",
+             "led_strip_set_pixel("):
+    assert renderer.count(term)==1, term
+order = ["ot_palette_runtime_snapshot(", "ot_wled_palette_global_tick(",
+         "ot_effects_1d_render(", "ot_fx_overlay_apply(",
+         "ot_om_trigger_overlay(role,combined,",
+         "ot_frame_snapshot_pixel(", "ot_om_swizzle(c,output->color_order)",
+         "led_strip_set_pixel("]
+assert [renderer.index(x) for x in order]==sorted(renderer.index(x) for x in order)
+assert "native_rendering=decision.show_requested;" in renderer
+assert "if(!trigger_here){" in renderer
+assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
+assert "if(trigger_here)c=ot_om_calibrate(" not in renderer
+assert "slot->overlay.style" in renderer
+# No universal car/body location assumptions; all output zones use active
+# user-specified lengths, not predetermined left/right or trunk zones.
+assert "ot_om_section_next(output,&zone_cursor,px)" in renderer
+assert "for(unsigned px=0;px<output->active_pixels;++px)" in renderer
+assert "local_tm=tm_profile;" in renderer
+assert "combined=ot_tm_resolve(&local_tm,physical);" in renderer
+
+# BLE and palette-v3 additions cannot bypass trigger save admission or retain
+# in-flight palette mutation across invalid owner reauthorization / disconnect.
+mutation=between(core, "bool ot_ble_palette_mutation_begin(void){",
+                 "bool ot_ble_palette_in_use(")
+for term in ("input_sampler_ready", "om_write_mutex",
+             "tm_gpio_input_mask()!=0", "om_deferred.pending",
+             "tm_deferred.pending", "live_input_mask!=0"):
+    assert term in mutation, term
+assert "if(busy)xSemaphoreGive(om_write_mutex);" in mutation
+assert "if(changed)request_render_refresh();" in mutation
+assert "ot_palette_ble_session_reset();" in revoke
+assert gap.count("ot_palette_ble_session_reset();")==2
+# The palette-v3 GATT must not change the existing 11-byte trigger write
+# or 15-byte owner-authorized trigger readback.
+assert "OT_TM_BLE_WRITE_BYTES (3u+OT_IN_COUNT)" in (
+    root / "trigger_manager.h").read_text()
+assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (
+    root / "trigger_manager.h").read_text()
+assert "ot_tm_ble_decode(" in gatt and "ot_tm_ble_encode(" in gatt
+
 # 10–11: hardware proof remains explicitly required, not encoded as a host PASS.
 assert "OT_INPUT_ACTIVE_LOW 1" in board  # provisional bench assumption
 assert "BENCH ONLY" in core or "BENCH ONLY" in board
