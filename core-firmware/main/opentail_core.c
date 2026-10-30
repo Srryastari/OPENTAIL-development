@@ -61,6 +61,15 @@ static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGH
 static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
+/* Control-plane Stop must wake the render owner instead of waiting for the
+ * next adaptive frame timer. All strip writes still belong to led_task. */
+static void request_render_refresh(void){
+    TaskHandle_t task=NULL;
+    portENTER_CRITICAL(&state_lock);
+    task=render_task_handle;
+    portEXIT_CRITICAL(&state_lock);
+    if(task)xTaskNotifyGive(task);
+}
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -603,6 +612,7 @@ static esp_err_t show_stop(httpd_req_t *r){
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"active\":false}");
 }
@@ -860,7 +870,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
 }
 void ot_ble_stop_show(void){
     const TickType_t now=xTaskGetTickCount();
-    bool stopped=false;
+    bool stopped=false,refresh_requested=false;
     portENTER_CRITICAL(&state_lock);
     /* STOP cancels all active BLE-owned zones, including a scene whose
      * ownership bit was cleared during a pending disconnect. A genuine
@@ -872,13 +882,15 @@ void ot_ble_stop_show(void){
         native_show.mode=OT_SHOW_OFF;
         native_show_deadline=now;
         stop_request_generation++;
-        stopped=true;
+        stopped=true;refresh_requested=true;
     }else if(native_show.mode==OT_SHOW_OFF || !show_window(now)){
         /* Stop may be pressed after the 60-second FX timeout. Record the
          * requested post-stop refresh even when no show is still owned. */
         stop_request_generation++;
+        refresh_requested=true;
     }
     portEXIT_CRITICAL(&state_lock);
+    if(refresh_requested)request_render_refresh();
     /* Restore the previous status indication immediately, rather than
      * leaving a stale rainbow until the next BLE preview TTL expires. */
     if(stopped)ot_st_show_active(false);
@@ -996,6 +1008,7 @@ void ot_ble_disconnect_show(void){
  enabled_after=ble_fx_enabled;
  active_after=show_window(xTaskGetTickCount());
  portEXIT_CRITICAL(&state_lock);
+ if(owned_before)request_render_refresh();
  ESP_LOGI(TAG,"BLE disconnect cleanup: owned=%d->%d enabled=%d->%d active_after=%d",
           owned_before,owned_after,enabled_before,enabled_after,active_after);
 }
@@ -1145,6 +1158,7 @@ static esp_err_t stop_post(httpd_req_t *r) {
     native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
