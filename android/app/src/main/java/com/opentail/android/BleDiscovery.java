@@ -97,7 +97,7 @@ final class BleDiscovery {
     void cancelFrameCapture() { frameCapture.abortForStop(); }
     boolean captureFrame(int output) {
         if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return false;}
-        if(frameCapture.busy() || frameCallbackPending || cfgBusy || writePending ||
+        if(frameCapture.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||
            readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending) {
             notifyStatus("BLE busy; retry frame capture");return false;
         }
@@ -222,7 +222,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void readFxCapabilities(){
         if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
@@ -268,23 +268,22 @@ final class BleDiscovery {
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     /** Returns true when an output save enters the GATT transaction; only readback proves application. */
     boolean saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
         cfgExpected=Arrays.copyOf(cfgBytes,cfgBytes.length);
         cfgBusy=true;cfgSaving=true;cfgIndex=index;cfgPhase=3;cfgOffset=0;
         cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];
-        cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
+        return cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
                 (byte)cfgCrc,(byte)(cfgCrc>>8),(byte)cfgRevision,(byte)(cfgRevision>>8)});
-        return true;
     }
     private void cfgNotify(boolean ok,String message,org.json.JSONObject output,int index){
         if(configListener==null)return;
@@ -306,8 +305,8 @@ final class BleDiscovery {
         cfgWatchdog++;cfgNotify(false,message,null,index);pumpQueue();
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
-    private void cfgSend(byte[] packet){
-        if(!cfgBusy||gatt==null||cfgCommand==null){cfgFail("Bluetooth disconnected during configuration");return;}
+    private boolean cfgSend(byte[] packet){
+        if(!cfgBusy||gatt==null||cfgCommand==null){cfgFail("Bluetooth disconnected during configuration");return false;}
         cfgWaitingWrite=true;cfgWaitingRead=false;
         int watchdog=++cfgWatchdog;
         ui.postDelayed(()->{if(cfgBusy&&cfgWatchdog==watchdog)cfgFail("BLE operation timed out; reload output before retrying");},8000L);
@@ -315,8 +314,9 @@ final class BleDiscovery {
             boolean ok;
             if(Build.VERSION.SDK_INT>=33)ok=gatt.writeCharacteristic(cfgCommand,packet,BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
             else{cfgCommand.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);cfgCommand.setValue(packet);ok=gatt.writeCharacteristic(cfgCommand);}
-            if(!ok)cfgFail("BLE configuration write did not start");
-        }catch(SecurityException ex){cfgFail("Bluetooth permission missing");}
+            if(!ok){cfgFail("BLE configuration write did not start");return false;}
+            return true;
+        }catch(SecurityException ex){cfgFail("Bluetooth permission missing");return false;}
     }
     @SuppressWarnings("MissingPermission")
     private void cfgWritten(BluetoothGatt connection,int status){
@@ -432,7 +432,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
@@ -443,7 +443,7 @@ final class BleDiscovery {
     void authorizeStored(){
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
         try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
@@ -742,7 +742,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
