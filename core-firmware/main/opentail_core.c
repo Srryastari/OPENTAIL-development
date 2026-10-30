@@ -1361,10 +1361,10 @@ static void led_task(void *p) {
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
-    /* WLED has exactly ONE random palette for all active segments. The
-     * pinned non-harmonic generator is deliberately selected here; harmonic
-     * generation remains a separate source-parity gate, not an approximation.
-     * Initialize both source palettes from ESP32 hardware RNG at task start. */
+    /* WLED has exactly ONE random palette shared across active segments.
+     * Generate the two source boot palettes, then use the pinned default
+     * harmonic source mode on subsequent once-per-frame transitions.
+     * Hardware RNG draws are never performed independently per zone. */
     ot_wled_palette_random_t global_palette={0};
     if(!ot_wled_palette_global_init(&global_palette,
                                    ot_palette_hardware_byte,NULL)){
@@ -1443,7 +1443,7 @@ static void led_task(void *p) {
                const uint16_t source_frame_ms=(uint16_t)(
                    frame_delta_ms<8u?8u:frame_delta_ms>1000u?1000u:frame_delta_ms);
                if(!ot_wled_palette_global_tick(&global_palette,frame_ms,
-                     5u,source_frame_ms,750u,ot_palette_hardware_byte,NULL))
+                     5u,source_frame_ms,750u,true,ot_palette_hardware_byte,NULL))
                    ot_st_set_fault("global effect palette advance failed");
            }
            const int64_t fx_started_us=esp_timer_get_time();
