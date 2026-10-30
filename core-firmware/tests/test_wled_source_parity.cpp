@@ -1376,10 +1376,6 @@ uint16_t perlin16(uint32_t x, uint32_t y, uint32_t z) {
   return ((perlin3D_raw(x, y, z) * 1731) >> 10) + 33147; //scale to 16bit and offset (fastled range: about 4766 to 60840)
 }
 
-uint8_t perlin8(uint16_t x) {
-  return (((perlin1D_raw((uint32_t)x << 8, true) * 1353) >> 10) + 32769) >> 8; //scale to 16 bit, offset, then scale to 8bit
-}
-
 uint8_t perlin8(uint16_t x, uint16_t y) {
   return (((perlin2D_raw((uint32_t)x << 8, (uint32_t)y << 8, true) * 1620) >> 10) + 32771) >> 8; //scale to 16 bit, offset, then scale to 8bit
 }
