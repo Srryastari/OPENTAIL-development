@@ -485,11 +485,8 @@ bool ot_wled_palette_generate_harmonic(const ot_wled_palette16_t *base,
         hsv[i*3u+1u]=ot_palette_hw_range(draw,context,200u,255u);
         hsv[i*3u+2u]=ot_palette_hw_range(draw,context,220u,255u);
     }
+    hsv[10u]=ot_palette_hw_range(draw,context,20u,255u);
     hsv[11u]=ot_palette_hw_range(draw,context,80u,255u);
-    /* Source writes saturation[3] before value[3]; swap these draws
-     * only for the individual CHSV nested constructor, not here. */
-    /* The saturation[3] draw is performed before value[3], as upstream. */
-    /* See assignment correction below: each source draw is ordered. */
     for(int i=3;i>0;i--){
         const uint8_t sat_j=ot_palette_hw_range(draw,context,0u,(uint8_t)(i+1));
         ot_palette_swap_byte(&hsv[i*3u+1u],&hsv[sat_j*3u+1u]);
