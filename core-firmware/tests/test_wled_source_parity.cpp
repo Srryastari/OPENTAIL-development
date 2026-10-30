@@ -4042,6 +4042,42 @@ void mode_dynamic_smooth(void) {
   SEGMENT.check1 = old;
  }
 
+/* Pinned Solid and both Sparkle variants (RGB / overlays off). */
+void mode_static(void) {
+  SEGMENT.fill(SEGCOLOR(0));
+}
+
+void mode_flash_sparkle(void) {
+  if (!SEGMENT.check2) for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+  }
+
+  if (strip.now - SEGENV.aux0 > SEGENV.step) {
+    if(hw_random8((255-SEGMENT.intensity) >> 4) == 0) {
+      SEGMENT.setPixelColor(hw_random16(SEGLEN), SEGCOLOR(1)); //flash
+    }
+    SEGENV.step = strip.now;
+    SEGENV.aux0 = 255-SEGMENT.speed;
+  }
+}
+
+void mode_hyper_sparkle(void) {
+  if (!SEGMENT.check2) for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+  }
+
+  if (strip.now - SEGENV.aux0 > SEGENV.step) {
+    if (hw_random8((255-SEGMENT.intensity) >> 4) == 0) {
+      int len = max(1, (int)SEGLEN/3);
+      for (int i = 0; i < len; i++) {
+        SEGMENT.setPixelColor(hw_random16(SEGLEN), SEGCOLOR(1));
+      }
+    }
+    SEGENV.step = strip.now;
+    SEGENV.aux0 = 255-SEGMENT.speed;
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4122,7 +4158,10 @@ static const RefCase refs[]={
     {35,mode_traffic_light,"Traffic Light"},
     {98,mode_percent,"Percent"},
     {7,mode_dynamic,"Dynamic"},
-    {117,mode_dynamic_smooth,"Dynamic Smooth"}
+    {117,mode_dynamic_smooth,"Dynamic Smooth"},
+    {0,mode_static,"Solid"},
+    {21,mode_flash_sparkle,"Sparkle Dark"},
+    {22,mode_hyper_sparkle,"Sparkle+"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
