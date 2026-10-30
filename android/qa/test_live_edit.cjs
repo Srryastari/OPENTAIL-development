@@ -32,7 +32,7 @@ assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx
 
 for(const required of [
   'fun applyTriggerStyle(): Boolean','applyTriggerStyle()','project.assignMany(',
-  'project.styleTriggers(selections, chosenFx, chosenColor)',
+  'project.assignMany(selections,zoneId,!checked)',
   'if (applyTriggerStyle()) editing = false', 'confirmButton = { Pill("Done"',
 ]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
 assert(!triggerBlock.includes('ble.saveOutput('),
