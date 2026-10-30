@@ -65,6 +65,7 @@ python3 tests/test_dev_console_contract.py
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/arbitration_logic.c tests/test_arbitration_logic.c -o /tmp/ot-arb-tests && /tmp/ot-arb-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_output_manager.c -o /tmp/ot-output-tests && /tmp/ot-output-tests
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_config_journal.c main/output_manager.c main/trigger_manager.c main/core_logic.c main/arbitration_logic.c tests/test_config_journal.c -o /tmp/ot-config-journal-tests && /tmp/ot-config-journal-tests
 # Validate two independent board-memory budgets. Neither is a vehicle layout.
 for lane_budget in 1024 3072; do
   cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain -DCONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT="$lane_budget" \
