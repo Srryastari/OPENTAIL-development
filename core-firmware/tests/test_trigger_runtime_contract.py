@@ -337,6 +337,61 @@ assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (
     root / "trigger_manager.h").read_text()
 assert "ot_tm_ble_decode(" in gatt and "ot_tm_ble_encode(" in gatt
 
+# P1 #45: Independent exact-source fence for the corrected durable
+# transaction on Firmware #49. This checks actual ordering and readback;
+# NVS/interrupt power-fault injection is an additional hardware requirement.
+trigger_promotion=between(core,"static void tm_promote(uint32_t epoch){",
+                         "static void om_promote(uint32_t epoch){")
+output_promotion=between(core,"static void om_promote(uint32_t epoch){",
+                        "static void config_activation_task(void *unused){")
+for kind,operation,helper in (
+    ("trigger",trigger_promotion,"ot_tm_apply_if_released("),
+    ("output geometry",output_promotion,"ot_om_apply_if_released("),
+):
+    active_write=operation.index("config_write_active(h,")
+    stage_erase=operation.index("config_clear_stage(h)")
+    after_erase_idle=operation.index("config_activation_idle(epoch)",stage_erase)
+    ram_apply=operation.index(helper)
+    assert active_write < stage_erase < after_erase_idle < ram_apply, (
+        f"{kind}: RAM publication must follow durable stage erasure and "
+        "fresh GPIO/epoch qualification (P1 issue #45)"
+    )
+    assert "if(!config_clear_stage(h))" in operation, kind
+    assert "config_recovery_fault=true;" in operation, kind
+    assert "tm_gpio_input_mask()==0u" in operation, kind
+    assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in operation, kind
+    assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in operation, kind
+    assert "stage.previous_revision" in operation and "stage.candidate_revision" in operation, kind
+
+# On power-loss recovery, an active-only journal still restores previous
+# mapping/geometry and holds the candidate pending; stage deletion does
+# not authorize a fresh boot to change Brake/Turn/Reverse behavior.
+journal=(root / "config_journal.c").read_text(encoding="utf-8")
+for token in ("*live=r->previous;", "pending->profile=r->candidate;",
+              "memcpy(live,r->previous", "memcpy(pending->outputs,r->candidate",
+              "pending->pending=staged!=NULL ||"):
+    assert token in journal, token
+
+trigger_recovery=between(core,"static void tm_journal_load(void){",
+                         "static bool tm_save(")
+output_recovery=between(core,"static void om_journal_load(void){",
+                        "static bool om_save(")
+for token in ("tm_active_revision=r->previous_revision;",
+              "tm_revision=r->candidate_revision;"):
+    assert token in trigger_recovery, token
+for token in ("om_active_revision,r->previous_revision",
+              "om_revision,r->candidate_revision"):
+    assert token in output_recovery, token
+assert 'cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision)' in readback
+assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in readback
+assert "tm_revision==UINT16_MAX" in core
+assert "om_revision[index]==UINT16_MAX" in core
+assert 'expected_config_revision required' in core
+# No wire-layout changes: the same authenticated 11-byte trigger mapping write
+# and 15-byte active-profile readback continue to use the durable edit token.
+assert "OT_TM_BLE_WRITE_BYTES (3u+OT_IN_COUNT)" in (root/"trigger_manager.h").read_text()
+assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (root/"trigger_manager.h").read_text()
+
 # 10–11: hardware proof remains explicitly required, not encoded as a host PASS.
 assert "OT_INPUT_ACTIVE_LOW 1" in board  # provisional bench assumption
 assert "BENCH ONLY" in core or "BENCH ONLY" in board
