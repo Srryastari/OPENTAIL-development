@@ -546,21 +546,10 @@ static uint32_t source_fast_scale(uint32_t c,uint8_t scale) {
   uint32_t wg=(((c>>8)&0x00ff00ffu)*scale)&~0x00ff00ffu;
   return rb|wg;
 }
+/* Blur uses the pinned colors.cpp color_add() default, not the
+ * alternate preserveCR=true path. */
 static uint32_t source_color_add(uint32_t c1,uint32_t c2) {
-  if(c1==0u)return c2;
-  if(c2==0u)return c1;
-  const uint32_t mask=0x00ff00ffu;
-  uint32_t rb=(c1&mask)+(c2&mask);
-  uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
-  if((rb|wg)&0x01000100u) {
-    uint32_t red=rb>>16, blue=rb&0xffffu, white=wg>>16, green=wg&0xffffu;
-    uint32_t top=red>green?(red>blue?red:blue):(green>blue?green:blue);
-    if(white>top)top=white;
-    uint32_t scale=(255u<<8)/top;
-    rb=((rb*scale)>>8)&mask;
-    wg=(wg*scale)&~mask;
-  } else wg<<=8;
-  return rb|wg;
+  return color_add(c1,c2);
 }
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
