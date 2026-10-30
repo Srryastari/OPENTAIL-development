@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -1116,9 +1118,29 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 if (project.zoneCount() > 0)
                     Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                        Pill("Delete Zone", t) {
-                            // Never infer a destructive target from list ordering.
-                            choosingDelete = true
+                        // Icon-only delete action; retains a spoken accessibility label.
+                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(99.dp))
+                            .background(t.raised)
+                            .border(1.dp, t.muted.copy(alpha = 0.28f),
+                                RoundedCornerShape(99.dp))
+                            .semantics { contentDescription = "Delete Zone" }
+                            .clickable {
+                                // Never infer a destructive target from list ordering.
+                                choosingDelete = true
+                            }, contentAlignment = Alignment.Center) {
+                            Canvas(Modifier.size(22.dp)) {
+                                val c = t.fg
+                                val u = size.width / 24f
+                                drawLine(c, Offset(5*u, 7*u), Offset(19*u, 7*u), strokeWidth=2*u)
+                                drawLine(c, Offset(9*u, 4*u), Offset(15*u, 4*u), strokeWidth=2*u)
+                                drawLine(c, Offset(9*u, 4*u), Offset(9*u, 7*u), strokeWidth=2*u)
+                                drawLine(c, Offset(15*u, 4*u), Offset(15*u, 7*u), strokeWidth=2*u)
+                                drawLine(c, Offset(7*u, 9*u), Offset(8*u, 20*u), strokeWidth=2*u)
+                                drawLine(c, Offset(17*u, 9*u), Offset(16*u, 20*u), strokeWidth=2*u)
+                                drawLine(c, Offset(8*u, 20*u), Offset(16*u, 20*u), strokeWidth=2*u)
+                                drawLine(c, Offset(11*u, 10*u), Offset(11*u, 17*u), strokeWidth=1.5f*u)
+                                drawLine(c, Offset(14*u, 10*u), Offset(14*u, 17*u), strokeWidth=1.5f*u)
+                            }
                         }
                     }
             }
