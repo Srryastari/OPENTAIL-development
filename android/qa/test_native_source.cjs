@@ -41,18 +41,8 @@ assert(!fs.existsSync('android/app/src/main/assets/opentail.htm'),
   'No HTML copy may be bundled in the native APK');
 assert(!fs.existsSync('android/app/src/main/assets/unified-shell.js'),
   'No JS navigation overlay may be bundled in the native APK');
-const benchNetwork=fs.readFileSync('android/app/src/main/res/xml/bench_network_security.xml','utf8');
-const benchAuth=fs.readFileSync('android/app/src/main/java/com/opentail/android/BenchWifiSessionAuth.java','utf8');
-assert(manifest.includes('android.permission.INTERNET') &&
-       manifest.includes('android.permission.ACCESS_NETWORK_STATE') &&
-       manifest.includes('android:networkSecurityConfig="@xml/bench_network_security"') &&
-       manifest.includes('android:usesCleartextTraffic="false"') &&
-       benchNetwork.includes('<base-config cleartextTrafficPermitted="false" />') &&
-       benchNetwork.includes('<domain includeSubdomains="false">192.168.4.1</domain>') &&
-       benchAuth.includes('wifi.openConnection(new URL(URL_TEXT))') &&
-       benchAuth.includes('json.optBoolean("bench_only",false)') &&
-       !/URL\s*_TEXT\s*=\s*"https?:\/\/[^"]*(?!192\.168\.4\.1)/.test(''),
-       'Local CORE Wi-Fi session must remain bench-only, host restricted and non-cellular');
+assert(!manifest.includes('android.permission.INTERNET')&&!manifest.includes('usesCleartextTraffic="true"'),
+  'Native offline designer must not request arbitrary network access');
 // Check the actual launch contract, not merely the retained Java source.
 assert(manifest.includes('android:name=".ComposeMainActivity"'), 'Compose is not registered');
 assert(!manifest.includes('android:name=".MainActivity"'), 'Legacy Java UI remains launchable');
@@ -110,7 +100,7 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('3 -> { // Triggers: lightning') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
-assert(bleSource.includes('frameCapture.cancel();palette.reset();cancelBenchSession(); // GATT close may never produce a disconnect callback') &&
+assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
        (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
@@ -367,6 +357,15 @@ assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
        'Repeated authorization must not overlap active ATT operations or waiting STOP');
 
+// The shipped BLE flow must require no Wi-Fi permission or bootstrap.
+assert(!manifest.includes('android.permission.INTERNET') &&
+       !manifest.includes('android.permission.ACCESS_NETWORK_STATE') &&
+       !fs.existsSync('android/app/src/main/java/com/opentail/android/BenchWifiSessionAuth.java') &&
+       !fs.existsSync('android/app/src/main/res/xml/bench_network_security.xml') &&
+       bleSource.includes('BleFxCapabilities.decode(raw)') &&
+       compose.includes('ble.tryReconnect(it)'),
+       'Bluetooth-only CORE discovery, owner reconnect and full FX capability path');
+
 // A capability-read GATT rejection must release a STOP queued during the
 // read. Successful reads already pump the queue through fxRead().
 const capsStart=bleSource.split('void readFxCapabilities(){')[1]?.split('private void fxNotify')[0];
@@ -383,11 +382,11 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        servicesBlock.includes('if (!infoStarted) {') &&
        servicesBlock.includes('ui.post(thisAutoAuth(connection));') &&
        servicesBlock.includes('catch (SecurityException ex)') &&
-       bleSource.includes('if (command!=null && reply!=null)') &&
+       bleSource.includes('if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)') &&
        bleSource.includes('if (status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
        bleSource.includes('finishInfoRead(connection,value,status);') &&
        bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
-       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) {'),
+       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
 // MTU negotiation failures fall through to guarded service discovery.
