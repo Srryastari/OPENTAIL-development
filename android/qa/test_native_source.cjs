@@ -165,6 +165,16 @@ const modes=compose.split('private fun ShowModesPage(t: Tone) {')[1].split('priv
 const events=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
                     .split('private fun SettingsPage(')[0];
 const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+// Locked Layout: Add Zone and Delete Zone stay side-by-side, never a
+// destructive one-tap action. Target selection precedes confirmation.
+assert(layout.includes('Pill("+ Add Zone", t)') &&
+       layout.includes('Pill("Delete Zone", t)') &&
+       layout.includes('var choosingDelete by remember { mutableStateOf(false) }') &&
+       layout.includes('title = { Text("Choose zone to delete") }') &&
+       layout.includes('deleteId = id // use existing second-stage confirmation') &&
+       layout.includes('title = { Text("Remove this zone?") }') &&
+       layout.includes('if (project.removeZone(id)) {'),
+       'Layout Add/Delete placement and two-stage safe zone removal regressed');
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
 for(const required of ['project.previewZoneOffsets(id, n)',
