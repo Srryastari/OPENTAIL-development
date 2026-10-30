@@ -154,21 +154,7 @@ class ComposeMainActivity : ComponentActivity() {
             try {
                 val input = contentResolver.openInputStream(uri)
                     ?: throw java.io.IOException("Cannot open selected document")
-                val data = input.bufferedReader().use { reader ->
-                    // The v4 model rejects files over two million characters.
-                    // Enforce that limit while reading, not after a potentially
-                    // unbounded allocation from a user-selected document.
-                    val text = StringBuilder()
-                    val chunk = CharArray(8192)
-                    while (true) {
-                        val count = reader.read(chunk)
-                        if (count < 0) break
-                        if (text.length + count > 2_000_000)
-                            throw java.io.IOException("Project exceeds 2 MB character limit")
-                        text.append(chunk, 0, count)
-                    }
-                    text.toString()
-                }
+                val data = input.bufferedReader().use(NativeProjectDocumentIo::readBounded)
                 outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
                 refresh()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
