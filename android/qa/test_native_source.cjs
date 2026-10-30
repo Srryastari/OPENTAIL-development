@@ -260,7 +260,8 @@ assert(buildFile.includes("testImplementation 'org.json:json:20240303'"),
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
-assert(bleSource.includes('if (stopped || connection != gatt) {') &&
+assert(bleSource.includes('private volatile BluetoothGatt gatt;') &&
+       bleSource.includes('if (stopped || connection != gatt) {') &&
        (bleSource.match(/if\(stopped \|\| connection!=gatt\)return;/g)||[]).length === 5 &&
        bleSource.includes('final BluetoothGatt owner=gatt;') &&
        bleSource.includes('if(owner==gatt && fxCapabilitiesListener!=null)') &&
