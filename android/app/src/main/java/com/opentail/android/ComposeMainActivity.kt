@@ -1153,6 +1153,34 @@ class ComposeMainActivity : ComponentActivity() {
                         reverse=!reverse
                         applyLiveZone()
                     }
+                    Caption("Output assignment · design draft only", t)
+                    val linkedOutput=z.optInt("physicalOutput",-1)
+                    val linkedSection=z.optInt("physicalSection",-1)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                        Pill("Unassigned",t,linkedOutput==-1) {
+                            if(project.mapZoneToOutputSlot(id,-1,-1))refresh()
+                        }
+                        (0..1).forEach { output ->
+                            Pill("OUT " + (output+1),t,linkedOutput==output) {
+                                if(project.mapZoneToOutputSlot(id,output,
+                                    if(linkedOutput==output) linkedSection.coerceIn(0,7) else 0))refresh()
+                            }
+                        }
+                    }
+                    if(linkedOutput>=0) {
+                        Caption("Section on OUT " + (linkedOutput+1) + " · choose hardware zone",t)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                            (0 until 8).forEach { slot ->
+                                Pill((slot+1).toString(),t,linkedSection==slot) {
+                                    if(project.mapZoneToOutputSlot(id,linkedOutput,slot))refresh()
+                                }
+                            }
+                        }
+                    }
+                    Caption("Linked assignment is local. In CORE Output Manager below, " +
+                        "copy the linked zone into the physical draft and explicitly Save to CORE.",t)
                     Caption("LED preview · indexed dots, not simulated FX", t)
                     ZoneDotPreview(t,n,reverse)
                     val pixelLimit=n.coerceAtLeast(1)-1
@@ -1722,6 +1750,51 @@ class ComposeMainActivity : ComponentActivity() {
                     zoneCountText = n.toString()
                     outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
+                // Bidirectional association: choose a design zone here, or
+                // choose its physical output/section from the expanded design card.
+                val linkedId=(0 until project.zoneCount()).firstOrNull { localIndex ->
+                    val local=project.zone(localIndex)
+                    local?.optInt("physicalOutput",-1)==index &&
+                        local.optInt("physicalSection",-1)==i
+                }?.let { project.zone(it)?.optString("id") }
+                val linkedName=(0 until project.zoneCount()).firstOrNull { localIndex ->
+                    project.zone(localIndex)?.optString("id")==linkedId
+                }?.let { project.zone(it)?.optString("name") }
+                var choosingDesign by remember(index,i) { mutableStateOf(false) }
+                Pill("Design zone: " + (linkedName ?: "Unassigned"),t) {
+                    choosingDesign=!choosingDesign
+                }
+                if(choosingDesign) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        for(localIndex in 0 until project.zoneCount()) {
+                            val local=project.zone(localIndex) ?: continue
+                            val localId=local.optString("id")
+                            Pill(local.optString("name"),t,localId==linkedId) {
+                                val newPixels=local.optInt("length",0)
+                                val newTotal=pixelCount-count+newPixels
+                                if(newPixels !in 1..outputLimit || newTotal !in 1..outputLimit) {
+                                    outputMessage.value="Design zone does not fit this physical output"
+                                } else if(project.mapZoneToOutputSlot(localId,index,i)) {
+                                    // Update only the editable BLE draft; physical
+                                    // outputs do not change until confirmed Save.
+                                    edit { next ->
+                                        val part=next.getJSONArray("zones").getJSONObject(i)
+                                        part.put("name",local.optString("name"))
+                                            .put("pixels",newPixels)
+                                        next.put("pixels",newTotal)
+                                    }
+                                    zoneCountText=newPixels.toString()
+                                    outputCountText=newTotal.toString()
+                                    choosingDesign=false
+                                    structureVersion++
+                                    refresh()
+                                } else outputMessage.value="Could not save local output assignment"
+                            }
+                        }
+                    }
+                }
+                Caption("Physical section link is local until CORE Save/readback.",t)
                 Caption("Lighting role (only CORE assigns trigger priority)", t)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
