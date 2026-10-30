@@ -18,13 +18,15 @@ Status: **bench-only integration**. Firmware owns BLE/HMAC, NVS, profile revisio
 | 4 DELETE | `[3,4,index,base_revision:uint32]` | Reject if active FX references it; store a **revision tombstone** before deleting live palette |
 | 5 QUERY | `[3,5,index]` | Read current metadata, including tombstone revision |
 | 6 ABORT | `[3,6]` | Drop uncommitted transaction |
+| 7 READ | `[3,7,index,offset]` | Read up to six original persisted stop bytes; absent/deleted records are rejected |
 
 Each stop is exactly `[position,R,G,B]`. First position 0, last 255; positions strictly increasing; count 2–18. Uploads expire after 5000 ms from BEGIN. Invalid packets, CRCs, revisions, lengths, unsupported indices and incomplete transfers do not alter the live palette or saved NVS record.
 
 ## Response
 Read characteristic returns 12 bytes:
 `[3,opcode|0x80,index,status,revision:uint32,count,stops_crc:uint16,present]`.
-Status: 0 OK; 1 invalid; 2 referenced/busy; 3 stale revision; 4 persistent-write failure. Querying a missing index returns `present=0`, `revision=0` (or the last committed tombstone revision).
+Status: 0 OK; 1 invalid; 2 referenced/busy; 3 stale revision; 4 persistent-write failure.
+For opcode 7, the same 12-byte response is `[3,0x87,index,status,offset,count,stop_data[up to 6]]`; use QUERY to obtain total `count*4` and checksum. Readback is authorized and NVS-backed, not reconstructed from interpolated renderer pixels. Querying a missing index returns `present=0`, `revision=0` (or the last committed tombstone revision).
 
 ## Persistence and rendering
 - Namespace `ot_palettes`, key `p000`–`p127`; record magic/version, index, count, exact byte length, revision, 72-byte zero-padded stop region, CRC16. Read rejects invalid/tampered records. The entire NVS value is committed before cache swap; commit failure preserves the previous palette.
