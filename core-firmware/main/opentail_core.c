@@ -495,10 +495,8 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
-    const uint8_t pins_after=tm_gpio_input_mask();
     portENTER_CRITICAL(&state_lock);
-    (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
-                            pins_after,live_input_mask);
+    (void)ot_om_stage(&om_deferred,next_all);
     om_persistent=true;om_revision[index]++;
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
@@ -534,10 +532,8 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
-            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
-                                    pins_after,live_input_mask);
+            (void)ot_om_stage(&om_deferred,next_all);
             om_persistent=true;om_revision[index]++;
             portEXIT_CRITICAL(&state_lock);
         }
@@ -581,12 +577,10 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
     if(!code){
         if(!tm_save(next))code=4;
         else {
-            /* NVS is durable, but an input may have asserted while it was
-             * writing. Preserve its OLD mapping until fully released. */
-            const uint8_t pins_after=tm_gpio_input_mask();
+            /* Never activate in a storage writer, even if pins appear idle;
+             * the sampler requires a stable physical release first. */
             portENTER_CRITICAL(&state_lock);
-            (void)ot_tm_saved_apply(&tm_profile,&tm_deferred,next,
-                                    pins_after,live_input_mask);
+            (void)ot_tm_stage(&tm_deferred,next);
             tm_persistent=true;
             tm_revision++;
             portEXIT_CRITICAL(&state_lock);
