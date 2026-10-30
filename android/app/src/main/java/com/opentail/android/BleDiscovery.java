@@ -852,7 +852,16 @@ final class BleDiscovery {
             frameCapture.configure(connection,service.getCharacteristic(FRAME_CMD_UUID),service.getCharacteristic(FRAME_RSP_UUID));
             authorized = false;
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
-            connection.readCharacteristic(info);
+            // The info read is optional discovery metadata. If Android rejects
+            // its ATT start, do not strand owner auto-authorization indefinitely.
+            boolean infoStarted=false;
+            try { infoStarted=connection.readCharacteristic(info); }
+            catch (SecurityException ex) { notifyStatus("Bluetooth permission missing for CORE information read"); }
+            if (!infoStarted) {
+                notifyStatus("CORE information read unavailable; authorization can still proceed");
+                if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
+                    ui.post(thisAutoAuth());
+            }
         }
 
         @Override public void onCharacteristicRead(BluetoothGatt connection, BluetoothGattCharacteristic characteristic,
