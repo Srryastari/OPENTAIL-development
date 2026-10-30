@@ -359,7 +359,12 @@ assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrT
 
 // Imported/restored project names must refresh Compose's remembered field,
 // and a failed zone write must not close the editor or remove confirmation.
-assert(compose.includes('var name by remember(revision.intValue) { mutableStateOf(project.name()) }') &&
+assert(compose.includes('private val projectLoadRevision = mutableIntStateOf(0)') &&
+       compose.includes('var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }') &&
+       compose.includes('private fun refreshLoadedProject()') &&
+       compose.includes('if (imported) refreshLoadedProject()') &&
+       compose.includes('if (restored) refreshLoadedProject()') &&
+       !compose.includes('var name by remember(revision.intValue)') &&
        compose.includes('fun applyLiveZone(): Boolean') &&
        compose.includes('if (applyLiveZone()) editingId = null') &&
        compose.includes('if (project.removeZone(id)) {'),
