@@ -1679,8 +1679,10 @@ class ComposeMainActivity : ComponentActivity() {
                 try {
                     BleConfigCodec.encode(JSONObject(draftText))
                     if (ble.canConfigure()) {
-                        ble.saveOutput(index, draftText)
-                        outputMessage.value = "Save requested · verifying hardware readback"
+                        if (ble.saveOutput(index, draftText))
+                            outputMessage.value = "Save requested · verifying hardware readback"
+                        else
+                            outputMessage.value = "Save request rejected · see BLE status"
                     } else outputMessage.value = "Not authorized — no settings sent"
                 } catch (ex: Exception) {
                     outputMessage.value = "Save rejected: " + (ex.message ?: "invalid draft")
