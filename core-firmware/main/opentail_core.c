@@ -69,6 +69,9 @@ static void request_render_refresh(void){
     portEXIT_CRITICAL(&state_lock);
     if(task)xTaskNotifyGive(task);
 }
+/* Latches successful physical GPIO setup and sampler task creation before
+ * BLE/HTTP configuration endpoints start accepting durable mapping writes. */
+static bool input_sampler_ready=false;
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -396,6 +399,8 @@ static esp_err_t om_post(httpd_req_t *r){
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
+    if(!input_sampler_ready)
+        return respond_err(r,409,"physical input sampler unavailable");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
     /* A freshly asserted optocoupler pin is busy even before debounce. */
@@ -434,6 +439,7 @@ bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
 }
 int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
     if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
+    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
     /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
     const bool raw_active=tm_gpio_input_mask()!=0;
@@ -478,6 +484,7 @@ static uint8_t tm_gpio_input_mask(void){
  * Physical input sampling never takes this mutex and remains BLE-independent. */
 static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_revision){
     if(!ot_tm_valid(next))return 1;
+    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
     if(!om_write_mutex ||
        xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     /* The debounced mask alone has a nominal 40ms assertion blind spot.
@@ -1768,6 +1775,7 @@ void app_main(void) {
     const bool sampler_ready=inputs_ready &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
     if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
     bool outputs_ready=sampler_ready&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
     const bool wifi_started=wifi_ap_init();

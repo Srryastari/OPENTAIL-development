@@ -233,6 +233,24 @@ persist = between(core, "static bool tm_save(", "#define OT_OM_STORAGE_MAGIC")
 assert "nvs_set_blob(" in persist and "nvs_commit(h)" in persist
 assert "tm_load();" in core
 
+# A configured GPIO bank without a live sampler cannot safely authorize
+# a durable trigger or output mapping save. The readiness latch is set
+# after task creation and before either BLE or HTTP service starts.
+boot = between(core, "void app_main(void) {", "\n}")
+assert "static bool input_sampler_ready=false;" in core
+assert "input_sampler_ready=sampler_ready;" in boot
+assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("ble_startup_ready=ot_ble_start();")
+assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("http_startup_ready=wifi_started&&http_start();")
+for begin,end,persist in (
+    ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save(next_all)"),
+    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels", "om_save(next_all)"),
+    ("static int tm_commit(", "bool ot_ble_trigger_get(", "tm_save(next)"),
+):
+    op = between(core,begin,end)
+    assert "if(!input_sampler_ready)" in op
+    assert op.index("if(!input_sampler_ready)") < op.index(persist)
+    assert "tm_gpio_input_mask()" in op
+
 # 10–11: hardware proof remains explicitly required, not encoded as a host PASS.
 assert "OT_INPUT_ACTIVE_LOW 1" in board  # provisional bench assumption
 assert "BENCH ONLY" in core or "BENCH ONLY" in board
