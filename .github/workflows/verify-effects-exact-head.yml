@@ -1,0 +1,74 @@
+name: Certify integrated OpenTail effects at exact commit
+on:
+  pull_request:
+    branches: [effects/source-port-rolling-balls-48]
+  workflow_dispatch:
+permissions:
+  contents: read
+# Separate from the normal release pipeline: this does NOT override the
+# completed-branch/physical-evidence requirement for flash packages.
+jobs:
+  effects-exact-head-host:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'effects/integrated-engine-candidate-20261029'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact PR-head checkout (not synthetic merge)
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "Effects exact commit SHA: $actual"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Run complete CORE host regression at that commit
+        run: |
+          set -euo pipefail
+          cd core-firmware
+          bash tests/run-host-tests.sh
+
+  effects-exact-head-espidf:
+    needs: effects-exact-head-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same exact PR-head commit as host tests
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          echo "ESP-IDF exact commit SHA: $actual"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Compile CORE ESP32-S3 with ESP-IDF 5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify generated ESP32-S3 image and flash manifest
+        run: |
+          set -euo pipefail
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("core-firmware/build")
+          manifest = json.loads((p/"flasher_args.json").read_text())
+          flash_files = manifest.get("flash_files", {})
+          assert isinstance(flash_files, dict) and len(flash_files) >= 3
+          for filename in flash_files.values():
+              image = p/filename
+              assert image.exists() and image.stat().st_size > 0, image
+          print("Exact-head ESP32-S3 manifest/image validation passed")
+          PY

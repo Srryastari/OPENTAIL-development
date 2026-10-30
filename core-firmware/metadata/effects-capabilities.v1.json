@@ -1,0 +1,2448 @@
+{
+  "schema": "opentail.effects-capabilities.v1",
+  "source": {
+    "borrowed_fx_repository": "wled/WLED",
+    "borrowed_fx_commit": "20e7a717664295eefc6ad77972cee1888d2da072",
+    "source_license": "EUPL-1.2-or-later",
+    "opentail_source_commit": "e1278ae073e7057fc62c5f6cb71410310c374096"
+  },
+  "lifecycle": "development_candidate_not_a_firmware_or_hardware_certification",
+  "runtime_gate": {
+    "required_endpoint": "/api/v1/fx/catalog",
+    "require_installed_core_to_advertise_each_effect": true,
+    "offline_catalog_does_not_authorize_physical_playback": true,
+    "require_runtime_validation_of_palettes": true,
+    "requires_measured_audio_effect_ids": [
+      185
+    ]
+  },
+  "format": {
+    "pixel_layout": "configurable 1D zones",
+    "color_model": "RGB888",
+    "gamma_parity": "not_fully_verified",
+    "physical_led_timing": "unverified"
+  },
+  "palettes": {
+    "default_id": 0,
+    "source_fixed_ids": {
+      "first": 2,
+      "last": 72
+    },
+    "dynamic_random_id_1": "unsupported",
+    "user_custom_palettes": "unsupported",
+    "rgb_preview_stops": "not_included_do_not_synthesize",
+    "supported_effects_use_per_effect_palette_ids": true
+  },
+  "overlays": {
+    "style_ids": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "default_style": 0,
+    "brightness_cap_8bit": 32,
+    "compositing": "effect_then_overlay_then_physical_trigger"
+  },
+  "effects": [
+    {
+      "id": 0,
+      "name": "Solid",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 1,
+      "name": "Blink",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 2,
+      "name": "Breathe",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 3,
+      "name": "Wipe",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 4,
+      "name": "Wipe Random",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 5,
+      "name": "Random Colors",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 6,
+      "name": "Sweep",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 7,
+      "name": "Dynamic",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 8,
+      "name": "Colorloop",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 9,
+      "name": "Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 10,
+      "name": "Scan",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 11,
+      "name": "Scan Dual",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 12,
+      "name": "Fade",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 13,
+      "name": "Theater",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 14,
+      "name": "Theater Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 15,
+      "name": "Running",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 16,
+      "name": "Saw",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 17,
+      "name": "Twinkle",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 18,
+      "name": "Dissolve",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 19,
+      "name": "Dissolve Rnd",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 20,
+      "name": "Sparkle",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 21,
+      "name": "Sparkle Dark",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 22,
+      "name": "Sparkle+",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 23,
+      "name": "Strobe",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 24,
+      "name": "Strobe Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 25,
+      "name": "Strobe Mega",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 26,
+      "name": "Blink Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 27,
+      "name": "Android",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 28,
+      "name": "Chase",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 29,
+      "name": "Chase Random",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 30,
+      "name": "Chase Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 31,
+      "name": "Chase Flash",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32,
+      "name": "Chase Flash Rnd",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 33,
+      "name": "Rainbow Runner",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 34,
+      "name": "Colorful",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 35,
+      "name": "Traffic Light",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 36,
+      "name": "Sweep Random",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 37,
+      "name": "Chase 2",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 38,
+      "name": "Aurora",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 39,
+      "name": "Stream",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 40,
+      "name": "Scanner",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 41,
+      "name": "Lighthouse",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 42,
+      "name": "Fireworks",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 43,
+      "name": "Rain",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 44,
+      "name": "Tetrix",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 45,
+      "name": "Fire Flicker",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 46,
+      "name": "Gradient",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 47,
+      "name": "Loading",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 48,
+      "name": "Rolling Balls",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 49,
+      "name": "Fairy",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 50,
+      "name": "Two Dots",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 51,
+      "name": "Fairytwinkle",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 52,
+      "name": "Running Dual",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 54,
+      "name": "Chase 3",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 55,
+      "name": "Tri Wipe",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 56,
+      "name": "Tri Fade",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 57,
+      "name": "Lightning",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 58,
+      "name": "ICU",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 59,
+      "name": "Multi Comet",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 60,
+      "name": "Scanner Dual",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 61,
+      "name": "Stream 2",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 62,
+      "name": "Oscillate",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 63,
+      "name": "Pride 2015",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 64,
+      "name": "Juggle",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 65,
+      "name": "Palette",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 66,
+      "name": "Fire 2012",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 67,
+      "name": "Colorwaves",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 68,
+      "name": "Bpm",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 69,
+      "name": "Fill Noise",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 70,
+      "name": "Noise 1",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 71,
+      "name": "Noise 2",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 72,
+      "name": "Noise 3",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 73,
+      "name": "Noise 4",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 74,
+      "name": "Colortwinkles",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 75,
+      "name": "Lake",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 76,
+      "name": "Meteor",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 78,
+      "name": "Railway",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 79,
+      "name": "Ripple",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 80,
+      "name": "Twinklefox",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 81,
+      "name": "Twinklecat",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 82,
+      "name": "Halloween Eyes",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 83,
+      "name": "Solid Pattern",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 84,
+      "name": "Solid Pattern Tri",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 85,
+      "name": "Spots",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 86,
+      "name": "Spots Fade",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 87,
+      "name": "Glitter",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 88,
+      "name": "Candle",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 89,
+      "name": "Fireworks Starburst",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 90,
+      "name": "Fireworks 1D",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 91,
+      "name": "Bouncing Balls",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 92,
+      "name": "Sinelon",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 93,
+      "name": "Sinelon Dual",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 94,
+      "name": "Sinelon Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 95,
+      "name": "Popcorn",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 96,
+      "name": "Drip",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 97,
+      "name": "Plasma",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 98,
+      "name": "Percent",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 99,
+      "name": "Ripple Rainbow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 100,
+      "name": "Heartbeat",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 101,
+      "name": "Pacifica",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 102,
+      "name": "Candle Multi",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 103,
+      "name": "Solid Glitter",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 104,
+      "name": "Sunrise",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 105,
+      "name": "Phased",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 106,
+      "name": "Twinkleup",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 107,
+      "name": "Noise Pal",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 108,
+      "name": "Sine",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 109,
+      "name": "Phased Noise",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 110,
+      "name": "Flow",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 111,
+      "name": "Chunchun",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 112,
+      "name": "Dancing Shadows",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 113,
+      "name": "Washing Machine",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 115,
+      "name": "Blends",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 116,
+      "name": "TV Simulator",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 117,
+      "name": "Dynamic Smooth",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 179,
+      "name": "Flow Stripe",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 184,
+      "name": "Wavesins",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 185,
+      "name": "Rocktaves",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": true
+    },
+    {
+      "id": 218,
+      "name": "Color Clouds",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 219,
+      "name": "Slow Transition",
+      "origin": "source_derived_1d",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32768,
+      "name": "Embers",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0,
+        2,
+        3,
+        4
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32769,
+      "name": "Materialize Sparks",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32770,
+      "name": "Random Materialize",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32771,
+      "name": "Smooth Fade",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32772,
+      "name": "Plasma Sweep",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32773,
+      "name": "Smooth Fade Out",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32774,
+      "name": "Dimensional Rift",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32775,
+      "name": "Meteor Storm",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32776,
+      "name": "Helix Drive",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32777,
+      "name": "Crystal Growth",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32778,
+      "name": "Fusion Core",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32779,
+      "name": "Portal Gate",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32780,
+      "name": "Time Fracture",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32781,
+      "name": "Aurora Surge",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32782,
+      "name": "Chromatic Shatter",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32783,
+      "name": "Vortex",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32784,
+      "name": "Quantum Collapse",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32785,
+      "name": "Reality Break",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32786,
+      "name": "Event Horizon",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    },
+    {
+      "id": 32787,
+      "name": "Singularity Shutdown",
+      "origin": "opentail_original",
+      "palette_ids": [
+        0
+      ],
+      "requires_measured_audio": false
+    }
+  ]
+}

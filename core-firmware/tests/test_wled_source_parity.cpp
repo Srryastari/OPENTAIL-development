@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <cmath>
 #include <vector>
@@ -26,7 +27,8 @@ extern "C" {
 #define WHITE 0x00FFFFFFu
 #define BLACK 0u
 #define PALETTE_SOLID_WRAP true
-#define FRAMETIME 23u
+static uint16_t source_frame_time_ms=23u;
+#define FRAMETIME source_frame_time_ms
 static long map(long x,long a,long b,long c,long d) {return (x-a)*(d-c)/(b-a)+c;}
 // Tests use lengths >=2; upstream's 1-pixel mode_static fallback is excluded.
 #define FX_FALLBACK_STATIC { return; }
@@ -290,7 +292,8 @@ struct CRGB : CRGBW {
     CRGB()=default;
     CRGB(uint8_t red,uint8_t green,uint8_t blue) {r=red;g=green;b=blue;w=0u;}
     explicit CRGB(uint32_t color) { color32=color; }
-    explicit CRGB(CHSV c) {
+    CRGB& operator|=(const CRGB& rhs) { if(rhs.r>r)r=rhs.r; if(rhs.g>g)g=rhs.g; if(rhs.b>b)b=rhs.b; return *this; }
+    CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
         hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
         color32=((uint32_t)rgb[0]<<16)|((uint32_t)rgb[1]<<8)|rgb[2];
@@ -364,7 +367,7 @@ void fill_gradient_RGB(CRGB* colors, uint32_t num, const CRGB& c1, const CRGB& c
   fill_gradient_RGB(colors, twothirds, c3,      last, c4);
 }
 
-uint32_t ColorFromPalette(const CRGBPalette16& pal, unsigned index, uint8_t brightness, TBlendType blendType) {
+uint32_t ColorFromPalette(const CRGBPalette16& pal, unsigned index, uint8_t brightness, TBlendType blendType=LINEARBLEND) {
   if (blendType == LINEARBLEND_NOWRAP) {
     index = (index * 0xF0) >> 8; // Blend range is affected by lo4 blend of values, remap to avoid wrapping
   }
@@ -544,24 +547,14 @@ static uint32_t source_fast_scale(uint32_t c,uint8_t scale) {
   uint32_t wg=(((c>>8)&0x00ff00ffu)*scale)&~0x00ff00ffu;
   return rb|wg;
 }
+/* Blur uses the pinned colors.cpp color_add() default, not the
+ * alternate preserveCR=true path. */
 static uint32_t source_color_add(uint32_t c1,uint32_t c2) {
-  if(c1==0u)return c2;
-  if(c2==0u)return c1;
-  const uint32_t mask=0x00ff00ffu;
-  uint32_t rb=(c1&mask)+(c2&mask);
-  uint32_t wg=((c1>>8)&mask)+((c2>>8)&mask);
-  if((rb|wg)&0x01000100u) {
-    uint32_t red=rb>>16, blue=rb&0xffffu, white=wg>>16, green=wg&0xffffu;
-    uint32_t top=red>green?(red>blue?red:blue):(green>blue?green:blue);
-    if(white>top)top=white;
-    uint32_t scale=(255u<<8)/top;
-    rb=((rb*scale)>>8)&mask;
-    wg=(wg*scale)&~mask;
-  } else wg<<=8;
-  return rb|wg;
+  return color_add(c1,c2);
 }
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
+    uint16_t mode=0; /* pinned FX ID, used by Chase Random source */
     uint32_t step=0u,call=0u;
     uint16_t aux0=0u,aux1=0u;
     uint8_t cct=0u;
@@ -573,6 +566,7 @@ struct PinnedSeg {
     }
     uint8_t custom1=48u,custom2=64u,custom3=12u;
     bool check1=false,check2=false,check3=false;
+    bool reverse=false; /* pinned 1D segment orientation: default false */
     void fade_out(uint8_t amount) {
         const unsigned rate=(256u-amount)>>1;
         const int mapped=(int)(256u/(rate+1u));
@@ -590,7 +584,21 @@ struct PinnedSeg {
     unsigned nrOfVStrips() const {return 1u;}
     bool is2D() const {return false;}
     void blurCols(uint8_t){std::abort();}
-    void blur(uint8_t){std::abort();}
+    void blur(uint8_t amount) {
+        if(!amount||pixels.empty())return;
+        const uint8_t keep=(uint8_t)(255u-amount), seep=amount>>1;
+        uint32_t cur=pixels[0],carry=source_fast_scale(cur,seep);
+        pixels[0]=source_fast_scale(cur,keep);
+        for(size_t i=1;i<pixels.size();i++){
+            cur=pixels[i];
+            const uint32_t part=source_fast_scale(cur,seep);
+            cur=source_fast_scale(cur,keep);
+            cur=source_color_add(cur,carry);
+            pixels[i-1]=source_color_add(pixels[i-1],part);
+            pixels[i]=cur;
+            carry=part;
+        }
+    }
     void setPixelColorXY(unsigned x,unsigned y,uint32_t color) { (void)y;setPixelColor(x,color); }
     void setPixelColorXY(unsigned x,unsigned y,uint8_t r,uint8_t g,uint8_t b) { (void)y;setPixelColor(x,r,g,b); }
     void fadeToBlackBy(uint8_t fade) {for(auto& px:pixels)px=source_fast_scale(px,(uint8_t)(255u-fade));}
@@ -598,7 +606,10 @@ struct PinnedSeg {
     uint32_t colors[3]={0,0,0};
     std::vector<uint32_t> pixels;
     explicit PinnedSeg(size_t count):pixels(count,0u){}
-    uint32_t getPixelColor(unsigned i) const {return pixels.at(i);}
+    uint32_t getPixelColor(unsigned i) const {return i<pixels.size()?pixels[i]:0u;}
+    uint32_t getPixelColorXY(unsigned x,unsigned y) const {return y==0u?getPixelColor(x):0u;}
+    void move(unsigned,unsigned,bool) {std::abort();} // unreachable in 1D
+    void drawCircle(unsigned,unsigned,unsigned,uint32_t,bool) {std::abort();} // unreachable in 1D
     uint32_t color_wheel(uint8_t pos) const {
         if(palette!=0u)return ColorFromPalette(ref_palette(palette,colors[0],colors[1],colors[2]),pos,255u,LINEARBLEND);
         uint8_t bgrw[4]={0,0,0,0};
@@ -1310,6 +1321,76 @@ int32_t perlin2D_raw(uint32_t x, uint32_t y, bool is16bit) {
 
 uint16_t perlin16(uint32_t x, uint32_t y) {
  return ((perlin2D_raw(x, y) * 1537) >> 10) + 32725; //scale to 16bit and offset (fastled range: about 1748 to 63697)
+}
+
+
+// Pinned 3D and 2D Perlin overloads for noise golden tests.
+static inline __attribute__((always_inline)) int32_t gradient3D(uint32_t x0, int32_t dx, uint32_t y0, int32_t dy, uint32_t z0, int32_t dz) {
+  // fast and good entropy hash from corner coordinates
+  uint32_t h = (x0 * 0x27D4EB2D) ^ (y0 * 0xB5297A4D) ^ (z0 * 0x1B56C4E9);
+  h ^= h >> 15;
+  h *= 0x92C3412B;
+  h ^= h >> 13;
+  return ((hashToGradient(h) * dx + hashToGradient(h>>(1+PERLIN_SHIFT)) * dy + hashToGradient(h>>(1 + 2*PERLIN_SHIFT)) * dz) * 85) >> (8 + PERLIN_SHIFT); // scale to 16bit, x*85 >> 8 = x/3
+}
+
+
+int32_t perlin3D_raw(uint32_t x, uint32_t y, uint32_t z, bool is16bit=false) {
+  int32_t x0 = x >> 16;
+  int32_t y0 = y >> 16;
+  int32_t z0 = z >> 16;
+  int32_t x1 = x0 + 1;
+  int32_t y1 = y0 + 1;
+  int32_t z1 = z0 + 1;
+
+  if(is16bit) {
+    x1 = x1 & 0xFF; // wrap back to zero at 0xFF instead of 0xFFFF
+    y1 = y1 & 0xFF;
+    z1 = z1 & 0xFF;
+  }
+
+  int32_t dx0 = x & 0xFFFF;
+  int32_t dy0 = y & 0xFFFF;
+  int32_t dz0 = z & 0xFFFF;
+  int32_t dx1 = dx0 - 0x10000;
+  int32_t dy1 = dy0 - 0x10000;
+  int32_t dz1 = dz0 - 0x10000;
+
+  int32_t g000 = gradient3D(x0, dx0, y0, dy0, z0, dz0);
+  int32_t g001 = gradient3D(x0, dx0, y0, dy0, z1, dz1);
+  int32_t g010 = gradient3D(x0, dx0, y1, dy1, z0, dz0);
+  int32_t g011 = gradient3D(x0, dx0, y1, dy1, z1, dz1);
+  int32_t g100 = gradient3D(x1, dx1, y0, dy0, z0, dz0);
+  int32_t g101 = gradient3D(x1, dx1, y0, dy0, z1, dz1);
+  int32_t g110 = gradient3D(x1, dx1, y1, dy1, z0, dz0);
+  int32_t g111 = gradient3D(x1, dx1, y1, dy1, z1, dz1);
+
+  uint32_t tx = smoothstep(dx0);
+  uint32_t ty = smoothstep(dy0);
+  uint32_t tz = smoothstep(dz0);
+
+  int32_t nx0 = lerpPerlin(g000, g100, tx);
+  int32_t nx1 = lerpPerlin(g010, g110, tx);
+  int32_t nx2 = lerpPerlin(g001, g101, tx);
+  int32_t nx3 = lerpPerlin(g011, g111, tx);
+  int32_t ny0 = lerpPerlin(nx0, nx1, ty);
+  int32_t ny1 = lerpPerlin(nx2, nx3, ty);
+
+  int32_t noise = lerpPerlin(ny0, ny1, tz);
+  return noise;
+}
+
+
+uint16_t perlin16(uint32_t x, uint32_t y, uint32_t z) {
+  return ((perlin3D_raw(x, y, z) * 1731) >> 10) + 33147; //scale to 16bit and offset (fastled range: about 4766 to 60840)
+}
+
+uint8_t perlin8(uint16_t x, uint16_t y) {
+  return (((perlin2D_raw((uint32_t)x << 8, (uint32_t)y << 8, true) * 1620) >> 10) + 32771) >> 8; //scale to 16 bit, offset, then scale to 8bit
+}
+
+uint8_t perlin8(uint16_t x, uint16_t y, uint16_t z) {
+  return (((perlin3D_raw((uint32_t)x << 8, (uint32_t)y << 8, (uint32_t)z << 8, true) * 2015) >> 10) + 33168) >> 8; //scale to 16 bit, offset, then scale to 8bit
 }
 
 
@@ -4160,6 +4241,1181 @@ void mode_multi_comet(void) {
 }
 
 #undef MAX_COMETS
+void mode_fade(void) {
+  unsigned counter = (strip.now * ((SEGMENT.speed >> 3) +10));
+  uint8_t lum = triwave16(counter) >> 8;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), lum));
+  }
+}
+
+/* Verbatim pinned WLED util.cpp color-wheel helper for source reference only.
+ * Runtime uses OpenTail's separate port and PRNG; no firmware WLED dependency. */
+#define MIN(a,b) (((a)<(b))?(a):(b))
+uint8_t get_random_wheel_index(uint8_t pos) {
+  uint8_t r = 0, x = 0, y = 0, d = 0;
+  while (d < 42) {
+    r = hw_random8();
+    x = abs(pos - r);
+    y = 255 - x;
+    d = MIN(x, y);
+  }
+  return r;
+}
+#undef MIN
+
+/* Verbatim pinned WLED FX.cpp Wipe and Sweep reference functions. */
+void color_wipe(bool rev, bool useRandomColors) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  uint32_t cycleTime = 750 + (255 - SEGMENT.speed)*150;
+  uint32_t perc = strip.now % cycleTime;
+  unsigned prog = (perc * 65535) / cycleTime;
+  bool back = (prog > 32767);
+  if (back) {
+    prog -= 32767;
+    if (SEGENV.step == 0) SEGENV.step = 1;
+  } else {
+    if (SEGENV.step == 2) SEGENV.step = 3; //trigger color change
+  }
+
+  if (useRandomColors) {
+    if (SEGENV.call == 0) {
+      SEGENV.aux0 = hw_random8();
+      SEGENV.step = 3;
+    }
+    if (SEGENV.step == 1) { //if flag set, change to new random color
+      SEGENV.aux1 = get_random_wheel_index(SEGENV.aux0);
+      SEGENV.step = 2;
+    }
+    if (SEGENV.step == 3) {
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux1);
+      SEGENV.step = 0;
+    }
+  }
+
+  unsigned ledIndex = (prog * SEGLEN) >> 15;
+  uint16_t rem = (prog * SEGLEN) * 2; //mod 0xFFFF by truncating
+  rem /= (SEGMENT.intensity +1);
+  if (rem > 255) rem = 255;
+
+  uint32_t col1 = useRandomColors? SEGMENT.color_wheel(SEGENV.aux1) : SEGCOLOR(1);
+  for (unsigned i = 0; i < SEGLEN; i++)
+  {
+    unsigned index = (rev && back)? SEGLEN -1 -i : i;
+    uint32_t col0 = useRandomColors? SEGMENT.color_wheel(SEGENV.aux0) : SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0);
+
+    if (i < ledIndex)
+    {
+      SEGMENT.setPixelColor(index, back? col1 : col0);
+    } else
+    {
+      SEGMENT.setPixelColor(index, back? col0 : col1);
+      if (i == ledIndex) SEGMENT.setPixelColor(index, color_blend(back? col0 : col1, back? col1 : col0, uint8_t(rem)));
+    }
+  }
+}
+
+void mode_color_wipe(void) {
+  color_wipe(false, false);
+}
+
+void mode_color_sweep(void) {
+  color_wipe(true, false);
+}
+
+/* Pinned FX.cpp random-wipe wrappers: RNG handled by util.cpp wheel helper. */
+void mode_color_wipe_random(void) {
+  color_wipe(false, true);
+}
+void mode_color_sweep_random(void) {
+  color_wipe(true, true);
+}
+
+void mode_random_color(void) {
+  uint32_t cycleTime = 200 + (255 - SEGMENT.speed)*50;
+  uint32_t it = strip.now / cycleTime;
+  uint32_t rem = strip.now % cycleTime;
+  unsigned fadedur = (cycleTime * SEGMENT.intensity) >> 8;
+
+  uint32_t fade = 255;
+  if (fadedur) {
+    fade = (rem * 255) / fadedur;
+    if (fade > 255) fade = 255;
+  }
+
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = hw_random8();
+    SEGENV.step = 2;
+  }
+  if (it != SEGENV.step) //new color
+  {
+    SEGENV.aux1 = SEGENV.aux0;
+    SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0); //aux0 will store our random color wheel index
+    SEGENV.step = it;
+  }
+
+  SEGMENT.fill(color_blend(SEGMENT.color_wheel(SEGENV.aux1), SEGMENT.color_wheel(SEGENV.aux0), uint8_t(fade)));
+}
+
+/* Pinned upstream chase() and wrappers. Source branch tests rely on
+ * 1D segment.mode to distinguish its random-chase path. */
+#define FX_MODE_CHASE_RANDOM 29u
+void chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette) {
+  uint16_t counter = strip.now * ((SEGMENT.speed >> 2) + 1);
+  uint16_t a = (counter * SEGLEN) >> 16;
+
+  bool chase_random = (SEGMENT.mode == FX_MODE_CHASE_RANDOM);
+  if (chase_random) {
+    if (a < SEGENV.step) //we hit the start again, choose new color for Chase random
+    {
+      SEGENV.aux1 = SEGENV.aux0; //store previous random color
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0);
+    }
+    color1 = SEGMENT.color_wheel(SEGENV.aux0);
+  }
+  SEGENV.step = a;
+
+  // Use intensity setting to vary chase up to 1/2 string length
+  unsigned size = 1 + ((SEGMENT.intensity * SEGLEN) >> 10);
+
+  uint16_t b = a + size; //"trail" of chase, filled with color1
+  if (b > SEGLEN) b -= SEGLEN;
+  uint16_t c = b + size;
+  if (c > SEGLEN) c -= SEGLEN;
+
+  //background
+  if (do_palette)
+  {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+    }
+  } else SEGMENT.fill(color1);
+
+  //if random, fill old background between a and end
+  if (chase_random)
+  {
+    color1 = SEGMENT.color_wheel(SEGENV.aux1);
+    for (unsigned i = a; i < SEGLEN; i++)
+      SEGMENT.setPixelColor(i, color1);
+  }
+
+  //fill between points a and b with color2
+  if (a < b)
+  {
+    for (unsigned i = a; i < b; i++)
+      SEGMENT.setPixelColor(i, color2);
+  } else {
+    for (unsigned i = a; i < SEGLEN; i++) //fill until end
+      SEGMENT.setPixelColor(i, color2);
+    for (unsigned i = 0; i < b; i++) //fill from start until b
+      SEGMENT.setPixelColor(i, color2);
+  }
+
+  //fill between points b and c with color2
+  if (b < c)
+  {
+    for (unsigned i = b; i < c; i++)
+      SEGMENT.setPixelColor(i, color3);
+  } else {
+    for (unsigned i = b; i < SEGLEN; i++) //fill until end
+      SEGMENT.setPixelColor(i, color3);
+    for (unsigned i = 0; i < c; i++) //fill from start until c
+      SEGMENT.setPixelColor(i, color3);
+  }
+}
+
+void mode_chase_color(void) {
+  chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true);
+}
+
+void mode_chase_random(void) {
+  chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false);
+}
+
+void mode_chase_rainbow(void) {
+  unsigned color_sep = 256 / SEGLEN;
+  if (color_sep == 0) color_sep = 1;                                           // correction for segments longer than 256 LEDs
+  unsigned color_index = SEGENV.call & 0xFF;
+  uint32_t color = SEGMENT.color_wheel(((SEGENV.step * color_sep) + color_index) & 0xFF);
+
+  chase(color, SEGCOLOR(0), SEGCOLOR(1), false);
+}
+
+void mode_chase_rainbow_white(void) {
+  uint16_t n = SEGENV.step;
+  uint16_t m = (SEGENV.step + 1) % SEGLEN;
+  uint32_t color2 = SEGMENT.color_wheel(((n * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
+  uint32_t color3 = SEGMENT.color_wheel(((m * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
+
+  chase(SEGCOLOR(0), color2, color3, false);
+}
+#undef FX_MODE_CHASE_RANDOM
+
+/* Verbatim pinned util.cpp beat16 and beatsin16 source functions. */
+uint16_t beat16(uint16_t beats_per_minute,uint32_t timebase=0u);
+uint16_t beatsin16_t(uint16_t beats_per_minute,uint16_t lowest,uint16_t highest,
+                     uint32_t timebase=0u,uint16_t phase_offset=0u);
+uint16_t beat16(uint16_t beats_per_minute, uint32_t timebase) {
+  if (beats_per_minute < 256) beats_per_minute <<= 8;
+  return beat88(beats_per_minute, timebase);
+}
+
+uint16_t beatsin16_t(uint16_t beats_per_minute, uint16_t lowest, uint16_t highest, uint32_t timebase, uint16_t phase_offset) {
+  uint16_t beat = beat16(beats_per_minute, timebase);
+  uint16_t beatsin = sin16_t(beat + phase_offset) + 32768;
+  uint16_t rangewidth = highest - lowest;
+  uint16_t scaledbeat = scale16(beatsin, rangewidth);
+  uint16_t result = lowest + scaledbeat;
+  return result;
+}
+
+/* Verbatim pinned FX.cpp Sinelon family (default palette and RGB only). */
+void sinelon_base(bool dual, bool rainbow=false) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  SEGMENT.fade_out(SEGMENT.intensity);
+  unsigned pos = beatsin16_t(SEGMENT.speed/10,0,SEGLEN-1);
+  if (SEGENV.call == 0) SEGENV.aux0 = pos;
+  uint32_t color1 = SEGMENT.color_from_palette(pos, true, false, 0);
+  uint32_t color2 = SEGCOLOR(2);
+  if (rainbow) {
+    color1 = SEGMENT.color_wheel((pos & 0x07) * 32);
+  }
+  SEGMENT.setPixelColor(pos, color1);
+  if (dual) {
+    if (!color2) color2 = SEGMENT.color_from_palette(pos, true, false, 0);
+    if (rainbow) color2 = color1; //rainbow
+    SEGMENT.setPixelColor(SEGLEN-1-pos, color2);
+  }
+  if (SEGENV.aux0 != pos) {
+    if (SEGENV.aux0 < pos) {
+      for (unsigned i = SEGENV.aux0; i < pos ; i++) {
+        SEGMENT.setPixelColor(i, color1);
+        if (dual) SEGMENT.setPixelColor(SEGLEN-1-i, color2);
+      }
+    } else {
+      for (unsigned i = SEGENV.aux0; i > pos ; i--) {
+        SEGMENT.setPixelColor(i, color1);
+        if (dual) SEGMENT.setPixelColor(SEGLEN-1-i, color2);
+      }
+    }
+    SEGENV.aux0 = pos;
+  }
+}
+
+void mode_sinelon(void) {
+  sinelon_base(false);
+}
+
+void mode_sinelon_dual(void) {
+  sinelon_base(true);
+}
+
+void mode_sinelon_rainbow(void) {
+  sinelon_base(false, true);
+}
+
+void mode_flow(void)
+{
+  unsigned counter = 0;
+  if (SEGMENT.speed != 0)
+  {
+    counter = strip.now * ((SEGMENT.speed >> 2) +1);
+    counter = counter >> 8;
+  }
+
+  unsigned maxZones = SEGLEN / 6; //only looks good if each zone has at least 6 LEDs
+  int zones = (SEGMENT.intensity * maxZones) >> 8;
+  if (zones & 0x01) zones++; //zones must be even
+  if (zones < 2) zones = 2;
+  int zoneLen = SEGLEN / zones;
+  int requiredZones = (SEGLEN + zoneLen - 1) / zoneLen;
+  zones = requiredZones + 2; //add extra zones to cover beginning and end of segment (compensate integer truncation)
+  int offset = ((int)SEGLEN - (zones * zoneLen)) / 2; // center the zones on the segment (can not use bit shift on negative number)
+
+  for (int z = 0; z < zones; z++)
+  {
+    int pos = offset + z * zoneLen;
+    for (int i = 0; i < zoneLen; i++)
+    {
+      unsigned colorIndex = (i * 255 / zoneLen) - counter;
+      int led = (z & 0x01) ? i : (zoneLen -1) -i;
+      if (SEGMENT.reverse) led = (zoneLen -1) -led;
+      SEGMENT.setPixelColor(pos + led, SEGMENT.color_from_palette(colorIndex, false, true, 255));
+    }
+  }
+}
+
+/* Source millis() reads current LED frame time, as in the pinned engine. */
+#define millis() strip.now
+void mode_sunrise() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  //speed 0 - static sun
+  //speed 1 - 60: sunrise time in minutes
+  //speed 60 - 120 : sunset time in minutes - 60;
+  //speed above: "breathing" rise and set
+  if (SEGENV.call == 0 || SEGMENT.speed != SEGENV.aux0) {
+    SEGENV.step = millis(); //save starting time, millis() because strip.now can change from sync
+    SEGENV.aux0 = SEGMENT.speed;
+  }
+
+  SEGMENT.fill(BLACK);
+  unsigned stage = 0xFFFF;
+
+  uint32_t s10SinceStart = (millis() - SEGENV.step) /100; //tenths of seconds
+
+  if (SEGMENT.speed > 120) { //quick sunrise and sunset
+    unsigned counter = (strip.now >> 1) * (((SEGMENT.speed -120) >> 1) +1);
+    stage = triwave16(counter);
+  } else if (SEGMENT.speed) { //sunrise
+    unsigned durMins = SEGMENT.speed;
+    if (durMins > 60) durMins -= 60;
+    uint32_t s10Target = durMins * 600;
+    if (s10SinceStart > s10Target) s10SinceStart = s10Target;
+    stage = map(s10SinceStart, 0, s10Target, 0, 0xFFFF);
+    if (SEGMENT.speed > 60) stage = 0xFFFF - stage; //sunset
+  }
+
+  for (unsigned i = 0; i <= SEGLEN/2; i++)
+  {
+    //default palette is Fire    
+    unsigned wave = triwave16((i * stage) / SEGLEN);
+    wave = (wave >> 8) + ((wave * SEGMENT.intensity) >> 15);
+    uint32_t c;
+    if (wave > 240) { //clipped, full white sun
+      c = SEGMENT.color_from_palette( 240, false, true, 255);
+    } else { //transition
+      c = SEGMENT.color_from_palette(wave, false, true, 255);
+    }
+    SEGMENT.setPixelColor(i, c);
+    SEGMENT.setPixelColor(SEGLEN - i - 1, c);
+  }
+}
+
+#undef millis
+
+/* Verbatim pinned FX.cpp washing oscillator and waveform renderer. */
+static int8_t tristate_square8(uint8_t x, uint8_t pulsewidth, uint8_t attdec) {
+  int8_t a = 127;
+  if (x > 127) {
+    a = -127;
+    x -= 127;
+  }
+
+  if (x < attdec) { //inc to max
+    return (int16_t) x * a / attdec;
+  }
+  else if (x < pulsewidth - attdec) { //max
+    return a;
+  }
+  else if (x < pulsewidth) { //dec to 0
+    return (int16_t) (pulsewidth - x) * a / attdec;
+  }
+  return 0;
+}
+
+void mode_washing_machine(void) {
+  int speed = tristate_square8(strip.now >> 7, 90, 15);
+
+  SEGENV.step += (speed * 2048) / (512 - SEGMENT.speed);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint8_t col = sin8_t(((SEGMENT.intensity / 25 + 1) * 255 * i / SEGLEN) + (SEGENV.step >> 7));
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(col, false, PALETTE_SOLID_WRAP, 3));
+  }
+}
+
+void tricolor_chase(uint32_t color1, uint32_t color2) {
+  uint32_t cycleTime = 50 + ((255 - SEGMENT.speed)<<1);
+  uint32_t it = strip.now / cycleTime;  // iterator
+  unsigned width = (1 + (SEGMENT.intensity>>4)); // value of 1-16 for each colour
+  unsigned index = it % (width*3);
+
+  for (unsigned i = 0; i < SEGLEN; i++, index++) {
+    if (index > (width*3)-1) index = 0;
+
+    uint32_t color = color1;
+    if (index > (width<<1)-1) color = SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1);
+    else if (index > width-1) color = color2;
+
+    SEGMENT.setPixelColor(SEGLEN - i -1, color);
+  }
+}
+
+void mode_tricolor_chase(void) {
+  tricolor_chase(SEGCOLOR(2), SEGCOLOR(0));
+}
+
+/* Verbatim pinned FX.cpp Chase Flash, tested against CORE's 1D port. */
+#define FLASH_COUNT 4
+void mode_chase_flash(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned now = strip.now; // save time for delay calculation
+  bool advance = true;
+  unsigned flash_step = SEGENV.aux1 % ((FLASH_COUNT * 2) + 1);
+  if (now < SEGENV.step)
+    advance = false; // limit update rate but render every frame for smooth transitions
+  else
+    SEGENV.aux1++;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+  }
+  unsigned index = SEGENV.aux0;
+  unsigned n = index;
+  unsigned m = (index + 1) % SEGLEN;
+
+  unsigned delay = 10 + ((30 * (uint16_t)(255 - SEGMENT.speed)) / SEGLEN);
+  if(flash_step < (FLASH_COUNT * 2)) {
+    if(flash_step % 2 == 0) {
+      SEGMENT.setPixelColor( n, SEGCOLOR(1));
+      SEGMENT.setPixelColor( m, SEGCOLOR(1));
+      delay = 20;
+    } else {
+      delay = 30;
+    }
+  } else if (advance) {
+    SEGENV.aux0 = m; // advance to next position
+  }
+  if (advance)
+    SEGENV.step = now + delay;
+}
+void mode_chase_flash_random(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned now = strip.now; // save time for delay calculation
+  bool advance = true;
+  if (now < SEGENV.step) {
+    SEGENV.call--; // revert increment to skip moving the animation forward and just render the same frame again
+    advance = false;
+  }
+  unsigned flash_step = SEGENV.call % ((FLASH_COUNT * 2) + 1);
+
+  for (int i = 0; i < SEGENV.aux1; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_wheel(SEGENV.aux0));
+  }
+
+  unsigned delay = 1 + ((10 * (uint16_t)(255 - SEGMENT.speed)) / SEGLEN);
+  if(flash_step < (FLASH_COUNT * 2)) {
+    unsigned n = SEGENV.aux1;
+    unsigned m = (SEGENV.aux1 + 1) % SEGLEN;
+    if(flash_step % 2 == 0) {
+      SEGMENT.setPixelColor( n, SEGCOLOR(0));
+      SEGMENT.setPixelColor( m, SEGCOLOR(0));
+      delay = 20;
+    } else {
+      SEGMENT.setPixelColor( n, SEGMENT.color_wheel(SEGENV.aux0));
+      SEGMENT.setPixelColor( m, SEGCOLOR(1));
+      delay = 30;
+    }
+  } else if (advance) {
+    SEGENV.aux1 = (SEGENV.aux1 + 1) % SEGLEN;
+
+    if (SEGENV.aux1 == 0) {
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0);
+    }
+  }
+  if (advance)
+    SEGENV.step = now + delay;
+}
+#undef FLASH_COUNT
+
+/* Verbatim pinned FX.cpp Dissolve / Dissolve Rnd, isolated source fixture. */
+void dissolve(uint32_t color) {
+  unsigned dataSize = sizeof(uint32_t) * SEGLEN;
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  uint32_t* pixels = reinterpret_cast<uint32_t*>(SEGENV.data);
+
+  if (SEGENV.call == 0) {
+    for (unsigned i = 0; i < SEGLEN; i++) pixels[i] = SEGCOLOR(1);
+    SEGENV.aux0 = 1;
+  }
+
+  for (unsigned j = 0; j <= SEGLEN / 15; j++) {
+    if (hw_random8() <= SEGMENT.intensity) {
+      for (size_t times = 0; times < 10; times++) { //attempt to spawn a new pixel 10 times
+        unsigned i = hw_random16(SEGLEN);
+        if (SEGENV.aux0) { //dissolve to primary/palette
+          if (pixels[i] == SEGCOLOR(1)) {
+            uint32_t c = color == SEGCOLOR(0) ? SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0) : color;
+            if (SEGMENT.check2 && c == SEGCOLOR(1)) c ^= 0x00000001;  // change the color slightly so the effect doesn't get stuck in Complete mode if color is same as bkg color
+            pixels[i] = c;
+            break; //only spawn 1 new pixel per frame
+          }
+        } else { //dissolve to secondary
+          if (pixels[i] != SEGCOLOR(1)) {
+            pixels[i] = SEGCOLOR(1);
+            break;
+          }
+        }
+      }
+    }
+  }
+  unsigned incompletePixels = 0;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, pixels[i]); // fix for #4401
+    if (SEGMENT.check2) {
+      if (SEGENV.aux0) {
+        if (pixels[i] == SEGCOLOR(1)) incompletePixels++;
+      } else {
+        if (pixels[i] != SEGCOLOR(1)) incompletePixels++;
+      }
+    }
+  }
+
+  if (SEGENV.step > (255 - SEGMENT.speed) + 15U) {
+    SEGENV.aux0 = !SEGENV.aux0;
+    SEGENV.step = 0;
+  } else {
+    if (SEGMENT.check2) {
+      if (incompletePixels == 0)
+        SEGENV.step++; // only advance step once all pixels have changed
+    } else
+      SEGENV.step++;
+  }
+}
+
+
+/*
+ * Blink several LEDs on and then off
+ */
+void mode_dissolve(void) {
+  dissolve(SEGMENT.check1 ? SEGMENT.color_wheel(hw_random8()) : SEGCOLOR(0));
+}
+
+
+/*
+ * Blink several LEDs on and then off in random colors
+ */
+void mode_dissolve_random(void) {
+  dissolve(SEGMENT.color_wheel(hw_random8()));
+}
+
+void mode_larson_scanner(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+
+  const unsigned speed  = FRAMETIME * map(SEGMENT.speed, 0, 255, 96, 2); // map into useful range
+  const unsigned pixels = SEGLEN / speed; // how many pixels to advance per frame
+
+  SEGMENT.fade_out(255-SEGMENT.intensity);
+
+  if (SEGENV.step > strip.now) return;  // we have a pause
+
+  unsigned index = SEGENV.aux1 + pixels;
+  // are we slow enough to use frames per pixel?
+  if (pixels == 0) {
+    const unsigned frames = speed / SEGLEN; // how many frames per 1 pixel
+    if (SEGENV.step++ < frames) return;
+    SEGENV.step = 0;
+    index++;
+  }
+
+  if (index > SEGLEN) {
+
+    SEGENV.aux0 = !SEGENV.aux0; // change direction
+    SEGENV.aux1 = 0;            // reset position
+    // set delay
+    if (SEGENV.aux0 || SEGMENT.check2) SEGENV.step = strip.now + SEGMENT.custom1 * 25; // multiply by 25ms
+    else SEGENV.step = 0;
+
+  } else {
+
+    // paint as many pixels as needed
+    for (unsigned i = SEGENV.aux1; i < index; i++) {
+      unsigned j = (SEGENV.aux0) ? i : SEGLEN - 1 - i;
+      uint32_t c = SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0);
+      SEGMENT.setPixelColor(j, c);
+      if (SEGMENT.check1) {
+        SEGMENT.setPixelColor(SEGLEN - 1 - j, SEGCOLOR(2) ? SEGCOLOR(2) : c);
+      }
+    }
+    SEGENV.aux1 = index;
+  }
+}
+
+void mode_dual_larson_scanner(void){
+  SEGMENT.check1 = true;
+  mode_larson_scanner();
+}
+
+void mode_comet(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned counter = (strip.now * ((SEGMENT.speed >>2) +1)) & 0xFFFF;
+  unsigned index = (counter * SEGLEN) >> 16;
+  if (SEGENV.call == 0) SEGENV.aux0 = index;
+
+  SEGMENT.fade_out(SEGMENT.intensity);
+
+  SEGMENT.setPixelColor( index, SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0));
+  if (index > SEGENV.aux0) {
+    for (unsigned i = SEGENV.aux0; i < index ; i++) {
+       SEGMENT.setPixelColor( i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    }
+  } else if (index < SEGENV.aux0 && index < 10) {
+    for (unsigned i = 0; i < index ; i++) {
+       SEGMENT.setPixelColor( i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    }
+  }
+  SEGENV.aux0 = index++;
+}
+
+/* Pinned-source 1D noise effects. */
+static uint8_t beatsin8_t(uint16_t bpm,uint8_t lo=0u,uint8_t hi=255u,uint32_t tb=0u,uint8_t phase=0u){return source_beatsin8(bpm,lo,hi,tb,phase);}
+void mode_fillnoise8() {
+  if (SEGENV.call == 0) SEGENV.step = hw_random();
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned index = perlin8(i * SEGLEN, SEGENV.step + i * SEGLEN);
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+  SEGENV.step += beatsin8_t(SEGMENT.speed, 1, 6); //10,1,4
+}
+
+void mode_noise16_1() {
+  unsigned scale = 320;                                       // the "zoom factor" for the noise
+  SEGENV.step += (1 + SEGMENT.speed/16);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = beatsin8_t(11);                          // the x position of the noise field swings @ 17 bpm
+    unsigned shift_y = SEGENV.step/42;                        // the y position becomes slowly incremented
+    unsigned real_x = (i + shift_x) * scale;                  // the x position of the noise field swings @ 17 bpm
+    unsigned real_y = (i + shift_y) * scale;                  // the y position becomes slowly incremented
+    uint32_t real_z = SEGENV.step;                            // the z position becomes quickly incremented
+    unsigned noise = perlin16(real_x, real_y, real_z) >> 8;   // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                         // map LED color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+}
+
+void mode_noise16_2() {
+  unsigned scale = 1000;                                        // the "zoom factor" for the noise
+  SEGENV.step += (1 + (SEGMENT.speed >> 1));
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = SEGENV.step >> 6;                        // x as a function of time
+    uint32_t real_x = (i + shift_x) * scale;                    // calculate the coordinates within the noise field
+    unsigned noise = perlin16(real_x, 0, 4223) >> 8;            // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                           // map led color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0, noise));
+  }
+}
+
+void mode_noise16_3() {
+  unsigned scale = 800;                                       // the "zoom factor" for the noise
+  SEGENV.step += (1 + SEGMENT.speed);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned shift_x = 4223;                                  // no movement along x and y
+    unsigned shift_y = 1234;
+    uint32_t real_x = (i + shift_x) * scale;                  // calculate the coordinates within the noise field
+    uint32_t real_y = (i + shift_y) * scale;                  // based on the precalculated positions
+    uint32_t real_z = SEGENV.step*8;
+    unsigned noise = perlin16(real_x, real_y, real_z) >> 8;   // get the noise data and scale it down
+    unsigned index = sin8_t(noise * 3);                         // map led color based on noise data
+
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0, noise));
+  }
+}
+
+void mode_noise16_4() {
+  uint32_t stp = (strip.now * SEGMENT.speed) >> 7;
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    int index = perlin16(uint32_t(i) << 12, stp);
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
+  }
+}
+/* Pinned FX.cpp 1D Stream, Oscillate, Candle and Candle Multi. */
+#define FRAMETIME_FIXED 23u
+void mode_running_random(void) {
+  uint32_t cycleTime = 25 + (3 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+  if (SEGENV.call == 0) SEGENV.aux0 = hw_random(); // random seed for PRNG on start
+
+  unsigned zoneSize = ((255-SEGMENT.intensity) >> 4) +1;
+  uint16_t PRNG16 = SEGENV.aux0;
+
+  unsigned z = it % zoneSize;
+  bool nzone = (!z && (it & 0xFFFF) != SEGENV.aux1);
+  for (int i=SEGLEN-1; i >= 0; i--) {
+    if (nzone || z >= zoneSize) {
+      unsigned lastrand = PRNG16 >> 8;
+      int16_t diff = 0;
+      while (abs(diff) < 42) { // make sure the difference between adjacent colors is big enough
+        PRNG16 = (uint16_t)(PRNG16 * 2053) + 13849; // next zone, next 'random' number
+        diff = (PRNG16 >> 8) - lastrand;
+      }
+      if (nzone) {
+        SEGENV.aux0 = PRNG16; // save next starting seed
+        nzone = false;
+      }
+      z = 0;
+    }
+    SEGMENT.setPixelColor(i, SEGMENT.color_wheel(PRNG16 >> 8));
+    z++;
+  }
+
+  SEGENV.aux1 = it & 0xFFFF;
+}
+
+typedef struct Oscillator {
+  uint16_t pos;
+  uint8_t  size;
+  int8_t   dir;
+  uint8_t  speed;
+} oscillator;
+
+/*
+/  Oscillating bars of color, updated with standard framerate
+*/
+void mode_oscillate(void) {
+  constexpr unsigned numOscillators = 3;
+  constexpr unsigned dataSize = sizeof(oscillator) * numOscillators;
+
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  Oscillator* oscillators = reinterpret_cast<Oscillator*>(SEGENV.data);
+
+  if (SEGENV.call == 0)
+  {
+    oscillators[0] = {(uint16_t)(SEGLEN/4),   (uint8_t)(SEGLEN/8),  1, 1};
+    oscillators[1] = {(uint16_t)(SEGLEN/4*3), (uint8_t)(SEGLEN/8),  1, 2};
+    oscillators[2] = {(uint16_t)(SEGLEN/4*2), (uint8_t)(SEGLEN/8), -1, 1};
+  }
+
+  uint32_t cycleTime = 20 + (2 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+
+  for (unsigned i = 0; i < numOscillators; i++) {
+    // if the counter has increased, move the oscillator by the random step
+    if (it != SEGENV.step) oscillators[i].pos += oscillators[i].dir * oscillators[i].speed;
+    oscillators[i].size = SEGLEN/(3+SEGMENT.intensity/8);
+    if((oscillators[i].dir == -1) && (oscillators[i].pos > SEGLEN << 1)) { // use integer overflow
+      oscillators[i].pos = 0;
+      oscillators[i].dir = 1;
+      // make bigger steps for faster speeds
+      oscillators[i].speed = SEGMENT.speed > 100 ? hw_random8(2, 4):hw_random8(1, 3);
+    }
+    if((oscillators[i].dir == 1) && (oscillators[i].pos >= (SEGLEN - 1))) {
+      oscillators[i].pos = SEGLEN - 1;
+      oscillators[i].dir = -1;
+      oscillators[i].speed = SEGMENT.speed > 100 ? hw_random8(2, 4):hw_random8(1, 3);
+    }
+  }
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint32_t color = BLACK;
+    for (unsigned j = 0; j < numOscillators; j++) {
+      if((int)i >= (int)oscillators[j].pos - oscillators[j].size && i <= oscillators[j].pos + oscillators[j].size) {
+        color = (color == BLACK) ? SEGCOLOR(j) : color_blend(color, SEGCOLOR(j), uint8_t(128));
+      }
+    }
+    SEGMENT.setPixelColor(i, color);
+  }
+
+  SEGENV.step = it;
+}
+
+void candle(bool multi)
+{
+  if (multi && SEGLEN > 1) {
+    //allocate segment data
+    unsigned dataSize = sizeof(uint32_t) + max(1, (int)SEGLEN -1) *3;
+    if (!SEGENV.allocateData(dataSize)) candle(false); //allocation failed
+  } else {
+    unsigned dataSize = sizeof(uint32_t); // for last call timestamp
+    if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  }
+  uint32_t* lastcall = reinterpret_cast<uint32_t*>(SEGENV.data);
+  uint8_t*  candleData = reinterpret_cast<uint8_t*>(SEGENV.data + sizeof(uint32_t)); // only used for multi-candle
+
+  //limit update rate
+  if (strip.now - *lastcall < FRAMETIME_FIXED) return;
+  *lastcall = strip.now;
+
+  //max. flicker range controlled by intensity
+  unsigned valrange = SEGMENT.intensity;
+  unsigned rndval = valrange >> 1; //max 127
+
+  //step (how much to move closer to target per frame) coarsely set by speed
+  unsigned speedFactor = 4;
+  if (SEGMENT.speed > 252) { //epilepsy
+    speedFactor = 1;
+  } else if (SEGMENT.speed > 99) { //regular candle (mode called every ~25 ms, so 4 frames to have a new target every 100ms)
+    speedFactor = 2;
+  } else if (SEGMENT.speed > 49) { //slower fade
+    speedFactor = 3;
+  } //else 4 (slowest)
+
+  unsigned numCandles = (multi) ? SEGLEN : 1;
+
+  for (unsigned i = 0; i < numCandles; i++)
+  {
+    unsigned d = 0; //data location
+
+    unsigned s = SEGENV.aux0, s_target = SEGENV.aux1, fadeStep = SEGENV.step;
+    if (i > 0) {
+      d = (i-1) *3;
+      s = candleData[d]; s_target = candleData[d+1]; fadeStep = candleData[d+2];
+    }
+    if (fadeStep == 0) { //init vals
+      s = 128; s_target = 130 + hw_random8(4); fadeStep = 1;
+    }
+
+    bool newTarget = false;
+    if (s_target > s) { //fade up
+      s = qadd8(s, fadeStep);
+      if (s >= s_target) newTarget = true;
+    } else {
+      s = qsub8(s, fadeStep);
+      if (s <= s_target) newTarget = true;
+    }
+
+    if (newTarget) {
+      s_target = hw_random8(rndval) + hw_random8(rndval); //between 0 and rndval*2 -2 = 252
+      if (s_target < (rndval >> 1)) s_target = (rndval >> 1) + hw_random8(rndval);
+      unsigned offset = (255 - valrange);
+      s_target += offset;
+
+      unsigned dif = (s_target > s) ? s_target - s : s - s_target;
+
+      fadeStep = dif >> speedFactor;
+      if (fadeStep == 0) fadeStep = 1;
+    }
+
+    if (i > 0) {
+      SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), uint8_t(s)));
+      candleData[d] = s; candleData[d+1] = s_target; candleData[d+2] = fadeStep;
+    } else {
+      for (unsigned j = 0; j < SEGLEN; j++) {
+        SEGMENT.setPixelColor(j, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0), uint8_t(s)));
+      }
+
+      SEGENV.aux0 = s; SEGENV.aux1 = s_target; SEGENV.step = fadeStep;
+    }
+  }
+}
+
+
+void mode_candle()
+{
+  candle(false);
+}
+void mode_candle_multi(){candle(true);}
+#undef FRAMETIME_FIXED
+
+/* Pinned upstream prng.h and FX.cpp deterministic 1D source references. */
+class PRNG {
+private:
+  uint16_t seed;
+public:
+  PRNG(uint16_t initialSeed = 0x1234) : seed(initialSeed) {}
+  void setSeed(uint16_t s) { seed = s; }
+  uint16_t getSeed() const { return seed; }
+  uint16_t random16() {
+    seed = seed * 3001 + 31683;
+    seed ^= seed >> 7;
+    return seed;
+  }
+  uint16_t random16(uint16_t lim) { return ((uint32_t)random16() * lim) >> 16; }
+  uint16_t random16(uint16_t min, uint16_t lim) { uint16_t delta = lim - min; return random16(delta) + min; }
+  uint8_t random8() { return random16(); }
+  uint8_t random8(uint8_t lim) { return (uint8_t)(((uint16_t)random8() * lim) >> 8); }
+  uint8_t random8(uint8_t min, uint8_t lim) { uint8_t delta = lim - min; return random8(delta) + min; }
+};
+
+static PRNG prng;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-compare"
+void mode_random_chase(void) {
+  if (SEGENV.call == 0) {
+    SEGENV.step = RGBW32(prng.random8(), prng.random8(), prng.random8(), 0);
+    SEGENV.aux0 = prng.random16();
+  }
+  unsigned prevSeed = prng.getSeed(); // save seed so we can restore it at the end of the function
+  uint32_t cycleTime = 25 + (3 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+  uint32_t color = SEGENV.step;
+  prng.setSeed(SEGENV.aux0);
+
+  for (int i = SEGLEN -1; i >= 0; i--) {
+    uint8_t r = prng.random8(6) != 0 ? (color >> 16 & 0xFF) : prng.random8();
+    uint8_t g = prng.random8(6) != 0 ? (color >> 8  & 0xFF) : prng.random8();
+    uint8_t b = prng.random8(6) != 0 ? (color       & 0xFF) : prng.random8();
+    color = RGBW32(r, g, b, 0);
+    SEGMENT.setPixelColor(i, color);
+    if (i == SEGLEN -1U && SEGENV.aux1 != (it & 0xFFFFU)) { //new first color in next frame
+      SEGENV.step = color;
+      SEGENV.aux0 = prng.getSeed();
+    }
+  }
+
+  SEGENV.aux1 = it & 0xFFFF;
+
+  prng.setSeed(prevSeed); // restore original seed so other effects can use "random" PRNG
+}
+
+void mode_twinkleup(void) {                     // A very short twinkle routine with fade-in and dual controls. By Andrew Tuline.
+  unsigned prevSeed = prng.getSeed();           // save seed so we can restore it at the end of the function
+  prng.setSeed(535);                            // The randomizer needs to be re-set each time through the loop in order for the same 'random' numbers to be the same each time through.
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    unsigned ranstart = prng.random8();         // The starting value (aka brightness) for each pixel. Must be consistent each time through the loop for this to work.
+    unsigned pixBri = sin8_t(ranstart + 16 * strip.now/(256-SEGMENT.speed));
+    if (prng.random8() > SEGMENT.intensity) pixBri = 0;
+    SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(prng.random8()+strip.now/100, false, PALETTE_SOLID_WRAP, 0), pixBri));
+  }
+
+  prng.setSeed(prevSeed);                       // restore original seed so other effects can use "random" PRNG
+}
+
+#define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
+void mode_juggle(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+
+  SEGMENT.fadeToBlackBy(192 - (3*SEGMENT.intensity/4));
+  CRGB fastled_col;
+  byte dothue = 0;
+  for (int i = 0; i < 8; i++) {
+    int index = 0 + beatsin88_t((16 + SEGMENT.speed)*(i + 7), 0, SEGLEN -1);
+    fastled_col = CRGB(SEGMENT.getPixelColor(index));
+    fastled_col |= (SEGMENT.palette==0)?CHSV(dothue, 220, 255):CRGB(ColorFromPalette(SEGPALETTE, dothue, 255));
+    SEGMENT.setPixelColor(index, fastled_col);
+    dothue += 32;
+  }
+}
+#undef SEGPALETTE
+/* Verbatim pinned 1D Fireworks, Rain, Meteor, Ripple and Ripple Rainbow. */
+#define SPEED_FORMULA_L (5u+(50u*(255u-SEGMENT.speed))/SEGLEN)
+#define IBN 5100
+void mode_fireworks() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const uint16_t width  = SEGMENT.is2D() ? SEG_W : SEGLEN;
+  const uint16_t height = SEG_H;
+
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = UINT16_MAX;
+    SEGENV.aux1 = UINT16_MAX;
+  }
+  SEGMENT.fade_out(128);
+
+  uint8_t x = SEGENV.aux0%width, y = SEGENV.aux0/width; // 2D coordinates stored in upper and lower byte
+  if (!SEGENV.step) {
+    // fireworks mode (blur flares)
+    bool valid1 = (SEGENV.aux0 < width*height);
+    bool valid2 = (SEGENV.aux1 < width*height);
+    uint32_t sv1 = 0, sv2 = 0;
+    if (valid1) sv1 = SEGMENT.is2D() ? SEGMENT.getPixelColorXY(x, y) : SEGMENT.getPixelColor(SEGENV.aux0); // get spark color
+    if (valid2) sv2 = SEGMENT.is2D() ? SEGMENT.getPixelColorXY(x, y) : SEGMENT.getPixelColor(SEGENV.aux1);
+    SEGMENT.blur(16); // used in mode_rain()
+    if (valid1) { if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, sv1); else SEGMENT.setPixelColor(SEGENV.aux0, sv1); } // restore spark color after blur
+    if (valid2) { if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, sv2); else SEGMENT.setPixelColor(SEGENV.aux1, sv2); } // restore old spark color after blur
+  }
+
+  for (int i=0; i<max(1, width/20); i++) {
+    if (hw_random8(129 - (SEGMENT.intensity >> 1)) == 0) {
+      uint16_t index = hw_random16(width*height);
+      x = index % width;
+      y = index / width;
+      uint32_t col = SEGMENT.color_from_palette(hw_random8(), false, false, 0);
+      if (SEGMENT.is2D()) SEGMENT.setPixelColorXY(x, y, col);
+      else                SEGMENT.setPixelColor(index, col);
+      SEGENV.aux1 = SEGENV.aux0;  // old spark
+      SEGENV.aux0 = index;        // remember where spark occurred
+    }
+  }
+}
+
+void mode_rain() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  const unsigned width  = SEG_W;
+  const unsigned height = SEG_H;
+  SEGENV.step += FRAMETIME;
+  if (SEGENV.call && SEGENV.step > SPEED_FORMULA_L) {
+    SEGENV.step = 1;
+    if (SEGMENT.is2D()) {
+      //uint32_t ctemp[width];
+      //for (int i = 0; i<width; i++) ctemp[i] = SEGMENT.getPixelColorXY(i, height-1);
+      SEGMENT.move(6, 1, true);  // move all pixels down
+      //for (int i = 0; i<width; i++) SEGMENT.setPixelColorXY(i, 0, ctemp[i]); // wrap around
+      SEGENV.aux0 = (SEGENV.aux0 % width) + (SEGENV.aux0 / width + 1) * width;
+      SEGENV.aux1 = (SEGENV.aux1 % width) + (SEGENV.aux1 / width + 1) * width;
+    } else {
+      //shift all leds left
+      uint32_t ctemp = SEGMENT.getPixelColor(0);
+      for (unsigned i = 0; i < SEGLEN - 1; i++) {
+        SEGMENT.setPixelColor(i, SEGMENT.getPixelColor(i+1));
+      }
+      SEGMENT.setPixelColor(SEGLEN -1, ctemp); // wrap around
+      SEGENV.aux0++;  // increase spark index
+      SEGENV.aux1++;
+    }
+    if (SEGENV.aux0 == 0) SEGENV.aux0 = UINT16_MAX; // reset previous spark position
+    if (SEGENV.aux1 == 0) SEGENV.aux0 = UINT16_MAX; // reset previous spark position
+    if (SEGENV.aux0 >= width*height) SEGENV.aux0 = 0;     // ignore
+    if (SEGENV.aux1 >= width*height) SEGENV.aux1 = 0;
+  }
+  mode_fireworks();
+}
+
+void mode_meteor() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if (!SEGENV.allocateData(SEGLEN)) FX_FALLBACK_STATIC; //allocation failed
+  const bool meteorSmooth = SEGMENT.check3;
+  byte* trail = SEGENV.data;
+
+  const unsigned meteorSize = 1 + SEGLEN / 20; // 5%
+  uint16_t meteorstart;
+  if(meteorSmooth) meteorstart = map((SEGENV.step >> 6 & 0xFF), 0, 255, 0, SEGLEN -1);
+  else {
+    unsigned counter = strip.now * ((SEGMENT.speed >> 2) + 8);
+    meteorstart = (counter * SEGLEN) >> 16;
+  }
+
+  const int max = SEGMENT.palette==5 || !SEGMENT.check1 ? 240 : 255;
+  // fade all leds to colors[1] in LEDs one step
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint32_t col;
+    if (hw_random8() <= 255 - SEGMENT.intensity) {
+      if(meteorSmooth) {
+        if (trail[i] > 0) {
+          int change = trail[i] + 4 - hw_random8(24); //change each time between -20 and +4
+          trail[i] = constrain(change, 0, max);
+        }
+        col = SEGMENT.check1 ? SEGMENT.color_from_palette(i, true, false, 0, trail[i]) : SEGMENT.color_from_palette(trail[i], false, true, 255);
+      }
+      else {
+        trail[i] = scale8(trail[i], 128 + hw_random8(127));
+        int index = trail[i];
+        int idx = 255;
+        int bri = SEGMENT.palette==35 || SEGMENT.palette==36 ? 255 : trail[i];
+        if (!SEGMENT.check1) {
+          idx = 0;
+          index = map(i,0,SEGLEN,0,max);
+          bri = trail[i];
+        }
+        col = SEGMENT.color_from_palette(index, false, false, idx, bri);  // full brightness for Fire
+      }
+      SEGMENT.setPixelColor(i, col);
+    }
+  }
+
+  // draw meteor
+  for (unsigned j = 0; j < meteorSize; j++) {
+    unsigned index = (meteorstart + j) % SEGLEN;
+    if(meteorSmooth) {
+        trail[index] = max;
+        uint32_t col = SEGMENT.check1 ? SEGMENT.color_from_palette(index, true, false, 0, trail[index]) : SEGMENT.color_from_palette(trail[index], false, true, 255);
+        SEGMENT.setPixelColor(index, col);
+    }
+    else{
+      int idx = 255;
+      int i = trail[index] = max;
+      if (!SEGMENT.check1) {
+        i = map(index,0,SEGLEN,0,max);
+        idx = 0;
+      }
+      uint32_t col = SEGMENT.color_from_palette(i, false, false, idx, 255); // full brightness
+      SEGMENT.setPixelColor(index, col);
+    }
+  }
+
+  SEGENV.step += SEGMENT.speed +1;
+}
+
+typedef struct Ripple {
+  uint8_t state;
+  uint8_t color;
+  uint16_t pos;
+} ripple;
+
+#ifdef ESP8266
+  #define MAX_RIPPLES   56
+#else
+  #define MAX_RIPPLES  100
+#endif
+static void ripple_base(uint8_t blurAmount = 0) {
+  unsigned maxRipples = min(1 + (int)(SEGLEN >> 2), MAX_RIPPLES);  // 56 max for 16 segment ESP8266
+  unsigned dataSize = sizeof(ripple) * maxRipples;
+
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  Ripple* ripples = reinterpret_cast<Ripple*>(SEGENV.data);
+
+  //draw wave
+  for (unsigned i = 0; i < maxRipples; i++) {
+    unsigned ripplestate = ripples[i].state;
+    if (ripplestate) {
+      unsigned rippledecay = (SEGMENT.speed >> 4) +1; //faster decay if faster propagation
+      unsigned rippleorigin = ripples[i].pos;
+      uint32_t col = SEGMENT.color_from_palette(ripples[i].color, false, false, 255);
+      unsigned propagation = ((ripplestate/rippledecay - 1) * (SEGMENT.speed + 1));
+      int propI = propagation >> 8;
+      unsigned propF = propagation & 0xFF;
+      unsigned amp = (ripplestate < 17) ? triwave8((ripplestate-1)*8) : map(ripplestate,17,255,255,2);
+
+      #ifndef WLED_DISABLE_2D
+      if (SEGMENT.is2D()) {
+        propI /= 2;
+        unsigned cx = rippleorigin >> 8;
+        unsigned cy = rippleorigin & 0xFF;
+        unsigned mag = scale8(sin8_t((propF>>2)), amp);
+        if (propI > 0) SEGMENT.drawCircle(cx, cy, propI, color_blend(SEGMENT.getPixelColorXY(cx + propI, cy), col, mag), true);
+      } else
+      #endif
+      {
+        int left = rippleorigin - propI -1;
+        int right = rippleorigin + propI +2;
+        for (int v = 0; v < 4; v++) {
+          uint8_t mag = scale8(cubicwave8((propF>>2) + v * 64), amp);
+          SEGMENT.setPixelColor(left + v, color_blend(SEGMENT.getPixelColor(left + v), col, mag)); // TODO
+          SEGMENT.setPixelColor(right - v, color_blend(SEGMENT.getPixelColor(right - v), col, mag)); // TODO
+        }
+      }
+      ripplestate += rippledecay;
+      ripples[i].state = (ripplestate > 254) ? 0 : ripplestate;
+    } else {//randomly create new wave
+      if (hw_random16(IBN + 10000) <= (SEGMENT.intensity >> (SEGMENT.is2D()*3))) {
+        ripples[i].state = 1;
+        ripples[i].pos = SEGMENT.is2D() ? ((hw_random8(SEG_W)<<8) | (hw_random8(SEG_H))) : hw_random16(SEGLEN);
+        ripples[i].color = hw_random8(); //color
+      }
+    }
+  }
+  SEGMENT.blur(blurAmount);
+}
+#undef MAX_RIPPLES
+
+
+
+void mode_ripple(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if(SEGMENT.custom1 || SEGMENT.check2) // blur or overlay
+    SEGMENT.fade_out(250);
+  else
+    SEGMENT.fill(SEGCOLOR(1));
+
+  ripple_base(SEGMENT.custom1>>1);
+}
+
+void mode_ripple_rainbow(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  if (SEGENV.call ==0) {
+    SEGENV.aux0 = hw_random8();
+    SEGENV.aux1 = hw_random8();
+  }
+  if (SEGENV.aux0 == SEGENV.aux1) {
+    SEGENV.aux1 = hw_random8();
+  } else if (SEGENV.aux1 > SEGENV.aux0) {
+    SEGENV.aux0++;
+  } else {
+    SEGENV.aux0--;
+  }
+  SEGMENT.fill(color_blend(SEGMENT.color_wheel(SEGENV.aux0),BLACK,uint8_t(235)));
+  ripple_base();
+}
+#undef SPEED_FORMULA_L
+#undef IBN
+#pragma GCC diagnostic pop
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4245,13 +5501,607 @@ static const RefCase refs[]={
     {21,mode_flash_sparkle,"Sparkle Dark"},
     {22,mode_hyper_sparkle,"Sparkle+"},
     {17,mode_twinkle,"Twinkle"},
+    {18,mode_dissolve,"Dissolve"},
+    {19,mode_dissolve_random,"Dissolve Rnd"},
     {111,mode_chunchun,"Chunchun"},
-    {59,mode_multi_comet,"Multi Comet"}
+    {59,mode_multi_comet,"Multi Comet"},
+    {12,mode_fade,"Fade"},
+    {3,mode_color_wipe,"Wipe"},
+    {6,mode_color_sweep,"Sweep"},
+    {4,mode_color_wipe_random,"Wipe Random"},
+    {36,mode_color_sweep_random,"Sweep Random"},
+    {5,mode_random_color,"Random Colors"},
+    {28,mode_chase_color,"Chase"},
+    {29,mode_chase_random,"Chase Random"},
+    {92,mode_sinelon,"Sinelon"},
+    {93,mode_sinelon_dual,"Sinelon Dual"},
+    {94,mode_sinelon_rainbow,"Sinelon Rainbow"},
+    {110,mode_flow,"Flow"},
+    {104,mode_sunrise,"Sunrise"},
+    {113,mode_washing_machine,"Washing Machine"},
+    {54,mode_tricolor_chase,"Chase 3"},
+    {31,mode_chase_flash,"Chase Flash"},
+    {42,mode_fireworks,"Fireworks"},
+    {43,mode_rain,"Rain"},
+    {76,mode_meteor,"Meteor"},
+    {79,mode_ripple,"Ripple"},
+    {99,mode_ripple_rainbow,"Ripple Rainbow"},
+    {64,mode_juggle,"Juggle"},
+    {61,mode_random_chase,"Stream 2"},
+    {106,mode_twinkleup,"Twinkleup"},
+    {39,mode_running_random,"Stream"},
+    {62,mode_oscillate,"Oscillate"},
+    {88,mode_candle,"Candle"},
+    {102,mode_candle_multi,"Candle Multi"},
+    {69,mode_fillnoise8,"Fill Noise"},
+    {70,mode_noise16_1,"Noise 1"},
+    {71,mode_noise16_2,"Noise 2"},
+    {72,mode_noise16_3,"Noise 3"},
+    {73,mode_noise16_4,"Noise 4"},
+    {40,mode_larson_scanner,"Scanner"},
+    {60,mode_dual_larson_scanner,"Scanner Dual"},
+    {41,mode_comet,"Lighthouse"},
+    {32,mode_chase_flash_random,"Chase Flash Rnd"},
+    {30,mode_chase_rainbow,"Chase Rainbow"},
+    {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
 }
+/* Source fastled_slim.cpp nblendPaletteTowardPalette() on its real
+ * 48-byte CRGB layout. The existing host CRGB inherits a 4-byte RGBW
+ * shim, so using it here would silently test the wrong byte geometry. */
+struct SourceRGB3 {uint8_t r,g,b;};
+struct SourcePalette48 {SourceRGB3 entries[16];};
+static_assert(sizeof(SourcePalette48)==48u,"Pinned CRGB palette is 48 bytes");
+static_assert(sizeof(ot_wled_palette16_t)==48u,"CORE palette must be 48 bytes");
+static void source_nblendPaletteTowardPalette(SourcePalette48& current,
+                                             SourcePalette48& target,
+                                             uint8_t maxChanges) {
+  uint8_t* p1;
+  uint8_t* p2;
+  uint32_t changes = 0;
+  p1 = (uint8_t*)current.entries;
+  p2 = (uint8_t*)target.entries;
+  const uint32_t totalChannels = sizeof(SourcePalette48);
+  for (uint32_t i = 0; i < totalChannels; ++i) {
+    if (p1[i] == p2[i]) continue;
+    if (p1[i] < p2[i]) { ++p1[i]; ++changes; }
+    if (p1[i] > p2[i]) {
+      --p1[i]; ++changes;
+      if (p1[i] > p2[i]) --p1[i];
+    }
+    if(changes >= maxChanges)
+      break;
+  }
+}
+
+struct SourceRandomPaletteState {
+    SourcePalette48 current{},target{};
+    uint16_t lastChange=0u,nextBlend=0u;
+};
+static void source_handleRandomPalette(SourceRandomPaletteState& s,
+                                        uint32_t ms,uint16_t interval,
+                                        uint16_t frameTime,uint16_t transition,
+                                        const SourcePalette48& generated) {
+  uint32_t now = ms; // ESP32 unsigned long is 32-bit; host Linux uses 64-bit.
+  uint16_t now_s = now / 1000;
+  now = (now_s)*1000 + (now % 1000);
+  if (now_s < s.lastChange) s.lastChange = 0;
+  if (now_s > s.lastChange + interval) {
+    s.target = generated;
+    s.lastChange = now_s;
+    s.nextBlend = (uint16_t)now;
+  }
+  if ((uint16_t)now < s.nextBlend ||
+      now > ((uint32_t)s.lastChange*1000u+(uint32_t)transition+
+             2u*(uint32_t)frameTime)) return;
+  unsigned transitionFrames = frameTime > transition ? 1 : transition / frameTime;
+  unsigned noOfBlends = transitionFrames > 255 ? 1 :
+                        (255 + (transitionFrames>>1)) / transitionFrames;
+  for (unsigned i=0;i<noOfBlends;i++)
+    source_nblendPaletteTowardPalette(s.current,s.target,48u);
+  s.nextBlend = (uint16_t)(now + ((transitionFrames>>8)*frameTime));
+}
+static void certifyPaletteOneLifecycle() {
+    unsigned blendSamples=0u,tickSamples=0u;
+    const uint8_t budgets[]={0u,1u,2u,24u,48u,127u,255u};
+    for(unsigned profile=0;profile<40u;profile++) {
+        ot_wled_palette16_t initial{},target{};
+        for(unsigned i=0;i<16u;i++) {
+            const unsigned x=i*17u+profile*19u;
+            initial.entries[i]={(uint8_t)(x*3u),(uint8_t)(x*7u),(uint8_t)(x*11u)};
+            target.entries[i]={(uint8_t)(255u-(x*13u)),(uint8_t)(x*5u),(uint8_t)(x*23u)};
+        }
+        for(uint8_t budget:budgets) {
+            ot_wled_palette16_t actual=initial;
+            SourcePalette48 expected{},goal{};
+            std::memcpy(&expected,&initial,sizeof(initial));
+            std::memcpy(&goal,&target,sizeof(target));
+            for(unsigned k=0;k<20u;k++) {
+                ot_wled_palette_blend_toward(&actual,&target,budget);
+                source_nblendPaletteTowardPalette(expected,goal,budget);
+                if(std::memcmp(&actual,&expected,sizeof(actual))!=0) {
+                    std::fprintf(stderr,
+                      "Palette-1 upstream nblend mismatch profile=%u budget=%u pass=%u\\n",
+                      profile,(unsigned)budget,k);
+                    std::abort();
+                }
+                blendSamples+=sizeof(actual);
+            }
+        }
+        for(unsigned frame:{8u,23u,42u,1000u}) {
+            for(unsigned transition:{100u,700u,20000u}) {
+                ot_wled_palette_random_t live{};
+                live.current=initial;live.target=target;
+                SourceRandomPaletteState expected{};
+                std::memcpy(&expected.current,&initial,sizeof(initial));
+                std::memcpy(&expected.target,&target,sizeof(target));
+                const uint32_t times[]={0u,7u,17u,999u,1000u,1500u,2500u,
+                   5000u,5001u,65530u,65535u,65536u,65540u,
+                   100000u,65534000u,65535000u,65536000u,65537000u};
+                for(uint32_t now:times) {
+                    /* Random HSV/RNG may be consumed only at an upstream
+                     * regeneration event. A missing generated palette makes
+                     * the verified source-timing tick fail exactly when due. */
+                    const ot_wled_palette_random_t before_gate=live;
+                    const bool due=ot_wled_palette_random_generation_due(
+                        &live,now,2u);
+                    ot_wled_palette_random_t no_generator=live;
+                    const bool no_generator_ok=ot_wled_palette_random_tick(
+                        &no_generator,now,2u,(uint16_t)frame,
+                        (uint16_t)transition,nullptr);
+                    if(due==no_generator_ok ||
+                       std::memcmp(&before_gate,&live,sizeof(live))!=0){
+                        std::fprintf(stderr,
+                          "Global random palette due gate disagrees with source timing at %u ms\\n",
+                          (unsigned)now);
+                        std::abort();
+                    }
+                    const bool ok=ot_wled_palette_random_tick(
+                        &live,now,2u,(uint16_t)frame,(uint16_t)transition,&target);
+                    SourcePalette48 generated{};
+                    std::memcpy(&generated,&target,sizeof(target));
+                    source_handleRandomPalette(expected,now,2u,(uint16_t)frame,
+                                                (uint16_t)transition,generated);
+                    if(!ok||
+                       live.last_change_s!=expected.lastChange||
+                       live.next_blend_ms!=expected.nextBlend||
+                       std::memcmp(&live.current,&expected.current,sizeof(live.current))!=0||
+                       std::memcmp(&live.target,&expected.target,sizeof(live.target))!=0) {
+                        std::fprintf(stderr,
+                           "Palette-1 source schedule mismatch profile=%u frame=%u transition=%u ms=%u\\n",
+                           profile,frame,transition,(unsigned)now);
+                        std::abort();
+                    }
+                    tickSamples+=2u*48u+4u;
+                }
+                const ot_wled_palette_random_t before=live;
+                if(ot_wled_palette_random_tick(&live,7000000u,2u,
+                   (uint16_t)frame,(uint16_t)transition,nullptr) ||
+                   std::memcmp(&live,&before,sizeof(live))!=0)
+                    {std::fprintf(stderr,"Palette-1 rejected generator did not fail atomically\\n");std::abort();}
+                if(ot_wled_palette_random_tick(&live,65536000u,2u,0u,
+                   (uint16_t)transition,&target) ||
+                   std::memcmp(&live,&before,sizeof(live))!=0)
+                    {std::fprintf(stderr,"Palette-1 rejected timing mutated state\\n");std::abort();}
+            }
+        }
+    }
+    if(ot_wled_palette_random_generation_due(nullptr,7000000u,2u))
+        {std::fprintf(stderr,"Null global palette source accepted\\n");std::abort();}
+    std::printf("WLED palette-1 source blend and shared lifecycle parity passed: %u RGB bytes + %u schedule/state bytes checked.\\n",
+                blendSamples,tickSamples);
+}
+
+/* Pinned fastled_slim.h loadDynamicGradientPalette() RGB stop layout.
+ * The oracle uses the existing verbatim fill_gradient_RGB() source body
+ * on each stop span; no test interpolation tolerance is permitted. */
+static void certifyCustomGradientLoader() {
+    unsigned checked=0u;
+    for(unsigned count=2u;count<=18u;count++) {
+        for(unsigned seed=0u;seed<48u;seed++) {
+            std::array<uint8_t,72> stops{};
+            for(unsigned i=0u;i<count;i++) {
+                const unsigned index=i*255u/(count-1u);
+                stops[4u*i]=(uint8_t)index;
+                stops[4u*i+1u]=(uint8_t)(i*37u+seed*11u);
+                stops[4u*i+2u]=(uint8_t)(i*13u+seed*19u);
+                stops[4u*i+3u]=(uint8_t)(i*61u+seed*7u);
+            }
+            ot_wled_palette16_t actual{};
+            if(!ot_wled_palette_from_gradient_stops(stops.data(),count,&actual))
+                {std::fprintf(stderr,"Custom palette valid stops rejected\\n");std::abort();}
+            CRGBPalette16 expected{};
+            int lastSlot=-1;
+            unsigned indexstart=0u;
+            CRGB start(stops[1],stops[2],stops[3]);
+            for(unsigned i=1u;i<count;i++) {
+                const unsigned indexend=stops[4u*i];
+                const CRGB end(stops[4u*i+1u],stops[4u*i+2u],stops[4u*i+3u]);
+                unsigned start8=indexstart/16u,end8=indexend/16u;
+                if(count<16u&&(int)start8<=lastSlot&&lastSlot<15) {
+                    start8=(unsigned)(lastSlot+1);
+                    if(end8<start8)end8=start8;
+                }
+                lastSlot=(int)end8;
+                fill_gradient_RGB(expected.entries,start8,start,end8,end);
+                start=end;indexstart=indexend;
+            }
+            for(unsigned i=0u;i<16u;i++) {
+                const uint32_t got=pack(actual.entries[i]);
+                const uint32_t want=expected.entries[i].color32&0xffffffu;
+                if(got!=want) {
+                    std::fprintf(stderr,
+                      "Custom gradient source mismatch count=%u seed=%u stop=%u upstream=%06X CORE=%06X\\n",
+                      count,seed,i,(unsigned)want,(unsigned)got);
+                    std::abort();
+                }
+                checked+=3u;
+            }
+            const ot_wled_palette16_t unchanged=actual;
+            stops[4u*(count-1u)]=254u;
+            if(ot_wled_palette_from_gradient_stops(stops.data(),count,&actual)||
+               std::memcmp(&unchanged,&actual,sizeof(actual)))
+                {std::fprintf(stderr,"Custom gradient accepted missing 255 terminator\\n");std::abort();}
+            stops[4u*(count-1u)]=255u;
+            if(count>=3u) {
+                stops[4u]=254u;
+                stops[8u]=3u;
+                if(ot_wled_palette_from_gradient_stops(stops.data(),count,&actual)||
+                   std::memcmp(&unchanged,&actual,sizeof(actual)))
+                    {std::fprintf(stderr,"Custom gradient accepted descending stops\\n");std::abort();}
+            }
+        }
+    }
+    std::array<uint8_t,72> invalid{};
+    ot_wled_palette16_t untouched{};
+    untouched.entries[0]={7u,9u,11u};
+    const ot_wled_palette16_t original=untouched;
+    if(ot_wled_palette_from_gradient_stops(invalid.data(),1u,&untouched)||
+       ot_wled_palette_from_gradient_stops(invalid.data(),19u,&untouched)||
+       ot_wled_palette_from_gradient_stops(nullptr,2u,&untouched)||
+       std::memcmp(&untouched,&original,sizeof(original)))
+        {std::fprintf(stderr,"Custom gradient bounds violated\\n");std::abort();}
+    std::printf("WLED custom palette 2-18 stop interpolation reference passed: %u RGB channel comparisons and invalid-input fail-closed checks.\\n",checked);
+}
+
+static void certifyPaletteIdLookup() {
+    std::array<ot_wled_palette16_t,128> custom{};
+    std::array<ot_wled_palette16_t,55> usermods{};
+    ot_wled_palette16_t random{};
+    for(size_t i=0;i<custom.size();i++)
+        for(unsigned j=0;j<16u;j++)
+            custom[i].entries[j]={(uint8_t)i,(uint8_t)(j*9u),(uint8_t)(i+j)};
+    for(size_t i=0;i<usermods.size();i++)
+        for(unsigned j=0;j<16u;j++)
+            usermods[i].entries[j]={(uint8_t)(i+81u),(uint8_t)j,(uint8_t)(255u-i)};
+    for(unsigned j=0;j<16u;j++)random.entries[j]={(uint8_t)j,91u,37u};
+    const ot_wled_rgb_t fg={123u,56u,9u},bg={3u,88u,174u},third={0u,0u,0u};
+    unsigned bytes=0u;
+    for(unsigned id=0;id<=255u;id++) {
+        ot_wled_palette16_t actual{},expected{};
+        if(id==1u) expected=random;
+        else if(id<=72u) {
+            if(!ot_wled_palette_build((uint8_t)id,fg,bg,third,&expected))
+                std::abort();
+        } else if(id<=200u)expected=custom[200u-id];
+        else expected=usermods[255u-id];
+        if(!ot_wled_palette_resolve((uint8_t)id,fg,bg,third,&random,
+            custom.data(),custom.size(),usermods.data(),usermods.size(),&actual)||
+            std::memcmp(&actual,&expected,sizeof(actual))) {
+            std::fprintf(stderr,"Palette ID resolver mismatch id=%u\\n",id);
+            std::abort();
+        }
+        bytes+=(unsigned)sizeof(actual);
+    }
+    ot_wled_palette16_t original{};
+    original.entries[0]={7u,9u,11u};
+    ot_wled_palette16_t changed=original;
+    if(ot_wled_palette_resolve(1u,fg,bg,third,nullptr,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(200u,fg,bg,third,&random,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(255u,fg,bg,third,&random,nullptr,0u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(199u,fg,bg,third,&random,custom.data(),1u,nullptr,0u,&changed)||
+       ot_wled_palette_resolve(254u,fg,bg,third,&random,nullptr,0u,usermods.data(),1u,&changed)||
+       std::memcmp(&original,&changed,sizeof(original)))
+        {std::fprintf(stderr,"Missing palette IDs did not fail closed\\n");std::abort();}
+    std::printf("WLED palette ID mapping 0-255 verified: %u RGB bytes and missing-ID checks.\\n",bytes);
+}
+
+/* Transient dynamic/custom palette is consumed by an opted-in effect
+ * without creating per-zone generator state or weakening unsupported modes.
+ * The independent source palette sample comparisons run below. */
+static void certifyLivePaletteInjection() {
+    ot_wled_palette16_t warm{},cool{};
+    for(auto &v:warm.entries)v={17u,99u,201u};
+    for(auto &v:cool.entries)v={221u,31u,78u};
+    for(const uint8_t palette_id:{1u,73u,200u,201u,255u}) {
+        ot_wled_fx_config_t cfg{};
+        cfg.effect_id=OT_WLED_SLOW_TRANSITION;
+        cfg.palette_id=palette_id;
+        cfg.speed=127u;
+        cfg.intensity=128u;
+        cfg.brightness=255u;
+        cfg.frame_time_ms=23u;
+        cfg.foreground={123u,56u,9u};
+        cfg.background={3u,88u,174u};
+        std::array<ot_wled_rgb_t,32> pixels{};
+        ot_wled_fx_state_t state{};
+        for(auto &p:pixels)p={9u,8u,7u};
+        /* Missing external input fails before touching frame or state. */
+        if(ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()) ||
+           state.call!=0u)std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0x090807u)std::abort();
+        cfg.resolved_palette=&warm;
+        if(!ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()))
+            std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0x1163C9u) {
+            std::fprintf(stderr,"Palette injection warm mismatch id=%u got=%06X\\n",
+                         palette_id,(unsigned)pack(p));
+            std::abort();
+        }
+        ot_wled_fx_reset(&state);
+        state={};
+        cfg.resolved_palette=&cool;
+        if(!ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()))
+            std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0xDD1F4Eu) {
+            std::fprintf(stderr,"Palette injection cool mismatch id=%u got=%06X\\n",
+                         palette_id,(unsigned)pack(p));
+            std::abort();
+        }
+        ot_wled_fx_reset(&state);
+        state={};
+        cfg.effect_id=OT_WLED_SOLID; /* unsupported palette must still reject */
+        if(ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()) ||
+           state.call!=0u)std::abort();
+    }
+    std::puts("Transient random/custom palette render injection passed: five IDs, two independent RGB scenes, unsupported-mode and missing-data guards.");
+}
+
+/* Independently check pinned colors.cpp generateRandomPalette() byte draw
+ * order and source CHSV/gradient construction, then global cadence. */
+struct GlobalPaletteByteStream {
+    uint32_t draws;
+    uint8_t bytes[256];
+};
+static uint8_t nextPaletteByte(void *context) {
+    auto *s=(GlobalPaletteByteStream*)context;
+    return s->bytes[(s->draws++)&255u];
+}
+/* Independent RGB/HSV source math and harmonic branch ordering from
+ * pinned colors.cpp. The test stream replaces only ESP hardware register
+ * reads; it never replaces source arithmetic or relaxes RGB comparisons. */
+static uint8_t sourceRawRange(GlobalPaletteByteStream *s,
+                              unsigned lo,unsigned hi) {
+    return (uint8_t)(lo+((unsigned)nextPaletteByte(s)*(hi-lo)>>8));
+}
+static CHSV sourceRgbHsv(CRGB c){
+    int32_t r=c.r,g=c.g,b=c.b;
+    uint32_t mx=(r>g)?(r>b?r:b):(g>b?g:b);
+    if(mx==0u)return CHSV(0u,0u,0u);
+    uint32_t mn=(r<g)?(r<b?r:b):(g<b?g:b);
+    const int32_t delta=(int32_t)(mx-mn);
+    if(delta==0)return CHSV(0u,0u,(uint8_t)mx);
+    uint16_t h;
+    if(mx==(uint32_t)r)h=(uint16_t)(10923*(g-b)/delta);
+    else if(mx==(uint32_t)g)h=(uint16_t)(21845+10923*(b-r)/delta);
+    else h=(uint16_t)(43690+10923*(r-g)/delta);
+    return CHSV((uint8_t)(h>>8),(uint8_t)((255*delta)/mx),(uint8_t)mx);
+}
+static CRGBPalette16 sourceHarmonicPalette(const ot_wled_palette16_t &base,
+                                           GlobalPaletteByteStream *stream,
+                                           uint8_t *harmony_type){
+    CHSV c[4]={CHSV(0,0,0),CHSV(0,0,0),CHSV(0,0,0),CHSV(0,0,0)};
+    uint8_t keep=sourceRawRange(stream,0u,4u);
+    const auto v=base.entries[keep*5u];
+    c[keep]=sourceRgbHsv(CRGB(v.r,v.g,v.b));
+    c[keep].h=(uint8_t)(c[keep].h+sourceRawRange(stream,0u,10u)-5u);
+    for(unsigned i=0;i<3u;i++){
+        c[i].s=sourceRawRange(stream,200u,255u);
+        c[i].v=sourceRawRange(stream,220u,255u);
+    }
+    c[3].s=sourceRawRange(stream,20u,255u);
+    c[3].v=sourceRawRange(stream,80u,255u);
+    for(int i=3;i>0;i--){
+        std::swap(c[i].s,c[sourceRawRange(stream,0u,(unsigned)i+1u)].s);
+        std::swap(c[i].v,c[sourceRawRange(stream,0u,(unsigned)i+1u)].v);
+    }
+    const uint8_t basehue=c[keep].h;
+    uint8_t hs[3]={0};
+    const uint8_t type=sourceRawRange(stream,0u,5u);
+    *harmony_type=type;
+    switch(type){
+    case 0:
+        hs[0]=(uint8_t)(basehue+sourceRawRange(stream,30u,50u));
+        hs[1]=(uint8_t)(basehue+sourceRawRange(stream,10u,30u));
+        hs[2]=(uint8_t)(basehue-sourceRawRange(stream,10u,30u));break;
+    case 1:
+        hs[0]=(uint8_t)(basehue+113u+sourceRawRange(stream,0u,15u));
+        hs[1]=(uint8_t)(basehue+233u+sourceRawRange(stream,0u,15u));
+        hs[2]=(uint8_t)(basehue-7u+sourceRawRange(stream,0u,15u));break;
+    case 2:
+        hs[0]=(uint8_t)(basehue+145u+sourceRawRange(stream,0u,10u));
+        hs[1]=(uint8_t)(basehue+205u+sourceRawRange(stream,0u,10u));
+        hs[2]=(uint8_t)(basehue-5u+sourceRawRange(stream,0u,10u));break;
+    case 3:
+        hs[0]=(uint8_t)(basehue+85u+sourceRawRange(stream,0u,10u));
+        hs[1]=(uint8_t)(basehue+175u+sourceRawRange(stream,0u,10u));
+        hs[2]=(uint8_t)(basehue+265u+sourceRawRange(stream,0u,10u));break;
+    default:
+        hs[0]=(uint8_t)(basehue+80u+sourceRawRange(stream,0u,20u));
+        hs[1]=(uint8_t)(basehue+170u+sourceRawRange(stream,0u,20u));
+        hs[2]=(uint8_t)(basehue-15u+sourceRawRange(stream,0u,30u));break;
+    }
+    if(nextPaletteByte(stream)<128u){
+        for(int i=2;i>0;i--)
+            std::swap(hs[i],hs[sourceRawRange(stream,0u,(unsigned)i+1u)]);
+    }
+    for(int i=0,j=0;i<4;i++)if(i!=keep)c[i].h=hs[j++];
+    if(nextPaletteByte(stream)<25u)
+        for(auto &v:c)if(v.s>180u)v.s=(uint8_t)(v.s-160u);
+    const CRGB colors[4]={CRGB(c[0]),CRGB(c[1]),CRGB(c[2]),CRGB(c[3])};
+    CRGBPalette16 expected{};
+    fill_gradient_RGB(expected.entries,0u,colors[0],5u,colors[1]);
+    fill_gradient_RGB(expected.entries,5u,colors[1],10u,colors[2]);
+    fill_gradient_RGB(expected.entries,10u,colors[2],15u,colors[3]);
+    return expected;
+}
+static void certifyPinnedHarmonicPalette(){
+    unsigned type_mask=0u;
+    for(unsigned seed=0;seed<240u;seed++){
+        GlobalPaletteByteStream actual{},reference{};
+        for(unsigned i=0;i<256u;i++)
+            actual.bytes[i]=reference.bytes[i]=(uint8_t)(seed*41u+i*97u+
+                ((i*seed)>>3));
+        ot_wled_palette16_t base{},out{};
+        for(unsigned i=0;i<16u;i++)
+            base.entries[i]={(uint8_t)(seed+i*17u),
+                             (uint8_t)(seed*3u+i*11u),
+                             (uint8_t)(seed*7u+i*5u)};
+        uint8_t harmony=0xffu;
+        const auto expected=sourceHarmonicPalette(base,&reference,&harmony);
+        type_mask|=(1u<<harmony);
+        if(!ot_wled_palette_generate_harmonic(&base,nextPaletteByte,&actual,&out)||
+           actual.draws!=reference.draws){
+            std::fprintf(stderr,"Harmonic palette source RNG mismatch seed=%u\\n",seed);
+            std::abort();
+        }
+        for(unsigned i=0;i<16u;i++){
+            if(pack(out.entries[i])!=(expected.entries[i].color32&0xffffffu)){
+                std::fprintf(stderr,"Harmonic palette RGB source mismatch seed=%u harmony=%u entry=%u expected=%06X got=%06X\\n",
+                    seed,(unsigned)harmony,i,
+                    (unsigned)(expected.entries[i].color32&0xffffffu),
+                    (unsigned)pack(out.entries[i]));
+                std::abort();
+            }
+        }
+    }
+    if(type_mask!=31u){std::fprintf(stderr,"Missing harmonic families: mask=%u\\n",type_mask);std::abort();}
+    std::puts("Pinned harmonic random palette source: 240 seeded traces, all 5 harmony families, shared byte draw order and 3840 exact RGB samples PASS.");
+}
+
+static void certifyGlobalHardwarePaletteProducer() {
+    GlobalPaletteByteStream stream{};
+    for(unsigned i=0;i<256u;i++)
+        stream.bytes[i]=(uint8_t)(i*83u+19u);
+    ot_wled_palette16_t actual{};
+    if(ot_wled_palette_generate_random(nullptr,&stream,&actual)||
+       stream.draws!=0u)std::abort();
+    if(!ot_wled_palette_generate_random(nextPaletteByte,&stream,&actual)||
+       stream.draws!=12u)std::abort();
+    CRGB source_colors[4];
+    for(int i=3;i>=0;i--) {
+        const unsigned j=(unsigned)(3-i)*3u;
+        const uint8_t value=stream.bytes[j];
+        const uint8_t saturation=stream.bytes[j+1u];
+        const uint8_t hue=stream.bytes[j+2u];
+        source_colors[i]=CRGB(CHSV(hue,
+            (uint8_t)(160u+(((uint16_t)saturation*95u)>>8)),
+            (uint8_t)(128u+(((uint16_t)value*127u)>>8))));
+    }
+    CRGBPalette16 source{};
+    fill_gradient_RGB(source.entries,0u,source_colors[0],5u,source_colors[1]);
+    fill_gradient_RGB(source.entries,5u,source_colors[1],10u,source_colors[2]);
+    fill_gradient_RGB(source.entries,10u,source_colors[2],15u,source_colors[3]);
+    for(unsigned i=0;i<16u;i++)
+        if(pack(actual.entries[i])!=(source.entries[i].color32&0xFFFFFFu))
+            std::abort();
+    stream.draws=0u;
+    ot_wled_palette_random_t shared{};
+    if(!ot_wled_palette_global_init(&shared,nextPaletteByte,&stream)||
+       stream.draws!=24u)std::abort();
+    const ot_wled_palette_random_t init=shared;
+    if(!ot_wled_palette_global_tick(&shared,1000u,5u,23u,750u,false,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=24u)std::abort();
+    ot_wled_palette_random_t expected=shared;
+    /* A palette regeneration is due after >5 seconds, exactly once even
+     * when two independently sized zones draw the same global frame. */
+    ot_wled_palette16_t target{};
+    GlobalPaletteByteStream oracle=stream;
+    if(!ot_wled_palette_generate_random(nextPaletteByte,&oracle,&target)||
+       oracle.draws!=36u)std::abort();
+    if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,&target))
+        std::abort();
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,false,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
+    /* Source blending can advance on a second service call at the same
+     * timestamp, but random HSV generation must NOT run a second time. */
+    if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,nullptr))
+        std::abort();
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,false,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
+    const ot_wled_palette_random_t before=shared;
+    if(ot_wled_palette_global_tick(&shared,10000u,5u,0u,750u,false,
+                                  nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&before,&shared,sizeof(shared))!=0)std::abort();
+    if(std::memcmp(&init.current.entries[0],&shared.current.entries[0],48u)==0)
+        std::abort();
+    std::puts("Source non-harmonic global palette: raw hardware-byte draw order, independent CHSV RGB, one generator per global frame, 16-bit source lifecycle PASS.");
+}
+
+/* Source colors.cpp NeoGammaWLEDMethod::calcGammaTable() copied as an
+ * independent host oracle. RGB source effect profiles are still compared
+ * gamma-off; this certifies the reusable source output-stage transform,
+ * not the final bus ordering/optical gamma configuration. */
+static void certifyPinnedGammaRgbStage(){
+    for(float exp:{1.0f,1.8f,2.2f,2.8f,3.0f}){
+        ot_wled_gamma_tables_t actual{};
+        if(!ot_wled_gamma_tables_build(exp,&actual))std::abort();
+        uint8_t source_fw[256]={0},source_inv[256]={0};
+        const float gamma_inv=1.0f/exp;
+        for(size_t i=1;i<256;i++){
+            source_fw[i]=(int)(powf((float)i/255.0f,exp)*255.0f+0.5f);
+            source_inv[i]=(int)(powf(((float)i-0.5f)/255.0f,gamma_inv)*255.0f+0.5f);
+        }
+        for(unsigned i=0;i<256u;i++)
+            if(actual.forward[i]!=source_fw[i]||
+               actual.inverse[i]!=source_inv[i])std::abort();
+        for(unsigned id:{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}){
+            const CRGBPalette16 upstream=ref_palette((uint8_t)id,
+                                         0x007B3809u,0x000358AEu,0u);
+            for(unsigned ix=0;ix<256u;ix++){
+                const uint32_t src=ColorFromPalette(upstream,ix,255u,
+                                                     LINEARBLEND);
+                const ot_wled_rgb_t original={(uint8_t)(src>>16),
+                                              (uint8_t)(src>>8),(uint8_t)src};
+                const ot_wled_rgb_t out=ot_wled_gamma_rgb(original,&actual,false);
+                const uint32_t expect=((uint32_t)source_fw[original.r]<<16)|
+                      ((uint32_t)source_fw[original.g]<<8)|source_fw[original.b];
+                if(pack(out)!=expect)std::abort();
+                const ot_wled_rgb_t inverse=ot_wled_gamma_rgb(out,&actual,true);
+                if(inverse.r!=source_inv[out.r]||inverse.g!=source_inv[out.g]||
+                   inverse.b!=source_inv[out.b])std::abort();
+            }
+        }
+    }
+    ot_wled_gamma_tables_t untouched{};
+    untouched.forward[7]=123u;
+    const ot_wled_gamma_tables_t before=untouched;
+    if(ot_wled_gamma_tables_build(0.0f,&untouched)||
+       ot_wled_gamma_tables_build(-1.0f,&untouched)||
+       ot_wled_gamma_tables_build(NAN,&untouched)||
+       std::memcmp(&before,&untouched,sizeof(before))!=0)std::abort();
+    const ot_wled_rgb_t raw={77u,91u,201u};
+    const ot_wled_rgb_t no_lut=ot_wled_gamma_rgb(raw,nullptr,false);
+    if(pack(no_lut)!=pack(raw))std::abort();
+    std::puts("Pinned source RGB gamma: 5 exponents x 512 LUT values + 15,360 gradient samples x 2 directions, invalid-gamma atomicity PASS (host output stage only).");
+}
+
 int main() {
+    certifyPinnedHarmonicPalette();
+    certifyPinnedGammaRgbStage();
+    certifyGlobalHardwarePaletteProducer();
+    certifyLivePaletteInjection();
+    certifyPaletteOneLifecycle();
+    certifyCustomGradientLoader();
+    certifyPaletteIdLookup();
 
     /* Explicit fixed RGB palettes are source tables too. Test their entire
      * sampling space, rather than relying on effect frame coverage to catch
@@ -4265,7 +6115,7 @@ int main() {
                                  {3u,88u,174u},{0u,0u,0u},&built))
           std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned bt:{0u,1u,32u,128u,255u}) {
+        for(unsigned bt=0u;bt<256u;bt++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,(uint8_t)bt,
                                                      (TBlendType)blend)&0xffffffu;
@@ -4304,7 +6154,7 @@ int main() {
       ot_wled_palette16_t built{};
       if(!ot_wled_palette_from_hsv4(hsv,&built))std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned brightness:{0u,128u,255u}) {
+        for(unsigned brightness=0u;brightness<256u;brightness++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,
                      (uint8_t)brightness,(TBlendType)blend)&0xffffffu;
@@ -4334,7 +6184,7 @@ int main() {
                                   {3u,88u,174u},{0u,0u,0u},&built))
           std::abort();
       for(unsigned ix=0u;ix<256u;ix++) {
-        for(unsigned bt:{0u,1u,32u,128u,255u}) {
+        for(unsigned bt=0u;bt<256u;bt++) {
           for(unsigned blend=0u;blend<=2u;blend++) {
             const uint32_t expected=ColorFromPalette(original,ix,(uint8_t)bt,
                                                      (TBlendType)blend)&0xffffffu;
@@ -4352,32 +6202,92 @@ int main() {
     }
     std::printf("WLED gradient catalog reference comparison passed: %u RGB samples across 60 palettes (13-72).\n",gradient_samples);
 
-    unsigned checked=0;
+    /* Engine-wide safety/contract matrix, orthogonal to golden RGB.
+     * Use all source-derived IDs, including modes that allocate scratch.
+     * Zero brightness is a CORE absolute-off invariant; malformed inputs
+     * must fail closed without touching the caller's pixel buffer. */
+    unsigned contract_cases=0;
     for(const RefCase& fx:refs) {
-        const std::vector<unsigned> zone_lengths=
-            (fx.id==89u || fx.id==44u || fx.id==90u) ?
+        ot_wled_fx_config_t cfg{};
+        cfg.effect_id=fx.id;
+        cfg.speed=127u;
+        cfg.intensity=128u;
+        cfg.brightness=0u;
+        cfg.frame_time_ms=23u;
+        cfg.foreground={255u,128u,64u};
+        cfg.background={10u,20u,30u};
+        ot_wled_fx_state_t state{};
+        std::array<ot_wled_rgb_t,7> pixels;
+        pixels.fill({71u,89u,107u});
+        if(!ot_wled_fx_render(&cfg,&state,123u,pixels.data(),pixels.size()))
+            {std::fprintf(stderr,"FX zero-brightness rejected id=%u\n",fx.id);return 1;}
+        for(const auto& px:pixels) if(px.r||px.g||px.b)
+            {std::fprintf(stderr,"FX zero-brightness leak id=%u\n",fx.id);return 1;}
+        contract_cases++;
+        cfg.brightness=16u;
+        cfg.frame_time_ms=0u;
+        pixels.fill({71u,89u,107u});
+        if(ot_wled_fx_render(&cfg,&state,123u,pixels.data(),pixels.size()))
+            {std::fprintf(stderr,"FX accepted zero frame duration id=%u\n",fx.id);return 1;}
+        for(const auto& px:pixels)if(px.r!=71u||px.g!=89u||px.b!=107u)
+            {std::fprintf(stderr,"FX altered rejected frame id=%u\n",fx.id);return 1;}
+        contract_cases++;
+        ot_wled_fx_reset(&state);
+    }
+    std::printf("FX engine-wide fail-closed and absolute-off contract passed: %u cases across 120 IDs.\n",contract_cases);
+
+    unsigned checked=0;
+    unsigned mismatched_modes=0;
+    for(const RefCase& fx:refs) {
+        bool mismatch_reported=false;
+        const bool already_extended=(fx.id==89u || fx.id==44u ||
+             fx.id==90u || fx.id==104u || fx.id==110u || fx.id==113u);
+        const std::vector<unsigned> zone_lengths=already_extended ?
             std::vector<unsigned>{2u,3u,7u,16u,31u,64u,255u,522u} :
-            std::vector<unsigned>{2u,3u,7u,16u,31u};
+            std::vector<unsigned>{2u,3u,7u,16u,31u,522u};
         for(unsigned count: zone_lengths) {
+            /* New long-zone coverage is deliberately a representative
+             * profile, not the entire Cartesian product of parameters.
+             * Previously comprehensive 522-pixel cases remain unchanged. */
+            const bool new_long_profile=count==522u && !already_extended;
             if(fx.id==82u && count<5u)continue;
             if(fx.id==66u && count<3u)continue; // upstream ignition minimum needs 3 cells // upstream FX_FALLBACK_STATIC for short eyes
-            for(unsigned speed:{0u,16u,127u,255u}) {
-                for(unsigned intensity:{0u,64u,128u,200u,255u}) {
-                    const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
+            /* Add near-zero and near-maximum register values: branch behavior
+             * often differs at 1 and 254 even when 0 and 255 pass. */
+            for(unsigned speed:{0u,1u,16u,127u,254u,255u}) {
+                if(new_long_profile && speed!=127u && speed!=255u)continue;
+                for(unsigned intensity:{0u,1u,64u,128u,200u,254u,255u}) {
+                    if(new_long_profile && intensity!=128u && intensity!=255u)continue;
+                    const std::vector<uint8_t> palette_ids=new_long_profile?
+                      std::vector<uint8_t>{0u}:(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
+                    /* A second independent scene exercises zero-background
+                     * and saturated channel paths that the original warm
+                     * foreground / blue background cannot cover. */
+                    for(unsigned color_case=0u;color_case<2u;color_case++) {
+                    /* Compare 8ms high-FPS, 23ms reference, and slower 42ms
+                     * source render cadences without bypassing any test. */
+                    for(unsigned frame_time_ms:{8u,23u,42u}) {
+                    if(new_long_profile && frame_time_ms!=23u)continue;
+                    source_frame_time_ms=(uint16_t)frame_time_ms;
+                    const uint32_t fg=color_case?0x00ff0000u:0x007b3809u;
+                    const uint32_t bg=color_case?0x00000000u:0x000358aeu;
+                    PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
+                    /* FX.cpp Ripple metadata fixes custom1 at zero by
+                     * default; the generic source fixture default is 48. */
+                    if(fx.id==79u)seg.custom1=0u;
                     PinnedEnv env;
-                    seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
-                    seg.colors[0]=0x007B3809u; // configured primary 123,56,9
-                    seg.colors[1]=0x000358AEu; // secondary 3,88,174
+                    seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
+                    seg.colors[0]=fg;
+                    seg.colors[1]=bg;
                     seg.colors[2]=0u;         // missing CORE tertiary stays black
                     current_segment=&seg;current_environment=&env;
                     ref_rng_state=0x73a11c5du;
                     ot_wled_fx_config_t cfg{};
                     cfg.effect_id=fx.id;cfg.speed=seg.speed;
                     cfg.intensity=seg.intensity;cfg.brightness=255;
-                    cfg.frame_time_ms=23;cfg.palette_id=pal;
+                    cfg.frame_time_ms=(uint16_t)frame_time_ms;cfg.palette_id=pal;
                     const ot_wled_audio_peak_t measured={
                         speed==0u?110.0f:speed==16u?220.0f:speed==127u?440.0f:880.0f,
                         (float)(intensity+40u)*16.0f};
@@ -4386,12 +6296,26 @@ int main() {
                         source_audio_major=measured.major_peak_hz;
                         source_audio_mag=measured.magnitude;
                     }
-                    cfg.foreground={123,56,9};cfg.background={3,88,174};
+                    cfg.foreground={(uint8_t)(fg>>16),(uint8_t)(fg>>8),(uint8_t)fg};
+                    cfg.background={(uint8_t)(bg>>16),(uint8_t)(bg>>8),(uint8_t)bg};
                     ot_wled_fx_state_t state{};
+                    /* Source uses a global 16-bit PRNG. Inject one fixed
+                     * segment seed shared with CORE for reproducible frames. */
+                    if(fx.id==61u)prng.setSeed((uint16_t)0x1c5du);
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==35u ?
+                    const std::vector<uint32_t> frames=(fx.id==31u || fx.id==32u) ?
+                        /* Exercise every flash phase and actual movement. */
+                        std::vector<uint32_t>{0u,17u,20u,41u,72u,103u,
+                          134u,165u,196u,227u,258u,289u,320u,351u,382u,
+                          413u,444u,475u,506u,700u,1400u} :
+                        fx.id==29u ?
+                        /* Force Chase Random across the 16-bit phase wrap,
+                         * including transition at t=65536 for speed=0. */
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u,
+                                               65535u,65536u,65550u,70000u,131080u} :
+                        fx.id==35u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,5200u,10400u,25000u,60000u} :
                         fx.id==107u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,4999u,5000u,10000u,20000u,65530u} :
@@ -4401,6 +6325,17 @@ int main() {
                           2050u,2073u,2200u,2400u,2600u,3000u,5000u,10000u} :
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u};
                     for(uint32_t t:frames) {
+                        /* Keep the pre-frame pixel/flag at the one remaining
+                         * 522px Colortwinkles divergence for arithmetic triage. */
+                        const uint32_t prior_ref74=(fx.id==74u && count>360u)
+                              ?(seg.pixels[360u]&0xffffffu):0u;
+                        const uint32_t prior_core74=(fx.id==74u && count>360u)
+                              ?pack(actual[360u]):0u;
+                        const int prior_ref_flag74=(fx.id==74u && count>360u && env.data)
+                              ?(int)((env.data[360u>>3]>>(360u&7u))&1u):-1;
+                        const int prior_core_flag74=(fx.id==74u && count>360u &&
+                                    state.scratch_bytes>(360u>>3))
+                              ?(int)((state.scratch[360u>>3]>>(360u&7u))&1u):-1;
                         strip.now=t;
                         fx.effect();
                         if(fx.id==49 && t!=0u && env.allocation.size() && env.data==nullptr)
@@ -4411,20 +6346,93 @@ int main() {
                             return 1;
                         }
                         for(size_t i=0;i<count;i++) {
-                            if(pack(actual[i])!=(seg.pixels[i]&0xffffffu)) {
+                            if(pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
+                               !mismatch_reported) {
                                 std::fprintf(stderr,
-                                  "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
-                                  fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
+                                  "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u frame_ms=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
+                                  fx.id,fx.name,(unsigned)pal,color_case,frame_time_ms,count,speed,intensity,t,i,
                                   (unsigned)(seg.pixels[i]&0xffffffu),(unsigned)pack(actual[i]));
-                                return 1;
+                                /* On long segments, identify whether the
+                                 * first divergence is RNG/state or RGB math.
+                                 * Diagnostics never alter source/CORE frames. */
+                                if(fx.id==74u && state.scratch) {
+                                    const size_t flags=(count+7u)/8u;
+                                    if(state.scratch_bytes>=flags+count*3u &&
+                                       env.data && i<count) {
+                                        const uint8_t ref_bit=
+                                          (env.data[i>>3]>>(i&7u))&1u;
+                                        const uint8_t core_bit=
+                                          (state.scratch[i>>3]>>(i&7u))&1u;
+                                        const auto raw=state.scratch+flags+i*3u;
+                                        std::fprintf(stderr,
+                                          "Colortwinkles state pixel=%zu upflag=%u coreflag=%u coreRaw=%02X%02X%02X coreStep=%u refStep=%u refRNG=%08X coreRNG=%08X\\n",
+                                          i,(unsigned)ref_bit,(unsigned)core_bit,
+                                          raw[0],raw[1],raw[2],
+                                          (unsigned)state.step,(unsigned)env.step,
+                                          (unsigned)ref_rng_state,(unsigned)state.rng_state);
+                                        std::fprintf(stderr,
+                                          "Colortwinkles prevPixel src=%06X core=%06X prevFlag src=%d core=%d\\n",
+                                          (unsigned)prior_ref74,(unsigned)prior_core74,
+                                          prior_ref_flag74,prior_core_flag74);
+                                    }
+                                }
+                                if((fx.id==79u || fx.id==99u) &&
+                                   env.data && state.scratch) {
+                                    const size_t ripples=std::min(
+                                      (size_t)(1u+count/4u),(size_t)100u);
+                                    struct DebugRipple {
+                                        uint8_t phase,color;uint16_t pos;
+                                    };
+                                    if(state.scratch_bytes>=
+                                         ripples*sizeof(DebugRipple)) {
+                                        const auto *refR=
+                                          reinterpret_cast<const DebugRipple*>(env.data);
+                                        const auto *coreR=
+                                          reinterpret_cast<const DebugRipple*>(state.scratch);
+                                        unsigned first=ripples;
+                                        for(unsigned j=0;j<ripples;j++)
+                                            if(refR[j].phase!=coreR[j].phase ||
+                                               refR[j].color!=coreR[j].color ||
+                                               refR[j].pos!=coreR[j].pos) {
+                                                first=j;break;
+                                            }
+                                        std::fprintf(stderr,
+                                          "Ripple state firstDifference=%u/%zu refRNG=%08X coreRNG=%08X refAux=%u,%u coreAux=%u,%u\\n",
+                                          first,ripples,(unsigned)ref_rng_state,
+                                          (unsigned)state.rng_state,
+                                          (unsigned)env.aux0,(unsigned)env.aux1,
+                                          (unsigned)state.aux0,(unsigned)state.aux1);
+                                        for(unsigned j=0;j<ripples;j++) {
+                                            if(refR[j].phase && refR[j].pos+4u>=i &&
+                                               refR[j].pos<=i+4u) {
+                                                std::fprintf(stderr,
+                                                  "Ripple near pixel source wave[%u]=%u,%u,%u core=%u,%u,%u\\n",
+                                                  j,(unsigned)refR[j].phase,
+                                                  (unsigned)refR[j].pos,
+                                                  (unsigned)refR[j].color,
+                                                  (unsigned)coreR[j].phase,
+                                                  (unsigned)coreR[j].pos,
+                                                  (unsigned)coreR[j].color);
+                                            }
+                                        }
+                                    }
+                                }
+                                mismatch_reported=true;
+                                mismatched_modes++;
                             }
                             checked++;
                         }
                     }
                     }
+                    }
+                    }
                 }
             }
         }
+    }
+    if(mismatched_modes) {
+        std::fprintf(stderr,"WLED direct source-parity failed in %u distinct effects; no parity release claim.\n",mismatched_modes);
+        return 1;
     }
     std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (RGB with default/explicit fixed palettes where enabled, gamma-off except Fairy/Fairytwinkle; synchronized test RNG)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
