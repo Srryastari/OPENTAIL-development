@@ -445,6 +445,37 @@ final class NativeProject {
         } catch (JSONException e) { return false; }
     }
 
+    /** Startup/shutdown authoring only; physical ignition is CORE-owned. */
+    synchronized boolean setAutoEvent(String event, String key, Object value) {
+        if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;
+        switch (key) {
+            case "eventUiEnabled":
+                if (!(value instanceof Boolean)) return false;
+                break;
+            case "eventUiFadeMs":
+                if (!(value instanceof Integer) || (Integer)value < 0 || (Integer)value > 5000)
+                    return false;
+                break;
+            case "eventDuration":
+                if (!(value instanceof Number)) return false;
+                double seconds = ((Number)value).doubleValue();
+                if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0) return false;
+                break;
+            case "eventFx":
+                if (!(value instanceof String) || ((String)value).isEmpty()
+                        || ((String)value).length() > 64) return false;
+                break;
+            default:
+                return false;
+        }
+        try {
+            JSONObject draft = new JSONObject(data.toString());
+            draft.getJSONObject("profiles").getJSONObject(event).put(key, value);
+            data = draft;
+            return save();
+        } catch (JSONException ex) { return false; }
+    }
+
     synchronized boolean deleteTrigger(String name) {
         JSONObject p = profiles().optJSONObject(name);
         if (p == null || !"trigger-custom".equals(p.optString("kind"))) return false;
