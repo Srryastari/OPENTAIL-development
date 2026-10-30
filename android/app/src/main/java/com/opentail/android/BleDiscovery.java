@@ -193,6 +193,7 @@ final class BleDiscovery {
         byte[] wire;
         try {wire=NativeTriggerMappingCodec.encode(expectedRevision,mapping);}
         catch(IllegalArgumentException ex){notifyStatus("Invalid trigger map draft");return false;}
+        if(expectedRevision>=65535){notifyStatus("CORE trigger revision exhausted; cannot save or wrap");return false;}
         if(!triggerMapAvailable())return false;
         triggerMapBusy=true;triggerMapSavePending=true;
         triggerMapBaseRevision=expectedRevision;triggerMapExpected=mapping.clone();
@@ -226,7 +227,8 @@ final class BleDiscovery {
             if(verifying){
                 if(result.status!=0)
                     notifyStatus("CORE rejected trigger mapping (status "+result.status+"); reload before retry");
-                else if(result.revision!=((triggerMapBaseRevision+1)&65535))
+                else if(!result.confirmsApplied(triggerMapBaseRevision,triggerMapExpected) &&
+                        (triggerMapBaseRevision>=65535 || result.revision!=triggerMapBaseRevision+1))
                     notifyStatus("Trigger mapping revision mismatch; reload before retry");
                 else if(!result.persisted)
                     notifyStatus("Trigger mapping committed but not yet active; reload after physical inputs release");
