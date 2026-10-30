@@ -5584,7 +5584,7 @@ static void source_handleRandomPalette(SourceRandomPaletteState& s,
                                         uint32_t ms,uint16_t interval,
                                         uint16_t frameTime,uint16_t transition,
                                         const SourcePalette48& generated) {
-  unsigned long now = ms;
+  uint32_t now = ms; // ESP32 unsigned long is 32-bit; host Linux uses 64-bit.
   uint16_t now_s = now / 1000;
   now = (now_s)*1000 + (now % 1000);
   if (now_s < s.lastChange) s.lastChange = 0;
