@@ -154,7 +154,7 @@ class ComposeMainActivity : ComponentActivity() {
             try {
                 val input = contentResolver.openInputStream(uri)
                     ?: throw java.io.IOException("Cannot open selected document")
-                val data = input.bufferedReader().use(NativeProjectDocumentIo::readBounded)
+                val data = input.bufferedReader().use { reader -> NativeProjectDocumentIo.readBounded(reader) }
                 outputMessage.value = if (project.importJson(data)) "Design imported" else "Invalid v4 project"
                 refresh()
             } catch (e: Exception) { outputMessage.value = "Import failed: " + (e.message ?: "invalid file") }
