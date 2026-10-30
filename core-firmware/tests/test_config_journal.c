@@ -21,7 +21,8 @@ static void tm_case(void){
     }
     live=a;pending=(ot_tm_pending_t){0};
     assert(ot_tm_journal_recover(&journal,NULL,&live,&pending));
-    assert(memcmp(&live,&b,sizeof(b))==0&&!pending.pending);
+    assert(memcmp(&live,&a,sizeof(a))==0&&pending.pending);
+    assert(memcmp(&pending.profile,&b,sizeof(b))==0);
     for(size_t byte=0;byte<sizeof(journal);byte++){
         ot_tm_journal_t corrupt=journal;
         ((uint8_t*)&corrupt)[byte]^=0x40u;
@@ -51,7 +52,8 @@ static void om_case(void){
         assert(memcmp(live,a,sizeof(a))==0);
     }
     assert(ot_om_journal_recover(&journal,NULL,live,&pending));
-    assert(memcmp(live,b,sizeof(b))==0&&!pending.pending);
+    assert(memcmp(live,a,sizeof(a))==0&&pending.pending);
+    assert(memcmp(pending.outputs,b,sizeof(b))==0);
     for(size_t i=0;i<sizeof(journal);i++){
         ot_om_journal_t corrupt=journal;
         ((uint8_t*)&corrupt)[i]^=0x01u;
@@ -87,8 +89,11 @@ static void crash_matrix(void){
                 assert(memcmp(&got,&a,sizeof(a))==0);
                 assert(pending.pending==(phase!=0u));
             }else{
-                assert(memcmp(&got,&b,sizeof(b))==0);
-                assert(!pending.pending);
+                /* Stage erasure is NOT an authorization to publish to RAM:
+                 * a crash in this gap replays old + desired on next boot. */
+                assert(memcmp(&got,&a,sizeof(a))==0);
+                assert(pending.pending);
+                assert(memcmp(&pending.profile,&b,sizeof(b))==0);
             }
         }
         /* NVS set/commit failure leaves stage; corrupt/missing stage fails
@@ -98,4 +103,48 @@ static void crash_matrix(void){
     }
 }
 
-int main(void){tm_case();om_case();crash_matrix();puts("PASS: durable journal CRC and all 256 recovery masks, both profiles");return 0;}
+static void revision_case(void){
+    ot_tm_profile_t old,next;ot_tm_defaults(&old);next=old;
+    next.function[0]=OT_TM_BRAKE;
+    ot_tm_journal_t t={0};
+    assert(ot_tm_journal_build_revisions(&t,&old,&next,301u,302u));
+    assert(ot_tm_journal_valid(&t));
+    assert(t.previous_revision==301u&&t.candidate_revision==302u);
+    ot_tm_profile_t live={0};ot_tm_pending_t pending={0};
+    assert(ot_tm_journal_recover(&t,NULL,&live,&pending));
+    assert(pending.pending&&live.function[0]==OT_TM_PARK);
+    assert(t.candidate_revision!=301u); /* stale editor rejected at admission */
+    assert(!ot_tm_journal_build_revisions(&t,&old,&next,65535u,0u));
+    assert(!ot_tm_journal_build_revisions(&t,&old,&next,301u,301u));
+    ot_tm_journal_t corrupt=t;corrupt.candidate_revision=1u;
+    assert(!ot_tm_journal_valid(&corrupt));
+    ot_om_output_t a[OT_OM_OUTPUTS],b[OT_OM_OUTPUTS];
+    ot_om_defaults(a);memcpy(b,a,sizeof(b));
+    b[0].zones[0].role=OT_OM_BRAKE;
+    uint16_t prev[OT_OM_OUTPUTS],desired[OT_OM_OUTPUTS];
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++)prev[i]=desired[i]=(uint16_t)(90u+i);
+    desired[0]++;
+    ot_om_journal_t o={0};
+    assert(ot_om_journal_build_revisions(&o,a,b,prev,desired));
+    assert(ot_om_journal_valid(&o));
+    assert(o.candidate_revision[0]==91u);
+    o.candidate_revision[0]++;
+    assert(!ot_om_journal_valid(&o)); /* tampered revision invalidates CRC */
+}
+static void upgrade_case(void){
+    ot_tm_profile_t old,next;ot_tm_defaults(&old);next=old;next.function[0]=OT_TM_RIGHT;
+    ot_tm_journal_v1_t v1={0};v1.magic=OT_CFG_JOURNAL_MAGIC;v1.version=1u;
+    v1.previous=old;v1.candidate=next;
+    v1.crc=ot_cfg_crc32(&v1,sizeof(v1));
+    ot_tm_journal_t v2={0};
+    assert(ot_tm_journal_upgrade_v1(&v1,&v2));
+    assert(ot_tm_journal_valid(&v2));
+    assert(v2.previous_revision==1u&&v2.candidate_revision==2u);
+    v1.previous.function[0]=255u;
+    assert(!ot_tm_journal_upgrade_v1(&v1,&v2));
+}
+int main(void){
+    tm_case();om_case();crash_matrix();revision_case();upgrade_case();
+    puts("PASS: durable journal CRC, monotonic revisions, crash boundaries and 256 input masks");
+    return 0;
+}
