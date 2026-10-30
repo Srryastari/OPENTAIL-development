@@ -286,11 +286,17 @@ final class BleDiscovery {
     }
     private void cfgNotify(boolean ok,String message,org.json.JSONObject output,int index){
         if(configListener==null)return;
+        // Output responses can be queued across a disconnect. They must not
+        // repopulate new-device output state after an old CORE is discarded.
+        final BluetoothGatt owner=gatt;
         try{
             org.json.JSONObject response=new org.json.JSONObject();
             response.put("ok",ok);response.put("message",message);response.put("index",index);
             if(output!=null)response.put("output",output);
-            String content=response.toString();ui.post(()->{if(!stopped&&configListener!=null)configListener.accept(content);});
+            String content=response.toString();ui.post(()->{
+                if(!stopped && owner==gatt && configListener!=null)
+                    configListener.accept(content);
+            });
         }catch(Exception ignored){}
     }
     private void cfgFail(String message){
@@ -347,7 +353,12 @@ final class BleDiscovery {
             if(BleConfigCodec.crc16(cfgBytes)!=cfgCrc){cfgFail("BLE output read checksum mismatch");return;}
             try{
                 org.json.JSONObject output=BleConfigCodec.decode(cfgBytes,cfgIndex);
-                if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))){cfgFail("CORE readback differs from saved output");return;}
+                if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))){
+                    // A commit may be staged while physical inputs remain
+                    // asserted; old active geometry is not a verified apply.
+                    cfgFail("CORE active output differs; may be pending trigger release. Reload after release; no active change verified");
+                    return;
+                }
                 cfgKnownRevision[cfgIndex]=cfgRevision;cfgLatest[cfgIndex]=Arrays.copyOf(cfgBytes,cfgBytes.length);
                 cfgBusy=false;cfgWatchdog++;
                 cfgNotify(true,cfgSaving?"Saved to CORE flash and verified over BLE":"Loaded from CORE over BLE",output,cfgIndex);
