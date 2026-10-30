@@ -322,6 +322,17 @@ assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) {') &&
        replyPath.includes('afterStopPacket=null;'),
        'CORE ERR AUTH must invalidate Android owner and queued effects');
 
+// Repeated Authorize/Pair is idempotent. A legacy token auth cannot turn
+// an in-flight FX/STOP reply into a false failed authentication.
+const combinedAuth=bleSource.split('void authorizeOrPair() {')[1]?.split('void pairWithBoot()')[0];
+const tokenAuth=bleSource.split('void authorize(String tokenHex) {')[1]?.split('void show(')[0];
+assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("BLE already authorized"); return; }') &&
+       tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||') &&
+       tokenAuth.includes('frameCapture.busy() || nextPacket != null || pairPending ||') &&
+       tokenAuth.includes('challengePending || authPending) {') &&
+       tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
+       'Repeated authorization must not overlap active ATT operations or waiting STOP');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
