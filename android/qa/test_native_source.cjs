@@ -68,7 +68,8 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('val columns = 28') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
-       compose.includes('Local trigger color swatch only. No simulated effect'),
+       compose.includes('Developer · Trigger Testing') &&
+        compose.includes('project.styleTriggers(selections, chosenFx, chosenColor)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
 assert(compose.includes('if (offlinePreview.value) return') &&
        compose.includes('if (i != 1) offlinePreview.value = false') &&
