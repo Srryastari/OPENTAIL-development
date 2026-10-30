@@ -2301,6 +2301,11 @@ static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         pixels[0]=scaled(cfg->foreground,cfg->brightness);
         return;
     }
+    /* Upstream Flow uses color_from_palette(..., slot=255), which samples
+     * the WLED default Party palette (ID 0), not the two zone colors. */
+    ot_wled_palette16_t source_palette;
+    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     uint32_t counter=0u;
     if(cfg->speed)counter=(now*((uint32_t)(cfg->speed>>2)+1u))>>8;
     const unsigned max_zones=(unsigned)count/6u;
@@ -2323,8 +2328,8 @@ static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
             const unsigned led=(z&1u)?i:(zone_len-1u-i);
             const int32_t dst=pos+(int32_t)led;
             if(dst<0 || (size_t)dst>=count)continue;
-            pixels[dst]=scaled(blend_colors(cfg->background,cfg->foreground,index),
-                               cfg->brightness);
+            pixels[dst]=scaled(ot_wled_palette_sample(&source_palette,index,255u,
+                                      OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
     }
 }
