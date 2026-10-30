@@ -702,6 +702,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun EffectsPreview(t: Tone, effect: Int) {
         // Every segment represents exactly one real zero-based LED index.
         // No fabricated effect motion, fixed 28-dot count, or frame sampling.
+        Title("Live Lighting Preview",t)
         val revisionKey = revision.intValue
         val localFrame = remember(revisionKey) {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
@@ -709,7 +710,7 @@ class ComposeMainActivity : ComponentActivity() {
         val frame = coreFrame.value ?: localFrame
         val isCore = frame?.origin == ExactLedFrame.Origin.CORE
         val total = frame?.size() ?: 0
-        var visiblePixels by rememberSaveable { mutableIntStateOf(32) }
+        var visiblePixels by rememberSaveable { mutableIntStateOf(90) }
         val window = total.coerceAtMost(visiblePixels)
         var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
         val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
@@ -724,19 +725,30 @@ class ComposeMainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text("Zoom", color = t.muted, fontSize = 12.sp)
-                listOf(8, 16, 32, 64).forEach { pixels ->
+                listOf(30, 60, 90).forEach { pixels ->
                     Pill(pixels.toString(), t, visiblePixels == pixels) { visiblePixels = pixels }
                 }
             }
-            Canvas(Modifier.fillMaxWidth().height(64.dp)
-                .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
-                val pitch = size.width / window.toFloat()
-                for (i in 0 until window) {
-                    val x = i * pitch
-                    drawRect(Color(frame.colorAt(first + i)), topLeft = Offset(x, 9f),
-                        size = androidx.compose.ui.geometry.Size(
-                            (pitch - 1f).coerceAtLeast(0.5f),
-                            (size.height - 18f).coerceAtLeast(1f)))
+            // Approved compact lighting preview: at most 3 × 30 glowing
+            // indexed dots. Only CORE-captured RGB is labeled rendered.
+            Canvas(Modifier.fillMaxWidth().height(96.dp)
+                .clip(RoundedCornerShape(16.dp)).background(t.raised)) {
+                val columns=30
+                val rows=((window+columns-1)/columns).coerceAtLeast(1)
+                val pitch=size.width/columns
+                val rowPitch=size.height/3f
+                val radius=minOf(pitch*0.24f,rowPitch*0.27f)
+                for(i in 0 until window){
+                    val col=i%columns
+                    val row=i/columns
+                    val center=Offset((col+0.5f)*pitch,(row+0.5f)*rowPitch)
+                    val actual=Color(frame.colorAt(first+i))
+                    val lit=actual.red+actual.green+actual.blue>0.04f
+                    val color=if(lit)actual else t.muted.copy(alpha=0.38f)
+                    drawCircle(color.copy(alpha=if(lit)0.22f else 0.12f),
+                        radius=radius*1.9f,center=center)
+                    drawCircle(color.copy(alpha=if(lit)1f else 0.52f),
+                        radius=radius,center=center)
                 }
             }
             Caption("LED " + first + "–" + (first + window - 1) +
