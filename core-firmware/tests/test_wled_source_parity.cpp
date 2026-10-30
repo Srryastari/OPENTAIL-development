@@ -627,6 +627,10 @@ struct PinnedSeg {
     void setPixelColor(size_t i,uint8_t r,uint8_t g,uint8_t b) {
         setPixelColor(i,((uint32_t)r<<16)|((uint32_t)g<<8)|b);
     }
+    /* RGB-only host: ignore upstream white channel (source fixture W=0). */
+    void setPixelColor(size_t i,uint8_t r,uint8_t g,uint8_t b,uint8_t w) {
+        (void)w;setPixelColor(i,r,g,b);
+    }
 };
 struct PinnedEnv {
     uint32_t call=0,step=0;
@@ -3736,6 +3740,99 @@ void mode_lightning(void) {
   }
 }
 
+/* Pinned FX.h SPEED_FORMULA_L is used by ICU state transitions. */
+#define SPEED_FORMULA_L (5u+(50u*(255u-SEGMENT.speed))/SEGLEN)
+void mode_fire_flicker(void) {
+  uint32_t cycleTime = 40 + (255 - SEGMENT.speed);
+  uint32_t it = strip.now / cycleTime;
+  if (SEGENV.step == it) return;
+
+  byte w = (SEGCOLOR(0) >> 24);
+  byte r = (SEGCOLOR(0) >> 16);
+  byte g = (SEGCOLOR(0) >>  8);
+  byte b = (SEGCOLOR(0)      );
+  byte lum = (SEGMENT.palette == 0) ? MAX(w, MAX(r, MAX(g, b))) : 255;
+  lum /= (((256-SEGMENT.intensity)/16)+1);
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    byte flicker = hw_random8(lum);
+    if (SEGMENT.palette == 0) {
+      SEGMENT.setPixelColor(i, MAX(r - flicker, 0), MAX(g - flicker, 0), MAX(b - flicker, 0), MAX(w - flicker, 0));
+    } else {
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0, 255 - flicker));
+    }
+  }
+
+  SEGENV.step = it;
+}
+
+void mode_icu(void) {
+  // states: 0 = pause1, 1 = blink, 2 = pause2, 3 = move
+
+  uint16_t now = strip.now; // save time for delay calculation, use low16 bits only
+  unsigned dest = SEGENV.aux1;
+  unsigned space = (SEGMENT.intensity >> 3) +2;
+  uint16_t state = SEGENV.step >> 16; // upper bytes of step store current state
+  uint16_t nextUpdate = SEGENV.step & 0xFFFF; // lower bytes store time for next update
+
+  byte pindex = map(dest, 0, SEGLEN-SEGLEN/space, 0, 255);
+  uint32_t col = SEGMENT.color_from_palette(pindex, false, false, 0);
+  uint32_t bgcol = SEGMENT.check2 ? BLACK : SEGCOLOR(1);
+  SEGMENT.fill(bgcol); // apply background color or clear
+  // draw eyes if not blinking
+  if (state != 1) {
+    SEGMENT.setPixelColor(dest, col);
+    SEGMENT.setPixelColor(dest + SEGLEN/space, col);
+    // render next position if moving
+    if (state == 3) {
+      if(SEGENV.aux0 > SEGENV.aux1) {
+        dest++;
+      } else if (SEGENV.aux0 < SEGENV.aux1) {
+        dest--;
+      }
+      SEGMENT.setPixelColor(dest, col);
+      SEGMENT.setPixelColor(dest + SEGLEN/space, col);
+    }
+  }
+
+  // update state
+  if ((int16_t)(now - nextUpdate) >= 0) { // time to update, cast to int to handle wraparound properly
+    switch (state) {
+      case 0: // pause part 1
+        // first pause part finished, blink or pause some more
+        state++;
+        if(hw_random8(6) == 0) { // blink once in a while
+          nextUpdate = uint16_t(now + 200);
+          break;
+        }
+        // fall through if not blinking
+      case 1: // blink
+        // not blinking or finished blinking -> pause part 2
+        nextUpdate = uint16_t(now + 500 + hw_random16(1000));
+        state++;
+        break;
+      case 2: // pause part 2
+        // pause finished, move
+        SEGENV.aux0 = hw_random16(SEGLEN-SEGLEN/space); // choose a new destination
+        nextUpdate = now;
+        state++;
+        break;
+      default: // move (state 3)
+        SEGENV.aux1 = dest; // update destination to moved position
+        nextUpdate = uint16_t(now + SPEED_FORMULA_L);
+        if (SEGENV.aux0 == dest) {
+          // reached destination
+          nextUpdate = uint16_t(now + 500 + hw_random16(1000));
+          state = 0;
+        }
+        break;
+    }
+  }
+
+  // use upper bits of SEGENV.step to store current state, lower bits for next update time
+  SEGENV.step = (state << 16) | nextUpdate;
+}
+
+#undef SPEED_FORMULA_L
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3805,7 +3902,9 @@ static const RefCase refs[]={
     {75,mode_lake,"Lake"},
     {184,mode_wavesins,"Wavesins"},
     {97,mode_plasma,"Plasma"},
-    {57,mode_lightning,"Lightning"}
+    {57,mode_lightning,"Lightning"},
+    {45,mode_fire_flicker,"Fire Flicker"},
+    {58,mode_icu,"ICU"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
