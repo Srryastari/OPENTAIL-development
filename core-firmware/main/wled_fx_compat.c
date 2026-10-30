@@ -317,6 +317,37 @@ bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
     return true;
 }
 
+/* Pinned WLED const.h/FX_fcn.cpp palette ID partitions: random=1,
+ * custom=200..73 descending, usermod=255..201 descending. No hidden
+ * global state or storage side effects. Missing IDs fail closed. */
+bool ot_wled_palette_resolve(uint8_t id,ot_wled_rgb_t primary,
+                              ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
+                              const ot_wled_palette16_t *live_random,
+                              const ot_wled_palette16_t *custom,
+                              size_t custom_count,
+                              const ot_wled_palette16_t *usermod,
+                              size_t usermod_count,
+                              ot_wled_palette16_t *out) {
+    if(!out||custom_count>128u||usermod_count>55u)return false;
+    if(id==1u) {
+        if(!live_random)return false;
+        *out=*live_random;
+        return true;
+    }
+    if(id<=72u)
+        return ot_wled_palette_build(id,primary,secondary,tertiary,out);
+    if(id<=200u) {
+        const size_t index=200u-(size_t)id;
+        if(!custom||index>=custom_count)return false;
+        *out=custom[index];
+        return true;
+    }
+    const size_t index=255u-(size_t)id;
+    if(!usermod||index>=usermod_count)return false;
+    *out=usermod[index];
+    return true;
+}
+
 /* Pinned fastled_slim.cpp nblendPaletteTowardPalette(), RGB byte order
  * and stop-on-maxChanges semantics. No float, allocation or gamma. */
 void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
