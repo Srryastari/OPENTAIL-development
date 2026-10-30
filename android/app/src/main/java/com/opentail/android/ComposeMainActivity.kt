@@ -1092,6 +1092,7 @@ class ComposeMainActivity : ComponentActivity() {
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember { mutableStateOf<String?>(null) }
         var deleteId by remember { mutableStateOf<String?>(null) }
+        var choosingDelete by remember { mutableStateOf(false) }
         Panel(t) {
             Field(name, "Project name", t) {
                 name = it
@@ -1108,7 +1109,19 @@ class ComposeMainActivity : ComponentActivity() {
                     (if (i % 2 == 0) t.accent else t.fg)
             })
             Caption("Live layout strip · changes follow zone offsets immediately", t)
-            if (project.zoneCount() == 0) Pill("+ Add zone", t, true) { addZoneAfter(-1) }
+            // The approved global Add/Delete actions remain adjacent and visible.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    Pill("+ Add Zone", t) { addZoneAfter(project.zoneCount() - 1) }
+                }
+                if (project.zoneCount() > 0)
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Pill("Delete Zone", t) {
+                            // Never infer a destructive target from list ordering.
+                            choosingDelete = true
+                        }
+                    }
+            }
         }
         for (i in 0 until project.zoneCount()) {
             val z = project.zone(i) ?: continue
@@ -1225,6 +1238,23 @@ class ComposeMainActivity : ComponentActivity() {
         // Actual hardware output/section assignment belongs beside Layout.
         // Saving to CORE still requires an explicit authenticated confirmation.
         HardwareOutputEditor(t)
+        if (choosingDelete) AlertDialog(
+            onDismissRequest = { choosingDelete = false },
+            title = { Text("Choose zone to delete") },
+            text = {
+                Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (0 until project.zoneCount()).forEach { index ->
+                        val zone = project.zone(index) ?: return@forEach
+                        val id = zone.optString("id")
+                        Pill(zone.optString("name"), t) {
+                            choosingDelete = false
+                            deleteId = id // use existing second-stage confirmation
+                        }
+                    }
+                }
+            },
+            confirmButton = { Pill("Cancel", t) { choosingDelete = false } })
         deleteId?.let { id ->
             AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
                 text = { Text("Only assignments to this zone will be removed.") },
