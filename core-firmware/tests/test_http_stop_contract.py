@@ -44,6 +44,25 @@ assert 'remaining=active?' not in show_get
 show_stop = section("static esp_err_t show_stop(httpd_req_t *r){", "/* Provision an ephemeral")
 assert "ble_fx_enabled=false" in show_stop and "ot_fx_bank_stop_all(&fx_bank)" in show_stop
 
+# A Stop ACK must schedule the next render immediately even when adaptive
+# output FPS is very low. The renderer alone still writes physical LEDs;
+# Stop completion telemetry still depends on successful RMT refresh.
+wake = section("static void request_render_refresh(void){", "static uint8_t live_input_mask")
+assert 'task=render_task_handle;' in wake
+assert wake.index("portEXIT_CRITICAL(&state_lock);") < wake.index("xTaskNotifyGive(task);")
+for body in (stop, show_stop):
+    assert body.index("portEXIT_CRITICAL(&state_lock);") < body.index("request_render_refresh();")
+ble_stop = section("void ot_ble_stop_show(void){", "static bool fx_slot_key(")
+assert "if(refresh_requested)request_render_refresh();" in ble_stop
+assert "else if(native_show.mode==OT_SHOW_OFF || !show_window(now))" in ble_stop
+ble_disconnect = section("void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
+assert "if(owned_before)request_render_refresh();" in ble_disconnect
+assert ble_disconnect.index("portEXIT_CRITICAL(&state_lock);") < ble_disconnect.index("request_render_refresh();")
+render = section("static void led_task(void *p) {", "void app_main(void) {")
+assert "if(!native_rendering && full_frame)" in render
+assert "stop_render_generation=local_stop_generation;" in render
+assert "ulTaskNotifyTake(pdTRUE,timeout)" in render
+
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
 literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
 assert literal, "Capabilities must return valid static JSON"

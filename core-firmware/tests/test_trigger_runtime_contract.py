@@ -153,6 +153,22 @@ assert "wire[0]!=OT_TM_BLE_VERSION" in manager
 disconnect = between(core, "void ot_ble_disconnect_show(void){",
                      "static esp_err_t status_get(")
 assert "live_input_mask=0" not in disconnect
+# New CORE STOP behavior must wake the single render owner immediately
+# after exiting state_lock; never mutate GPIO input state or issue RMT writes here.
+refresh = between(core, "static void request_render_refresh(void){", "static uint8_t live_input_mask=0;")
+assert "task=render_task_handle;" in refresh
+assert "portEXIT_CRITICAL(&state_lock);" in refresh
+assert refresh.index("portEXIT_CRITICAL(&state_lock);") < refresh.index("xTaskNotifyGive(task)")
+for begin, end in (("static esp_err_t show_stop(httpd_req_t *r){", "/* Provision an ephemeral"),
+                   ("static esp_err_t stop_post(httpd_req_t *r) {", "/* CORE ships only its own")):
+    op = between(core, begin, end)
+    assert op.index("portEXIT_CRITICAL(&state_lock);") < op.index("request_render_refresh();")
+    assert "live_input_mask=0" not in op
+ble_stop = between(core, "void ot_ble_stop_show(void){", "/* Eight opt-in named-by-slot")
+assert "if(refresh_requested)request_render_refresh();" in ble_stop
+disconnect_stop = between(core, "void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
+assert "if(owned_before)request_render_refresh();" in disconnect_stop
+
 
 # 9: save admission includes instant GPIO and settled GPIO, source-level
 # ordering preserves RAM on NVS failure. No claim of atomicity DURING NVS.
