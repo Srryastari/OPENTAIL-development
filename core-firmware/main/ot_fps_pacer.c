@@ -11,13 +11,13 @@
 static uint32_t larger(uint32_t a,uint32_t b){return a>b?a:b;}
 static uint16_t desired_fps(uint32_t estimated_us){
     /* Reserve 10% headroom for scheduler and bus/render variability.
-     * Choose any integer fps in the requested adaptive range; 60 is not
-     * forced as a ceiling, and 120 is used only when the load allows. */
+     * 53..120 FPS is a preference, not a physically guaranteed minimum.
+     * Long chains must report an achievable lower target under overload. */
     const uint32_t guarded=estimated_us+estimated_us/10u;
     if(!guarded)return OT_FPS_PREFERRED_HIGH;
     uint32_t fps=1000000u/guarded;
     if(fps>OT_FPS_PREFERRED_HIGH)fps=OT_FPS_PREFERRED_HIGH;
-    if(fps<OT_FPS_PREFERRED_LOW)fps=OT_FPS_PREFERRED_LOW;
+    if(fps<1u)fps=1u;
     return (uint16_t)fps;
 }
 void ot_fps_pacer_init(ot_fps_pacer_t *p){
@@ -54,7 +54,7 @@ void ot_fps_pacer_observe(ot_fps_pacer_t *p,uint32_t work_us,
     }else p->upgrade_streak=0u;
 }
 uint32_t ot_fps_pacer_period_us(const ot_fps_pacer_t *p){
-    const uint32_t fps=(p&&p->target_fps>=OT_FPS_PREFERRED_LOW&&
+    const uint32_t fps=(p&&p->target_fps>=1u&&
                         p->target_fps<=OT_FPS_PREFERRED_HIGH)
                        ?p->target_fps:OT_FPS_PREFERRED_HIGH;
     return 1000000u/fps;
