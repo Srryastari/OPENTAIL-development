@@ -40,6 +40,7 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_app_desc.h"
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
 #include "ot_frame_snapshot.h"
@@ -1049,9 +1050,11 @@ static esp_err_t status_get(httpd_req_t *r) {
     }
     active_pixels_json[used++]=']';
     active_pixels_json[used]=0;
+    char elf_sha256[65]={0};
+    (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
     char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
-       OT_FW,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+       OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
