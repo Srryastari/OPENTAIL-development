@@ -286,6 +286,14 @@ assert(bleSource.includes('frameCapture.busy() || frameCallbackPending || cfgBus
        bleSource.includes('fxCaps=null;fxCapsBusy=false;triggerMapping=null;'),
   'Queued STOP must have priority and an immediate BLE write refusal must not be acknowledged as sent');
 
+// Failed output saves can have committed before readback failed. Require a
+// fresh revision from CORE, never reuse the possibly stale revision.
+assert(bleSource.includes('if(cfgSaving && index>=0 && index<cfgKnownRevision.length)') &&
+       bleSource.includes('cfgKnownRevision[index]=-1;') &&
+       bleSource.includes('cfgLatest[index]=null;') &&
+       bleSource.includes('cfgBusy=false;cfgSaving=false;cfgWaitingWrite=false;'),
+       'Failed output save must invalidate cached firmware revision before retry');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
