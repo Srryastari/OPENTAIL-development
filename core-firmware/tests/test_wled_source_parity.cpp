@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <cmath>
 #include <vector>
@@ -5547,7 +5548,133 @@ static const RefCase refs[]={
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
 }
+/* Source fastled_slim.cpp nblendPaletteTowardPalette() on its real
+ * 48-byte CRGB layout. The existing host CRGB inherits a 4-byte RGBW
+ * shim, so using it here would silently test the wrong byte geometry. */
+struct SourceRGB3 {uint8_t r,g,b;};
+struct SourcePalette48 {SourceRGB3 entries[16];};
+static_assert(sizeof(SourcePalette48)==48u,"Pinned CRGB palette is 48 bytes");
+static_assert(sizeof(ot_wled_palette16_t)==48u,"CORE palette must be 48 bytes");
+static void source_nblendPaletteTowardPalette(SourcePalette48& current,
+                                             SourcePalette48& target,
+                                             uint8_t maxChanges) {
+  uint8_t* p1;
+  uint8_t* p2;
+  uint32_t changes = 0;
+  p1 = (uint8_t*)current.entries;
+  p2 = (uint8_t*)target.entries;
+  const uint32_t totalChannels = sizeof(SourcePalette48);
+  for (uint32_t i = 0; i < totalChannels; ++i) {
+    if (p1[i] == p2[i]) continue;
+    if (p1[i] < p2[i]) { ++p1[i]; ++changes; }
+    if (p1[i] > p2[i]) {
+      --p1[i]; ++changes;
+      if (p1[i] > p2[i]) --p1[i];
+    }
+    if(changes >= maxChanges)
+      break;
+  }
+}
+
+struct SourceRandomPaletteState {
+    SourcePalette48 current{},target{};
+    uint16_t lastChange=0u,nextBlend=0u;
+};
+static void source_handleRandomPalette(SourceRandomPaletteState& s,
+                                        uint32_t ms,uint16_t interval,
+                                        uint16_t frameTime,uint16_t transition,
+                                        const SourcePalette48& generated) {
+  unsigned long now = ms;
+  uint16_t now_s = now / 1000;
+  now = (now_s)*1000 + (now % 1000);
+  if (now_s < s.lastChange) s.lastChange = 0;
+  if (now_s > s.lastChange + interval) {
+    s.target = generated;
+    s.lastChange = now_s;
+    s.nextBlend = (uint16_t)now;
+  }
+  if ((uint16_t)now < s.nextBlend ||
+      now > ((s.lastChange*1000) + transition + 2*frameTime)) return;
+  unsigned transitionFrames = frameTime > transition ? 1 : transition / frameTime;
+  unsigned noOfBlends = transitionFrames > 255 ? 1 :
+                        (255 + (transitionFrames>>1)) / transitionFrames;
+  for (unsigned i=0;i<noOfBlends;i++)
+    source_nblendPaletteTowardPalette(s.current,s.target,48u);
+  s.nextBlend = (uint16_t)(now + ((transitionFrames>>8)*frameTime));
+}
+static void certifyPaletteOneLifecycle() {
+    unsigned blendSamples=0u,tickSamples=0u;
+    const uint8_t budgets[]={0u,1u,2u,24u,48u,127u,255u};
+    for(unsigned profile=0;profile<40u;profile++) {
+        ot_wled_palette16_t initial{},target{};
+        for(unsigned i=0;i<16u;i++) {
+            const unsigned x=i*17u+profile*19u;
+            initial.entries[i]={(uint8_t)(x*3u),(uint8_t)(x*7u),(uint8_t)(x*11u)};
+            target.entries[i]={(uint8_t)(255u-(x*13u)),(uint8_t)(x*5u),(uint8_t)(x*23u)};
+        }
+        for(uint8_t budget:budgets) {
+            ot_wled_palette16_t actual=initial;
+            SourcePalette48 expected{},goal{};
+            std::memcpy(&expected,&initial,sizeof(initial));
+            std::memcpy(&goal,&target,sizeof(target));
+            for(unsigned k=0;k<20u;k++) {
+                ot_wled_palette_blend_toward(&actual,&target,budget);
+                source_nblendPaletteTowardPalette(expected,goal,budget);
+                if(std::memcmp(&actual,&expected,sizeof(actual))!=0) {
+                    std::fprintf(stderr,
+                      "Palette-1 upstream nblend mismatch profile=%u budget=%u pass=%u\\n",
+                      profile,(unsigned)budget,k);
+                    std::abort();
+                }
+                blendSamples+=sizeof(actual);
+            }
+        }
+        for(unsigned frame:{8u,23u,42u,1000u}) {
+            for(unsigned transition:{100u,700u,20000u}) {
+                ot_wled_palette_random_t live{};
+                live.current=initial;live.target=target;
+                SourceRandomPaletteState expected{};
+                std::memcpy(&expected.current,&initial,sizeof(initial));
+                std::memcpy(&expected.target,&target,sizeof(target));
+                const uint32_t times[]={0u,7u,17u,999u,1000u,1500u,2500u,
+                   5000u,5001u,65530u,65535u,65536u,65540u,
+                   100000u,65534000u,65535000u,65536000u,65537000u};
+                for(uint32_t now:times) {
+                    const bool ok=ot_wled_palette_random_tick(
+                        &live,now,2u,(uint16_t)frame,(uint16_t)transition,&target);
+                    source_handleRandomPalette(expected,now,2u,(uint16_t)frame,
+                                                (uint16_t)transition,
+                                                *reinterpret_cast<SourcePalette48*>(&target));
+                    if(!ok||
+                       live.last_change_s!=expected.lastChange||
+                       live.next_blend_ms!=expected.nextBlend||
+                       std::memcmp(&live.current,&expected.current,sizeof(live.current))!=0||
+                       std::memcmp(&live.target,&expected.target,sizeof(live.target))!=0) {
+                        std::fprintf(stderr,
+                           "Palette-1 source schedule mismatch profile=%u frame=%u transition=%u ms=%u\\n",
+                           profile,frame,transition,(unsigned)now);
+                        std::abort();
+                    }
+                    tickSamples+=2u*48u+4u;
+                }
+                const ot_wled_palette_random_t before=live;
+                if(ot_wled_palette_random_tick(&live,7000000u,2u,
+                   (uint16_t)frame,(uint16_t)transition,nullptr) ||
+                   std::memcmp(&live,&before,sizeof(live))!=0)
+                    {std::fprintf(stderr,"Palette-1 rejected generator did not fail atomically\\n");std::abort();}
+                if(ot_wled_palette_random_tick(&live,65536000u,2u,0u,
+                   (uint16_t)transition,&target) ||
+                   std::memcmp(&live,&before,sizeof(live))!=0)
+                    {std::fprintf(stderr,"Palette-1 rejected timing mutated state\\n");std::abort();}
+            }
+        }
+    }
+    std::printf("WLED palette-1 source blend and shared lifecycle parity passed: %u RGB bytes + %u schedule/state bytes checked.\\n",
+                blendSamples,tickSamples);
+}
+
 int main() {
+    certifyPaletteOneLifecycle();
 
     /* Explicit fixed RGB palettes are source tables too. Test their entire
      * sampling space, rather than relying on effect frame coverage to catch
