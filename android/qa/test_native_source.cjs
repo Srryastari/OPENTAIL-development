@@ -420,7 +420,8 @@ for (const required of [
  'final boolean persisted;',
  'return Arrays.equals(functions, expected);',
  'boolean confirmsApplied(int baseRevision, int[] expected)',
- 'revision == ((baseRevision + 1) & 0xffff)'
+ 'baseRevision >= 1 && baseRevision < 65535',
+ 'revision == baseRevision + 1 && matches(expected);'
 ]) assert(triggerCodec.includes(required), 'Trigger team GATT V1 codec regressed: '+required);
 for (const required of [
  'decodesExactFifteenByteReadbackIncludingAuxAndPendingApply',
