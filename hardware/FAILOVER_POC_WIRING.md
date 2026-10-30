@@ -4,6 +4,12 @@
 
 **Frozen software reference:** PR #51 `bc92d886560dab88c6a53316d8e4cddc5d2fb8ef`. No change to that code/image. `OT_CHAIN_COUNT=2`, and the separately configured pixel capacity defaults to 2048 per output. The existing Primary supports a left 623-pixel chain and right 623-pixel chain **in software capacity**, not yet proven with installed strips.
 
+## Immediate owned-hardware path (before any new circuit)
+
+**User directive: use already owned hardware; custom PCB procurement on hold.** Start with 2 of the 6 hiBCTR ESP32-S3 boards, 2 of the 8-channel PC817 modules, the received Adafruit #6066 2-channel shifter, the fused bench supply, WS2815 test strips, existing suitable connectors and wiring. Two separate MCU tests can be performed with the same #6066 by **powering down completely and moving the two data-input wires**, never joining two MCU/shifter outputs or switching them while powered. This proves only A/B standalone rendering, not automatic electrical failover. For scope, inventory limitations and exact no-go conditions, use [`ON_HAND_FIRST_BENCH_PLAN.md`](./ON_HAND_FIRST_BENCH_PLAN.md) and the inventory-reconciled `FAILOVER_POC_BOM.csv`.
+
+**The component shortlist and schematic concept below are explicitly later-stage unowned engineering candidates**, not a request to buy parts or a claim they are available on the bench. No custom PCB will be ordered without physical A/B evidence and circuit review. The GLEDOPTO 4D-EXMU is a separate WLED baseline only, not a two-processor data selector. Keep full vehicle lighting independent of bench prototypes.
+
 ## POC topology: exclusive 5 V bus drivers for two outputs
 
 ```
