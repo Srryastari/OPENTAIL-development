@@ -3,6 +3,13 @@
 #include <string.h>
 #include <stdio.h>
 
+bool ot_om_stage(ot_om_pending_t *deferred,const ot_om_output_t saved[OT_OM_OUTPUTS]){
+    if(!deferred||!saved)return false;
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++)if(!ot_om_valid(&saved[i]))return false;
+    memcpy(deferred->outputs,saved,sizeof(deferred->outputs));
+    deferred->pending=true;
+    return true;
+}
 bool ot_om_saved_apply(ot_om_output_t active[OT_OM_OUTPUTS],
                         ot_om_pending_t *deferred,
                         const ot_om_output_t saved[OT_OM_OUTPUTS],
