@@ -705,6 +705,7 @@ for(const guard of ['if(r.status!=0){rejected(r.status);return;}',
 }
 for(const guard of ['PALETTE_CMD_UUID','PALETTE_RSP_UUID','PALETTE_CAP_UUID',
   'palette.abortForStop();','palette.busy()','palette.negotiate()',
+  'void cancelPaletteTransfer(){palette.abortForStop();}',
   'palette.upload(','palette.load(','palette.delete(',
   'palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities)',
   'palette.written(connection,status);return;',
@@ -718,6 +719,7 @@ for(const control of ['private fun CorePaletteTransferPanel(',
   'ble.deletePalette(slot!!, paletteLoadedRevision.longValue)',
   'paletteLoadedSlot.intValue = -1 // no save success until CRC/readback confirms',
   'CorePaletteTransferPanel(t)',
+  'ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding',
   'Unsupported effect/palette combinations stay local']) {
   assert(compose.includes(control),'Missing native v3 palette UX/readback gate: '+control);
 }
