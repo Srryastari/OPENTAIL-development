@@ -262,4 +262,47 @@ public class NativeProjectCommitTest {
         assertEquals(before, project.exportJson());
         assertEquals(1, project.zoneCount());
     }
+
+    @Test public void physicalOutputLinksAreUniqueBidirectionalAndLocalOnly() throws Exception {
+        Storage store=new Storage();
+        NativeProject project=new NativeProject(store.prefs);
+        assertTrue(project.addZoneAt("Tail",60,0));
+        assertTrue(project.addZoneAt("Turn",32,1));
+        String tail=project.zone(0).getString("id");
+        String turn=project.zone(1).getString("id");
+
+        assertTrue(project.mapZoneToOutputSlot(tail,0,2));
+        assertEquals(0,project.zone(0).getInt("physicalOutput"));
+        assertEquals(2,project.zone(0).getInt("physicalSection"));
+        assertTrue(project.mapZoneToOutputSlot(turn,0,2));
+        assertFalse(project.zone(0).has("physicalOutput")); // unique physical owner
+        assertEquals(0,project.zone(1).getInt("physicalOutput"));
+        assertTrue(project.mapZoneToOutputSlot(tail,1,7));
+        assertTrue(project.mapZoneToOutputSlot(turn,-1,-1));
+        assertFalse(project.zone(1).has("physicalOutput"));
+
+        String committed=project.exportJson();
+        assertFalse(project.mapZoneToOutputSlot(tail,12,0));
+        assertFalse(project.mapZoneToOutputSlot(tail,0,8));
+        assertEquals(committed,project.exportJson());
+        NativeProject reopened=new NativeProject(store.prefs);
+        assertEquals(1,reopened.zone(0).getInt("physicalOutput"));
+        assertEquals(7,reopened.zone(0).getInt("physicalSection"));
+
+        String old=reopened.exportJson();
+        JSONObject malformed=new JSONObject(old);
+        malformed.getJSONArray("layout").getJSONObject(0).put("physicalSection",7.5);
+        assertFalse(reopened.importJson(malformed.toString()));
+        assertEquals(old,reopened.exportJson());
+        malformed=new JSONObject(old);
+        malformed.getJSONArray("layout").getJSONObject(1)
+                .put("physicalOutput",1).put("physicalSection",7);
+        assertFalse(reopened.importJson(malformed.toString()));
+        assertEquals(old,reopened.exportJson());
+
+        store.fail=true;
+        assertFalse(reopened.mapZoneToOutputSlot(tail,0,1));
+        assertEquals(old,reopened.exportJson());
+        assertEquals(committed,store.persisted); // no failed link leaked to disk
+    }
 }
