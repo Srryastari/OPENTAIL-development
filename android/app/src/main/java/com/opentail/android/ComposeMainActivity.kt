@@ -1270,7 +1270,10 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun CoreTriggerMappingPage(t: Tone) {
-        if (!ble.canMapTriggers()) return // Older firmware keeps offline authoring intact
+        // BLE connection state is not Compose state. Observe the existing
+        // status signal so the optional panel appears/disappears immediately.
+        val canMap = remember(bleMessage.value) { ble.canMapTriggers() }
+        if (!canMap) return // Older firmware keeps offline authoring intact
         val snapshot = coreTriggerMapping.value
         val names = listOf("Disabled", "Park", "Brake", "Left", "Right",
             "Reverse", "AUX1", "AUX2", "AUX3")
