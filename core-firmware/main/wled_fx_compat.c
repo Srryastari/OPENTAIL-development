@@ -2251,12 +2251,17 @@ static void railway_frame(const ot_wled_fx_config_t *cfg,
         if(p<255u)pos=p;
     }
     if(state->aux0)pos=255u-pos;
-    const ot_wled_rgb_t first=scaled(
-         blend_colors(cfg->background,cfg->foreground,(uint8_t)(255u-pos)),
-         cfg->brightness);
-    const ot_wled_rgb_t second=scaled(
-         blend_colors(cfg->background,cfg->foreground,(uint8_t)pos),
-         cfg->brightness);
+    /* WLED Railway's default is palette 3 (Colors 1 & 2), sampled
+     * LINEARBLEND_NOWRAP. A direct RGB blend differs at palette stops. */
+    ot_wled_palette16_t pal={0};
+    if(!ot_wled_palette_build(3u,cfg->foreground,cfg->background,
+                             (ot_wled_rgb_t){0,0,0},&pal))return;
+    const ot_wled_rgb_t first=scaled(ot_wled_palette_sample(
+                 &pal,(uint8_t)(255u-pos),255u,OT_WLED_PALETTE_NOWRAP),
+                 cfg->brightness);
+    const ot_wled_rgb_t second=scaled(ot_wled_palette_sample(
+                 &pal,(uint8_t)pos,255u,OT_WLED_PALETTE_NOWRAP),
+                 cfg->brightness);
     for(size_t i=0;i<count;i++)pixels[i]=(i&1u)?second:first;
     state->step+=(uint32_t)cfg->frame_time_ms;
 }
