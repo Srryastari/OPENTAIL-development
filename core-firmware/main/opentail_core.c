@@ -42,6 +42,8 @@
 #include "nvs.h"
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "esp_attr.h"
+#include "esp_intr_alloc.h"
 #include "palette_runtime.h"
 #include "esp_app_desc.h"
 #include "ot_fps_pacer.h"
@@ -88,6 +90,7 @@ static bool input_sampler_ready=false;
 static volatile uint32_t input_edge_epoch=0u;
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
+static bool config_promotion_ready=false;
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -495,8 +498,8 @@ static esp_err_t om_post(httpd_req_t *r){
     if(valid)valid=ot_om_valid(&next);
     cJSON_Delete(obj);
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
-    if(!input_sampler_ready)
-        return respond_err(r,409,"physical input sampler unavailable");
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)
+        return respond_err(r,409,"physical input sampler or configuration promoter unavailable");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
     /* A freshly asserted optocoupler pin is busy even before debounce. */
@@ -534,7 +537,7 @@ bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
 }
 int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
     if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
-    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2; /* Cannot activate durable config. */
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
     /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
     const bool raw_active=tm_gpio_input_mask()!=0;
@@ -578,7 +581,7 @@ static uint8_t tm_gpio_input_mask(void){
  * Physical input sampling never takes this mutex and remains BLE-independent. */
 static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_revision){
     if(!ot_tm_valid(next))return 1;
-    if(!input_sampler_ready)return 2; /* Cannot verify physical inputs. */
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2; /* Cannot activate durable config. */
     if(!om_write_mutex ||
        xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     /* The debounced mask alone has a nominal 40ms assertion blind spot.
@@ -1555,15 +1558,31 @@ static bool wifi_ap_init(void) {
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
     return true;
 }
+static void IRAM_ATTR input_edge_isr(void *ignored){
+    (void)ignored;
+    (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
+}
 static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
         gpio_config_t cfg={.pin_bit_mask=1ULL<<input_pin[i],.mode=GPIO_MODE_INPUT,
                            .pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,
-                           .intr_type=GPIO_INTR_DISABLE};
+                           .intr_type=GPIO_INTR_ANYEDGE};
         const esp_err_t e=gpio_config(&cfg);
         if(e!=ESP_OK){
             ESP_LOGE(TAG,"Trigger input IN%u GPIO setup failed: %s",
                      (unsigned)(i+1),esp_err_to_name(e));
+            return false;
+        }
+    }
+    esp_err_t e=gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"GPIO edge observer unavailable: %s",esp_err_to_name(e));
+        return false;
+    }
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        e=gpio_isr_handler_add(input_pin[i],input_edge_isr,NULL);
+        if(e!=ESP_OK){
+            ESP_LOGE(TAG,"GPIO edge handler failed IN%u",i+1u);
             return false;
         }
     }
@@ -1617,6 +1636,106 @@ static bool strip_init(void){
         if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
     return true;
 }
+/* Low-priority durable promoter. The independent input sampler never waits
+ * for NVS. While staged exists, boot always restores its previous configuration
+ * even when active_v3 has been written and power is cut during promotion. */
+static bool config_activation_idle(uint32_t epoch){
+    if(tm_gpio_input_mask()!=0u ||
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch)return false;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool idle=input_quiet_samples>=OT_DEBOUNCE_TICKS &&
+        live_input_mask==0u &&
+        !(before_deadline(now,sim_deadline)&&sim_mask!=0u) &&
+        !(before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) &&
+        !show_window(now);
+    portEXIT_CRITICAL(&state_lock);
+    return idle&&tm_gpio_input_mask()==0u &&
+        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch;
+}
+static bool config_write_active(nvs_handle_t h,const void *data,size_t n){
+    esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_ACTIVE,data,n);
+    if(e==ESP_OK)e=nvs_commit(h);
+    return e==ESP_OK;
+}
+static bool config_clear_stage(nvs_handle_t h){
+    esp_err_t e=nvs_erase_key(h,OT_CFG_JOURNAL_KEY_STAGED);
+    if(e==ESP_OK)e=nvs_commit(h);
+    return e==ESP_OK;
+}
+static void tm_promote(uint32_t epoch){
+    nvs_handle_t h;
+    if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
+    ot_tm_journal_t stage={0};size_t n=sizeof(stage);
+    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
+                     n==sizeof(stage)&&ot_tm_journal_valid(&stage);
+    if(!valid){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("trigger journal invalid during promotion");return;
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    const bool durable=config_write_active(h,&stage,sizeof(stage));
+    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    bool applied=false;
+    portENTER_CRITICAL(&state_lock);
+    if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+        applied=ot_tm_apply_if_released(&tm_profile,&tm_deferred,0u,0u);
+    portEXIT_CRITICAL(&state_lock);
+    if(applied)request_render_refresh();
+    if(applied&&!config_clear_stage(h)){
+        config_recovery_fault=true;
+        ot_st_set_fault("trigger journal finalization failed");
+    }
+    nvs_close(h);
+}
+static void om_promote(uint32_t epoch){
+    nvs_handle_t h;
+    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
+    ot_om_journal_t stage={0};size_t n=sizeof(stage);
+    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
+                     n==sizeof(stage)&&ot_om_journal_valid(&stage);
+    if(!valid){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("output journal invalid during promotion");return;
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    const bool durable=config_write_active(h,&stage,sizeof(stage));
+    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    bool applied=false;
+    portENTER_CRITICAL(&state_lock);
+    if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+        applied=ot_om_apply_if_released(om_outputs,&om_deferred,0u,0u);
+    portEXIT_CRITICAL(&state_lock);
+    if(applied)request_render_refresh();
+    if(applied&&!config_clear_stage(h)){
+        config_recovery_fault=true;
+        ot_st_set_fault("output journal finalization failed");
+    }
+    nvs_close(h);
+}
+static void config_activation_task(void *unused){
+    (void)unused;
+    for(;;){
+        if(input_sampler_ready&&!config_recovery_fault&&om_write_mutex &&
+           xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(1))==pdTRUE){
+            bool trigger_pending,output_pending;
+            portENTER_CRITICAL(&state_lock);
+            trigger_pending=tm_deferred.pending;
+            output_pending=om_deferred.pending;
+            portEXIT_CRITICAL(&state_lock);
+            const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+            if(config_activation_idle(epoch)){
+                if(trigger_pending)tm_promote(epoch);
+                else if(output_pending)om_promote(epoch);
+            }
+            xSemaphoreGive(om_write_mutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(25u));
+    }
+}
+
 /* The input sampler is independent of FPS. Four 10ms samples stay 40ms,
  * not four display frames. Wakes pixel rendering after a trigger transition. */
 static void input_sampler_task(void *arg){
@@ -2028,6 +2147,12 @@ void app_main(void) {
     /* Configuration writes already reject a missing mutex. Keep local
      * trigger-driven rendering alive rather than rebooting on this fault. */
     if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
+    else{
+        config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
+            5120,NULL,5,NULL)==pdPASS;
+        if(!config_promotion_ready)
+            ot_st_set_fault("durable configuration promoter failed to start");
+    }
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
     http_startup_ready=wifi_started&&http_start();
