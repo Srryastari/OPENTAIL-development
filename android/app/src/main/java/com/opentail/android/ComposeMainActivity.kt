@@ -240,6 +240,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPreferredListener { address ->
+            runOnUiThread { prefs.edit().putString("preferred_ble_address", address).apply() }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -289,7 +292,14 @@ class ComposeMainActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         ble.handlePermissions(requestCode, grantResults)
     }
+    override fun onStart() {
+        super.onStart()
+        val preferred = prefs.getString("preferred_ble_address", null)
+        if (!preferred.isNullOrBlank()) ble.tryReconnect(preferred)
+        else if (ble.isConnected() && !ble.canControl()) ble.authorizeOrPair()
+    }
     override fun onStop() {
+        ble.cancelAutomaticAuthorization()
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
@@ -1522,6 +1532,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
             }
             Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
+            Caption("Auto-access uses a saved owner key or the OpenTail-CORE-Alpha Wi-Fi session. No BOOT press is required when on that Wi-Fi.", t)
+            Pill("Advanced: Pair with BOOT", t) { ble.pairWithBoot() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
             Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (temporary TTL, max 24/255).", t)
