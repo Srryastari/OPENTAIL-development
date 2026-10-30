@@ -1661,11 +1661,14 @@ static void fire_flicker_frame(const ot_wled_fx_config_t *cfg,
 /* Pinned FX.cpp mode_wavesins(), palette=0 direct foreground.
  * WLED's index modulation is ignored by the source itself when palette=0:
  * the pixel receives SEGCOLOR(0) at the sin8_t brightness. */
+/* WLED Segment::color_from_palette(palette=0) uses color_fade(video=true),
+ * not ordinary linear RGB scaling. Shared with Fairy/Colorwaves. */
+static ot_wled_rgb_t fx_video_fade(ot_wled_rgb_t input,uint8_t amount);
 static void wavesins_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                            ot_wled_rgb_t *pixels,size_t count) {
     for(size_t i=0;i<count;i++) {
         const uint8_t bri=wled_sin8((uint8_t)(now/4u+(uint32_t)i*cfg->intensity));
-        pixels[i]=scaled(scaled(cfg->foreground,bri),cfg->brightness);
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,bri),cfg->brightness);
     }
 }
 
@@ -1693,7 +1696,7 @@ static void bpm_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     const uint8_t beat=fx_beatsin8(cfg->speed,64u,255u,now);
     for(size_t i=0;i<count;i++) {
         const uint8_t intensity=(uint8_t)((uint32_t)beat-phase+i*10u);
-        pixels[i]=scaled(scaled(cfg->foreground,intensity),cfg->brightness);
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,intensity),cfg->brightness);
     }
 }
 /* Source mode_lake() palette=0: keep WLED's signed-range beatsin8
@@ -1711,7 +1714,7 @@ static void lake_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         const uint8_t b=wled_cubicwave8((uint8_t)(i*23u+wave2));
         const unsigned idx=(unsigned)a/2u+(unsigned)b/2u;
         const uint8_t intensity=(uint8_t)(idx>wave3?idx-wave3:0u);
-        pixels[i]=scaled(scaled(cfg->foreground,intensity),cfg->brightness);
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,intensity),cfg->brightness);
     }
 }
 
