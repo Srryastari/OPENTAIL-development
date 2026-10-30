@@ -582,6 +582,10 @@ static esp_err_t om_post(httpd_req_t *r){
     const bool exhausted=om_revision[index]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stale or exhausted output edit revision");}
+    /* Idempotent REST save is a readback, not a new configuration revision. */
+    if(memcmp(&next_all[index],&next,sizeof(next))==0){
+        xSemaphoreGive(om_write_mutex);return om_get(r);
+    }
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
@@ -620,6 +624,10 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     portEXIT_CRITICAL(&state_lock);
     int result=busy?2:(stale||om_revision[index]==UINT16_MAX)?3:0;
     if(!result){
+        /* A no-op BLE write must not publish a revision absent from NVS. */
+        if(memcmp(&next_all[index],next,sizeof(*next))==0){
+            xSemaphoreGive(om_write_mutex);return 0;
+        }
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
