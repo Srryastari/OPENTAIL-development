@@ -283,6 +283,64 @@ ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *pal,
     return out;
 }
 
+/* Pinned fastled_slim.cpp nblendPaletteTowardPalette(), RGB byte order
+ * and stop-on-maxChanges semantics. No float, allocation or gamma. */
+void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
+                                  const ot_wled_palette16_t *target,
+                                  uint8_t max_changes) {
+    if(!current||!target)return;
+    uint8_t *a=(uint8_t*)current->entries;
+    const uint8_t *b=(const uint8_t*)target->entries;
+    unsigned changes=0u;
+    for(size_t i=0;i<sizeof(current->entries);i++) {
+        if(a[i]==b[i])continue;
+        if(a[i]<b[i]){++a[i];++changes;}
+        if(a[i]>b[i]) {
+            --a[i];++changes;
+            if(a[i]>b[i])--a[i];
+        }
+        if(changes>=max_changes)break;
+    }
+}
+
+/* Pinned FX_fcn.cpp Segment::handleRandomPalette(): preserve its 16-bit
+ * seconds/next-blend wrap, absolute transition window and per-frame blend
+ * budget. The upstream generated palette is caller-supplied to avoid
+ * changing the global WLED PRNG sequence or inventing random palettes. */
+bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
+                                 uint32_t now_ms,uint16_t change_interval_s,
+                                 uint16_t frame_time_ms,
+                                 uint16_t transition_time_ms,
+                                 const ot_wled_palette16_t *generated_if_due) {
+    if(!state||frame_time_ms<8u||frame_time_ms>1000u||
+       transition_time_ms<100u)return false;
+    ot_wled_palette_random_t next=*state;
+    const uint16_t now_s=(uint16_t)(now_ms/1000u);
+    const uint32_t now=(uint32_t)now_s*1000u+(now_ms%1000u);
+    if(now_s<next.last_change_s)next.last_change_s=0u;
+    if((uint32_t)now_s>(uint32_t)next.last_change_s+change_interval_s) {
+        if(!generated_if_due)return false;
+        next.target=*generated_if_due;
+        next.last_change_s=now_s;
+        next.next_blend_ms=(uint16_t)now;
+    }
+    if((uint16_t)now<next.next_blend_ms||
+       now>((uint32_t)next.last_change_s*1000u+
+             transition_time_ms+2u*(uint32_t)frame_time_ms)) {
+        *state=next;
+        return true;
+    }
+    const unsigned frames=frame_time_ms>transition_time_ms?1u:
+                          transition_time_ms/frame_time_ms;
+    const unsigned blends=frames>255u?1u:
+                          (255u+(frames>>1))/frames;
+    for(unsigned i=0;i<blends;i++)
+        ot_wled_palette_blend_toward(&next.current,&next.target,48u);
+    next.next_blend_ms=(uint16_t)(now+((frames>>8)*frame_time_ms));
+    *state=next;
+    return true;
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
