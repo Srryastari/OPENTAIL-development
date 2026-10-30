@@ -40,6 +40,8 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_random.h"
+#include "esp_heap_caps.h"
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
 #include "ot_frame_snapshot.h"
@@ -49,6 +51,11 @@
  * actual pixel length, transfer backend and render processing time. */
 #define OT_AP_SSID "OpenTail-CORE-Alpha"
 static const char *TAG="OPENTAIL";
+/* One hardware-RNG byte source for source-derived global palettes. */
+static uint8_t ot_palette_hardware_byte(void *unused){
+    (void)unused;
+    return (uint8_t)esp_random();
+}
 extern void ot_ble_start(void);
 extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
@@ -1354,6 +1361,19 @@ static void led_task(void *p) {
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
+    /* WLED has exactly ONE random palette for all active segments. The
+     * pinned non-harmonic generator is deliberately selected here; harmonic
+     * generation remains a separate source-parity gate, not an approximation.
+     * Initialize both source palettes from ESP32 hardware RNG at task start. */
+    ot_wled_palette_random_t global_palette={0};
+    if(!ot_wled_palette_global_init(&global_palette,
+                                   ot_palette_hardware_byte,NULL)){
+        ot_st_set_fault("global effect palette RNG initialization failed");
+        vTaskDelete(NULL);
+        return;
+    }
+    uint32_t fx_perf_window_ms=0,fx_perf_frames=0,fx_perf_max_us=0;
+    uint64_t fx_perf_total_us=0;
     bool boot_frame_verified=false;
     uint32_t previous_frame_ms=0;
     TaskHandle_t self=xTaskGetCurrentTaskHandle();
@@ -1417,6 +1437,16 @@ static void led_task(void *p) {
            previous_frame_ms=frame_ms;
            if(frame_delta_ms<1u)frame_delta_ms=1u;
            if(frame_delta_ms>65535u)frame_delta_ms=65535u;
+           /* Advance shared random palette once BEFORE either lane/zone
+            * renders. Never advance it from an individual FX zone. */
+           if(native_rendering && local_fx_enabled){
+               const uint16_t source_frame_ms=(uint16_t)(
+                   frame_delta_ms<8u?8u:frame_delta_ms>1000u?1000u:frame_delta_ms);
+               if(!ot_wled_palette_global_tick(&global_palette,frame_ms,
+                     5u,source_frame_ms,750u,ot_palette_hardware_byte,NULL))
+                   ot_st_set_fault("global effect palette advance failed");
+           }
+           const int64_t fx_started_us=esp_timer_get_time();
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
@@ -1465,7 +1495,11 @@ static void led_task(void *p) {
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
                                .spark_style=slot->spark.style,
                                .spark_peak=slot->spark.peak,
-                               .spark_color=slot->spark.color
+                               .spark_color=slot->spark.color,
+                               /* This frame-stable snapshot is shared by
+                                * every zone, regardless of output length. */
+                               .resolved_palette=fx->palette_id==1u?
+                                       &global_palette.current:NULL
                            };
                            uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(!ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
@@ -1554,6 +1588,16 @@ static void led_task(void *p) {
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
            }
+           /* Measure wall-time for the active effects/output pipeline,
+            * INCLUDING RMT completion waits. It is not pure CPU FX time and
+            * cannot establish optical LED output. */
+           if(native_rendering && local_fx_enabled){
+               const int64_t fx_elapsed=esp_timer_get_time()-fx_started_us;
+               const uint32_t us=fx_elapsed<0?0u:
+                   (uint32_t)(fx_elapsed>2000000LL?2000000LL:fx_elapsed);
+               fx_perf_total_us+=us;fx_perf_frames++;
+               if(us>fx_perf_max_us)fx_perf_max_us=us;
+           }
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
            const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
@@ -1590,6 +1634,25 @@ static void led_task(void *p) {
        }
        /* Observe measured work + RGB800 wire minimum. At overload there is
         * no extra delay; actual FPS may dip below the preferred 53 FPS. */
+       /* Per-five-second CORE serial evidence. Idle or incomplete hardware
+        * frames cannot be described as an LED optical validation. */
+       const uint32_t perf_now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       if(!fx_perf_window_ms)fx_perf_window_ms=perf_now_ms;
+       if((uint32_t)(perf_now_ms-fx_perf_window_ms)>=5000u){
+           if(fx_perf_frames){
+               const uint32_t mean=(uint32_t)(fx_perf_total_us/fx_perf_frames);
+               ESP_LOGI(TAG,"FX pipeline (incl. RMT): mean_us=%lu max_us=%lu "
+                   "samples=%lu internal_free=%u internal_min_free=%u "
+                   "observed_full_frame_fps=%lu",
+                   (unsigned long)mean,(unsigned long)fx_perf_max_us,
+                   (unsigned long)fx_perf_frames,
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                   (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                   (unsigned long)measured_fps);
+           }
+           fx_perf_frames=0;fx_perf_max_us=0;fx_perf_total_us=0;
+           fx_perf_window_ms=perf_now_ms;
+       }
        int64_t work_elapsed=esp_timer_get_time()-frame_started_us;
        uint32_t work_us=work_elapsed<=0?0u:
            (uint32_t)(work_elapsed>2000000LL?2000000LL:work_elapsed);

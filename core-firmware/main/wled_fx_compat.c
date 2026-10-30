@@ -430,6 +430,48 @@ static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
     return ot_wled_palette_build(id,primary,secondary,tertiary,out);
 }
 
+/* WLED pinned colors.cpp generateRandomPalette() target evaluation
+ * sequence: Xtensa GCC evaluates CHSV and enclosing palette arguments
+ * right-to-left. Each CHSV evaluates value, saturation, then hue.
+ * Byte-range scaling is WLED fcn_declare.h hw_random8(min,max). */
+bool ot_wled_palette_generate_random(ot_wled_random_byte_fn draw,
+                                     void *context,ot_wled_palette16_t *out) {
+    if(!draw||!out)return false;
+    uint8_t hsv[12];
+    for(int i=3;i>=0;i--) {
+        const uint8_t val=draw(context);
+        const uint8_t sat=draw(context);
+        const uint8_t hue=draw(context);
+        hsv[3*i]=hue;
+        hsv[3*i+1]=(uint8_t)(160u+(((uint16_t)sat*95u)>>8));
+        hsv[3*i+2]=(uint8_t)(128u+(((uint16_t)val*127u)>>8));
+    }
+    return ot_wled_palette_from_hsv4(hsv,out);
+}
+bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
+                                ot_wled_random_byte_fn draw,void *context) {
+    if(!state||!draw)return false;
+    ot_wled_palette_random_t next={0};
+    if(!ot_wled_palette_generate_random(draw,context,&next.current)||
+       !ot_wled_palette_generate_random(draw,context,&next.target))
+        return false;
+    *state=next;
+    return true;
+}
+bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
+                                uint32_t now_ms,uint16_t interval_s,
+                                uint16_t frame_time_ms,uint16_t transition_ms,
+                                ot_wled_random_byte_fn draw,void *context) {
+    if(!state||!draw||frame_time_ms<8u||frame_time_ms>1000u||
+       transition_ms<100u)return false;
+    ot_wled_palette16_t generated;
+    const bool due=ot_wled_palette_random_generation_due(state,now_ms,interval_s);
+    if(due && !ot_wled_palette_generate_random(draw,context,&generated))
+        return false;
+    return ot_wled_palette_random_tick(state,now_ms,interval_s,
+            frame_time_ms,transition_ms,due?&generated:NULL);
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},

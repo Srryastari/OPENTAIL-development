@@ -5859,7 +5859,83 @@ static void certifyLivePaletteInjection() {
     std::puts("Transient random/custom palette render injection passed: five IDs, two independent RGB scenes, unsupported-mode and missing-data guards.");
 }
 
+/* Independently check pinned colors.cpp generateRandomPalette() byte draw
+ * order and source CHSV/gradient construction, then global cadence. */
+struct GlobalPaletteByteStream {
+    uint32_t draws;
+    uint8_t bytes[256];
+};
+static uint8_t nextPaletteByte(void *context) {
+    auto *s=(GlobalPaletteByteStream*)context;
+    return s->bytes[(s->draws++)&255u];
+}
+static void certifyGlobalHardwarePaletteProducer() {
+    GlobalPaletteByteStream stream{};
+    for(unsigned i=0;i<256u;i++)
+        stream.bytes[i]=(uint8_t)(i*83u+19u);
+    ot_wled_palette16_t actual{};
+    if(ot_wled_palette_generate_random(nullptr,&stream,&actual)||
+       stream.draws!=0u)std::abort();
+    if(!ot_wled_palette_generate_random(nextPaletteByte,&stream,&actual)||
+       stream.draws!=12u)std::abort();
+    CRGB source_colors[4];
+    for(int i=3;i>=0;i--) {
+        const unsigned j=(unsigned)(3-i)*3u;
+        const uint8_t value=stream.bytes[j];
+        const uint8_t saturation=stream.bytes[j+1u];
+        const uint8_t hue=stream.bytes[j+2u];
+        source_colors[i]=CRGB(CHSV(hue,
+            (uint8_t)(160u+(((uint16_t)saturation*95u)>>8)),
+            (uint8_t)(128u+(((uint16_t)value*127u)>>8))));
+    }
+    CRGBPalette16 source{};
+    fill_gradient_RGB(source.entries,0u,source_colors[0],5u,source_colors[1]);
+    fill_gradient_RGB(source.entries,5u,source_colors[1],10u,source_colors[2]);
+    fill_gradient_RGB(source.entries,10u,source_colors[2],15u,source_colors[3]);
+    for(unsigned i=0;i<16u;i++)
+        if(pack(actual.entries[i])!=(source.entries[i].color32&0xFFFFFFu))
+            std::abort();
+    stream.draws=0u;
+    ot_wled_palette_random_t shared{};
+    if(!ot_wled_palette_global_init(&shared,nextPaletteByte,&stream)||
+       stream.draws!=24u)std::abort();
+    const ot_wled_palette_random_t init=shared;
+    if(!ot_wled_palette_global_tick(&shared,1000u,5u,23u,750u,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=24u)std::abort();
+    ot_wled_palette_random_t expected=shared;
+    /* A palette regeneration is due after >5 seconds, exactly once even
+     * when two independently sized zones draw the same global frame. */
+    ot_wled_palette16_t target{};
+    GlobalPaletteByteStream oracle=stream;
+    if(!ot_wled_palette_generate_random(nextPaletteByte,&oracle,&target)||
+       oracle.draws!=36u)std::abort();
+    if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,&target))
+        std::abort();
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
+    /* Source blending can advance on a second service call at the same
+     * timestamp, but random HSV generation must NOT run a second time. */
+    if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,nullptr))
+        std::abort();
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,
+                                   nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
+    const ot_wled_palette_random_t before=shared;
+    if(ot_wled_palette_global_tick(&shared,10000u,5u,0u,750u,
+                                  nextPaletteByte,&stream)||
+       stream.draws!=36u||
+       std::memcmp(&before,&shared,sizeof(shared))!=0)std::abort();
+    if(std::memcmp(&init.current.entries[0],&shared.current.entries[0],48u)==0)
+        std::abort();
+    std::puts("Source non-harmonic global palette: raw hardware-byte draw order, independent CHSV RGB, one generator per global frame, 16-bit source lifecycle PASS.");
+}
+
 int main() {
+    certifyGlobalHardwarePaletteProducer();
     certifyLivePaletteInjection();
     certifyPaletteOneLifecycle();
     certifyCustomGradientLoader();
