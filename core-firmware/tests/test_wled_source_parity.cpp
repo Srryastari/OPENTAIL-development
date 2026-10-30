@@ -5642,9 +5642,10 @@ static void certifyPaletteOneLifecycle() {
                 for(uint32_t now:times) {
                     const bool ok=ot_wled_palette_random_tick(
                         &live,now,2u,(uint16_t)frame,(uint16_t)transition,&target);
+                    SourcePalette48 generated{};
+                    std::memcpy(&generated,&target,sizeof(target));
                     source_handleRandomPalette(expected,now,2u,(uint16_t)frame,
-                                                (uint16_t)transition,
-                                                *reinterpret_cast<SourcePalette48*>(&target));
+                                                (uint16_t)transition,generated);
                     if(!ok||
                        live.last_change_s!=expected.lastChange||
                        live.next_blend_ms!=expected.nextBlend||
