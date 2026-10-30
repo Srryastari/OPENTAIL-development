@@ -942,8 +942,50 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         .intensity=(uint8_t)intensity,.palette_id=(uint8_t)palette,
         .ttl_sec=(uint8_t)ttl
     };
+    /* Optional RAM-only compositor. Never changes effect ID, trigger priority,
+     * saved palette profiles, or BLE FX packet layouts. */
+    struct {const char *key;unsigned max;unsigned value;} options[]={
+       {"overlay_style",3u,0u},{"overlay_peak",32u,32u},
+       {"overlay_density",255u,160u},{"overlay_radius",12u,4u},
+       {"overlay_fade_ms",1000u,120u},{"overlay_r",255u,255u},
+       {"overlay_g",255u,255u},{"overlay_b",255u,255u}
+    };
+    for(unsigned k=0;k<sizeof(options)/sizeof(options[0]);k++){
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,options[k].key);
+        if(!v)continue;
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           v->valueint<0||(unsigned)v->valueint>options[k].max){
+            cJSON_Delete(obj);return respond_err(r,400,"invalid overlay setting");
+        }
+        options[k].value=(unsigned)v->valueint;
+    }
+    const ot_fx_overlay_config_t overlay={
+       .style=(uint8_t)options[0].value,.peak=(uint8_t)options[1].value,
+       .density=(uint8_t)options[2].value,.radius=(uint8_t)options[3].value,
+       .fade_ms=(uint16_t)options[4].value,
+       .color={(uint8_t)options[5].value,(uint8_t)options[6].value,
+               (uint8_t)options[7].value}
+    };
+    const cJSON *only=cJSON_GetObjectItemCaseSensitive(obj,"overlay_only");
+    if(!ot_fx_overlay_valid(&overlay)||(only&&!cJSON_IsBool(only))){
+        cJSON_Delete(obj);return respond_err(r,400,"invalid overlay parameters");
+    }
+    const bool overlay_only=cJSON_IsTrue(only);
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,NULL))
+    if(overlay_only){
+        const TickType_t now=xTaskGetTickCount();
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        bool changed=false;
+        portENTER_CRITICAL(&state_lock);
+        if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
+            changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
+                  req.chain_mask,req.zone_mask,ms,&overlay);
+        portEXIT_CRITICAL(&state_lock);
+        if(!changed)return respond_err(r,409,"no matching active effect zones");
+        request_render_refresh();
+        return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
+    }
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
