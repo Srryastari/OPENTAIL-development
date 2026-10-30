@@ -142,6 +142,19 @@ final class NativeProject {
                     || start + length > 1000000)
                 throw new JSONException("Invalid or overlapping zone layout");
             if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
+            // Optional local Output Manager link, never a physical NVS write.
+            // Old Studio v4 documents omit these fields and remain compatible.
+            if (z.has("physicalOutput") || z.has("physicalSection")) {
+                if (!wholeNumber(z.opt("physicalOutput"), 0, 1) ||
+                    !wholeNumber(z.opt("physicalSection"), 0, 7))
+                    throw new JSONException("Invalid physical output/section link");
+                for(int previous=0;previous<i;previous++){
+                    JSONObject other=layout.getJSONObject(previous);
+                    if(other.optInt("physicalOutput",-1)==z.optInt("physicalOutput") &&
+                       other.optInt("physicalSection",-1)==z.optInt("physicalSection"))
+                        throw new JSONException("Two design zones cannot own one physical section");
+                }
+            }
             lastEnd = start + length;
         }
         if (candidate.optString("projectName", "Untitled project").length() > 64)
@@ -373,6 +386,31 @@ final class NativeProject {
             }
             reindex();return save();
         } catch (JSONException e) { restoreCommitted(); return false; }
+    }
+
+    /** Maps an offline Studio zone to exactly one physical output/section.
+     * The link is local-only until the explicitly confirmed BLE Output
+     * Manager save; never starts a hardware transaction on a tap.
+     */
+    synchronized boolean mapZoneToOutputSlot(String id,int output,int section){
+        int selected=indexOfZone(id);
+        if(selected<0||!((output==-1&&section==-1)||
+            (output>=0&&output<2&&section>=0&&section<8)))return false;
+        try{
+            for(int i=0;i<zoneCount();i++){
+                JSONObject z=zone(i);
+                if(i==selected)continue;
+                if(z.optInt("physicalOutput",-1)==output &&
+                   z.optInt("physicalSection",-1)==section) {
+                    z.remove("physicalOutput");
+                    z.remove("physicalSection");
+                }
+            }
+            JSONObject z=zone(selected);
+            if(output==-1){z.remove("physicalOutput");z.remove("physicalSection");}
+            else z.put("physicalOutput",output).put("physicalSection",section);
+            return save();
+        }catch(JSONException ex){restoreCommitted();return false;}
     }
 
     synchronized boolean removeZone(String id) {
