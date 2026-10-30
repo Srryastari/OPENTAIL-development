@@ -342,11 +342,14 @@ static int pal_write(uint16_t conn,uint16_t handle,
        conn!=active_conn)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     uint8_t p[20];uint16_t n=0;
     if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0||
-       n<3u||p[0]!=1u){pal_ack(0x7fu,0u,1u);return 0;}
+       n<3u||p[0]!=1u){
+        ot_pal_transfer_reset(&pal_upload);
+        pal_ack(0x7fu,0u,1u);return 0;
+    }
     const uint8_t op=p[1],index=p[2];
     pal_ack(op,index,0u);
     if(!authorized){ot_pal_transfer_reset(&pal_upload);
-        pal_ack(op,index,5u);return 0;}
+        pal_snapshot_valid=false;pal_ack(op,index,5u);return 0;}
     if(index>=OT_PAL_CUSTOM_SLOTS){pal_ack(op,index,1u);return 0;}
     const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
     switch(op){
@@ -377,13 +380,17 @@ static int pal_write(uint16_t conn,uint16_t handle,
         pal_reply_len=(uint8_t)(6u+take);break;
     }
     case 3:
-        if(n!=8u||!ot_pal_transfer_begin(&pal_upload,index,
+        if(n!=8u){ot_pal_transfer_reset(&pal_upload);
+            pal_ack(op,index,1u);break;}
+        if(!ot_pal_transfer_begin(&pal_upload,index,
            (uint16_t)p[3]|((uint16_t)p[4]<<8),p[5],
            (uint16_t)p[6]|((uint16_t)p[7]<<8),ms))
             pal_ack(op,index,1u);
         break;
     case 4:
-        if(n<5u||!ot_pal_transfer_append(&pal_upload,index,p[3],
+        if(n<5u){ot_pal_transfer_reset(&pal_upload);
+            pal_ack(op,index,1u);break;}
+        if(!ot_pal_transfer_append(&pal_upload,index,p[3],
                                       p+4u,(size_t)n-4u,ms))
             pal_ack(op,index,1u);
         break;
