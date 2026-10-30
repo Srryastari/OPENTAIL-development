@@ -137,7 +137,8 @@ enum {
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
 /* Source-accurate 16-entry RGB palette sampler. No global state, allocations,
- * UI styling or WLED runtime. Dynamic and custom IDs are not yet supported.
+ * UI styling or WLED runtime. Frame-scoped dynamic/custom palettes are accepted
+ * only through explicit caller-owned resolved snapshots.
  * ID 0 is the WLED source default Party palette for palette-only callers;
  * it does not change existing direct-color render paths. */
 typedef struct { ot_wled_rgb_t entries[16]; } ot_wled_palette16_t;
@@ -288,7 +289,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
  * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
  * Fixed RGB palettes 2-12 are supported only where explicitly marked.
- * Dynamic/custom palette import, gamma and global brightness remain separate.
+ * Dynamic/custom palette generation and delivery, gamma and bus brightness
+ * remain separate; an injected palette never bypasses effect support gating.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
 bool ot_wled_fx_render(const ot_wled_fx_config_t *config, ot_wled_fx_state_t *state,
