@@ -290,6 +290,7 @@ struct CRGB : CRGBW {
     CRGB()=default;
     CRGB(uint8_t red,uint8_t green,uint8_t blue) {r=red;g=green;b=blue;w=0u;}
     explicit CRGB(uint32_t color) { color32=color; }
+    CRGB& operator|=(const CRGB& rhs) { if(rhs.r>r)r=rhs.r; if(rhs.g>g)g=rhs.g; if(rhs.b>b)b=rhs.b; return *this; }
     explicit CRGB(CHSV c) {
         uint8_t rgb[4]={0u,0u,0u,0u};
         hsv2rgb_rainbow((uint16_t)c.h<<8,c.s,c.v,rgb,false);
@@ -5157,6 +5158,22 @@ void mode_twinkleup(void) {                     // A very short twinkle routine 
   prng.setSeed(prevSeed);                       // restore original seed so other effects can use "random" PRNG
 }
 
+#define SEGPALETTE ref_palette(SEGMENT.palette,SEGMENT.colors[0],SEGMENT.colors[1],SEGMENT.colors[2])
+void mode_juggle(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+
+  SEGMENT.fadeToBlackBy(192 - (3*SEGMENT.intensity/4));
+  CRGB fastled_col;
+  byte dothue = 0;
+  for (int i = 0; i < 8; i++) {
+    int index = 0 + beatsin88_t((16 + SEGMENT.speed)*(i + 7), 0, SEGLEN -1);
+    fastled_col = CRGB(SEGMENT.getPixelColor(index));
+    fastled_col |= (SEGMENT.palette==0)?CHSV(dothue, 220, 255):CRGB(ColorFromPalette(SEGPALETTE, dothue, 255));
+    SEGMENT.setPixelColor(index, fastled_col);
+    dothue += 32;
+  }
+}
+#undef SEGPALETTE
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -5262,6 +5279,7 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {64,mode_juggle,"Juggle"},
     {61,mode_random_chase,"Stream 2"},
     {106,mode_twinkleup,"Twinkleup"},
     {39,mode_running_random,"Stream"},
