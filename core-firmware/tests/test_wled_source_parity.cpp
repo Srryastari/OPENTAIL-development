@@ -3933,6 +3933,32 @@ void mode_solid_glitter()
 
 #undef ULTRAWHITE
 
+/* Pinned WLED FX.cpp Traffic Light RGB; gamma32inv identity in gamma-off fixture. */
+void mode_traffic_light(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  for (unsigned i=0; i < SEGLEN; i++)
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+  uint32_t mdelay = 500;
+  for (unsigned i = 0; i < SEGLEN-2 ; i+=3)
+  {
+    switch (SEGENV.aux0)
+    {
+      case 0: SEGMENT.setPixelColor(i, 0x00FF0000); mdelay = 150 + (100 * (uint32_t)(255 - SEGMENT.speed));break;
+      case 1: SEGMENT.setPixelColor(i, 0x00FF0000); mdelay = 150 + (20 * (uint32_t)(255 - SEGMENT.speed)); SEGMENT.setPixelColor(i+1, 0x00EECC00); break;
+      case 2: SEGMENT.setPixelColor(i+2, 0x0000FF00); mdelay = 150 + (100 * (uint32_t)(255 - SEGMENT.speed));break;
+      case 3: SEGMENT.setPixelColor(i+1, gamma32inv(0x00EECC00)); mdelay = 150 + (20 * (uint32_t)(255 - SEGMENT.speed));break; // gamma inversion to restore original pre 16.0 looks
+    }
+  }
+
+  if (strip.now - SEGENV.step > mdelay)
+  {
+    SEGENV.aux0++;
+    if (SEGENV.aux0 == 1 && SEGMENT.intensity > 140) SEGENV.aux0 = 2; //skip Red + Amber, to get US-style sequence
+    if (SEGENV.aux0 > 3) SEGENV.aux0 = 0;
+    SEGENV.step = strip.now;
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4009,7 +4035,8 @@ static const RefCase refs[]={
     {25,mode_multi_strobe,"Strobe Mega"},
     {78,mode_railway,"Railway"},
     {20,mode_sparkle,"Sparkle"},
-    {103,mode_solid_glitter,"Solid Glitter"}
+    {103,mode_solid_glitter,"Solid Glitter"},
+    {35,mode_traffic_light,"Traffic Light"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -4154,7 +4181,9 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==107u ?
+                    const std::vector<uint32_t> frames=fx.id==35u ?
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,5200u,10400u,25000u,60000u} :
+                        fx.id==107u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,4999u,5000u,10000u,20000u,65530u} :
                         fx.id==90u ?
                         []{std::vector<uint32_t> v;for(unsigned f=0;f<90u;f++)v.push_back(f*23u);return v;}():fx.id==44u ?
