@@ -42,6 +42,23 @@ public class NativeTriggerMappingCodecTest {
         assertThrows(IllegalArgumentException.class, () -> NativeTriggerMappingCodec.encode(1, bad));
     }
 
+    @Test public void requiresAuthoritativeAppliedReadbackNotJustAttWriteAck() {
+        int[] wanted = {1,2,3,4,5,6,7,8};
+        byte[] read = {1,0,2,0,0,0,1,1,2,3,4,5,6,7,8};
+        assertTrue(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
+        read[1] = 3; // stale edit rejected
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
+        read[1] = 0;read[6] = 0; // persisted, but not yet active
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
+        read[6] = 1;read[2] = 1; // unchanged revision
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
+        read[2] = 2;read[14] = 7; // revision advanced, wrong mapping
+        assertFalse(NativeTriggerMappingCodec.decode(read).confirmsApplied(1,wanted));
+        // Revision rolls over as unsigned 16-bit, while mapping must still match.
+        read[14] = 8;read[2] = 0;read[3] = 0;
+        assertTrue(NativeTriggerMappingCodec.decode(read).confirmsApplied(65535,wanted));
+    }
+
     @Test public void exposesBusyStaleAndNvsFailureAsFailuresNotSuccess() {
         byte[] wire = {1, 3, 2, 0, 0, 0, 1, 1,2,3,4,5,6,7,8};
         assertEquals(3, NativeTriggerMappingCodec.decode(wire).status);
