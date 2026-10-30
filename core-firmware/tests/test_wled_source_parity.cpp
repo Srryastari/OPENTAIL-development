@@ -5789,7 +5789,59 @@ static void certifyPaletteIdLookup() {
     std::printf("WLED palette ID mapping 0-255 verified: %u RGB bytes and missing-ID checks.\\n",bytes);
 }
 
+/* Transient dynamic/custom palette is consumed by an opted-in effect
+ * without creating per-zone generator state or weakening unsupported modes.
+ * The independent source palette sample comparisons run below. */
+static void certifyLivePaletteInjection() {
+    ot_wled_palette16_t warm{},cool{};
+    for(auto &v:warm.entries)v={17u,99u,201u};
+    for(auto &v:cool.entries)v={221u,31u,78u};
+    for(const uint8_t palette_id:{1u,73u,200u,201u,255u}) {
+        ot_wled_fx_config_t cfg{};
+        cfg.effect_id=OT_WLED_SLOW_TRANSITION;
+        cfg.palette_id=palette_id;
+        cfg.speed=127u;
+        cfg.intensity=128u;
+        cfg.brightness=255u;
+        cfg.frame_time_ms=23u;
+        cfg.foreground={123u,56u,9u};
+        cfg.background={3u,88u,174u};
+        std::array<ot_wled_rgb_t,32> pixels{};
+        ot_wled_fx_state_t state{};
+        for(auto &p:pixels)p={9u,8u,7u};
+        /* Missing external input fails before touching frame or state. */
+        if(ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()) ||
+           state.call!=0u)std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0x090807u)std::abort();
+        cfg.resolved_palette=&warm;
+        if(!ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()))
+            std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0x1163C9u) {
+            std::fprintf(stderr,"Palette injection warm mismatch id=%u got=%06X\\n",
+                         palette_id,(unsigned)pack(p));
+            std::abort();
+        }
+        ot_wled_fx_reset(&state);
+        state={};
+        cfg.resolved_palette=&cool;
+        if(!ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()))
+            std::abort();
+        for(const auto &p:pixels)if(pack(p)!=0xDD1F4Eu) {
+            std::fprintf(stderr,"Palette injection cool mismatch id=%u got=%06X\\n",
+                         palette_id,(unsigned)pack(p));
+            std::abort();
+        }
+        ot_wled_fx_reset(&state);
+        state={};
+        cfg.effect_id=OT_WLED_SOLID; /* unsupported palette must still reject */
+        if(ot_wled_fx_render(&cfg,&state,0u,pixels.data(),pixels.size()) ||
+           state.call!=0u)std::abort();
+    }
+    std::puts("Transient random/custom palette render injection passed: five IDs, two independent RGB scenes, unsupported-mode and missing-data guards.");
+}
+
 int main() {
+    certifyLivePaletteInjection();
     certifyPaletteOneLifecycle();
     certifyCustomGradientLoader();
     certifyPaletteIdLookup();
