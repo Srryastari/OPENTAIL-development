@@ -91,7 +91,13 @@ assert "(unsigned long)measured_fps" not in status
 assert "outputs_ready=native_outputs_ready;" in status
 assert r'\"ble_ready\":%s' in status
 assert r'\"outputs_ready\":%s' in status
-assert 'OT_FW,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
+assert 'OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
+# A semantic version repeats across alpha commits; physical evidence needs
+# the running ELF fingerprint to match the exact CI-generated firmware image.
+assert '#include "esp_app_desc.h"' in core
+assert 'char elf_sha256[65]={0};' in status
+assert 'esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256))' in status
+assert r'\"elf_sha256\":\"%s\"' in status
 assert 'outputs_ready?"true":"false","user-configured"' in status
 assert r'\"ble_radio_ready\":%s' in status
 assert "const bool ble_radio_ready=ot_ble_radio_ever_ready();" in status
