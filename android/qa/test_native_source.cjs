@@ -699,6 +699,8 @@ for(const guard of ['if(r.status!=0){rejected(r.status);return;}',
   'NativePaletteV3.crc(received)!=crc',
   'kind==UPLOAD&&!Arrays.equals(received,expected)',
   'if(abort){finish(false,false,null,"Palette transfer canceled for STOP");return;}',
+  'abort=true;generation++;',
+  'disconnect and reconnect before retry',
   'if(!busy||kind==CAPS||owner!=gatt)return;',
   'finish(true,false,null,"CORE palette deleted and tombstone verified")']) {
   assert(paletteTransport.includes(guard),'BLE v3 readback/cancel safety regressed: '+guard);
