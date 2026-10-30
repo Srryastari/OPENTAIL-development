@@ -574,6 +574,7 @@ struct PinnedSeg {
     }
     uint8_t custom1=48u,custom2=64u,custom3=12u;
     bool check1=false,check2=false,check3=false;
+    bool reverse=false; /* pinned 1D segment orientation: default false */
     void fade_out(uint8_t amount) {
         const unsigned rate=(256u-amount)>>1;
         const int mapped=(int)(256u/(rate+1u));
@@ -4435,6 +4436,37 @@ void mode_sinelon_rainbow(void) {
   sinelon_base(false, true);
 }
 
+void mode_flow(void)
+{
+  unsigned counter = 0;
+  if (SEGMENT.speed != 0)
+  {
+    counter = strip.now * ((SEGMENT.speed >> 2) +1);
+    counter = counter >> 8;
+  }
+
+  unsigned maxZones = SEGLEN / 6; //only looks good if each zone has at least 6 LEDs
+  int zones = (SEGMENT.intensity * maxZones) >> 8;
+  if (zones & 0x01) zones++; //zones must be even
+  if (zones < 2) zones = 2;
+  int zoneLen = SEGLEN / zones;
+  int requiredZones = (SEGLEN + zoneLen - 1) / zoneLen;
+  zones = requiredZones + 2; //add extra zones to cover beginning and end of segment (compensate integer truncation)
+  int offset = ((int)SEGLEN - (zones * zoneLen)) / 2; // center the zones on the segment (can not use bit shift on negative number)
+
+  for (int z = 0; z < zones; z++)
+  {
+    int pos = offset + z * zoneLen;
+    for (int i = 0; i < zoneLen; i++)
+    {
+      unsigned colorIndex = (i * 255 / zoneLen) - counter;
+      int led = (z & 0x01) ? i : (zoneLen -1) -i;
+      if (SEGMENT.reverse) led = (zoneLen -1) -led;
+      SEGMENT.setPixelColor(pos + led, SEGMENT.color_from_palette(colorIndex, false, true, 255));
+    }
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4533,6 +4565,7 @@ static const RefCase refs[]={
     {92,mode_sinelon,"Sinelon"},
     {93,mode_sinelon_dual,"Sinelon Dual"},
     {94,mode_sinelon_rainbow,"Sinelon Rainbow"},
+    {110,mode_flow,"Flow"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
