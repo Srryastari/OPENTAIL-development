@@ -459,9 +459,6 @@ final class BleDiscovery {
     }
 
     private volatile boolean authPending = false;
-    private volatile boolean benchSessionPending = false;
-    private volatile int benchSessionEpoch = 0;
-    private boolean benchFallbackAttempted = false;
     private boolean writePending = false;
     private boolean readReplyPending = false;
     private byte[] pendingPacket;
@@ -476,7 +473,7 @@ final class BleDiscovery {
         if (connecting) return "connecting";
         if (!connected) return "disconnected";
         if (pairPending) return "pairing";
-        if (challengePending || authPending || benchSessionPending) return "authorizing";
+        if (challengePending || authPending) return "authorizing";
         if (cfgBusy) return cfgSaving ? "saving" : "reading";
         if (triggerMapBusy) return triggerMapSavePending ? "saving trigger map" : "reading trigger map";
         return authorized ? "authorized" : "connected";
@@ -484,7 +481,7 @@ final class BleDiscovery {
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
     void onAdapterDisabled() {
         stopScan();
-        frameCapture.cancel();palette.reset();cancelBenchSession(); // GATT close may never produce a disconnect callback
+        frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
         command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); triggerMapping=null; triggerMapBusy=false; triggerMapSavePending=false; triggerMapExpected=null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
@@ -504,46 +501,9 @@ final class BleDiscovery {
         // challenge while this session is already authorized.
         if (canControl()) { notifyStatus("BLE already authorized"); return; }
         if (!connected) { notifyStatus("Connect to CORE over Bluetooth first"); return; }
-        if (BleOwnerVault.load(activity,activeAddress)==null) authorizeViaBenchWifi();
+        if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
         else authorizeStored();
     }
-    /**
-     * Transparently use the existing ephemeral session token offered by the
-     * password-protected bench Wi-Fi AP. No unauthenticated BLE access is added.
-     * Explicit BOOT enrollment remains available as a fallback.
-     */
-    void authorizeViaBenchWifi() {
-        if(!connected || gatt==null || command==null || reply==null) {
-            notifyStatus("Connect to OpenTail CORE Bluetooth first");return;
-        }
-        if(canControl() || benchSessionPending || pairPending || authPending ||
-           challengePending || cfgBusy || writePending || readReplyPending ||
-           fxCapsBusy || triggerMapBusy || palette.busy() || frameCapture.busy() ||
-           nextPacket!=null) return;
-        benchSessionPending=true;
-        benchFallbackAttempted=true;
-        final int attempt=++benchSessionEpoch;
-        final BluetoothGatt owner=gatt;
-        notifyStatus("Opening bench Wi-Fi session for automatic BLE access…");
-        new Thread(()->{
-            String token=null,error=null;
-            try{token=BenchWifiSessionAuth.request(activity);}
-            catch(Exception ex){error=ex.getMessage();}
-            final String sessionToken=token,sessionError=error;
-            ui.post(()->{
-                if(stopped || attempt!=benchSessionEpoch || owner!=gatt)return;
-                benchSessionPending=false;
-                if(!connected || canControl())return;
-                if(sessionToken!=null)authorize(sessionToken);
-                else notifyStatus("Automatic BLE access unavailable: "+
-                    (sessionError==null?"join OpenTail-CORE-Alpha Wi-Fi":sessionError)+
-                    ". BOOT pairing remains available.");
-            });
-        },"opentail-bench-wifi-session").start();
-    }
-    private void cancelBenchSession(){benchSessionEpoch++;benchSessionPending=false;}
-    void cancelAutomaticAuthorization(){cancelBenchSession();}
-
     /** Physical BOOT/GPIO0 button must be held after CORE starts, until read completes. */
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
@@ -864,9 +824,8 @@ final class BleDiscovery {
                     labels.add(name + "  •  " + address);
                     entries.notifyDataSetChanged();
                     if(composeScanResults!=null)composeScanResults.onFound(address,name);
-                    // A single physical CORE needs only the white Connect tap.
-                    // With multiple discovered controllers, preserve the full
-                    // visible picker and require explicit target selection.
+                    // Prefer a single-tap BLE connect on a bench with exactly one
+                    // controller; retain manual selection for multiple devices.
                     if(headlessScan && preferredPending==null && found.size()==1){
                         ui.postDelayed(()->{
                             if(stopped || !scanning || scanGeneration!=scanLease ||
@@ -902,7 +861,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();palette.reset();cancelBenchSession();benchFallbackAttempted=false;Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -931,7 +890,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();palette.reset();cancelBenchSession();benchFallbackAttempted=false;Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+                frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -1000,7 +959,7 @@ final class BleDiscovery {
             catch (SecurityException ex) { notifyStatus("Bluetooth permission missing for CORE information read"); }
             if (!infoStarted) {
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
-                if (command!=null && reply!=null)
+                if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
                     ui.post(thisAutoAuth(connection));
             }
         }
@@ -1074,16 +1033,13 @@ final class BleDiscovery {
         if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
             notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
         else notifyStatus("BLE connected; information read failed: " + status);
-        if (command!=null && reply!=null)
+        if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
             ui.post(thisAutoAuth(connection));
     }
 
     private Runnable thisAutoAuth(BluetoothGatt owner) {
         return ()->{
-            if (!stopped && owner==gatt && connected && !canControl()) {
-                if(BleOwnerVault.load(activity,activeAddress)!=null)authorizeStored();
-                else authorizeViaBenchWifi();
-            }
+            if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();
         };
     }
 
@@ -1103,12 +1059,8 @@ final class BleDiscovery {
         String response = status==BluetoothGatt.GATT_SUCCESS && raw!=null
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
-        boolean authenticating=authPending;
         if(authPending){authorized="OK AUTH".equals(response);authPending=false;}
-        boolean retryViaWifi=authenticating && !authorized &&
-            "ERR AUTH".equals(response) && !benchFallbackAttempted;
         if("ERR AUTH".equals(response)) revokeOwnerSession();
-        if(retryViaWifi)ui.post(this::authorizeViaBenchWifi);
         if(response.startsWith("ERR"))notifyStatus("BLE · " + response + " (Wi-Fi control unaffected)");
         else notifyStatus("BLE · " + response + (authorized?" · lighting enabled":""));
         pumpQueue();
@@ -1126,7 +1078,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void shutdown() {
         stopped = true;
-        frameCapture.cancel();palette.reset();cancelBenchSession();
+        frameCapture.cancel();palette.reset();
         connected = false;
         connecting = false;
         authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;cfgWatchdog++;
