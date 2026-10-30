@@ -540,6 +540,22 @@ final class BleDiscovery {
     private static boolean isStopPacket(byte[] data) {
         return data != null && data.length == 2 && data[0] == 1 && data[1] == 3;
     }
+    /** A failed STOP must never release a newer deferred effect START. */
+    private void discardFollowingFxIfStopFailed() {
+        if (isStopPacket(pendingPacket)) {
+            nextPacket=null;
+            afterStopPacket=null;
+        }
+    }
+    private void commandWriteStartFailed(String message) {
+        discardFollowingFxIfStopFailed();
+        writePending=false;
+        authPending=false;
+        pendingPacket=null;
+        notifyStatus(message);
+        // Do not recurse into another writeCharacteristic on the failing stack.
+        ui.post(this::pumpQueue);
+    }
     private void enqueueWrite(byte[] data) {
         final boolean stop = isStopPacket(data);
         if(frameCapture.busy() && stop) {
@@ -580,8 +596,8 @@ final class BleDiscovery {
                 command.setValue(packet);
                 ok=gatt.writeCharacteristic(command);
             }
-            if(!ok){writePending=false;authPending=false;notifyStatus("BLE write could not start");}
-        }catch(SecurityException ex){writePending=false;authPending=false;notifyStatus("BLE permission missing");}
+            if(!ok)commandWriteStartFailed("BLE write could not start");
+        }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
         if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!triggerMapBusy&&!frameCapture.busy()&&nextPacket!=null){
@@ -871,17 +887,18 @@ final class BleDiscovery {
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
+                discardFollowingFxIfStopFailed();
                 authPending=false;authorized=false;
                 notifyStatus("BLE write failed (GATT " + status + ")");pumpQueue();return;
             }
-            if(reply==null){authPending=false;notifyStatus("CORE missing BLE reply characteristic");pumpQueue();return;}
+            if(reply==null){discardFollowingFxIfStopFailed();authPending=false;notifyStatus("CORE missing BLE reply characteristic");pumpQueue();return;}
             readReplyPending=true;
             try {
                 if (!connection.readCharacteristic(reply)){
-                    readReplyPending=false;authPending=false;
+                    readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;
                     notifyStatus("Could not read CORE BLE result");pumpQueue();
                 }
-            } catch(SecurityException ex){readReplyPending=false;authPending=false;notifyStatus("BLE read permission missing");pumpQueue();}
+            } catch(SecurityException ex){readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;notifyStatus("BLE read permission missing");pumpQueue();}
         }
     };
 
@@ -891,6 +908,7 @@ final class BleDiscovery {
         readReplyPending=false;
         String response = status==BluetoothGatt.GATT_SUCCESS && raw!=null
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
+        if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
         if(authPending){authorized="OK AUTH".equals(response);authPending=false;}
         if(response.startsWith("ERR"))notifyStatus("BLE · " + response + " (Wi-Fi control unaffected)");
         else notifyStatus("BLE · " + response + (authorized?" · lighting enabled":""));
