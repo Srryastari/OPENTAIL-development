@@ -5787,7 +5787,7 @@ int main() {
                                 if((fx.id==79u || fx.id==99u) &&
                                    env.data && state.scratch) {
                                     const size_t ripples=std::min(
-                                      1u+count/4u,(size_t)100u);
+                                      (size_t)(1u+count/4u),(size_t)100u);
                                     struct DebugRipple {
                                         uint8_t phase,color;uint16_t pos;
                                     };
