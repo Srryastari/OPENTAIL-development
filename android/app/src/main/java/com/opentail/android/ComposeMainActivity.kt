@@ -1295,7 +1295,7 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun TriggersPage(t: Tone) {
         var selections by remember { mutableStateOf(setOf<String>()) }
-        var testing by remember { mutableStateOf(setOf<String>()) }
+        var removeConfirm by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf(false) }
         var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
@@ -1313,14 +1313,35 @@ class ComposeMainActivity : ComponentActivity() {
                 val index = order.indexOf(name)
                 if (index >= 0) index else 100
             }, { it }))
-        // Match the user-approved Studio Triggers grid. The test buttons
-        // affect only local authoring; CORE physical arbitration is untouched.
+        // The six universal trigger profiles exist by default with empty
+        // zone assignments; testing is a Settings-only developer tool.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Title("Triggers", t)
                 Caption("Tap cards to select one or more for editing", t)
             }
             Pill("+ Add", t) { adding = true }
+            // Icon-only delete is limited to explicitly selected custom profiles.
+            val canDelete = selections.size == 1 &&
+                project.trigger(selections.first()).optString("kind") == "trigger-custom"
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(99.dp))
+                .background(t.raised)
+                .border(1.dp, t.red.copy(alpha = 0.35f), RoundedCornerShape(99.dp))
+                .semantics { contentDescription = "Delete custom trigger" }
+                .clickable { if (canDelete) removeConfirm = true },
+                contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(21.dp)) {
+                    val u = size.width / 24f
+                    val c = if (canDelete) t.red else t.red.copy(alpha = 0.30f)
+                    drawLine(c, Offset(5*u, 7*u), Offset(19*u, 7*u), strokeWidth = 2*u)
+                    drawLine(c, Offset(9*u, 4*u), Offset(15*u, 4*u), strokeWidth = 2*u)
+                    drawLine(c, Offset(7*u, 9*u), Offset(8*u, 20*u), strokeWidth = 2*u)
+                    drawLine(c, Offset(17*u, 9*u), Offset(16*u, 20*u), strokeWidth = 2*u)
+                    drawLine(c, Offset(8*u, 20*u), Offset(16*u, 20*u), strokeWidth = 2*u)
+                    drawLine(c, Offset(11*u, 10*u), Offset(11*u, 17*u), strokeWidth = 1.5f*u)
+                    drawLine(c, Offset(14*u, 10*u), Offset(14*u, 17*u), strokeWidth = 1.5f*u)
+                }
+            }
         }
         if (triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
         keys.chunked(2).forEach { pair ->
@@ -1328,7 +1349,7 @@ class ComposeMainActivity : ComponentActivity() {
                 pair.forEach { name ->
                     val profile=project.trigger(name)
                     val selected=name in selections
-                    val active=name in testing
+                    val assigned = profile.optJSONArray("zones")?.length() ?: 0
                     Row(Modifier.weight(1f).heightIn(min=62.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(if(selected) t.raised else t.surface)
@@ -1339,14 +1360,11 @@ class ComposeMainActivity : ComponentActivity() {
                         verticalAlignment=Alignment.CenterVertically,
                         horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text(if(selected) "◉" else "○",color=t.fg,fontSize=13.sp)
-                        Text(name,Modifier.weight(1f),color=t.fg,
-                            fontSize=12.sp,fontWeight=FontWeight.SemiBold,maxLines=1)
-                        Box(Modifier.clip(RoundedCornerShape(99.dp))
-                            .background(t.raised)
-                            .clickable { testing=if(active) testing-name else testing+name }
-                            .padding(horizontal=9.dp,vertical=9.dp)) {
-                            Text(if(active) "■ Stop" else "▷ Test",
-                                color=t.fg,fontSize=11.sp,maxLines=1)
+                        Column(Modifier.weight(1f)) {
+                            Text(name,color=t.fg,fontSize=12.sp,
+                                fontWeight=FontWeight.SemiBold,maxLines=1)
+                            Caption(if(assigned == 0) "Unassigned" else
+                                "$assigned zones",t)
                         }
                     }
                 }
@@ -1368,11 +1386,8 @@ class ComposeMainActivity : ComponentActivity() {
                 editing=true
             }
         }
-        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Text("Trigger testing · "+testing.size+" active",Modifier.weight(1f),
-                color=t.fg,fontSize=13.sp,fontWeight=FontWeight.SemiBold)
-            Pill(if(testing.isEmpty()) "⌄" else "⌃",t) { testing=emptySet() }
-        }
+        Caption("Universal defaults are unassigned until you select zones. " +
+            "Developer trigger testing is in Settings.",t)
         if(adding) AlertDialog(
             onDismissRequest={ adding=false },
             title={ Text("Add trigger") },
@@ -1418,19 +1433,7 @@ class ComposeMainActivity : ComponentActivity() {
                             applyTriggerStyle()
                         }
                         Caption("Changes apply immediately to the local design; DONE only closes this editor.", t)
-                        if (selections.size == 1 &&
-                            project.trigger(selections.first()).optString("kind") == "trigger-custom") {
-                            Pill("Remove custom trigger", t) {
-                                val name=selections.first()
-                                if(project.deleteTrigger(name)){
-                                    selections=emptySet()
-                                    testing=testing-name
-                                    editing=false
-                                    refresh()
-                                } else triggerMessage="Could not remove custom trigger"
-                            }
-                        }
-                        Caption("Zone assignment (select to apply to all)", t)
+                         Caption("Zone assignment (select to apply to all)", t)
                         for (i in 0 until project.zoneCount()) {
                             val z = project.zone(i) ?: continue
                             val zoneId = z.optString("id")
@@ -1450,6 +1453,23 @@ class ComposeMainActivity : ComponentActivity() {
                 } },
                 dismissButton = { Pill("Close", t) { editing = false } })
         }
+        if(removeConfirm && selections.size == 1) AlertDialog(
+            onDismissRequest={removeConfirm=false},
+            title={Text("Delete custom trigger?")},
+            text={Text("Remove " + selections.first() +
+                " from the local project? Universal default triggers cannot be deleted.")},
+            confirmButton={Pill("Delete",t,true) {
+                val name=selections.first()
+                if(project.deleteTrigger(name)){
+                    selections=emptySet()
+                    removeConfirm=false
+                    refresh()
+                }else{
+                    triggerMessage="Cannot remove a universal default trigger"
+                    removeConfirm=false
+                }
+            }},
+            dismissButton={Pill("Cancel",t){removeConfirm=false}})
         CoreTriggerMappingPage(t)
     }
     @Composable
@@ -1645,6 +1665,30 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
         Title("Settings", t)
+        // Developer testing is deliberately isolated from universal trigger
+        // authoring. This is a local UI test; it does not assert GPIO or write NVS.
+        var simulatedTriggers by remember { mutableStateOf(setOf<String>()) }
+        Panel(t) {
+            Title("Developer · Trigger Testing", t)
+            Caption("Local simulation only · physical trigger inputs remain CORE-authoritative.", t)
+            val defaults = listOf("Park","Brake","Left Turn","Right Turn","Hazards","Reverse")
+            defaults.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { name ->
+                        Box(Modifier.weight(1f)) {
+                            Pill((if(name in simulatedTriggers) "■ Stop " else "▷ Test ") + name,
+                                t,name in simulatedTriggers) {
+                                simulatedTriggers=if(name in simulatedTriggers)
+                                    simulatedTriggers-name else simulatedTriggers+name
+                            }
+                        }
+                    }
+                }
+            }
+            Caption(simulatedTriggers.size.toString() + " simulated triggers active", t)
+            if(simulatedTriggers.isNotEmpty())
+                Pill("Clear test states",t) { simulatedTriggers=emptySet() }
+        }
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
