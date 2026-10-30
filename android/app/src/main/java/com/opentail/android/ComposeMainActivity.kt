@@ -646,6 +646,22 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
     }
+    @Composable
+    private fun ZoneDotPreview(t: Tone, count: Int, reverse: Boolean) {
+        // Neutral, indexed LED-address preview. Never invent effect animation.
+        val dots = count.coerceIn(0, 30)
+        Canvas(Modifier.fillMaxWidth().height(34.dp)
+            .clip(RoundedCornerShape(99.dp)).background(t.raised)) {
+            val pitch = size.width / 31f
+            for(i in 0 until dots){
+                val x = (if (reverse) 30-i else i) * pitch + pitch/2f
+                val center = Offset(x,size.height/2f)
+                drawCircle(t.fg.copy(alpha = 0.10f),radius=8f,center=center)
+                drawCircle(t.fg.copy(alpha = 0.66f),radius=4.2f,center=center)
+            }
+        }
+    }
+
     private fun rolePixelColor(role: String): Color = when(role) {
         "park_brake", "parking", "brake" -> Color(0xFFEE3939)
         "left_turn", "right_turn" -> Color(0xFFFFB300)
@@ -1104,72 +1120,66 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill("Move ↑", t) { if (project.moveZone(i, i - 1)) refresh() }
                     Pill("Move ↓", t) { if (project.moveZone(i, i + 1)) refresh() }
                 }
-            }
-        }
-        editingId?.let { id ->
-            val index = project.indexOfZone(id)
-            val zone = if (index >= 0) project.zone(index) else null
-            if (zone != null) {
-                var label by remember(id) { mutableStateOf(zone.optString("name")) }
-                var count by remember(id) { mutableStateOf(zone.optInt("length").toString()) }
-                var reverse by remember(id) { mutableStateOf(zone.optBoolean("reverse")) }
-                var selectedPixel by remember(id) { mutableIntStateOf(0) }
-                fun applyLiveZone(): Boolean {
-                    val n = count.toIntOrNull() ?: return false
-                    if (n !in 1..10000 || label.trim().isEmpty() ||
-                        !project.editZone(id, label, n, reverse)) return false
-                    refresh()
-                    return true
-                }
-                AlertDialog(onDismissRequest = { editingId = null },
-                    title = { Text("Edit zone") },
-                    text = {
-                        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Caption("Live editing is always on. Changes appear immediately; " +
-                                "valid edits are auto-saved to the design. No controller NVS writes.", t)
-                            Field(label, "Zone name", t) {
-                                label = it
-                                applyLiveZone()
-                            }
-                            Field(count, "Pixel count", t) {
-                                count = it.filter(Char::isDigit).take(5)
-                                applyLiveZone()
-                            }
-                            val n = count.toIntOrNull() ?: 0
-                            CapsuleSlider(n, 1, 10000, t,
-                                change = { count = it.toString() },
-                                finished = { applyLiveZone() })
-                            Caption(project.previewZoneOffsets(id, n), t)
-                            val pixelLimit = (n.coerceAtLeast(1) - 1)
-                            val activePixel = selectedPixel.coerceIn(0, pixelLimit)
-                            Caption("Pixel editor · zero-based index (saved locally immediately)", t)
-                            ValueSlider("Pixel", activePixel, pixelLimit.coerceAtLeast(1), t) {
-                                selectedPixel = it.coerceIn(0, pixelLimit)
-                            }
-                            val painted = project.pixelColor(id, activePixel)
-                            val liveColor = android.graphics.Color.parseColor(painted)
-                            PaletteEditor("Pixel " + activePixel, liveColor, t) { color ->
-                                val hex = String.format("#%06X", color and 0xFFFFFF)
-                                if (project.setPixelColor(id, activePixel, hex)) refresh()
-                            }
-                            Pill("Clear this pixel", t) {
-                                if (project.clearPixelColor(id, activePixel)) refresh()
-                            }
-                            Caption("Live per-pixel color is included in the v4 design export. " +
-                                "The existing CORE BLE protocol cannot stream individual pixel writes.", t)
-                            Pill(if (reverse) "Reverse pixels ✓" else "Reverse pixels", t, reverse) {
-                                reverse = !reverse
-                                applyLiveZone()
-                            }
+                // Approved Layout: the active zone expands INSIDE its card, not
+                // a blocking modal. Every valid edit updates the local preview.
+                if (editingId == id) {
+                    var label by remember(id) { mutableStateOf(z.optString("name")) }
+                    var count by remember(id) { mutableStateOf(z.optInt("length").toString()) }
+                    var reverse by remember(id) { mutableStateOf(z.optBoolean("reverse")) }
+                    var selectedPixel by remember(id) { mutableIntStateOf(0) }
+                    fun applyLiveZone(): Boolean {
+                        val n = count.toIntOrNull() ?: return false
+                        if (n !in 1..10000 || label.trim().isEmpty() ||
+                            !project.editZone(id,label,n,reverse)) return false
+                        refresh()
+                        return true
+                    }
+                    Caption("Zone name", t)
+                    Field(label, "Zone name", t) {
+                        label=it
+                        applyLiveZone()
+                    }
+                    Caption("Zone length", t)
+                    Field(count, "LED count", t) {
+                        count=it.filter(Char::isDigit).take(5)
+                        applyLiveZone()
+                    }
+                    val n=count.toIntOrNull() ?: 0
+                    CapsuleSlider(n, 1, 10000, t,
+                        change={ count=it.toString() },
+                        finished={ applyLiveZone() })
+                    Caption(project.previewZoneOffsets(id, n), t)
+                    Pill(if(reverse) "Reverse ✓" else "Reverse", t, reverse) {
+                        reverse=!reverse
+                        applyLiveZone()
+                    }
+                    Caption("LED preview · indexed dots, not simulated FX", t)
+                    ZoneDotPreview(t,n,reverse)
+                    val pixelLimit=n.coerceAtLeast(1)-1
+                    val activePixel=selectedPixel.coerceIn(0,pixelLimit)
+                    ValueSlider("Pixel", activePixel, pixelLimit.coerceAtLeast(1),t) {
+                        selectedPixel=it.coerceIn(0,pixelLimit)
+                    }
+                    val painted=project.pixelColor(id,activePixel)
+                    val liveColor=android.graphics.Color.parseColor(painted)
+                    PaletteEditor("Pixel " + activePixel,liveColor,t) { color ->
+                        val hex=String.format("#%06X",color and 0xFFFFFF)
+                        if(project.setPixelColor(id,activePixel,hex))refresh()
+                    }
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Pill("Clear pixel",t) {
+                            if(project.clearPixelColor(id,activePixel))refresh()
                         }
-                    },
-                    confirmButton = { Pill("Done", t, true) {
-                        if (applyLiveZone()) editingId = null
-                    } },
-                    dismissButton = { Pill("Close", t) { editingId = null } })
+                        Pill("Done",t,true) { if(applyLiveZone())editingId=null }
+                    }
+                } else {
+                    ZoneDotPreview(t,length,z.optBoolean("reverse"))
+                }
             }
         }
+        // Actual hardware output/section assignment belongs beside Layout.
+        // Saving to CORE still requires an explicit authenticated confirmation.
+        HardwareOutputEditor(t)
         deleteId?.let { id ->
             AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
                 text = { Text("Only assignments to this zone will be removed.") },
@@ -1588,7 +1598,6 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
             Caption(outputMessage.value, t)
         }
-        HardwareOutputEditor(t)
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
