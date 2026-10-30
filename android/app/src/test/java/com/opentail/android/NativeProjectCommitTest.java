@@ -188,6 +188,33 @@ public class NativeProjectCommitTest {
         assertEquals(999992, project.zone(0).getInt("start"));
     }
 
+    @Test public void malformedTriggerProfilesNeverOverwriteSavedDataOnRead() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        String original = project.exportJson();
+        int commits = storage.commits;
+        for (Object invalid : new Object[]{new JSONArray(), "malformed", JSONObject.NULL}) {
+            JSONObject imported = new JSONObject(original);
+            imported.getJSONObject("profiles").put("Brake", invalid);
+            assertFalse(project.importJson(imported.toString()));
+            assertEquals(original, project.exportJson());
+            assertEquals(commits, storage.commits);
+        }
+
+        // Unknown lookups are read-only and cannot silently add an entry.
+        assertNotNull(project.trigger("Unknown local profile"));
+        assertEquals(original, project.exportJson());
+        assertEquals(commits, storage.commits);
+
+        // Missing built-in keys in older project versions are still restored.
+        JSONObject legacy = new JSONObject(original);
+        legacy.put("version", 3);
+        legacy.getJSONObject("profiles").remove("Brake");
+        assertTrue(project.importJson(legacy.toString()));
+        assertEquals("Solid", project.trigger("Brake").getString("pattern"));
+        assertEquals(4, new JSONObject(project.exportJson()).getInt("version"));
+    }
+
     @Test public void failedReindexBeforeCommitCannotLeavePartialLayout() throws Exception {
         Storage store = new Storage();
         NativeProject project = new NativeProject(store.prefs);
