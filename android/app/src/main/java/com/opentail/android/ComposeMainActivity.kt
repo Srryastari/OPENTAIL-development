@@ -1295,13 +1295,10 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun TriggersPage(t: Tone) {
         var selections by remember { mutableStateOf(setOf<String>()) }
-        var removeConfirm by remember { mutableStateOf(false) }
+        var triggerToDelete by remember { mutableStateOf<String?>(null) }
         var editing by remember { mutableStateOf(false) }
         var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
-        var searchFx by remember { mutableStateOf("") }
-        var chosenFx by remember { mutableStateOf("Solid") }
-        var chosenColor by remember { mutableStateOf("#ff0000") }
         var triggerMessage by remember { mutableStateOf("") }
         val profiles = project.profiles()
         val names = profiles.names()
@@ -1321,27 +1318,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Caption("Tap cards to select one or more for editing", t)
             }
             Pill("+ Add", t) { adding = true }
-            // Icon-only delete is limited to explicitly selected custom profiles.
-            val canDelete = selections.size == 1 &&
-                project.trigger(selections.first()).optString("kind") == "trigger-custom"
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(99.dp))
-                .background(t.raised)
-                .border(1.dp, t.red.copy(alpha = 0.35f), RoundedCornerShape(99.dp))
-                .semantics { contentDescription = "Delete custom trigger" }
-                .clickable { if (canDelete) removeConfirm = true },
-                contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(21.dp)) {
-                    val u = size.width / 24f
-                    val c = if (canDelete) t.red else t.red.copy(alpha = 0.30f)
-                    drawLine(c, Offset(5*u, 7*u), Offset(19*u, 7*u), strokeWidth = 2*u)
-                    drawLine(c, Offset(9*u, 4*u), Offset(15*u, 4*u), strokeWidth = 2*u)
-                    drawLine(c, Offset(7*u, 9*u), Offset(8*u, 20*u), strokeWidth = 2*u)
-                    drawLine(c, Offset(17*u, 9*u), Offset(16*u, 20*u), strokeWidth = 2*u)
-                    drawLine(c, Offset(8*u, 20*u), Offset(16*u, 20*u), strokeWidth = 2*u)
-                    drawLine(c, Offset(11*u, 10*u), Offset(11*u, 17*u), strokeWidth = 1.5f*u)
-                    drawLine(c, Offset(14*u, 10*u), Offset(14*u, 17*u), strokeWidth = 1.5f*u)
-                }
-            }
+
         }
         if (triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
         keys.chunked(2).forEach { pair ->
@@ -1366,6 +1343,26 @@ class ComposeMainActivity : ComponentActivity() {
                             Caption(if(assigned == 0) "Unassigned" else
                                 "$assigned zones",t)
                         }
+                        if(profile.optString("kind") == "trigger-custom") {
+                            // Per-created-trigger trash: built-in profiles get none.
+                            Box(Modifier.size(35.dp)
+                                .clip(RoundedCornerShape(99.dp)).background(t.raised)
+                                .semantics { contentDescription = "Delete " + name }
+                                .clickable { triggerToDelete = name },
+                                contentAlignment = Alignment.Center) {
+                                Canvas(Modifier.size(19.dp)) {
+                                    val u=size.width/24f
+                                    val c=t.red
+                                    drawLine(c,Offset(5*u,7*u),Offset(19*u,7*u),strokeWidth=2*u)
+                                    drawLine(c,Offset(9*u,4*u),Offset(15*u,4*u),strokeWidth=2*u)
+                                    drawLine(c,Offset(7*u,9*u),Offset(8*u,20*u),strokeWidth=2*u)
+                                    drawLine(c,Offset(17*u,9*u),Offset(16*u,20*u),strokeWidth=2*u)
+                                    drawLine(c,Offset(8*u,20*u),Offset(16*u,20*u),strokeWidth=2*u)
+                                    drawLine(c,Offset(11*u,10*u),Offset(11*u,17*u),strokeWidth=1.5f*u)
+                                    drawLine(c,Offset(14*u,10*u),Offset(14*u,17*u),strokeWidth=1.5f*u)
+                                }
+                            }
+                        }
                     }
                 }
                 if(pair.size==1) Spacer(Modifier.weight(1f))
@@ -1377,14 +1374,8 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("All",t) { selections=keys.toSet() }
             Pill("Clear",t) { selections=emptySet() }
         }
-        Pill("Edit "+selections.size+" selected Triggers",t,selections.isNotEmpty()) {
-            if(selections.isNotEmpty()){
-                val p=project.trigger(selections.first())
-                chosenFx=p.optString("pattern","Solid")
-                chosenColor=p.optString("color","#ff0000")
-                searchFx=""
-                editing=true
-            }
+        Pill("Assign zones · " + selections.size + " selected", t, selections.isNotEmpty()) {
+            if(selections.isNotEmpty()) editing=true
         }
         Caption("Universal defaults are unassigned until you select zones. " +
             "Developer trigger testing is in Settings.",t)
@@ -1401,75 +1392,49 @@ class ComposeMainActivity : ComponentActivity() {
                 }else triggerMessage="Could not add trigger"
             } },
             dismissButton={ Pill("Cancel",t){ adding=false } })
-        if (editing) {
-            fun applyTriggerStyle(): Boolean {
-                if (selections.isEmpty() ||
-                    !Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor) ||
-                    NativeEffectCatalog.all().none { it.name == chosenFx }) return false
-                val saved = project.styleTriggers(selections, chosenFx, chosenColor)
-                triggerMessage = if (saved) "" else "Could not save trigger styles"
-                if (saved) refresh()
-                return saved
-            }
-            AlertDialog(onDismissRequest = { editing = false },
-                title = { Text("Edit " + selections.size + " triggers") },
-                text = {
-                    Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Caption("Effect (applies to every selected trigger)", t)
-                        Field(searchFx, "Search effects", t) { searchFx = it }
-                        Caption("Selected: " + chosenFx, t)
-                        NativeEffectCatalog.all()
-                            .filter { it.name.contains(searchFx, ignoreCase = true) }
-                            .take(12).forEach { fx ->
-                                Pill(fx.name, t, chosenFx == fx.name) {
-                                    chosenFx = fx.name
-                                    applyTriggerStyle()
-                                }
-                            }
-                        Caption("Trigger color (hex #RRGGBB)", t)
-                        Field(chosenColor, "#ff0000", t) {
-                            chosenColor = it.take(7)
-                            applyTriggerStyle()
+        if (editing) AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("Assign zones to " + selections.size + " triggers") },
+            text = {
+                Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    if(project.zoneCount()==0) Caption("Add zones in Layout first.",t)
+                    for(i in 0 until project.zoneCount()) {
+                        val zone=project.zone(i) ?: continue
+                        val zoneId=zone.optString("id")
+                        val checked=selections.all { name ->
+                            val assigned=project.trigger(name).optJSONArray("zones")
+                            (0 until (assigned?.length() ?: 0))
+                                .any { assigned?.optString(it)==zoneId }
                         }
-                        Caption("Changes apply immediately to the local design; DONE only closes this editor.", t)
-                         Caption("Zone assignment (select to apply to all)", t)
-                        for (i in 0 until project.zoneCount()) {
-                            val z = project.zone(i) ?: continue
-                            val zoneId = z.optString("id")
-                            val checked = selections.all { name ->
-                                val assigned = project.trigger(name).optJSONArray("zones")
-                                (0 until (assigned?.length() ?: 0))
-                                    .any { assigned?.optString(it) == zoneId }
-                            }
-                            Pill(z.optString("name") + (if (checked) " ✓" else ""), t, checked) {
-                                if (project.assignMany(selections, zoneId, !checked)) refresh()
-                            }
+                        Pill(zone.optString("name") + (if(checked) " ✓" else ""),t,checked) {
+                            if(project.assignMany(selections,zoneId,!checked)) refresh()
+                            else triggerMessage="Could not save zone assignments"
                         }
                     }
-                },
-                confirmButton = { Pill("Done", t, true) {
-                    if (applyTriggerStyle()) editing = false
-                } },
-                dismissButton = { Pill("Close", t) { editing = false } })
-        }
-        if(removeConfirm && selections.size == 1) AlertDialog(
-            onDismissRequest={removeConfirm=false},
-            title={Text("Delete custom trigger?")},
-            text={Text("Remove " + selections.first() +
-                " from the local project? Universal default triggers cannot be deleted.")},
-            confirmButton={Pill("Delete",t,true) {
-                val name=selections.first()
-                if(project.deleteTrigger(name)){
-                    selections=emptySet()
-                    removeConfirm=false
-                    refresh()
-                }else{
-                    triggerMessage="Cannot remove a universal default trigger"
-                    removeConfirm=false
                 }
-            }},
-            dismissButton={Pill("Cancel",t){removeConfirm=false}})
+            },
+            confirmButton = { Pill("Done",t,true) { editing=false } },
+            dismissButton = { Pill("Close",t) { editing=false } })
+        triggerToDelete?.let { target ->
+            if(project.trigger(target).optString("kind") == "trigger-custom")
+                AlertDialog(
+                    onDismissRequest={triggerToDelete=null},
+                    title={Text("Delete custom trigger?")},
+                    text={Text("Delete " + target + " from this project?")},
+                    confirmButton={Pill("Delete",t,true) {
+                        if(project.deleteTrigger(target)) {
+                            selections=selections-target
+                            triggerToDelete=null
+                            refresh()
+                        }else {
+                            triggerMessage="Cannot delete a default trigger"
+                            triggerToDelete=null
+                        }
+                    }},
+                    dismissButton={Pill("Cancel",t){triggerToDelete=null}})
+            else triggerToDelete=null
+        }
         CoreTriggerMappingPage(t)
     }
     @Composable
