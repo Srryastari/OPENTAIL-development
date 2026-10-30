@@ -173,7 +173,7 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.busy()') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
-assert(gradle.includes("versionName '0.2.0-alpha3'"));
+assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
