@@ -4567,6 +4567,42 @@ void mode_tricolor_chase(void) {
   tricolor_chase(SEGCOLOR(2), SEGCOLOR(0));
 }
 
+/* Verbatim pinned FX.cpp Chase Flash, tested against CORE's 1D port. */
+#define FLASH_COUNT 4
+void mode_chase_flash(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned now = strip.now; // save time for delay calculation
+  bool advance = true;
+  unsigned flash_step = SEGENV.aux1 % ((FLASH_COUNT * 2) + 1);
+  if (now < SEGENV.step)
+    advance = false; // limit update rate but render every frame for smooth transitions
+  else
+    SEGENV.aux1++;
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+  }
+  unsigned index = SEGENV.aux0;
+  unsigned n = index;
+  unsigned m = (index + 1) % SEGLEN;
+
+  unsigned delay = 10 + ((30 * (uint16_t)(255 - SEGMENT.speed)) / SEGLEN);
+  if(flash_step < (FLASH_COUNT * 2)) {
+    if(flash_step % 2 == 0) {
+      SEGMENT.setPixelColor( n, SEGCOLOR(1));
+      SEGMENT.setPixelColor( m, SEGCOLOR(1));
+      delay = 20;
+    } else {
+      delay = 30;
+    }
+  } else if (advance) {
+    SEGENV.aux0 = m; // advance to next position
+  }
+  if (advance)
+    SEGENV.step = now + delay;
+}
+#undef FLASH_COUNT
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4669,6 +4705,7 @@ static const RefCase refs[]={
     {104,mode_sunrise,"Sunrise"},
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
+    {31,mode_chase_flash,"Chase Flash"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
@@ -4816,7 +4853,12 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==29u ?
+                    const std::vector<uint32_t> frames=fx.id==31u ?
+                        /* Exercise every flash phase and actual movement. */
+                        std::vector<uint32_t>{0u,17u,20u,41u,72u,103u,
+                          134u,165u,196u,227u,258u,289u,320u,351u,382u,
+                          413u,444u,475u,506u,700u,1400u} :
+                        fx.id==29u ?
                         /* Force Chase Random across the 16-bit phase wrap,
                          * including transition at t=65536 for speed=0. */
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u,
