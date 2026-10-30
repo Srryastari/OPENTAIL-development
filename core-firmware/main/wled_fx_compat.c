@@ -2346,6 +2346,12 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
     if(old_call==0u || cfg->speed!=state->aux0) {
         state->step=now;state->aux0=cfg->speed;
     }
+    /* Upstream Sunrise metadata prescribes Fire palette 35 by default.
+     * Use exact pinned 16-entry source palette, not a foreground/background
+     * approximation; palette selection ABI remains unchanged (ID 0 only). */
+    ot_wled_palette16_t fire_palette;
+    (void)ot_wled_palette_build(35u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&fire_palette);
     uint32_t stage=0xffffu;
     uint32_t elapsed=(now-state->step)/100u;
     if(cfg->speed>120u) {
@@ -2365,8 +2371,9 @@ static void sunrise_frame(const ot_wled_fx_config_t *cfg,
         const uint32_t wave=wave16((uint16_t)angle);
         uint32_t luminance=(wave>>8)+((wave*(uint32_t)cfg->intensity)>>15);
         if(luminance>240u)luminance=240u;
-        const ot_wled_rgb_t c=scaled(blend_colors(cfg->background,cfg->foreground,
-                                        (uint8_t)luminance),cfg->brightness);
+        const ot_wled_rgb_t c=scaled(ot_wled_palette_sample(
+                         &fire_palette,(uint8_t)luminance,255u,
+                         OT_WLED_PALETTE_LINEAR),cfg->brightness);
         pixels[i]=c;
         pixels[count-1u-i]=c;
     }
