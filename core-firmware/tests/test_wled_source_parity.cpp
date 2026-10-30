@@ -4915,6 +4915,183 @@ void mode_noise16_4() {
     SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(index, false, PALETTE_SOLID_WRAP, 0));
   }
 }
+/* Pinned FX.cpp 1D Stream, Oscillate, Candle and Candle Multi. */
+void mode_running_random(void) {
+  uint32_t cycleTime = 25 + (3 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+  if (SEGENV.call == 0) SEGENV.aux0 = hw_random(); // random seed for PRNG on start
+
+  unsigned zoneSize = ((255-SEGMENT.intensity) >> 4) +1;
+  uint16_t PRNG16 = SEGENV.aux0;
+
+  unsigned z = it % zoneSize;
+  bool nzone = (!z && (it & 0xFFFF) != SEGENV.aux1);
+  for (int i=SEGLEN-1; i >= 0; i--) {
+    if (nzone || z >= zoneSize) {
+      unsigned lastrand = PRNG16 >> 8;
+      int16_t diff = 0;
+      while (abs(diff) < 42) { // make sure the difference between adjacent colors is big enough
+        PRNG16 = (uint16_t)(PRNG16 * 2053) + 13849; // next zone, next 'random' number
+        diff = (PRNG16 >> 8) - lastrand;
+      }
+      if (nzone) {
+        SEGENV.aux0 = PRNG16; // save next starting seed
+        nzone = false;
+      }
+      z = 0;
+    }
+    SEGMENT.setPixelColor(i, SEGMENT.color_wheel(PRNG16 >> 8));
+    z++;
+  }
+
+  SEGENV.aux1 = it & 0xFFFF;
+}
+
+typedef struct Oscillator {
+  uint16_t pos;
+  uint8_t  size;
+  int8_t   dir;
+  uint8_t  speed;
+} oscillator;
+
+/*
+/  Oscillating bars of color, updated with standard framerate
+*/
+void mode_oscillate(void) {
+  constexpr unsigned numOscillators = 3;
+  constexpr unsigned dataSize = sizeof(oscillator) * numOscillators;
+
+  if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+
+  Oscillator* oscillators = reinterpret_cast<Oscillator*>(SEGENV.data);
+
+  if (SEGENV.call == 0)
+  {
+    oscillators[0] = {(uint16_t)(SEGLEN/4),   (uint8_t)(SEGLEN/8),  1, 1};
+    oscillators[1] = {(uint16_t)(SEGLEN/4*3), (uint8_t)(SEGLEN/8),  1, 2};
+    oscillators[2] = {(uint16_t)(SEGLEN/4*2), (uint8_t)(SEGLEN/8), -1, 1};
+  }
+
+  uint32_t cycleTime = 20 + (2 * (uint32_t)(255 - SEGMENT.speed));
+  uint32_t it = strip.now / cycleTime;
+
+  for (unsigned i = 0; i < numOscillators; i++) {
+    // if the counter has increased, move the oscillator by the random step
+    if (it != SEGENV.step) oscillators[i].pos += oscillators[i].dir * oscillators[i].speed;
+    oscillators[i].size = SEGLEN/(3+SEGMENT.intensity/8);
+    if((oscillators[i].dir == -1) && (oscillators[i].pos > SEGLEN << 1)) { // use integer overflow
+      oscillators[i].pos = 0;
+      oscillators[i].dir = 1;
+      // make bigger steps for faster speeds
+      oscillators[i].speed = SEGMENT.speed > 100 ? hw_random8(2, 4):hw_random8(1, 3);
+    }
+    if((oscillators[i].dir == 1) && (oscillators[i].pos >= (SEGLEN - 1))) {
+      oscillators[i].pos = SEGLEN - 1;
+      oscillators[i].dir = -1;
+      oscillators[i].speed = SEGMENT.speed > 100 ? hw_random8(2, 4):hw_random8(1, 3);
+    }
+  }
+
+  for (unsigned i = 0; i < SEGLEN; i++) {
+    uint32_t color = BLACK;
+    for (unsigned j = 0; j < numOscillators; j++) {
+      if((int)i >= (int)oscillators[j].pos - oscillators[j].size && i <= oscillators[j].pos + oscillators[j].size) {
+        color = (color == BLACK) ? SEGCOLOR(j) : color_blend(color, SEGCOLOR(j), uint8_t(128));
+      }
+    }
+    SEGMENT.setPixelColor(i, color);
+  }
+
+  SEGENV.step = it;
+}
+
+void candle(bool multi)
+{
+  if (multi && SEGLEN > 1) {
+    //allocate segment data
+    unsigned dataSize = sizeof(uint32_t) + max(1, (int)SEGLEN -1) *3;
+    if (!SEGENV.allocateData(dataSize)) candle(false); //allocation failed
+  } else {
+    unsigned dataSize = sizeof(uint32_t); // for last call timestamp
+    if (!SEGENV.allocateData(dataSize)) FX_FALLBACK_STATIC; //allocation failed
+  }
+  uint32_t* lastcall = reinterpret_cast<uint32_t*>(SEGENV.data);
+  uint8_t*  candleData = reinterpret_cast<uint8_t*>(SEGENV.data + sizeof(uint32_t)); // only used for multi-candle
+
+  //limit update rate
+  if (strip.now - *lastcall < FRAMETIME_FIXED) return;
+  *lastcall = strip.now;
+
+  //max. flicker range controlled by intensity
+  unsigned valrange = SEGMENT.intensity;
+  unsigned rndval = valrange >> 1; //max 127
+
+  //step (how much to move closer to target per frame) coarsely set by speed
+  unsigned speedFactor = 4;
+  if (SEGMENT.speed > 252) { //epilepsy
+    speedFactor = 1;
+  } else if (SEGMENT.speed > 99) { //regular candle (mode called every ~25 ms, so 4 frames to have a new target every 100ms)
+    speedFactor = 2;
+  } else if (SEGMENT.speed > 49) { //slower fade
+    speedFactor = 3;
+  } //else 4 (slowest)
+
+  unsigned numCandles = (multi) ? SEGLEN : 1;
+
+  for (unsigned i = 0; i < numCandles; i++)
+  {
+    unsigned d = 0; //data location
+
+    unsigned s = SEGENV.aux0, s_target = SEGENV.aux1, fadeStep = SEGENV.step;
+    if (i > 0) {
+      d = (i-1) *3;
+      s = candleData[d]; s_target = candleData[d+1]; fadeStep = candleData[d+2];
+    }
+    if (fadeStep == 0) { //init vals
+      s = 128; s_target = 130 + hw_random8(4); fadeStep = 1;
+    }
+
+    bool newTarget = false;
+    if (s_target > s) { //fade up
+      s = qadd8(s, fadeStep);
+      if (s >= s_target) newTarget = true;
+    } else {
+      s = qsub8(s, fadeStep);
+      if (s <= s_target) newTarget = true;
+    }
+
+    if (newTarget) {
+      s_target = hw_random8(rndval) + hw_random8(rndval); //between 0 and rndval*2 -2 = 252
+      if (s_target < (rndval >> 1)) s_target = (rndval >> 1) + hw_random8(rndval);
+      unsigned offset = (255 - valrange);
+      s_target += offset;
+
+      unsigned dif = (s_target > s) ? s_target - s : s - s_target;
+
+      fadeStep = dif >> speedFactor;
+      if (fadeStep == 0) fadeStep = 1;
+    }
+
+    if (i > 0) {
+      SEGMENT.setPixelColor(i, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0), uint8_t(s)));
+      candleData[d] = s; candleData[d+1] = s_target; candleData[d+2] = fadeStep;
+    } else {
+      for (unsigned j = 0; j < SEGLEN; j++) {
+        SEGMENT.setPixelColor(j, color_blend(SEGCOLOR(1), SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0), uint8_t(s)));
+      }
+
+      SEGENV.aux0 = s; SEGENV.aux1 = s_target; SEGENV.step = fadeStep;
+    }
+  }
+}
+
+
+void mode_candle()
+{
+  candle(false);
+}
+void mode_candle_multi(){candle(true);}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -5020,6 +5197,10 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {39,mode_running_random,"Stream"},
+    {62,mode_oscillate,"Oscillate"},
+    {88,mode_candle,"Candle"},
+    {102,mode_candle_multi,"Candle Multi"},
     {69,mode_fillnoise8,"Fill Noise"},
     {70,mode_noise16_1,"Noise 1"},
     {71,mode_noise16_2,"Noise 2"},
