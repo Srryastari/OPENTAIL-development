@@ -20,6 +20,9 @@
 #include "ble_config.h"
 #include "trigger_manager.h"
 #include "ot_frame_snapshot.h"
+#include "palette_ble_v3.h"
+#include "palette_profile.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
@@ -129,6 +132,9 @@ static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,
 static const ble_uuid128_t ot_frame_cmd_uuid=BLE_UUID128_INIT(0x2a,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_frame_rsp_uuid=BLE_UUID128_INIT(0x2b,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_trigger_uuid=BLE_UUID128_INIT(0x2c,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_palette_cmd_uuid=BLE_UUID128_INIT(0x2d,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_palette_rsp_uuid=BLE_UUID128_INIT(0x2e,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_palette_caps_uuid=BLE_UUID128_INIT(0x2f,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -216,6 +222,7 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
         ot_ble_disconnect_show();
         cfg_reset();
         frame_reply_reset();
+        ot_palette_ble_session_reset();
         trigger_last_status=0;
     }
     if(last_result==OT_BLE_OK_SHOW && !ot_ble_apply_show(&show))last_result=OT_BLE_ERR_BUSY;
@@ -429,6 +436,36 @@ static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_c
     }
     return BLE_ATT_ERR_UNLIKELY;
 }
+/* Palette writes are allowed only for the active, HMAC-authorized owner. */
+static int palette_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||!authorized)
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t p[OT_PALETTE_WIRE_MAX];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0){
+        ot_palette_ble_session_reset();return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    ot_palette_ble_process(p,n,(uint32_t)(esp_timer_get_time()/1000LL));return 0;
+}
+static int palette_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR||conn!=active_conn||!authorized)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    uint8_t reply[OT_PALETTE_REPLY_BYTES];ot_palette_ble_reply(reply);
+    if(ctx->offset>sizeof(reply))return BLE_ATT_ERR_INVALID_OFFSET;
+    return os_mbuf_append(ctx->om,reply+ctx->offset,sizeof(reply)-ctx->offset)==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static int palette_caps(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR||conn!=active_conn)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    const uint8_t caps[]={OT_PALETTE_WIRE_VERSION,OT_PALETTE_SLOTS,
+         OT_PALETTE_STOPS_MAX,OT_PALETTE_CHUNK_MAX,200u,73u};
+    if(ctx->offset>sizeof(caps))return BLE_ATT_ERR_INVALID_OFFSET;
+    return os_mbuf_append(ctx->om,caps+ctx->offset,sizeof(caps)-ctx->offset)==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
 static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_info_uuid.u,.access_cb=info_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
@@ -441,6 +478,9 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_trigger_uuid.u,.access_cb=trigger_access,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_frame_cmd_uuid.u,.access_cb=frame_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_frame_rsp_uuid.u,.access_cb=frame_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_palette_cmd_uuid.u,.access_cb=palette_write,.flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_palette_rsp_uuid.u,.access_cb=palette_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_palette_caps_uuid.u,.access_cb=palette_caps,.flags=BLE_GATT_CHR_F_READ},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
@@ -472,7 +512,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
             }
             active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
             challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
-            cfg_reset();frame_reply_reset();trigger_last_status=0;
+            cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
         }else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         /* A rejected secondary connection can still deliver DISCONNECT. */
@@ -480,7 +520,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;
         challenge_ready=false;pair_failures=0;
         ot_st_ble_connected(false);ot_ble_disconnect_show();
-        cfg_reset();frame_reply_reset();trigger_last_status=0;advertise();
+        cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }
