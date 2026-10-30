@@ -40,6 +40,10 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/effects_1d.c main/ot_aut
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_preset_record.c main/fx_zone_bank.c main/fx_overlay_engine.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_fx_preset_record.c -o /tmp/ot-fx-presets-test -lm && /tmp/ot-fx-presets-test
 
+# Pure custom-palette persistence codec and default-MTU bounded staging.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_profile.c main/wled_fx_compat.c tests/test_palette_profile.c -o /tmp/ot-pal-profile-tests -lm
+/tmp/ot-pal-profile-tests
+
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/palette_1d.c main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_palette_1d.c -o /tmp/ot-palettes-test -lm && /tmp/ot-palettes-test
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c tests/test_fx_zone_bank.c -o /tmp/ot-fx-bank-tests && /tmp/ot-fx-bank-tests
