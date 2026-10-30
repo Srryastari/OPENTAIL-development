@@ -63,3 +63,10 @@ uint32_t ot_fps_pacer_wait_us(const ot_fps_pacer_t *p,uint32_t work_us){
     const uint32_t period=ot_fps_pacer_period_us(p);
     return work_us<period?period-work_us:0u;
 }
+/* A fixed 30ms task timeout used to cancel longer frame timers early.
+ * Round UP to ticks, then allow one tick for scheduling jitter. */
+uint32_t ot_fps_pacer_wait_ticks(uint32_t wait_us,uint32_t tick_rate_hz){
+    if(wait_us==0u||tick_rate_hz==0u)return 0u;
+    const uint64_t ticks=((uint64_t)wait_us*tick_rate_hz+999999u)/1000000u;
+    return (uint32_t)(ticks+1u);
+}

@@ -1729,7 +1729,9 @@ static void led_task(void *p) {
        if(wait_us>=100u){
            if(esp_timer_start_once(frame_timer,wait_us)==ESP_OK){
                /* Input sampler can wake the frame early on a trigger change. */
-               (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30u));
+               const TickType_t timeout=(TickType_t)ot_fps_pacer_wait_ticks(
+                   wait_us,configTICK_RATE_HZ);
+               (void)ulTaskNotifyTake(pdTRUE,timeout);
                (void)esp_timer_stop(frame_timer);
            }else vTaskDelay(1);
        }else taskYIELD();

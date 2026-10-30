@@ -20,3 +20,6 @@ void ot_fps_pacer_observe(ot_fps_pacer_t *p, uint32_t work_us,
                           uint16_t longest_output_pixels);
 uint32_t ot_fps_pacer_period_us(const ot_fps_pacer_t *p);
 uint32_t ot_fps_pacer_wait_us(const ot_fps_pacer_t *p, uint32_t work_us);
+/* Convert the requested microsecond timer delay to a FreeRTOS task timeout.
+ * Add one tick for scheduler granularity; trigger notifications still wake early. */
+uint32_t ot_fps_pacer_wait_ticks(uint32_t wait_us, uint32_t tick_rate_hz);
