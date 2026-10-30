@@ -54,8 +54,19 @@ static ot_wled_rgb_t scale_compat(ot_rgb_t c,uint8_t brightness){
 }
 bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     ot_effects_1d_state_t *s,uint32_t ms,ot_wled_rgb_t *frame,size_t count){
-    if(!cfg||!s||!frame||count==0||count>65535u||cfg->frame_time_ms==0||
-       !ot_palette_1d_supported(cfg->effect_id,cfg->palette_id))return false;
+    if(!cfg||!s||!frame||count==0||count>65535u||cfg->frame_time_ms==0)
+        return false;
+    if(!ot_palette_1d_supported(cfg->effect_id,cfg->palette_id)) {
+        /* BLE admission still accepts fixed palettes only. Internal callers
+         * may supply an already resolved random/user palette snapshot, but
+         * only for source adapters with verified fixed-palette sampling.
+         * Never allow this opt-in path for Embers or a recipe fallback. */
+        if(!cfg->resolved_palette ||
+           (cfg->palette_id!=1u&&cfg->palette_id<=72u) ||
+           cfg->effect_id==OT_FX_EMBERS ||
+           !ot_palette_1d_supported(cfg->effect_id,2u))
+            return false;
+    }
     if(ot_auto_fx_id(cfg->effect_id))
         return ot_auto_fx_render(cfg,s->particles.seed,ms,frame,count);
     if(cfg->effect_id!=OT_FX_EMBERS){
