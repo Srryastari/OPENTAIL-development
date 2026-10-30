@@ -431,6 +431,9 @@ final class BleDiscovery {
     boolean canControl() { return connected && authorized && command != null; }
     /** One UI action: use the stored owner key or enroll with physical BOOT once. */
     void authorizeOrPair() {
+        // The combined Home/Settings action must not open a second GATT
+        // challenge while this session is already authorized.
+        if (canControl()) { notifyStatus("BLE already authorized"); return; }
         if (!connected) { notifyStatus("Connect to CORE over Bluetooth first"); return; }
         if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
         else authorizeStored();
@@ -485,6 +488,13 @@ final class BleDiscovery {
         }
         if (tokenHex == null || !tokenHex.matches("[a-fA-F0-9]{32}")) {
             notifyStatus("Invalid CORE BLE authorization token");return;
+        }
+        // Legacy-token authorization must not mark authPending for an older
+        // command's reply or overlap another ATT operation or queued STOP.
+        if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||
+                frameCapture.busy() || nextPacket != null || pairPending ||
+                challengePending || authPending) {
+            notifyStatus("BLE busy; retry authorization"); return;
         }
         byte[] packet = new byte[18];packet[0]=1;packet[1]=1;
         for(int i=0;i<16;i++)packet[i+2]=(byte)Integer.parseInt(tokenHex.substring(2*i,2*i+2),16);
