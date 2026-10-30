@@ -76,14 +76,14 @@ require_text("pinned-effects50/core-firmware/tests/test_effects_oem_safety_matri
 core_modes = [
     (int(m.group(1)), m.group(2))
     for m in re.finditer(
-        r'^\\s*\\{(\\d+),"[^"]+","([^"]+)",\\d+\\},',
+        r'^\s*\{(\d+),"[^"]+","([^"]+)",\d+\},',
         Path("pinned-core49/core-firmware/main/wled_1d.c").read_text(), re.M
     )
 ]
 android_modes = [
     (int(m.group(1)), m.group(2))
     for m in re.finditer(
-        r'new Effect\\((\\d+),\\s*"([^"]+)"\\)',
+        r'new Effect\((\d+),\s*"([^"]+)"\)',
         Path("android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java").read_text()
     )
     if int(m.group(1)) < 32768
