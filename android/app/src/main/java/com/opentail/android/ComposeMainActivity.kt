@@ -1019,7 +1019,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun LayoutPage(t: Tone) {
         Title("Layout", t)
-        var name by remember { mutableStateOf(project.name()) }
+        // Import and preset load replace the project. Use the committed model
+        // rather than keeping a name from the previous design.
+        var name by remember(revision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember { mutableStateOf<String?>(null) }
         var deleteId by remember { mutableStateOf<String?>(null) }
         Panel(t) {
@@ -1069,10 +1071,12 @@ class ComposeMainActivity : ComponentActivity() {
                 var count by remember(id) { mutableStateOf(zone.optInt("length").toString()) }
                 var reverse by remember(id) { mutableStateOf(zone.optBoolean("reverse")) }
                 var selectedPixel by remember(id) { mutableIntStateOf(0) }
-                fun applyLiveZone() {
-                    val n = count.toIntOrNull() ?: return
-                    if (n in 1..10000 && label.trim().isNotEmpty() &&
-                        project.editZone(id, label, n, reverse)) refresh()
+                fun applyLiveZone(): Boolean {
+                    val n = count.toIntOrNull() ?: return false
+                    if (n !in 1..10000 || label.trim().isEmpty() ||
+                        !project.editZone(id, label, n, reverse)) return false
+                    refresh()
+                    return true
                 }
                 AlertDialog(onDismissRequest = { editingId = null },
                     title = { Text("Edit zone") },
@@ -1118,8 +1122,7 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     },
                     confirmButton = { Pill("Done", t, true) {
-                        applyLiveZone()
-                        editingId = null
+                        if (applyLiveZone()) editingId = null
                     } },
                     dismissButton = { Pill("Close", t) { editingId = null } })
             }
@@ -1128,7 +1131,10 @@ class ComposeMainActivity : ComponentActivity() {
             AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
                 text = { Text("Only assignments to this zone will be removed.") },
                 confirmButton = { Pill("Remove", t, true) {
-                    project.removeZone(id);deleteId = null;refresh()
+                    if (project.removeZone(id)) {
+                        deleteId = null
+                        refresh()
+                    }
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
