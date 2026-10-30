@@ -383,7 +383,7 @@ final class BleDiscovery {
         frameCapture.cancel(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
-        command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
+        command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); triggerMapping=null; triggerMapBusy=false; triggerMapSavePending=false; triggerMapExpected=null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
         writePending = false; readReplyPending = false; pendingPacket = null; nextPacket = null; afterStopPacket = null;
