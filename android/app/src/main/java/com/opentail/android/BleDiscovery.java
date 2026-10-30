@@ -110,6 +110,7 @@ final class BleDiscovery {
     private volatile BluetoothGatt gatt;
     private AlertDialog scanDialog;
     private volatile boolean scanning;
+    private int scanGeneration=0;
     private boolean stopped;
     private volatile boolean connected = false;
     private volatile boolean connecting = false;
@@ -703,6 +704,7 @@ final class BleDiscovery {
             return;
         }
         stopScan();
+        final int scanLease=++scanGeneration;
         found.clear();
         labels.clear();
         entries.notifyDataSetChanged();
@@ -737,7 +739,7 @@ final class BleDiscovery {
             scanner.startScan(scanCallback);
             if (!background) notifyStatus("Scanning for OpenTail CORE (10 seconds)…");
             ui.postDelayed(() -> {
-                if (!scanning) return;
+                if (!scanning || scanGeneration!=scanLease || stopped) return;
                 stopScan();
                 if (!background) notifyStatus(found.isEmpty() ? "No OpenTail BLE advertisement detected" : "Scan complete; tap OpenTail CORE to connect");
                 preferredPending = null;
@@ -753,6 +755,7 @@ final class BleDiscovery {
             final String name = result.getScanRecord() == null ? null : result.getScanRecord().getDeviceName();
             if (name == null || !name.startsWith("OpenTail CORE")) return;
             ui.post(() -> {
+                if(stopped || !scanning)return;
                 String address = result.getDevice().getAddress();
                 if (!found.containsKey(address)) {
                     found.put(address, result.getDevice());
@@ -978,6 +981,7 @@ final class BleDiscovery {
     void stopScan() {
         if (!scanning) return;
         scanning = false;
+        scanGeneration++;
         try { if (scanner != null) scanner.stopScan(scanCallback); }
         catch (SecurityException | IllegalStateException ignored) { }
     }
