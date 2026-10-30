@@ -19,6 +19,12 @@ void ot_palette_runtime_load(void){
         char key[8];key_for((uint8_t)i,key);
         ot_palette_record_t record={0};size_t size=sizeof(record);
         if(nvs_get_blob(n,key,&record,&size)!=ESP_OK||size!=sizeof(record))continue;
+        /* The NVS key and embedded index must match for LIVE and DELETED
+         * records; otherwise corruption could import an unrelated revision. */
+        if(record.index!=i){
+            ESP_LOGW(TAG,"Palette NVS index/key mismatch at %u",i);
+            continue;
+        }
         ot_palette_entry_t entry={0};
         if(ot_palette_record_is_tombstone(&record)){
             entry.revision=record.revision;
