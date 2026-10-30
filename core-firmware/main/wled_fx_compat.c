@@ -472,6 +472,29 @@ bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
             frame_time_ms,transition_ms,due?&generated:NULL);
 }
 
+/* Pinned colors.cpp NeoGammaWLEDMethod::calcGammaTable: float powf,
+ * rounded +0.5f, both forward and inverse, gammaT[0]=0. No white
+ * channel or ESP-IDF side effects; output owner chooses if/when to apply. */
+bool ot_wled_gamma_tables_build(float exponent,ot_wled_gamma_tables_t *out){
+    if(!out||!isfinite(exponent)||exponent<=0.0f||
+       exponent>10.0f)return false;
+    ot_wled_gamma_tables_t next={0};
+    const float inverse=1.0f/exponent;
+    for(unsigned i=1u;i<256u;i++){
+        next.forward[i]=(uint8_t)(powf((float)i/255.0f,exponent)*255.0f+0.5f);
+        next.inverse[i]=(uint8_t)(powf(((float)i-0.5f)/255.0f,inverse)*255.0f+0.5f);
+    }
+    *out=next;
+    return true;
+}
+ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
+                                const ot_wled_gamma_tables_t *tables,
+                                bool inverse) {
+    if(!tables)return c;
+    const uint8_t *g=inverse?tables->inverse:tables->forward;
+    return (ot_wled_rgb_t){g[c.r],g[c.g],g[c.b]};
+}
+
 static const ot_wled_fx_metadata_t supported[] = {
     {OT_WLED_SOLID,  "Solid",  "Solid",                         true, false, false, false, false},
     {OT_WLED_BLINK,  "Blink",  "Blink@!,Duty cycle;!,!;!;01",   true, true, true, true, false},
