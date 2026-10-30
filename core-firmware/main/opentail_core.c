@@ -1457,8 +1457,15 @@ static void led_task(void *p) {
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
-               if(!output_failed[ch])
+               if(!output_failed[ch]){
                    frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+                   if(!frame_ready[ch]){
+                       /* A failed resize may leave an old handle or no handle.
+                        * Never retry teardown/allocation on every render frame. */
+                       output_runtime_fault(ch,"reconfigure",ESP_FAIL);
+                       output_failed[ch]=true;
+                   }
+               }
                if(!frame_ready[ch])ot_frame_snapshot_unavailable((uint8_t)ch);
            }
            /* A saved mapping can fail to reconfigure its RMT lane at runtime.
