@@ -20,7 +20,7 @@ Status: **bench-only integration**. Firmware owns BLE/HMAC, NVS, profile revisio
 | 6 ABORT | `[3,6]` | Drop uncommitted transaction |
 | 7 READ | `[3,7,index,offset]` | Read up to six original persisted stop bytes; absent/deleted records are rejected |
 
-Each stop is exactly `[position,R,G,B]`. First position 0, last 255; positions strictly increasing; count 2–18. Uploads expire after 5000 ms from BEGIN. Invalid packets, CRCs, revisions, lengths, unsupported indices and incomplete transfers do not alter the live palette or saved NVS record.
+Each stop is exactly `[position,R,G,B]`. First position 0, last 255; positions strictly increasing; count 2–18. Uploads expire after 5000 ms from BEGIN. COMMIT and DELETE share CORE's NVS save mutex and fail with status 2 when the physical input sampler is unready, a raw/debounced vehicle trigger is asserted, a simulated trigger is active, or a pending output/trigger configuration must settle. A busy COMMIT leaves its validated upload intact for a retry before the original deadline; no profile mutation occurs. Successful palette mutations notify the render task, without transferring LED ownership to BLE. Invalid packets, CRCs, revisions, lengths, unsupported indices and incomplete transfers do not alter the live palette or saved NVS record.
 
 ## Response
 Read characteristic returns 12 bytes:
