@@ -1642,6 +1642,9 @@ static void fire_flicker_frame(const ot_wled_fx_config_t *cfg,
                                ot_wled_rgb_t *pixels,size_t count) {
     const uint32_t cycle=40u+255u-(uint32_t)cfg->speed;
     const uint32_t it=now/cycle;
+    /* Upstream returns immediately while SEGENV.step == 0 and it == 0:
+     * preserve the initial retained frame until the first timer boundary. */
+    if(it==0u && state->step==0u)return;
     const bool fresh=(state->call==1u || state->step!=it);
     if(fresh)state->held_rng_seed=state->rng_state;
     ot_wled_fx_state_t sample={0};
