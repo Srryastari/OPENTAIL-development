@@ -275,6 +275,17 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
        bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
        'Output Manager must reject stale controller callbacks and fail closed on pending geometry');
 
+// STOP queued behind a GATT transaction must drain before any new capture,
+// owner/auth, effect-capability, or output-config GATT operation starts.
+assert(bleSource.includes('frameCapture.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||') &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 4 &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
+       bleSource.includes('private boolean cfgSend(byte[] packet)') &&
+       bleSource.includes('return cfgSend(new byte[]{2,3,(byte)index') &&
+       bleSource.includes('if(!ok){cfgFail("BLE configuration write did not start");return false;}') &&
+       bleSource.includes('fxCaps=null;fxCapsBusy=false;triggerMapping=null;'),
+  'Queued STOP must have priority and an immediate BLE write refusal must not be acknowledged as sent');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
