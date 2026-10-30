@@ -135,6 +135,25 @@ public class NativeProjectCommitTest {
         assertEquals("Solid", project.trigger("Left Turn").getString("pattern"));
     }
 
+    @Test public void autoEventsAreValidatedAndCommittedAtomically() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        int commits = store.commits;
+        assertFalse(project.setAutoEvent("Brake", "eventUiEnabled", true));
+        assertFalse(project.setAutoEvent("Startup", "eventUiFadeMs", -1));
+        assertFalse(project.setAutoEvent("Shutdown", "eventDuration", Double.NaN));
+        assertFalse(project.setAutoEvent("Startup", "notAProperty", true));
+        assertEquals(commits, store.commits);
+        assertTrue(project.setAutoEvent("Startup", "eventFx", "Solid"));
+        assertEquals(commits + 1, store.commits);
+        String previous = project.exportJson();
+        store.fail = true;
+        assertFalse(project.setAutoEvent("Startup", "eventUiEnabled", true));
+        assertEquals(previous, project.exportJson());
+        assertFalse(project.setAutoEvent("Shutdown", "eventUiFadeMs", 120));
+        assertEquals(previous, project.exportJson());
+    }
+
     @Test public void failedReindexBeforeCommitCannotLeavePartialLayout() throws Exception {
         Storage store = new Storage();
         NativeProject project = new NativeProject(store.prefs);
