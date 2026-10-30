@@ -145,7 +145,7 @@ for(const term of ['class CoreFrameCapture','CHUNK_PIXELS=56',
 }
 assert(compose.includes('ExactLedFrame.fromCoreRgb888(output, sequence, rgb)') &&
        compose.includes('ble.captureFrame(captureOutput.intValue)') &&
-       compose.includes('frame?.origin == ExactLedFrame.Origin.CORE') &&
+       compose.includes('ExactLedFrame.fromProjectModel(project)') &&
        compose.includes('Color(frame.colorAt(sample))') &&
         compose.includes('captureMessage.value = "Verified CORE RGB888 snapshot · output "'),
   'Compose must show verified CORE frame provenance, not invented animation');
