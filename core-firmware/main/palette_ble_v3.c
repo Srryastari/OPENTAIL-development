@@ -33,6 +33,7 @@ void ot_palette_ble_process(const uint8_t *p,size_t n,uint32_t now){
         ot_palette_transfer_reset(&upload);ack(0x7fu,255u,1u);return;
     }
     const uint8_t op=p[1];uint8_t index=n>=3u?p[2]:255u,status=1u;
+    uint8_t stop_bytes[6]={0},stop_offset=0,stop_len=0;
     switch(op){
       case 1: { /* BEGIN [v,1,index,count,base_revisionLE32,stops_crcLE16] */
         ot_palette_transfer_reset(&upload);
@@ -78,7 +79,22 @@ void ot_palette_ble_process(const uint8_t *p,size_t n,uint32_t now){
         ot_palette_transfer_reset(&upload);index=255u;status=0u;
         break;
       }
+      case 7: { /* READ [v,7,index,stop_byte_offset] => six bytes max */
+        if(n!=4u||index>=OT_PALETTE_SLOTS)break;
+        ot_palette_record_t record={0};
+        if(!ot_palette_runtime_read_record(index,&record) ||
+           p[3]>=record.byte_length)break;
+        stop_offset=p[3];
+        const size_t remain=(size_t)record.byte_length-stop_offset;
+        stop_len=(uint8_t)(remain>sizeof(stop_bytes)?sizeof(stop_bytes):remain);
+        memcpy(stop_bytes,record.stops+stop_offset,stop_len);
+        status=0u;break;
+      }
       default:break;
     }
     ack(op,index,status);
+    if(op==7u&&status==0u){
+        response[4]=stop_offset;response[5]=stop_len;
+        memcpy(response+6,stop_bytes,stop_len);
+    }
 }
