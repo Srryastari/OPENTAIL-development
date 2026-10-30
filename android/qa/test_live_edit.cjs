@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+'use strict';
+/* Guard the locked universal live-edit contract on every Android change.
+ * Static checks do not claim phone/BLE/pixel hardware acceptance. */
+const fs=require('fs'), assert=require('assert/strict');
+const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
+const project=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
+const preview=fs.readFileSync('android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
+const ble=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
+const qa=fs.readFileSync('android/qa/check_release.py','utf8');
+
+const zoneBlock=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
+const triggerBlock=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
+const effectBlock=compose.split('private fun ShowModesPage(t: Tone) {')[1].split('private fun SequencePage(')[0];
+const hardwareBlock=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(zoneBlock && triggerBlock && effectBlock && hardwareBlock);
+
+for(const required of [
+  'project.previewZoneOffsets(id, n)',
+  'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
+  'project.editZone(id, label, n, reverse)',
+  'project.setPixelColor(id, activePixel, hex)',
+  'project.clearPixelColor(id, activePixel)',
+  'PaletteEditor("Pixel " + activePixel',
+  'name = it', 'project.name(it)', 'confirmButton = { Pill("Done"',
+]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
+assert(compose.includes('selectedEffect.intValue = effectId') &&
+       compose.includes('val effect = selectedEffect.intValue'),
+       'Auto Events must preview the correct selected effect immediately.');
+assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx('),
+  'Authoring layout must never directly write a physical output mapping.');
+
+for(const required of [
+  'fun applyTriggerStyle(): Boolean','applyTriggerStyle()','project.assignMany(',
+  'project.styleTriggers(selections, chosenFx, chosenColor)',
+  'if (applyTriggerStyle()) editing = false', 'confirmButton = { Pill("Done"',
+]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
+assert(!triggerBlock.includes('ble.saveOutput('),
+ 'Trigger authoring must never modify controller NVS.');
+
+for(const required of [
+  'EffectsPreview(', 'previewCurrentEffect(effect)',
+  'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
+]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
+
+assert(triggerBlock.includes('project.assignMany(selections, zoneId, !checked)') &&
+       !triggerBlock.includes('selections.forEach { project.assign('),
+       'Multi-select assignments must commit once, not partially save per trigger');
+
+for(const required of [
+  'selectedPixels','pixelColor(String id,int pixel)',
+  'setPixelColor(String id,int pixel,String hex)',
+  'clearPixelColor(String id,int pixel)', 'synchronized boolean editZone',
+  'painted.remove(key)','all.remove(id)',
+]) assert(project.includes(required), 'v4 pixel-edit regression: '+required);
+
+for(const required of [
+  'class LiveBlePreview', 'private val intervalMs = 120L', 'handler.postDelayed(drain',
+  'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
+  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId, 5', 'ble.showFx(', 'fun stop()',
+  'handler.removeCallbacks(drain)', 'ble.stopShow()'
+]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
+assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
+       compose.includes('Caption(bleMessage.value, t)'),
+       'Connection status and transient diagnostics must remain separate');
+assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
+       compose.includes('frame.colorAt(first + i)') &&
+       compose.includes('First visible pixel') &&
+       compose.includes('NOT a simulated effect.'),
+  'Preview must show indexed project pixels rather than fabricated animation frames.');
+assert(compose.includes('if (offlinePreview.value) return') &&
+       compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
+       compose.includes('offlinePreview.value = true') &&
+       compose.includes('livePreview.stop()'),
+       'Preview Offline must not issue effect or frame capture commands');
+// Only palette values actually implemented by current CORE may be sent.
+// Selecting a local-only palette must stop any stale physical palette demo.
+const palette=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
+assert(palette.includes('fun coreSupports(effectId: Int, paletteId: Int): Boolean') &&
+       palette.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+       palette.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)'),
+  'CORE palette support must remain a narrowly scoped protocol gate');
+assert(preview.includes('val paletteId: Int,') &&
+       preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)') &&
+       preview.includes('frame.paletteId, 5'),
+  'Unsupported palette IDs must never enter a physical BLE FX packet');
+const previewGate=compose.split('private fun previewCurrentEffect(effectOverride: Int? = null) {')[1]
+  ?.split('private val importer =')[0];
+assert(previewGate &&
+       previewGate.includes('effectId !in supportedIds.value') &&
+       previewGate.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
+       previewGate.indexOf('!NativePaletteEngine.coreSupports(effectId, paletteId)') <
+         previewGate.indexOf('livePreview.arm()') &&
+       previewGate.includes('livePreview.stop()') &&
+       previewGate.includes('liveArmed.value = false') &&
+       effectBlock.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
+       effectBlock.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
+       compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
+  'All Effects edits must reject unsupported palettes before arming BLE without silent fallback');
+assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
+       'Disconnect must clear stale effect capability ownership');
+
+assert(compose.includes('if (!livePreview.isArmed())') &&
+       compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
+  'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
+assert(!compose.includes('Preview live on CORE bench') &&
+       compose.includes('Every editor is live.'),
+  'No optional Live Edit Mode toggle permitted in Android.');
+assert(!preview.includes('saveOutput(') && !preview.includes('fxPreset('),
+  'Live FX preview cannot use NVS config or preset writes.');
+assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview.stop()'),
+ 'Live hardware preview must STOP on activity background/exit.');
+assert(hardwareBlock.includes('fun adjustZone(') &&
+       hardwareBlock.includes('fun adjustOutput(') &&
+       hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
+       hardwareBlock.includes('next.put("pixels", total)') &&
+       hardwareBlock.includes('it.put("pixels", remaining)') &&
+       hardwareBlock.includes('structureVersion++') &&
+       hardwareBlock.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+       !hardwareBlock.includes('623') &&
+       hardwareBlock.includes('PixelStrip(t,'),
+       'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
+assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
+       hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
+       hardwareBlock.includes('Save to CORE · verify readback'),
+ 'Persistent hardware mapping requires explicit validated commit and readback.');
+assert(ble.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
+       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       ble.includes('||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
+       'Disconnect and GATT operation sequencing regression');
+assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
+ 'Preview must reuse authenticated CORE FX/STOP commands.');
+// A STOP waiting for a BLE GATT transaction must never be overwritten by
+// a later live-edit frame. Coalesced edits may follow, but not precede STOP.
+const stopQueue = ble.split('private static boolean isStopPacket(byte[] data) {')[1]
+  ?.split('@SuppressWarnings({"MissingPermission","deprecation"})')[0];
+const queuePump = ble.split('private void pumpQueue(){')[1]?.split('private String preferredPending')[0];
+assert(stopQueue && queuePump &&
+  stopQueue.includes('nextPacket=Arrays.copyOf(data,data.length);') &&
+  stopQueue.includes('afterStopPacket=null;') &&
+  stopQueue.includes('frameCapture.busy() || palette.busy() || nextPacket!=null) {') &&
+  stopQueue.includes('else if (isStopPacket(nextPacket))') &&
+  stopQueue.includes('afterStopPacket=Arrays.copyOf(data,data.length);') &&
+  stopQueue.includes('frameCapture.abortForStop();') &&
+  queuePump.includes('pendingPacket=nextPacket;') &&
+  queuePump.includes('nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;') &&
+  queuePump.includes('afterStopPacket=null;'),
+  'STOP priority and latest-following-FX ordering must survive GATT queue contention');
+assert(ble.includes('pendingPacket = null; nextPacket = null; afterStopPacket = null;') &&
+       (ble.match(/pendingPacket=null;nextPacket=null;afterStopPacket=null;/g)||[]).length === 2,
+  'Post-STOP queue must reset on adapter off, reconnect and disconnect');
+assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
+console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary authenticated bounded BLE FX; no NVS writes on edit.');
