@@ -193,6 +193,7 @@ final class NativePaletteBleTransport {
                        "CORE palette NVS write and exact stop readback verified":
                        "CORE palette downloaded with valid CRC");return;
             }
+            if(kind==DELETE && op==4){send(NativePaletteV3.query(index),5);return;}
             if(kind!=UPLOAD)
                 throw new IllegalArgumentException("Unexpected palette write acknowledgement");
             if(op==1 || op==2){
@@ -204,7 +205,6 @@ final class NativePaletteBleTransport {
                 return;
             }
             if(op==3){send(NativePaletteV3.query(index),5);return;}
-            if(kind==DELETE && op==4){send(NativePaletteV3.query(index),5);return;}
             throw new IllegalArgumentException("Unexpected CORE palette response opcode");
         }catch(IllegalArgumentException ex){finish(false,false,null,ex.getMessage());}
     }
