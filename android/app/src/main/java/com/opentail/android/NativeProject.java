@@ -93,9 +93,16 @@ final class NativeProject {
         return number >= 0 && number <= 255 && number == Math.floor(number);
     }
 
+    /** Do not coerce fractional or text JSON numbers to integer pixel indices. */
+    private static boolean wholeNumber(Object value, long min, long max) {
+        if (!(value instanceof Number)) return false;
+        double n = ((Number)value).doubleValue();
+        return Double.isFinite(n) && n >= min && n <= max && n == Math.floor(n);
+    }
+
     private static void validateSequenceStep(JSONObject step) throws JSONException {
         if (step.optString("fx", "").isEmpty()
-                || step.optInt("ms", 0) < 50 || step.optInt("ms", 0) > 600000)
+                || !wholeNumber(step.opt("ms"), 50, 600000))
             throw new JSONException("Invalid sequence step");
         JSONObject settings = step.optJSONObject("settings");
         if (step.has("settings") && settings == null)
@@ -118,13 +125,16 @@ final class NativeProject {
             JSONObject z = layout.getJSONObject(i);
             String id = z.optString("id", "");
             String name = z.optString("name", "");
-            int start = z.optInt("start", -1), length = z.optInt("length", -1);
+            if (!wholeNumber(z.opt("start"), 0, 999999)
+                    || !wholeNumber(z.opt("length"), 1, 10000))
+                throw new JSONException("Zone index and length must be whole numbers");
+            long start = ((Number)z.opt("start")).longValue();
+            long length = ((Number)z.opt("length")).longValue();
             if (id.isEmpty() || !ids.add(id) || name.isEmpty() || name.length() > 48
-                    || start < 0 || length < 1 || length > 10000
-                    || ((long) start + length) > 1000000)
+                    || start + length > 1000000)
                 throw new JSONException("Invalid or overlapping zone layout");
             if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
-            lastEnd = (long) start + length;
+            lastEnd = start + length;
         }
         if (candidate.optString("projectName", "Untitled project").length() > 64)
             throw new JSONException("Project name is too long");
