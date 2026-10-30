@@ -56,7 +56,8 @@ end=core.split("void ot_ble_palette_mutation_end(bool changed){",1)[1].split(
 assert "xSemaphoreGive(om_write_mutex);" in end
 assert "if(changed)request_render_refresh();" in end
 assert wire.count("ot_ble_palette_mutation_begin()")==2
-assert wire.count("ot_ble_palette_mutation_end(")==2
+assert "ot_ble_palette_mutation_end(committed);" in wire
+assert "ot_ble_palette_mutation_end(deleted);" in wire
 assert "ot_ble_palette_in_use(index)" in wire
 assert "ot_palette_runtime_delete(index,e.revision)" in wire
 assert "ot_palette_runtime_read_record(index,&record)" in wire
