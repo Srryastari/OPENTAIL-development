@@ -46,6 +46,14 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_o
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c tests/test_fx_overlay_engine.c -o /tmp/ot-fx-overlay && /tmp/ot-fx-overlay
 python3 tests/test_effect_capabilities_manifest.py
+# Firmware-owned v3 palette codec + authenticated BLE transaction regression,
+# including simulated durable write failure and session reset.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/palette_profile.c main/palette_transfer.c main/palette_ble_v3.c \
+  main/wled_fx_compat.c tests/test_palette_protocol.c \
+  -o /tmp/ot-palette-v3-tests -lm && /tmp/ot-palette-v3-tests
+python3 tests/test_palette_integration_contract.py
+
 python3 tests/test_wled_catalog.py
 # Inventory audit is separate from release certification (which remains blocked
 # until all source-derived parity and physical evidence gates pass).
