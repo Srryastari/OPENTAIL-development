@@ -3908,6 +3908,28 @@ void mode_railway() {
   SEGENV.step += FRAMETIME;
 }
 
+/* Pinned WLED Sparkle and Solid Glitter source (RGB, default overlay-off). */
+void mode_sparkle(void) {
+  if (!SEGMENT.check2) for (unsigned i = 0; i < SEGLEN; i++) {
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+  }
+  uint32_t cycleTime = 10 + (255 - SEGMENT.speed)*2;
+  uint32_t it = strip.now / cycleTime;
+  if (it != SEGENV.step)
+  {
+    SEGENV.aux0 = hw_random16(SEGLEN); // aux0 stores the random led index
+    SEGENV.step = it;
+  }
+
+  SEGMENT.setPixelColor(SEGENV.aux0, SEGCOLOR(0));
+}
+
+void mode_solid_glitter()
+{
+  SEGMENT.fill(SEGCOLOR(0));
+  glitter_base(SEGMENT.intensity, SEGCOLOR(2) ? SEGCOLOR(2) : ULTRAWHITE);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3982,7 +4004,9 @@ static const RefCase refs[]={
     {58,mode_icu,"ICU"},
     {50,mode_two_dots,"Two Dots"},
     {25,mode_multi_strobe,"Strobe Mega"},
-    {78,mode_railway,"Railway"}
+    {78,mode_railway,"Railway"},
+    {20,mode_sparkle,"Sparkle"},
+    {103,mode_solid_glitter,"Solid Glitter"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
