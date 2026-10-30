@@ -604,6 +604,7 @@ static esp_err_t show_start(httpd_req_t *r){
       native_show_started_ms=start_ms;}
     portEXIT_CRITICAL(&state_lock);
     if(!ready)return respond_err(r,409,"pixel outputs not initialized");
+    request_render_refresh();
     return send_json(r,"{\"ok\":true,\"active\":true,\"bench_only\":true,\"message\":\"native effect started on configured bench outputs; real trigger inputs always override\"}");
 }
 static esp_err_t show_stop(httpd_req_t *r){
@@ -646,6 +647,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
     if(ready){native_show=show;ble_owns_show=true;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show_started_ms=(uint32_t)(esp_timer_get_time()/1000LL);
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)request->ttl_sec*1000u);}
     portEXIT_CRITICAL(&state_lock);
+    if(ready)request_render_refresh();
     return ready;
 }
 /* Runtime control over BLE; all pixels are computed on CORE, never streamed by the app.
@@ -696,6 +698,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
     }
     portEXIT_CRITICAL(&state_lock);
+    if(ready)request_render_refresh();
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
@@ -976,6 +979,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      }
  }
  portEXIT_CRITICAL(&state_lock);
+ if(ready)request_render_refresh();
  return ready;
 }
 bool ot_ble_delete_fx_preset(uint8_t slot){
