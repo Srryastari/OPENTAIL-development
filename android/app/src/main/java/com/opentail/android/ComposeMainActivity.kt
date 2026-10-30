@@ -290,6 +290,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble.handlePermissions(requestCode, grantResults)
     }
     override fun onStop() {
+        ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
         if (liveArmed.value) {
