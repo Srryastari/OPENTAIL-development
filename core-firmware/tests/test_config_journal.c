@@ -58,4 +58,44 @@ static void om_case(void){
         assert(!ot_om_journal_valid(&corrupt));
     }
 }
-int main(void){tm_case();om_case();puts("PASS: durable journal CRC and all 256 recovery masks, both profiles");return 0;}
+
+/* Model every atomic flash boundary. Before a stage exists, the previous
+ * active profile remains authoritative. Once staged exists, even writing
+ * active_v3 does not authorize it at reboot. A torn/corrupt journal returns
+ * an error, never an untrusted candidate. The same is true on all GPIO masks.
+ * Real flash/power-cut injection is a separate hardware release gate. */
+static void crash_matrix(void){
+    ot_tm_profile_t a={0},b={0},got={0};
+    ot_tm_defaults(&a);b=a;b.function[0]=OT_TM_RIGHT;
+    ot_tm_journal_t stage={0},primary={0};
+    ot_tm_pending_t pending={0};
+    assert(ot_tm_journal_build(&stage,&a,&b));
+    assert(ot_tm_journal_build(&primary,&a,&a));
+    for(unsigned gpio=0u;gpio<256u;gpio++){
+        (void)gpio;
+        /* phase 0: no write; phase 1: stage committed;
+         * phase 2: active committed while stage still present;
+         * phase 3: stage cleared following promotion. */
+        for(unsigned phase=0u;phase<=3u;phase++){
+            got=a;pending=(ot_tm_pending_t){0};
+            const ot_tm_journal_t *durable_active=phase>=2u?&stage:&primary;
+            const ot_tm_journal_t *durable_stage=
+                phase==1u||phase==2u?&stage:NULL;
+            assert(ot_tm_journal_recover(durable_active,durable_stage,
+                                         &got,&pending));
+            if(phase<=2u){
+                assert(memcmp(&got,&a,sizeof(a))==0);
+                assert(pending.pending==(phase!=0u));
+            }else{
+                assert(memcmp(&got,&b,sizeof(b))==0);
+                assert(!pending.pending);
+            }
+        }
+        /* NVS set/commit failure leaves stage; corrupt/missing stage fails
+         * closed rather than promoting the newer active key. */
+        ot_tm_journal_t damaged=stage;damaged.crc^=1u;
+        assert(!ot_tm_journal_recover(&stage,&damaged,&got,&pending));
+    }
+}
+
+int main(void){tm_case();om_case();crash_matrix();puts("PASS: durable journal CRC and all 256 recovery masks, both profiles");return 0;}
