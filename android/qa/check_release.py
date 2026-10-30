@@ -37,8 +37,7 @@ check("Sole Kotlin Compose launcher; no Java UI entry or network transport permi
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
       'android:name=".ComposeMainActivity"' in manifest_xml and
       'android:name=".MainActivity"' not in manifest_xml and
-      'android.permission.INTERNET' in manifest_xml and
-      'android:networkSecurityConfig="@xml/bench_network_security"' in manifest_xml and
+      'android.permission.INTERNET' not in manifest_xml and
       manifest_xml.index('android:name=".ComposeMainActivity"') <
       manifest_xml.index('android.intent.category.LAUNCHER'))
 check("No WebView or packaged Studio HTML runtime assets",
