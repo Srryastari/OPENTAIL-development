@@ -333,6 +333,14 @@ assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
        'Repeated authorization must not overlap active ATT operations or waiting STOP');
 
+// A capability-read GATT rejection must release a STOP queued during the
+// read. Successful reads already pump the queue through fxRead().
+const capsStart=bleSource.split('void readFxCapabilities(){')[1]?.split('private void fxNotify')[0];
+assert(capsStart && capsStart.includes('fxCapsBusy=false;fxNotify("[]");pumpQueue();') &&
+       capsStart.includes('catch(SecurityException ex){') &&
+       bleSource.includes('fxNotify(ids.append(\']\').toString());pumpQueue();'),
+       'Failed capability-read admission must not strand a queued STOP');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
