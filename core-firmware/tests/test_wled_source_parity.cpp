@@ -5697,6 +5697,9 @@ int main() {
                     }
                     cfg.foreground={123,56,9};cfg.background={3,88,174};
                     ot_wled_fx_state_t state{};
+                    /* Source uses a global 16-bit PRNG. Inject one fixed
+                     * segment seed shared with CORE for reproducible frames. */
+                    if(fx.id==61u)prng.setSeed((uint16_t)0x1c5du);
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
