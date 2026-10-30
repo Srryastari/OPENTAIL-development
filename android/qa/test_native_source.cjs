@@ -277,9 +277,9 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
 
 // STOP queued behind a GATT transaction must drain before any new capture,
 // owner/auth, effect-capability, or output-config GATT operation starts.
-assert(bleSource.includes('frameCapture.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||') &&
-       (bleSource.match(/frameCapture\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 4 &&
-       (bleSource.match(/frameCapture\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
+assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||') &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 4 &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
        bleSource.includes('private boolean cfgSend(byte[] packet)') &&
        bleSource.includes('return cfgSend(new byte[]{2,3,(byte)index') &&
        bleSource.includes('if(!ok){cfgFail("BLE configuration write did not start");return false;}') &&
@@ -335,7 +335,7 @@ const combinedAuth=bleSource.split('void authorizeOrPair() {')[1]?.split('void p
 const tokenAuth=bleSource.split('void authorize(String tokenHex) {')[1]?.split('void show(')[0];
 assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("BLE already authorized"); return; }') &&
        tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||') &&
-       tokenAuth.includes('frameCapture.busy() || nextPacket != null || pairPending ||') &&
+       tokenAuth.includes('frameCapture.busy() || palette.busy() || nextPacket != null || pairPending ||') &&
        tokenAuth.includes('challengePending || authPending) {') &&
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
        'Repeated authorization must not overlap active ATT operations or waiting STOP');
@@ -667,7 +667,7 @@ assert(compose.includes('captureOutput.intValue = 0; invalidateCoreFrame()') &&
        compose.includes('invalidateCoreFrame()\n        if (liveArmed.value)') &&
        bleSource.includes('private volatile boolean frameCallbackPending=false;') &&
        bleSource.includes('boolean captureFrame(int output)') &&
-       bleSource.includes('frameCapture.busy() || frameCallbackPending') &&
+       bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending') &&
        bleSource.includes('finally {frameCallbackPending=false;}'),
        'Capture completion must serialize with new requests and STOP/output/offline changes');
 
@@ -676,5 +676,56 @@ assert(!compose.includes('ble.setPalette(') && !compose.includes('ble.sendPalett
 assert(compose.includes('Preview unavailable') && compose.includes('shared option is off') &&
        compose.includes('Other palette choices stay local'),
        'Palette UI must label unknown previews, restoration and BLE limitations');
+
+// CORE #38, exact pinned contract: f9614060b892f474e97501dc46a41e6242f60ec3
+// Transport and UI are optional/authenticated. A v3 palette transfer never
+// implies the selected FX supports it or that any optical LED pixel matched.
+const paletteV3=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/NativePaletteV3.java','utf8');
+const paletteTransport=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/NativePaletteBleTransport.java','utf8');
+const paletteV3Test=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/NativePaletteV3Test.java','utf8');
+for (const field of ['VERSION=3','SLOTS=128','STOPS_MAX=18','CHUNK_MAX=15','READ_MAX=6',
+  'FIRST_ID=200','LAST_ID=73','return BleConfigCodec.crc16(stops)',
+  'static byte[] begin(','static byte[] data(','static byte[] commit(',
+  'static byte[] delete(','static byte[] query(','static byte[] read(',
+  'static Reply reply(', 'validateStops(received)']) {
+  assert(paletteV3.includes(field)||paletteTransport.includes(field),
+    'Missing pinned CORE #38 palette BLE v3 contract: '+field);
+}
+for(const guard of ['if(r.status!=0){rejected(r.status);return;}',
+  'if(kind==UPLOAD && (r.revision!=baseRevision+1 || !r.present))',
+  'NativePaletteV3.crc(received)!=crc',
+  'kind==UPLOAD&&!Arrays.equals(received,expected)',
+  'if(abort){finish(false,false,null,"Palette transfer canceled for STOP");return;}',
+  'if(!busy||kind==CAPS||owner!=gatt)return;',
+  'finish(true,false,null,"CORE palette deleted and tombstone verified")']) {
+  assert(paletteTransport.includes(guard),'BLE v3 readback/cancel safety regressed: '+guard);
+}
+for(const guard of ['PALETTE_CMD_UUID','PALETTE_RSP_UUID','PALETTE_CAP_UUID',
+  'palette.abortForStop();','palette.busy()','palette.negotiate()',
+  'palette.upload(','palette.load(','palette.delete(',
+  'palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities)',
+  'palette.written(connection,status);return;',
+  'palette.capability(connection,value,status);return;',
+  'palette.read(connection,value,status);return;']) {
+  assert(bleSource.includes(guard),'Missing GATT v3 integration: '+guard);
+}
+for(const control of ['private fun CorePaletteTransferPanel(',
+  'ble.negotiatePaletteV3()','ble.downloadPalette(slot!!)',
+  'ble.uploadPalette(slot!!, paletteLoadedRevision.longValue, stopsText)',
+  'ble.deletePalette(slot!!, paletteLoadedRevision.longValue)',
+  'paletteLoadedSlot.intValue = -1 // no save success until CRC/readback confirms',
+  'CorePaletteTransferPanel(t)',
+  'Unsupported effect/palette combinations stay local']) {
+  assert(compose.includes(control),'Missing native v3 palette UX/readback gate: '+control);
+}
+for(const exercise of ['capabilityNegotiationFailsClosed',
+  'exactStopsAndCrc','uploadPacketsRespectTwentyByteAttBoundary',
+  'authenticatedRepliesValidateVersionOpIndexAndStatus',
+  'readChunkRequiresExactOffsetAndBounds']) {
+  assert(paletteV3Test.includes(exercise),'BLE v3 executable codec coverage missing: '+exercise);
+}
 
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
