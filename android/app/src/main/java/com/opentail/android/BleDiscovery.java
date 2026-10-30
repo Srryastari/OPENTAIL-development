@@ -95,7 +95,21 @@ final class BleDiscovery {
             return;
         }
         if(connecting) {
-            notifyStatus("Opening existing CORE connection; retry will be available if it times out");
+            // A second explicit Connect tap is a user-requested retry, not an
+            // instruction to unpair in Android Settings. Retire this pending
+            // app-owned GATT registration and immediately try again.
+            BluetoothGatt pending=gatt;
+            if(pending!=null){
+                scanFallbackAllowed=false;
+                recoverStalledGatt(pending,"Retrying OpenTail CORE connection");
+                ui.postDelayed(()->{
+                    if(!stopped && !connecting && !connected)
+                        connectFromApp(preferredAddress);
+                },500L);
+            }else {
+                connecting=false;
+                ui.post(()->connectFromApp(preferredAddress));
+            }
             return;
         }
         BluetoothManager manager=(BluetoothManager)activity.getSystemService(Activity.BLUETOOTH_SERVICE);
@@ -911,7 +925,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     private void connectReadOnly(BluetoothDevice device) {connectReadOnly(device,false);}
 
-    private int connectionAttempt=0;
+    private volatile int connectionAttempt=0;
     private volatile boolean scanFallbackAllowed=false;
     private static final long GATT_SETUP_TIMEOUT_MS=18000L;
 
