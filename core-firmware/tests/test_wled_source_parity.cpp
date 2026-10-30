@@ -4243,6 +4243,14 @@ void mode_color_sweep(void) {
   color_wipe(true, false);
 }
 
+/* Pinned FX.cpp random-wipe wrappers: RNG handled by util.cpp wheel helper. */
+void mode_color_wipe_random(void) {
+  color_wipe(false, true);
+}
+void mode_color_sweep_random(void) {
+  color_wipe(true, true);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4332,7 +4340,9 @@ static const RefCase refs[]={
     {59,mode_multi_comet,"Multi Comet"},
     {12,mode_fade,"Fade"},
     {3,mode_color_wipe,"Wipe"},
-    {6,mode_color_sweep,"Sweep"}
+    {6,mode_color_sweep,"Sweep"},
+    {4,mode_color_wipe_random,"Wipe Random"},
+    {36,mode_color_sweep_random,"Sweep Random"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
