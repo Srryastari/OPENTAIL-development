@@ -4169,6 +4169,80 @@ void mode_fade(void) {
   }
 }
 
+/* Verbatim pinned WLED util.cpp color-wheel helper for source reference only.
+ * Runtime uses OpenTail's separate port and PRNG; no firmware WLED dependency. */
+#define MIN(a,b) (((a)<(b))?(a):(b))
+uint8_t get_random_wheel_index(uint8_t pos) {
+  uint8_t r = 0, x = 0, y = 0, d = 0;
+  while (d < 42) {
+    r = hw_random8();
+    x = abs(pos - r);
+    y = 255 - x;
+    d = MIN(x, y);
+  }
+  return r;
+}
+#undef MIN
+
+/* Verbatim pinned WLED FX.cpp Wipe and Sweep reference functions. */
+void color_wipe(bool rev, bool useRandomColors) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  uint32_t cycleTime = 750 + (255 - SEGMENT.speed)*150;
+  uint32_t perc = strip.now % cycleTime;
+  unsigned prog = (perc * 65535) / cycleTime;
+  bool back = (prog > 32767);
+  if (back) {
+    prog -= 32767;
+    if (SEGENV.step == 0) SEGENV.step = 1;
+  } else {
+    if (SEGENV.step == 2) SEGENV.step = 3; //trigger color change
+  }
+
+  if (useRandomColors) {
+    if (SEGENV.call == 0) {
+      SEGENV.aux0 = hw_random8();
+      SEGENV.step = 3;
+    }
+    if (SEGENV.step == 1) { //if flag set, change to new random color
+      SEGENV.aux1 = get_random_wheel_index(SEGENV.aux0);
+      SEGENV.step = 2;
+    }
+    if (SEGENV.step == 3) {
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux1);
+      SEGENV.step = 0;
+    }
+  }
+
+  unsigned ledIndex = (prog * SEGLEN) >> 15;
+  uint16_t rem = (prog * SEGLEN) * 2; //mod 0xFFFF by truncating
+  rem /= (SEGMENT.intensity +1);
+  if (rem > 255) rem = 255;
+
+  uint32_t col1 = useRandomColors? SEGMENT.color_wheel(SEGENV.aux1) : SEGCOLOR(1);
+  for (unsigned i = 0; i < SEGLEN; i++)
+  {
+    unsigned index = (rev && back)? SEGLEN -1 -i : i;
+    uint32_t col0 = useRandomColors? SEGMENT.color_wheel(SEGENV.aux0) : SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0);
+
+    if (i < ledIndex)
+    {
+      SEGMENT.setPixelColor(index, back? col1 : col0);
+    } else
+    {
+      SEGMENT.setPixelColor(index, back? col0 : col1);
+      if (i == ledIndex) SEGMENT.setPixelColor(index, color_blend(back? col0 : col1, back? col1 : col0, uint8_t(rem)));
+    }
+  }
+}
+
+void mode_color_wipe(void) {
+  color_wipe(false, false);
+}
+
+void mode_color_sweep(void) {
+  color_wipe(true, false);
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4256,7 +4330,9 @@ static const RefCase refs[]={
     {17,mode_twinkle,"Twinkle"},
     {111,mode_chunchun,"Chunchun"},
     {59,mode_multi_comet,"Multi Comet"},
-    {12,mode_fade,"Fade"}
+    {12,mode_fade,"Fade"},
+    {3,mode_color_wipe,"Wipe"},
+    {6,mode_color_sweep,"Sweep"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
