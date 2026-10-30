@@ -61,6 +61,7 @@ static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGH
 static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
 
 static portMUX_TYPE state_lock=portMUX_INITIALIZER_UNLOCKED;
+static uint8_t tm_gpio_input_mask(void);
 static uint8_t live_input_mask=0;
 static uint8_t sim_mask=0;
 static TickType_t sim_deadline=0;
@@ -92,12 +93,15 @@ static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect ass
 static ot_ble_fx_packet_t ble_fx_request={0};
 
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
+static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS];
 /* Trigger profile is stored separately from v0.1.17 Output Manager NVS. */
 static ot_tm_profile_t tm_profile;
+static ot_tm_pending_t tm_deferred; /* Persisted mapping awaits release. */
 static bool tm_persistent=false;
+static uint16_t tm_revision=1u;
 typedef struct {
     uint32_t magic, version;
     ot_tm_profile_t profile;
@@ -303,11 +307,12 @@ static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask,uint8_t
     return item;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));persistent=om_persistent;tm=tm_profile;
+    memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
+    persistent=om_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -326,6 +331,7 @@ static esp_err_t om_get(httpd_req_t *r){
     if(!obj)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
     cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
+    cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending);
     cJSON_AddBoolToObject(obj,"bench_only",true);
     cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT);
     cJSON_AddNumberToObject(obj,"future_outputs_target",12);
@@ -391,10 +397,12 @@ static esp_err_t om_post(httpd_req_t *r){
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return respond_err(r,409,"output mapping save busy");
+    /* A freshly asserted optocoupler pin is busy even before debounce. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
@@ -402,8 +410,11 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
+    const uint8_t pins_after=tm_gpio_input_mask();
     portENTER_CRITICAL(&state_lock);
-    memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+    (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                            pins_after,live_input_mask);
+    om_persistent=true;om_revision[index]++;
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return om_get(r);
@@ -423,9 +434,11 @@ bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
 int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
     if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
     if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
+    /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
@@ -435,8 +448,11 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
         else{
+            const uint8_t pins_after=tm_gpio_input_mask();
             portENTER_CRITICAL(&state_lock);
-            memcpy(om_outputs,next_all,sizeof(om_outputs));om_persistent=true;om_revision[index]++;
+            (void)ot_om_saved_apply(om_outputs,&om_deferred,next_all,
+                                    pins_after,live_input_mask);
+            om_persistent=true;om_revision[index]++;
             portEXIT_CRITICAL(&state_lock);
         }
     }
@@ -444,23 +460,95 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     return result;
 }
 
+/* Normalized instantaneous GPIO levels (NOT debounced). Used only for
+ * diagnostic readback and the pre-save busy gate; the independent sampler
+ * still owns the debounced physical mask used for rendering. */
+static uint8_t tm_gpio_input_mask(void){
+    uint8_t mask=0;
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        const bool high=gpio_get_level(input_pin[i])!=0;
+        if(OT_INPUT_ACTIVE_LOW?!high:high)mask|=(uint8_t)(1u<<i);
+    }
+    return mask;
+}
+/* Serialize authenticated BLE and bench-HTTP trigger edits with the existing
+ * configuration mutex. Commit to NVS before exposing new logical routing.
+ * Codes: 0 OK, 1 invalid, 2 busy/active inputs, 3 stale, 4 NVS failure.
+ * Physical input sampling never takes this mutex and remains BLE-independent. */
+static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_revision){
+    if(!ot_tm_valid(next))return 1;
+    if(!om_write_mutex ||
+       xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    /* The debounced mask alone has a nominal 40ms assertion blind spot.
+     * Reject an already asserted optocoupler pin before any NVS write. */
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    const bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0 ||
+        (before_deadline(now,sim_deadline)&&sim_mask) ||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) ||
+        show_window(now);
+    const bool stale=require_revision&&tm_revision!=expected;
+    portEXIT_CRITICAL(&state_lock);
+    int code=busy?2:stale?3:0;
+    if(!code){
+        if(!tm_save(next))code=4;
+        else {
+            /* NVS is durable, but an input may have asserted while it was
+             * writing. Preserve its OLD mapping until fully released. */
+            const uint8_t pins_after=tm_gpio_input_mask();
+            portENTER_CRITICAL(&state_lock);
+            (void)ot_tm_saved_apply(&tm_profile,&tm_deferred,next,
+                                    pins_after,live_input_mask);
+            tm_persistent=true;
+            tm_revision++;
+            portEXIT_CRITICAL(&state_lock);
+        }
+    }
+    xSemaphoreGive(om_write_mutex);
+    return code;
+}
+bool ot_ble_trigger_get(ot_tm_profile_t *out,uint16_t *revision,
+                        uint8_t *raw,uint8_t *effective,bool *persistent){
+    if(!out||!revision||!raw||!effective||!persistent)return false;
+    const TickType_t now=xTaskGetTickCount();
+    portENTER_CRITICAL(&state_lock);
+    *out=tm_profile;
+    *revision=tm_revision;
+    *raw=live_input_mask;
+    *effective=(uint8_t)(ot_tm_resolve(out,*raw)|
+        (before_deadline(now,sim_deadline)?sim_mask:0u));
+    *persistent=tm_persistent && !tm_deferred.pending;
+    portEXIT_CRITICAL(&state_lock);
+    return true;
+}
+int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
+    return tm_commit(next,revision,true);
+}
+
 /* Universal Trigger Manager v1: independent physical-input-to-function profile.
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved;uint8_t physical,sim;
+    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    cfg=tm_profile;saved=tm_persistent;physical=live_input_mask;
+    cfg=tm_profile;pending=tm_deferred.pending;saved=tm_persistent&&!pending;
+    physical=live_input_mask;config_revision=tm_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
     cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION);
+    cJSON_AddNumberToObject(root,"config_revision",config_revision);
     cJSON_AddBoolToObject(root,"saved_on_device",saved);
+    cJSON_AddBoolToObject(root,"config_apply_pending",pending);
     cJSON_AddBoolToObject(root,"bench_only",true);
     cJSON_AddNumberToObject(root,"physical_inputs",OT_IN_COUNT);
     cJSON_AddBoolToObject(root,"fixed_active_low",OT_INPUT_ACTIVE_LOW!=0);
+    /* Backward compatibility: raw_input_mask historically meant DEBOUNCED
+     * physical inputs. Report instantaneous normalized pins separately. */
     cJSON_AddNumberToObject(root,"raw_input_mask",physical);
+    cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask());
     cJSON_AddNumberToObject(root,"physical_function_mask",ot_tm_resolve(&cfg,physical));
     cJSON_AddNumberToObject(root,"effective_mask",ot_tm_resolve(&cfg,physical)|sim);
     cJSON *supported=cJSON_AddArrayToObject(root,"supported_functions");
@@ -481,9 +569,13 @@ static esp_err_t tm_get(httpd_req_t *r){
 static esp_err_t tm_post(httpd_req_t *r){
     cJSON *root=NULL;int status=recv_json(r,&root);
     if(status!=200){cJSON_Delete(root);return respond_err(r,status,"invalid JSON request");}
-    unsigned revision=0;
+    unsigned revision=0,expected_config_revision=0;
+    const cJSON *expected=cJSON_GetObjectItemCaseSensitive(root,"expected_config_revision");
+    const bool require_revision=expected!=NULL;
     const cJSON *arr=cJSON_GetObjectItemCaseSensitive(root,"inputs");
-    bool valid=om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
+    bool valid=(!require_revision || om_number(root,"expected_config_revision",
+                    &expected_config_revision,0,UINT16_MAX)) &&
+        om_number(root,"revision",&revision,OT_TM_VERSION,OT_TM_VERSION) &&
         cJSON_IsArray(arr) && cJSON_GetArraySize(arr)==OT_IN_COUNT;
     ot_tm_profile_t next={0};
     for(int i=0;valid && i<OT_IN_COUNT;i++){
@@ -496,17 +588,13 @@ static esp_err_t tm_post(httpd_req_t *r){
     }
     cJSON_Delete(root);
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
-    TickType_t now=xTaskGetTickCount();
-    portENTER_CRITICAL(&state_lock);
-    bool busy=live_input_mask!=0 || (before_deadline(now,sim_deadline)&&sim_mask) ||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    portEXIT_CRITICAL(&state_lock);
-    if(busy)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
-    /* Commit first; previous profile is unchanged on error. */
-    if(!tm_save(&next))return respond_err(r,500,"failed to save trigger mapping in flash");
-    portENTER_CRITICAL(&state_lock);
-    tm_profile=next;tm_persistent=true;
-    portEXIT_CRITICAL(&state_lock);
+    /* Same transaction and busy policy as authenticated BLE. The HTTP
+     * 'revision' field is a schema version, not the BLE edit revision. */
+    const int result=tm_commit(&next,(uint16_t)expected_config_revision,require_revision);
+    if(result==2)return respond_err(r,409,"stop shows and release all 12V triggers before saving trigger mapping");
+    if(result==3)return respond_err(r,409,"stale trigger mapping revision; read back current profile before saving");
+    if(result==4)return respond_err(r,500,"failed to save trigger mapping in flash");
+    if(result!=0)return respond_err(r,400,"invalid trigger mapping");
     return tm_get(r);
 }
 static esp_err_t show_get(httpd_req_t *r){
@@ -1320,14 +1408,22 @@ static void input_sampler_task(void *arg){
     if(!period)period=1u;
     for(;;){
         bool levels[OT_IN_COUNT];
+        uint8_t instantaneous=0;
         for(unsigned i=0;i<OT_IN_COUNT;i++){
             const int level=gpio_get_level(input_pin[i]);
             levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+        /* This is the only deferred activation point. Do not swap mappings
+         * while either a raw pin or its settled level is asserted. */
+        if(ot_tm_apply_if_released(&tm_profile,&tm_deferred,
+                                   instantaneous,physical))target=render_task_handle;
+        if(ot_om_apply_if_released(om_outputs,&om_deferred,
+                                   instantaneous,physical))target=render_task_handle;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
