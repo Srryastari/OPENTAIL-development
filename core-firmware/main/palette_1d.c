@@ -17,6 +17,10 @@ bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette){
    return palette>=2u&&palette<=72u;
  return effect_id==OT_FX_EMBERS&&(palette==2u||palette==3u||palette==4u);
 }
+bool ot_palette_1d_external_supported(uint16_t effect_id,uint8_t palette_id){
+    return palette_id>=73u&&palette_id<=200u&&
+           effect_id!=OT_FX_EMBERS&&ot_palette_1d_supported(effect_id,2u);
+}
 static uint8_t linear(uint8_t a,uint8_t b,uint8_t t){
  return (uint8_t)(((uint32_t)a*(255u-t)+(uint32_t)b*t+127u)/255u);
 }
