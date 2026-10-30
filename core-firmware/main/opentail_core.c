@@ -2254,6 +2254,12 @@ static void led_task(void *p) {
        }else taskYIELD();
     }
 }
+/* This task executes deep NVS recovery and SPI pixel setup synchronously.
+ * The v0.1.31 ESP32-S3 physical bootloop was a main-task stack overflow;
+ * never silently fall back to the IDF default startup stack. */
+#if CONFIG_ESP_MAIN_TASK_STACK_SIZE < 8192
+#error "OpenTail app_main requires at least 8192 bytes of main-task stack"
+#endif
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -2265,6 +2271,8 @@ void app_main(void) {
     tm_journal_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
+    ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
     const bool inputs_ready=input_init();
     if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
