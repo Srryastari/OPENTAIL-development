@@ -2133,7 +2133,7 @@ void app_main(void) {
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
-    const bool inputs_ready=!config_recovery_fault&&input_init();
+    const bool inputs_ready=input_init();
     if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
     const bool sampler_ready=inputs_ready &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
