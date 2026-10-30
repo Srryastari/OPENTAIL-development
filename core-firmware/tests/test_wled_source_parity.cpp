@@ -5697,6 +5697,9 @@ int main() {
                     const uint32_t bg=color_case?0x00000000u:0x000358aeu;
                     PinnedSeg seg(count);seg.palette=((fx.id==42u||fx.id==43u)&&pal==0u)?11u:(fx.id==70u&&pal==0u)?20u:(fx.id==71u&&pal==0u)?43u:(fx.id==72u&&pal==0u)?35u:(fx.id==73u&&pal==0u)?26u:((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
+                    /* FX.cpp Ripple metadata fixes custom1 at zero by
+                     * default; the generic source fixture default is 48. */
+                    if(fx.id==79u)seg.custom1=0u;
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
                     seg.colors[0]=fg;
