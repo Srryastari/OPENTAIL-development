@@ -195,7 +195,6 @@ class ComposeMainActivity : ComponentActivity() {
         selectedEffect.intValue = prefs.getInt("effectId", 0)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
-            if (ble.isConnected() && !status.startsWith("Scanning")) foundDevices.clear()
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilities()
             if (!ble.canControl()) {
@@ -295,13 +294,13 @@ class ComposeMainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
-        val preferred = prefs.getString("preferred_ble_address", null)
-        if (ble.isConnected()) {
-            if (!ble.canControl()) ble.authorizeOrPair()
-        } else if (!preferred.isNullOrBlank()) ble.tryReconnect(preferred)
+        if (!ble.isConnected()) {
+            prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
+        } else if (!ble.canControl()) {
+            ble.authorizeOrPair()
+        }
     }
     override fun onStop() {
-        ble.cancelAutomaticAuthorization()
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
@@ -1534,8 +1533,6 @@ class ComposeMainActivity : ComponentActivity() {
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
             }
             Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
-            Caption("Auto-access uses a saved owner key or the OpenTail-CORE-Alpha Wi-Fi session. No BOOT press is required when on that Wi-Fi.", t)
-            Pill("Advanced: Pair with BOOT", t) { ble.pairWithBoot() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
             Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (temporary TTL, max 24/255).", t)
