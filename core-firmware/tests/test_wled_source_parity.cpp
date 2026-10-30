@@ -5666,21 +5666,21 @@ int main() {
         std::array<ot_wled_rgb_t,7> pixels;
         pixels.fill({71u,89u,107u});
         if(!ot_wled_fx_render(&cfg,&state,123u,pixels.data(),pixels.size()))
-            {std::fprintf(stderr,"FX zero-brightness rejected id=%u\\n",fx.id);return 1;}
+            {std::fprintf(stderr,"FX zero-brightness rejected id=%u\n",fx.id);return 1;}
         for(const auto& px:pixels) if(px.r||px.g||px.b)
-            {std::fprintf(stderr,"FX zero-brightness leak id=%u\\n",fx.id);return 1;}
+            {std::fprintf(stderr,"FX zero-brightness leak id=%u\n",fx.id);return 1;}
         contract_cases++;
         cfg.brightness=16u;
         cfg.frame_time_ms=0u;
         pixels.fill({71u,89u,107u});
         if(ot_wled_fx_render(&cfg,&state,123u,pixels.data(),pixels.size()))
-            {std::fprintf(stderr,"FX accepted zero frame duration id=%u\\n",fx.id);return 1;}
+            {std::fprintf(stderr,"FX accepted zero frame duration id=%u\n",fx.id);return 1;}
         for(const auto& px:pixels)if(px.r!=71u||px.g!=89u||px.b!=107u)
-            {std::fprintf(stderr,"FX altered rejected frame id=%u\\n",fx.id);return 1;}
+            {std::fprintf(stderr,"FX altered rejected frame id=%u\n",fx.id);return 1;}
         contract_cases++;
         ot_wled_fx_reset(&state);
     }
-    std::printf("FX engine-wide fail-closed and absolute-off contract passed: %u cases across 120 IDs.\\n",contract_cases);
+    std::printf("FX engine-wide fail-closed and absolute-off contract passed: %u cases across 120 IDs.\n",contract_cases);
 
     unsigned checked=0;
     unsigned mismatched_modes=0;
