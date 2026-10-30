@@ -59,6 +59,12 @@ static void test_transfer(void){
     assert(!ot_pal_transfer_append(&tx,127u,0u,p.stops,1u,21u));
     assert(!tx.active);
     assert(ot_pal_transfer_begin(&tx,127u,0u,4u,crc,50u));
+    assert(ot_pal_transfer_append(&tx,127u,0u,p.stops,4u,51u));
+    /* Invalid BEGIN erases old staged bytes, even if a prior upload
+     * was active and partially completed. */
+    assert(!ot_pal_transfer_begin(&tx,127u,0u,1u,crc,52u));
+    assert(!tx.active&&tx.received==0u);
+    assert(ot_pal_transfer_begin(&tx,127u,0u,4u,crc,53u));
     assert(!ot_pal_transfer_append(&tx,127u,0u,p.stops,17u,55u));
     assert(!tx.active);
     assert(ot_pal_transfer_begin(&tx,127u,0u,4u,crc,100u));
