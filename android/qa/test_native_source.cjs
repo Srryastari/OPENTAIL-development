@@ -48,7 +48,7 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame.colorAt(first + i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
+  'frame.colorAt(first+i)', 'NOT a simulated effect.', 'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id, activePixel, hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
@@ -65,7 +65,7 @@ assert(compose.includes('private fun CapsuleSlider(') &&
 assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('verticalScroll(pageScroll)') &&
        compose.includes('val window = total.coerceAtMost(visiblePixels)') &&
-       compose.includes('listOf(8, 16, 32, 64)') &&
+       compose.includes('listOf(30, 60, 90)') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
        compose.includes('Local trigger color swatch only. No simulated effect'),
