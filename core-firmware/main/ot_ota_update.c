@@ -106,10 +106,14 @@ esp_err_t ot_ota_upload_post(httpd_req_t *r) {
         ESP_LOGE(TAG,"OTA receive/verification failed: %s",esp_err_to_name(err));
         return reply(r,"400 Bad Request","{\"error\":\"Image upload or verification failed; existing firmware retained\"}");
     }
+    /* Alpha builds can change source without changing their display version.
+     * Compare actual ELF identities, not the shared semantic version label. */
     esp_app_desc_t desc={0};
+    const esp_app_desc_t *installed=esp_app_get_description();
     err=esp_ota_get_partition_description(update,&desc);
     if(err!=ESP_OK || strcmp(desc.project_name,"opentail_core_alpha")!=0 ||
-       strncmp(desc.version,OT_FW_VERSION,sizeof(desc.version))==0){
+       !installed || memcmp(desc.app_elf_sha256,installed->app_elf_sha256,
+                           sizeof(desc.app_elf_sha256))==0){
         ota_active=false;
         return reply(r,"400 Bad Request","{\"error\":\"Image is not a different OpenTail CORE build\"}");
     }
