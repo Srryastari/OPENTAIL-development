@@ -874,11 +874,8 @@ final class BleDiscovery {
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,value,status);return;}
-            if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
-                notifyStatus("BLE connected · " + new String(value, StandardCharsets.UTF_8));
-                if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
-            } else {
-                notifyStatus("BLE connected; information read failed: " + status);
+            if (INFO_UUID.equals(characteristic.getUuid())) {
+                finishInfoRead(value,status);
             }
         }
 
@@ -896,11 +893,9 @@ final class BleDiscovery {
                 }
                 if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
                 if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,characteristic.getValue(),status);return;}
-                if (INFO_UUID.equals(characteristic.getUuid()) && status == BluetoothGatt.GATT_SUCCESS) {
-                    byte[] value = characteristic.getValue();
-                    notifyStatus("BLE connected · " + new String(value == null ? new byte[0] : value, StandardCharsets.UTF_8));
-                    if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());
-                } else notifyStatus("BLE connected; information read failed: " + status);
+                if (INFO_UUID.equals(characteristic.getUuid())) {
+                    finishInfoRead(characteristic.getValue(),status);
+                }
             }
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
@@ -925,6 +920,17 @@ final class BleDiscovery {
             } catch(SecurityException ex){readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;notifyStatus("BLE read permission missing");pumpQueue();}
         }
     };
+
+    // INFO is optional metadata, not a prerequisite for owner authentication.
+    // Both API-level GATT read callbacks must continue the same auth flow,
+    // including when a started read returns a failure status.
+    private void finishInfoRead(byte[] value,int status) {
+        if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
+            notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
+        else notifyStatus("BLE connected; information read failed: " + status);
+        if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
+            ui.post(thisAutoAuth());
+    }
 
     private Runnable thisAutoAuth(){return ()->authorizeStored();}
 
