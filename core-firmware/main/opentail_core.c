@@ -622,9 +622,11 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  * Temporary bench effects expire in 60 seconds; vehicle triggers overlay assigned zones.
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
-                                      const ot_fx_spark_style_t *spark){
+                                      const ot_fx_spark_style_t *spark,
+                                      const ot_fx_overlay_config_t *overlay){
     ot_wled_fx_metadata_t meta;
-    if(!req||!ot_effects_1d_metadata(req->effect_id,&meta)||
+    if((overlay&&!ot_fx_overlay_valid(overlay))||!req||
+       !ot_effects_1d_metadata(req->effect_id,&meta)||
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
@@ -651,6 +653,18 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
                 }
             }
         }
+        if(ready&&overlay){
+            /* Engine overlay is volatile, per zone, and never stored in NVS. */
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+                if(!(req->chain_mask&(1u<<o)))continue;
+                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                    if(!(req->zone_mask&(1u<<z))||
+                       om_outputs[o].zones[z].pixels==0||
+                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
+                    fx_bank.zones[o][z].overlay=*overlay;
+                }
+            }
+        }
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
@@ -669,7 +683,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL); /* live 60-sec bench preview */
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -763,8 +777,57 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         .intensity=(uint8_t)intensity,.palette_id=(uint8_t)palette,
         .ttl_sec=(uint8_t)ttl
     };
+    /* Optional RAM-only OpenTail overlay parameters apply to ANY unified FX,
+     * including Embers, without changing IDs, stored presets or BLE FX ABI.
+     * The bench endpoint is intentionally unavailable on production networks. */
+    unsigned ov_style=0u,ov_peak=32u,ov_density=160u,ov_radius=4u;
+    unsigned ov_fade=120u,ov_r=255u,ov_g=255u,ov_b=255u;
+    struct {const char *key;unsigned *value;unsigned limit;} options[]={
+       {"overlay_style",&ov_style,3u},{"overlay_peak",&ov_peak,32u},
+       {"overlay_density",&ov_density,255u},{"overlay_radius",&ov_radius,12u},
+       {"overlay_fade_ms",&ov_fade,1000u},{"overlay_r",&ov_r,255u},
+       {"overlay_g",&ov_g,255u},{"overlay_b",&ov_b,255u}
+    };
+    for(unsigned k=0;k<sizeof(options)/sizeof(options[0]);k++){
+        cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,options[k].key);
+        if(!v)continue;
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           v->valueint<0||(unsigned)v->valueint>options[k].limit){
+            cJSON_Delete(obj);
+            return respond_err(r,400,"invalid overlay parameter");
+        }
+        *options[k].value=(unsigned)v->valueint;
+    }
+    const ot_fx_overlay_config_t overlay={
+       .style=(uint8_t)ov_style,.peak=(uint8_t)ov_peak,
+       .density=(uint8_t)ov_density,.radius=(uint8_t)ov_radius,
+       .fade_ms=(uint16_t)ov_fade,.color={(uint8_t)ov_r,(uint8_t)ov_g,(uint8_t)ov_b}
+    };
+    if(!ot_fx_overlay_valid(&overlay)){
+       cJSON_Delete(obj);return respond_err(r,400,"invalid overlay fade or radius");
+    }
+    const cJSON *only=cJSON_GetObjectItemCaseSensitive(obj,"overlay_only");
+    if(only&&!cJSON_IsBool(only)){
+       cJSON_Delete(obj);return respond_err(r,400,"overlay_only must be boolean");
+    }
+    const bool overlay_only=cJSON_IsTrue(only);
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,NULL))
+    if(overlay_only){
+       /* Modify the active RAM-only overlay without replacing the effect.
+        * No generation, elapsed time, timeout, NVS or arbitration changes.
+        * Only the isolated bench AP exposes this developer preview. */
+       const TickType_t now=xTaskGetTickCount();
+       const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       bool changed=false;
+       portENTER_CRITICAL(&state_lock);
+       if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
+           changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
+                      req.chain_mask,req.zone_mask,ms,&overlay);
+       portEXIT_CRITICAL(&state_lock);
+       if(!changed)return respond_err(r,409,"no active eligible effect zone");
+       return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
+    }
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -830,7 +893,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -902,7 +965,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -1410,6 +1473,11 @@ static void led_task(void *p) {
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                           } else if(slot->overlay.style &&
+                                     !ot_fx_overlay_apply(&slot->overlay,
+                                         slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
+                                         zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
+                               ot_st_set_fault("invalid flare/spark overlay");
                            }
                        } else {
                            prior_fx_active[ch][z]=false;

@@ -60,6 +60,36 @@ bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
  }
  return true;
 }
+/* A live sparkle/flare parameter change must NOT restart the underlying
+ * WLED/native effect. Require at least one already-active, configured zone;
+ * validate the entire selection before modifying anything. The caller holds
+ * state_lock and controls authentication/session lifetime. */
+bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay){
+ if(!bank||!outputs||!ot_fx_overlay_valid(overlay)||!chain_mask||
+    (chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0u||!zone_mask)return false;
+ bool active=false;
+ for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+  if(!(chain_mask&(1u<<o)))continue;
+  if(outputs[o].zone_count>OT_OM_ZONES)return false;
+  for(unsigned z=0;z<outputs[o].zone_count;z++)
+   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u&&
+      outputs[o].zones[z].role!=OT_OM_OFF &&
+      ot_fx_slot_active(&bank->zones[o][z],now_ms))
+    active=true;
+ }
+ if(!active)return false;
+ for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+  if(!(chain_mask&(1u<<o)))continue;
+  for(unsigned z=0;z<outputs[o].zone_count;z++)
+   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u&&
+      outputs[o].zones[z].role!=OT_OM_OFF &&
+      ot_fx_slot_active(&bank->zones[o][z],now_ms))
+    bank->zones[o][z].overlay=*overlay;
+ }
+ return true;
+}
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms){
     if(!bank)return false;
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
