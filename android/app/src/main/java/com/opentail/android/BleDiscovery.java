@@ -784,8 +784,12 @@ final class BleDiscovery {
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
-        try { gatt = device.connectGatt(activity, false, callback, BluetoothDevice.TRANSPORT_LE); }
-        catch (SecurityException ex) { connecting = false; notifyStatus("BLE connection permission denied"); }
+        try {
+            gatt = device.connectGatt(activity, false, callback, BluetoothDevice.TRANSPORT_LE);
+            if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}
+        } catch (SecurityException ex) {
+            connecting=false;notifyStatus("BLE connection permission denied");
+        }
     }
 
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
