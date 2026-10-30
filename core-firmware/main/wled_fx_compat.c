@@ -283,6 +283,40 @@ ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *pal,
     return out;
 }
 
+/* Source fastled_slim.h loadDynamicGradientPalette(), RGB-only. WLED
+ * packs up to 18 gradient stops in [position,r,g,b] order (max 72 bytes).
+ * Preserve the source's extra-slot adjustment only when stop_count < 16.
+ * Unsigned indices and a sorted terminator prevent out-of-range access. */
+bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
+                                          size_t stop_count,
+                                          ot_wled_palette16_t *out) {
+    if(!stops||!out||stop_count<2u||stop_count>18u||
+       stops[(stop_count-1u)*4u]!=255u)return false;
+    for(size_t i=1;i<stop_count;i++)
+        if(stops[i*4u]<stops[(i-1u)*4u])return false;
+    ot_wled_palette16_t next={0};
+    int last_slot_used=-1;
+    unsigned indexstart=0u;
+    ot_wled_rgb_t rgbstart=(ot_wled_rgb_t){stops[1],stops[2],stops[3]};
+    for(size_t i=1;i<stop_count;i++) {
+        const unsigned indexend=stops[4u*i];
+        const ot_wled_rgb_t rgbend=(ot_wled_rgb_t){
+            stops[4u*i+1u],stops[4u*i+2u],stops[4u*i+3u]};
+        unsigned start=indexstart/16u,end=indexend/16u;
+        if(stop_count<16u && (int)start<=last_slot_used &&
+           last_slot_used<15) {
+            start=(unsigned)(last_slot_used+1);
+            if(end<start)end=start;
+        }
+        last_slot_used=(int)end;
+        palette_gradient(&next,start,rgbstart,end,rgbend);
+        indexstart=indexend;
+        rgbstart=rgbend;
+    }
+    *out=next;
+    return true;
+}
+
 /* Pinned fastled_slim.cpp nblendPaletteTowardPalette(), RGB byte order
  * and stop-on-maxChanges semantics. No float, allocation or gamma. */
 void ot_wled_palette_blend_toward(ot_wled_palette16_t *current,
