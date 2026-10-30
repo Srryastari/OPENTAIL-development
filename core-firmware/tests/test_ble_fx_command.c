@@ -24,5 +24,29 @@ int main(void){
   assert(v.effect_id==32768u);
   cmd[15]=4;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   cmd[2]=3;cmd[3]=0;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+
+  /* BLE packet structure remains unchanged; valid palettes now reach
+   * only the two source-verified fixed-palette effect renderers. */
+  cmd[2]=218;cmd[3]=0;cmd[15]=11;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  assert(v.effect_id==218u&&v.palette_id==11u);
+  cmd[2]=179;cmd[15]=12;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=38;cmd[15]=50;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=80;cmd[15]=72;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=81;cmd[15]=72;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=65;cmd[15]=72;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=115;cmd[15]=72;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[2]=87;cmd[15]=11;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  cmd[15]=73;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[2]=3;cmd[15]=11;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   return 0;
 }

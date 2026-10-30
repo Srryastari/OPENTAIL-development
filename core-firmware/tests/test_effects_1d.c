@@ -35,10 +35,12 @@ int main(void){
   /* Every catalog ID must resolve and render a deterministic bounded frame. */
   cfg.palette_id=0;cfg.brightness=32;cfg.foreground=(ot_wled_rgb_t){255,45,10};
   cfg.background=(ot_wled_rgb_t){3,4,5};
+  const ot_wled_audio_peak_t catalog_peak={220.0f,1800.0f};
   for(size_t i=0;i<ot_wled_1d_count();i++){
     const ot_wled_1d_meta_t *entry=ot_wled_1d_at(i);
     assert(entry&&ot_effects_1d_metadata(entry->id,&meta));
     cfg.effect_id=entry->id;
+    cfg.audio_peak=entry->id==OT_WLED_ROCKTAVES?&catalog_peak:NULL;
     ot_effects_1d_reset(&s,(uint32_t)i+1u);
     /* Resetting an effect also invalidates the previous zone pixel frame
      * in the authoritative CORE LED task. Trailing effects may read the
@@ -79,7 +81,9 @@ int main(void){
   for(size_t mode_index=0;mode_index<source_total;mode_index++){
     ot_effects_1d_state_t actual={0};
     ot_wled_fx_state_t source={0};
+    const ot_wled_audio_peak_t measured_audio={220.0f,1800.0f};
     cfg.effect_id=source_ids[mode_index];cfg.palette_id=0u;
+    cfg.audio_peak=source_ids[mode_index]==OT_WLED_ROCKTAVES?&measured_audio:NULL;
     cfg.brightness=255u;cfg.speed=127u;cfg.intensity=192u;
     cfg.foreground=(ot_wled_rgb_t){123u,56u,9u};
     cfg.background=(ot_wled_rgb_t){3u,88u,174u};
@@ -99,7 +103,56 @@ int main(void){
     ot_effects_1d_reset(&actual,1u);
     ot_wled_fx_reset(&source);
   }
+  cfg.audio_peak=NULL; /* Never retain a pointer to a loop-local audio frame. */
   printf("CORE unified dispatch: %zu source-derived effects match direct renderer.\\n",source_total);
+
+
+  /* Palette selection has to pass through the authoritative CORE dispatcher,
+   * not just pass the standalone source renderer. Test full 522 pixel zones. */
+  for(unsigned variant=0u;variant<12u;variant++) {
+    for(unsigned palette=2u;palette<=12u;palette+=5u) {
+      ot_effects_1d_state_t actual={0};
+      ot_wled_fx_state_t reference={0};
+      cfg.effect_id=variant==0u?OT_WLED_COLOR_CLOUDS:
+                    variant==1u?OT_WLED_FLOW_STRIPE:variant==2u?OT_WLED_GLITTER:variant==3u?OT_WLED_BLENDS:variant==4u?OT_WLED_PALETTE:variant==5u?OT_WLED_TWINKLEFOX:variant==6u?OT_WLED_TWINKLECAT:variant==7u?OT_WLED_AURORA:variant==8u?OT_WLED_COLORTWINKLE:variant==9u?OT_WLED_SLOW_TRANSITION:variant==10u?OT_WLED_DANCING_SHADOWS:OT_WLED_FIRE_2012;
+      cfg.palette_id=(uint8_t)palette;
+      cfg.brightness=32u;cfg.speed=24u;cfg.intensity=32u;
+      ot_wled_rgb_t output[522]={0},expected[522]={0};
+      for(unsigned k=0u;k<8u;k++) {
+        const uint32_t ms=k*223u;
+        assert(ot_effects_1d_render(&cfg,&actual,ms,output,522u));
+        assert(ot_wled_fx_render(&cfg,&reference,ms,expected,522u));
+        assert(memcmp(output,expected,sizeof(output))==0);
+      }
+      ot_effects_1d_reset(&actual,1u);
+      ot_wled_fx_reset(&reference);
+    }
+  }
+  /* Four newly ported source modes must accept their pinned fixed
+   * palettes across the complete CORE dispatcher, including audio input. */
+  const uint16_t completed_ids[]={OT_WLED_EXPLODING_FIREWORKS,
+       OT_WLED_PACIFICA,OT_WLED_NOISE_PAL,OT_WLED_ROCKTAVES};
+  const ot_wled_audio_peak_t peak={440.0f,1900.0f};
+  for(size_t n=0u;n<sizeof(completed_ids)/sizeof(completed_ids[0]);n++){
+    for(unsigned palette=2u;palette<=72u;palette+=35u) {
+      ot_effects_1d_state_t unified={0};
+      ot_wled_fx_state_t source={0};
+      cfg.effect_id=completed_ids[n];cfg.palette_id=(uint8_t)palette;
+      cfg.audio_peak=cfg.effect_id==OT_WLED_ROCKTAVES?&peak:NULL;
+      cfg.brightness=255u;cfg.speed=128u;cfg.intensity=128u;
+      ot_wled_rgb_t dispatched[71]={0},expected[71]={0};
+      for(unsigned frame=0u;frame<12u;frame++) {
+        const uint32_t ms=frame*471u;
+        assert(ot_effects_1d_render(&cfg,&unified,ms,dispatched,71u));
+        assert(ot_wled_fx_render(&cfg,&source,ms,expected,71u));
+        assert(memcmp(dispatched,expected,sizeof(dispatched))==0);
+      }
+      ot_effects_1d_reset(&unified,1u);
+      ot_wled_fx_reset(&source);
+    }
+  }
+  cfg.audio_peak=NULL;
+  cfg.palette_id=0u;
 
   /* Theater's phase is per-zone and is never shared across outputs. */
   ot_effects_1d_state_t zone_a,zone_b;

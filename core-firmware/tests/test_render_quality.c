@@ -65,11 +65,14 @@ int main(void){
         assert(ot_effects_1d_render(&c,&state,times[k],pixels,11));
         for(size_t i=0;i<11;i++)assert(pixels[i].r==expected[k]);
     }
-    /* Absent source port: Fireworks 1D is still a compatibility recipe,
-     * NOT a pixel-identical upstream implementation. */
+    /* Fireworks 1D now has a source-derived renderer. Verify dispatch here;
+     * actual upstream RGB parity requires a separate golden-frame gate. */
     ot_wled_fx_metadata_t meta={0};
-    assert(!ot_wled_fx_metadata(90u,&meta));
+    assert(ot_wled_fx_metadata(90u,&meta));
     assert(ot_effects_1d_metadata(90u,&meta));
-    puts("CORE quality: monotonic fade endpoints, untouched guards, crisp strobe edges, and Fireworks parity gate passed (host only)");
+    c.effect_id=90u;c.palette_id=0u;c.speed=100u;c.intensity=128u;
+    ot_effects_1d_reset(&state,5u);
+    assert(ot_effects_1d_render(&c,&state,0u,pixels,11u));
+    puts("CORE quality: fade endpoints, guards, strobe edges, and Fireworks 1D source dispatch passed (host only)");
     return 0;
 }

@@ -9,6 +9,33 @@ int main(void){
  assert(ot_palette_1d_supported(OT_FX_EMBERS,4));
  assert(!ot_palette_1d_supported(OT_WLED_WIPE,3));
  assert(!ot_palette_1d_supported(OT_FX_EMBERS,1));
+
+ for(uint8_t palette=2u;palette<=72u;palette++){
+   assert(ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,palette));
+   assert(ot_palette_1d_supported(OT_WLED_FLOW_STRIPE,palette));
+   assert(ot_palette_1d_supported(OT_WLED_GLITTER,palette));
+   assert(ot_palette_1d_supported(OT_WLED_BLENDS,palette));
+   assert(ot_palette_1d_supported(OT_WLED_PALETTE,palette));
+   assert(ot_palette_1d_supported(OT_WLED_TWINKLEFOX,palette));
+   assert(ot_palette_1d_supported(OT_WLED_TWINKLECAT,palette));
+   assert(ot_palette_1d_supported(OT_WLED_AURORA,palette));
+   assert(ot_palette_1d_supported(OT_WLED_COLORTWINKLE,palette));
+   assert(ot_palette_1d_supported(OT_WLED_SLOW_TRANSITION,palette));
+   assert(ot_palette_1d_supported(OT_WLED_DANCING_SHADOWS,palette));
+   assert(ot_palette_1d_supported(OT_WLED_FIRE_2012,palette));
+   assert(ot_palette_1d_supported(OT_WLED_EXPLODING_FIREWORKS,palette));
+   assert(ot_palette_1d_supported(OT_WLED_PACIFICA,palette));
+   assert(ot_palette_1d_supported(OT_WLED_NOISE_PAL,palette));
+   assert(ot_palette_1d_supported(OT_WLED_ROCKTAVES,palette));
+   assert(!ot_palette_1d_supported(OT_WLED_WIPE,palette));
+ }
+ assert(!ot_palette_1d_supported(OT_WLED_COLOR_CLOUDS,1u));
+ assert(!ot_palette_1d_supported(OT_WLED_FLOW_STRIPE,73u));
+ assert(!ot_palette_1d_supported(OT_WLED_EXPLODING_FIREWORKS,1u));
+ assert(!ot_palette_1d_supported(OT_WLED_PACIFICA,73u));
+ assert(!ot_palette_1d_supported(OT_WLED_NOISE_PAL,1u));
+ assert(!ot_palette_1d_supported(OT_WLED_ROCKTAVES,73u));
+ assert(!ot_palette_1d_supported(OT_FX_EMBERS,11u));
  assert(ot_palette_1d_sample(4,a,b,0).r==255);
  assert(ot_palette_1d_sample(4,a,b,255).b==255);
  assert(ot_palette_1d_sample(4,a,b,128).r>=126);

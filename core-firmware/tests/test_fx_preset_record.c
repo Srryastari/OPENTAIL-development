@@ -34,6 +34,28 @@ int main(void){
  assert(!ot_fx_preset_pack(&record,&input));
  input.palette_id=0;input.effect_id=999;
  assert(!ot_fx_preset_pack(&record,&input));
+
+ /* Fixed palette selections must round-trip through the unchanged v1
+  * preset format, but only for palette-aware source effects. */
+ input.effect_id=218;input.palette_id=11;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
+ assert(record.fx.palette_id==11u);
+ input.effect_id=179;input.palette_id=12;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
+ input.effect_id=65;input.palette_id=72;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
+ input.effect_id=115;input.palette_id=72;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
+ input.effect_id=87;input.palette_id=11;
+ assert(ot_fx_preset_pack(&record,&input));
+ assert(ot_fx_preset_valid(&record));
+ input.effect_id=3;
+ assert(!ot_fx_preset_pack(&record,&input));
+ input.palette_id=0;
  /* A scene snapshot captures two distinct active effects without mixing
   * left/right zone mapping. Standalone scenes do not require a phone. */
  ot_fx_zone_bank_t bank;

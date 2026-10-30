@@ -29,6 +29,9 @@ enum {
     OT_WLED_SPOTS_FADE = 86,   /* WLED FX_MODE_SPOTS_FADE */
     OT_WLED_PERCENT = 98,      /* WLED FX_MODE_PERCENT */
     OT_WLED_HEARTBEAT = 100,    /* WLED FX_MODE_HEARTBEAT */
+    OT_WLED_PACIFICA = 101,    /* WLED FX_MODE_PACIFICA */
+    OT_WLED_ROCKTAVES = 185,  /* WLED FX_MODE_ROCKTAVES */
+    OT_WLED_NOISE_PAL = 107,   /* WLED FX_MODE_NOISEPAL */
     OT_WLED_COLORLOOP = 8,     /* WLED FX_MODE_RAINBOW */
     OT_WLED_RAINBOW = 9,       /* WLED FX_MODE_RAINBOW_CYCLE */
     OT_WLED_THEATER_RAINBOW = 14,
@@ -109,17 +112,67 @@ enum {
     OT_WLED_COLORWAVES = 67, /* WLED FX_MODE_COLORWAVES */
     OT_WLED_FAIRY = 49,      /* WLED FX_MODE_FAIRY */
     OT_WLED_FAIRYTWINKLE = 51, /* WLED FX_MODE_FAIRYTWINKLE */
+    OT_WLED_FIRE_2012 = 66, /* WLED FX_MODE_FIRE_2012 */
+    OT_WLED_DANCING_SHADOWS = 112, /* WLED FX_MODE_DANCING_SHADOWS */
+    OT_WLED_SLOW_TRANSITION = 219, /* WLED FX_MODE_SLOW_TRANSITION */
+    OT_WLED_COLORTWINKLE = 74, /* WLED FX_MODE_COLORTWINKLE */
+    OT_WLED_AURORA = 38, /* WLED FX_MODE_AURORA */
+    OT_WLED_TWINKLEFOX = 80, /* WLED FX_MODE_TWINKLEFOX */
+    OT_WLED_TWINKLECAT = 81, /* WLED FX_MODE_TWINKLECAT */
+    OT_WLED_PALETTE = 65, /* WLED FX_MODE_PALETTE */
+    OT_WLED_BLENDS = 115, /* WLED FX_MODE_BLENDS */
+    OT_WLED_GLITTER = 87, /* WLED FX_MODE_GLITTER */
+    OT_WLED_FLOW_STRIPE = 179, /* WLED FX_MODE_FLOWSTRIPE */
+    OT_WLED_TETRIX = 44, /* WLED FX_MODE_TETRIX */
+    OT_WLED_EXPLODING_FIREWORKS = 90, /* WLED FX_MODE_EXPLODING_FIREWORKS */
+    OT_WLED_STARBURST = 89, /* WLED FX_MODE_STARBURST */
+    OT_WLED_COLOR_CLOUDS = 218, /* WLED FX_MODE_COLORCLOUDS */
+    OT_WLED_TV_SIMULATOR = 116, /* WLED FX_MODE_TV_SIMULATOR */
+    OT_WLED_DRIP = 96, /* WLED FX_MODE_DRIP */
+    OT_WLED_POPCORN = 95, /* WLED FX_MODE_POPCORN */
+    OT_WLED_ROLLING_BALLS = 48, /* WLED FX_MODE_ROLLINGBALLS */
     OT_WLED_BOUNCING_BALLS = 91, /* WLED FX_MODE_BOUNCINGBALLS */
     OT_WLED_HALLOWEEN_EYES = 82 /* WLED FX_MODE_HALLOWEEN_EYES */
 };
 
 typedef struct { uint8_t r, g, b; } ot_wled_rgb_t;
+/* Source-accurate 16-entry RGB palette sampler. No global state, allocations,
+ * UI styling or WLED runtime. Dynamic and custom IDs are not yet supported.
+ * ID 0 is the WLED source default Party palette for palette-only callers;
+ * it does not change existing direct-color render paths. */
+typedef struct { ot_wled_rgb_t entries[16]; } ot_wled_palette16_t;
+typedef enum {
+    OT_WLED_PALETTE_NOBLEND=0,
+    OT_WLED_PALETTE_LINEAR=1,
+    OT_WLED_PALETTE_NOWRAP=2
+} ot_wled_palette_blend_t;
+bool ot_wled_palette_build(uint8_t id, ot_wled_rgb_t primary,
+                           ot_wled_rgb_t secondary, ot_wled_rgb_t tertiary,
+                           ot_wled_palette16_t *out);
+/* Source WLED colors.cpp generateRandomPalette() CHSV->RGB construction.
+ * Accept four HSV triplets in upstream generation order (h,s,v), so RNG
+ * timing and state stay caller-owned. Does not enable dynamic palette ID 1
+ * or change current fixed-palette selection/transport semantics. */
+bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
+                               ot_wled_palette16_t *out);
+ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
+                                    uint8_t index, uint8_t brightness,
+                                    ot_wled_palette_blend_t blend);
+
+/* Optional measured audio peak provided by the external audio subsystem.
+ * No synthetic FFT, microphone acquisition or BLE extension is embedded in
+ * the rendering engine. This data is read only for FX 185 Rocktaves. */
+typedef struct {
+    float major_peak_hz;
+    float magnitude;
+} ot_wled_audio_peak_t;
+
 typedef struct {
     uint16_t effect_id;     /* Preserve WLED's numeric effect ID */
     uint8_t speed;          /* WLED 0..255 */
     uint8_t intensity;      /* WLED 0..255 (Blink duty-cycle) */
     uint8_t brightness;     /* 0..255 post-effect linear cap; WLED bus brightness is separate */
-    uint8_t palette_id;     /* Only 0 (direct solid colors) is implemented */
+    uint8_t palette_id;     /* 0=mode default; 2-72 built-in on palette-enabled effects */
     uint16_t frame_time_ms; /* WLED runtime FRAMETIME, supplied by caller */
     ot_wled_rgb_t foreground;
     ot_wled_rgb_t background;
@@ -131,6 +184,9 @@ typedef struct {
     uint8_t spark_style;
     uint8_t spark_peak;
     ot_wled_rgb_t spark_color;
+    const ot_wled_audio_peak_t *audio_peak; /* nullable, source FX 185 only */
+    uint8_t active_segments;   /* FX 90 WLED spark budget, 0=isolated 1D zone */
+    uint8_t max_segments;      /* FX 90 WLED spark budget, 0=64 (ESP32-S3) */
 } ot_wled_fx_config_t;
 typedef struct {
     uint16_t pos;
@@ -177,7 +233,8 @@ void ot_wled_fx_reset(ot_wled_fx_state_t *state);
  * Heartbeat, Spots, Spots Fade, Percent, Chase Flash and Running Color,
  * with default
  * direct colors and Overlay disabled. Full upstream parity remains unverified.
- * WLED palette modes, gamma and global brightness handling are NOT ported.
+ * Fixed RGB palettes 2-12 are supported only where explicitly marked.
+ * Dynamic/custom palette import, gamma and global brightness remain separate.
  * Returns false for unknown effects, invalid config or zero-sized zones.
  */
 bool ot_wled_fx_render(const ot_wled_fx_config_t *config, ot_wled_fx_state_t *state,

@@ -2,8 +2,20 @@
 #include "effects_1d.h"
 bool ot_palette_1d_supported(uint16_t effect_id,uint8_t palette){
  if(palette==0)return true;
- /* WLED effect adapters currently implement direct color rendering only. */
- return effect_id==OT_FX_EMBERS&&(palette==2||palette==3||palette==4);
+ /* Only source-pinned adapters with verified 16-entry fixed-palette
+  * behavior are allowed through unified dispatch. Keep unrelated modes
+  * and existing Embers settings fail-closed / backward compatible. */
+ if(effect_id==OT_WLED_COLOR_CLOUDS||effect_id==OT_WLED_FLOW_STRIPE||
+    effect_id==OT_WLED_GLITTER||effect_id==OT_WLED_BLENDS||
+    effect_id==OT_WLED_PALETTE||effect_id==OT_WLED_TWINKLEFOX||
+    effect_id==OT_WLED_TWINKLECAT||effect_id==OT_WLED_AURORA||
+    effect_id==OT_WLED_COLORTWINKLE||
+    effect_id==OT_WLED_SLOW_TRANSITION||
+    effect_id==OT_WLED_DANCING_SHADOWS||effect_id==OT_WLED_FIRE_2012||
+    effect_id==OT_WLED_EXPLODING_FIREWORKS||effect_id==OT_WLED_PACIFICA||
+    effect_id==OT_WLED_NOISE_PAL||effect_id==OT_WLED_ROCKTAVES)
+   return palette>=2u&&palette<=72u;
+ return effect_id==OT_FX_EMBERS&&(palette==2u||palette==3u||palette==4u);
 }
 static uint8_t linear(uint8_t a,uint8_t b,uint8_t t){
  return (uint8_t)(((uint32_t)a*(255u-t)+(uint32_t)b*t+127u)/255u);
