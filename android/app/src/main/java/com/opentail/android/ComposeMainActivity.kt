@@ -1328,7 +1328,9 @@ class ComposeMainActivity : ComponentActivity() {
                 Caption("Revision " + snapshot.revision +
                     " · physical mask " + snapshot.rawPhysicalMask +
                     " · effective mask " + snapshot.effectiveMask +
-                    (if (snapshot.persisted) " · active/persisted" else " · pending application or unsaved"), t)
+                    (if (!snapshot.persisted) " · pending application or unsaved"
+                     else if (snapshot.status != 0) " · active map read; last save rejected (" + snapshot.status + ")"
+                     else " · active/persisted"), t)
                 for (i in 0 until NativeTriggerMappingCodec.INPUTS) {
                     Caption("IN" + (i + 1) + " → " + names[draft[i]], t)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -1340,13 +1342,13 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                 }
-                if (snapshot.persisted && snapshot.status == 0 && snapshot.revision in 1..65534)
+                if (snapshot.persisted && snapshot.revision in 1..65534)
                     Pill("Save mapping to CORE · verify readback", t, true) { confirm = true }
                 else Caption("CORE mapping cannot be edited until the pending profile applies, a valid readback is loaded, or revisions are available.", t)
             } else Caption("Read the authenticated CORE map before editing; no writes on selection.", t)
         }
         if (confirm && snapshot != null && snapshot.persisted &&
-            snapshot.status == 0 && snapshot.revision in 1..65534) AlertDialog(
+            snapshot.revision in 1..65534) AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Save physical input mapping?") },
             text = { Text("CORE will reject active triggers or stale revisions. Readback must confirm the saved mapping. Offline trigger styles are separate.") },
