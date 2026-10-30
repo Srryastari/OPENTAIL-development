@@ -417,6 +417,8 @@ const connectUi=compose.split('private fun SettingsPage(t: Tone, changePage: (In
 const connectFlow=bleSource.split('void connectFromApp(String preferredAddress) {')[1]?.split('void connectFoundDevice(')[0];
 assert(connectUi?.includes('ble.connectFromApp(prefs.getString("preferred_ble_address", null))') &&
        connectFlow?.includes('if(connected) {') &&
+       connectFlow.includes('recoverStalledGatt(pending,"Retrying OpenTail CORE connection")') &&
+       connectFlow.includes('ui.postDelayed(()->{') &&
        connectFlow.includes('getBondedDevices()') &&
        connectFlow.includes('BluetoothAdapter.checkBluetoothAddress(preferredAddress)') &&
        connectFlow.includes('adapter.getRemoteDevice(preferredAddress)') &&
