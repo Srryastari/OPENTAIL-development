@@ -3678,6 +3678,64 @@ void mode_wavesins(void) {
   }
 } // mode_waveins()
 
+/* Pinned WLED FX.cpp Plasma and Lightning 1D bodies; host shim uses
+ * checked source beatsin8 and xorshift RNG injection. */
+void mode_plasma(void) {
+  // initialize phases on start
+  if (SEGENV.call == 0) {
+    SEGENV.aux0 = hw_random8(0,2);  // add a bit of randomness
+  }
+  unsigned thisPhase = source_beatsin8(6+SEGENV.aux0,-64,64);
+  unsigned thatPhase = source_beatsin8(7+SEGENV.aux0,-64,64);
+
+  for (unsigned i = 0; i < SEGLEN; i++) {   // For each of the LED's in the strand, set color &  brightness based on a wave as follows:
+    unsigned colorIndex = cubicwave8((i*(2+ 3*(SEGMENT.speed >> 5))+thisPhase) & 0xFF)/2   // factor=23 // Create a wave and add a phase change and add another wave with its own phase change.
+                              + cos8_t((i*(1+ 2*(SEGMENT.speed >> 5))+thatPhase) & 0xFF)/2;  // factor=15 // Hey, you can even change the frequencies if you wish.
+    unsigned thisBright = qsub8(colorIndex, source_beatsin8(7,0, (128 - (SEGMENT.intensity>>1))));
+    SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(colorIndex, false, PALETTE_SOLID_WRAP, 0, thisBright));
+  }
+}
+
+void mode_lightning(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned ledstart = hw_random16(SEGLEN);               // Determine starting location of flash
+  unsigned ledlen = 1 + hw_random16(SEGLEN -ledstart);   // Determine length of flash (not to go beyond NUM_LEDS-1)
+  uint8_t bri = 255/hw_random8(1, 3);
+
+  if (SEGENV.aux1 == 0) //init, leader flash
+  {
+    SEGENV.aux1 = hw_random8(4, 4 + SEGMENT.intensity/20); //number of flashes
+    SEGENV.aux1 *= 2;
+
+    bri = 52; //leader has lower brightness
+    SEGENV.aux0 = 200; //200ms delay after leader
+  }
+
+  if (!SEGMENT.check2) SEGMENT.fill(SEGCOLOR(1));
+
+  if (SEGENV.aux1 > 3 && !(SEGENV.aux1 & 0x01)) { //flash on even number >2
+    for (unsigned i = ledstart; i < ledstart + ledlen; i++)
+    {
+      SEGMENT.setPixelColor(i,SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0, bri));
+    }
+    SEGENV.aux1--;
+
+    SEGENV.step = strip.now;
+    //return hw_random8(4, 10); // each flash only lasts one frame/every 24ms... originally 4-10 milliseconds
+  } else {
+    if (strip.now - SEGENV.step > SEGENV.aux0) {
+      SEGENV.aux1--;
+      if (SEGENV.aux1 < 2) SEGENV.aux1 = 0;
+
+      SEGENV.aux0 = (50 + hw_random8(100)); //delay between flashes
+      if (SEGENV.aux1 == 2) {
+        SEGENV.aux0 = (hw_random8(255 - SEGMENT.speed) * 100); // delay between strikes
+      }
+      SEGENV.step = strip.now;
+    }
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -3745,7 +3803,9 @@ static const RefCase refs[]={
     {107,source_noise_pal,"Noise Pal"},
     {68,mode_bpm,"BPM"},
     {75,mode_lake,"Lake"},
-    {184,mode_wavesins,"Wavesins"}
+    {184,mode_wavesins,"Wavesins"},
+    {97,mode_plasma,"Plasma"},
+    {57,mode_lightning,"Lightning"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
