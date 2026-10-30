@@ -122,8 +122,9 @@ a{color:#8cd3b0}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minm
 <div class="grid"><div class="card"><h3>Temporary isolated trigger simulation</h3><small>Select combinations. Hazard simulation = both turn signals. This does not change physical GPIO assignments or saved mapping.</small>
 <div class="input-grid" id="signals">
 <label><input type="checkbox" value="park">Park</label><label><input type="checkbox" value="brake">Brake</label><label><input type="checkbox" value="left">Left</label><label><input type="checkbox" value="right">Right</label><label><input type="checkbox" value="reverse">Reverse</label>
+<label><input type="checkbox" value="aux1">AUX1</label><label><input type="checkbox" value="aux2">AUX2</label><label><input type="checkbox" value="aux3">AUX3</label>
 </div>
-<label>Simulation TTL (ms)<input id="simTtl" type="number" min="100" max="10000" value="3000"></label>
+<label>Simulation TTL (ms)<input id="simTtl" type="number" min="100" max="15000" value="3000"></label>
 <div class="bar"><button class="primary" onclick="simulateSignals()">Apply simulation</button><button onclick="clearSimulation()">Clear simulation</button><button onclick="stopAll()">Stop ALL</button></div>
 <pre id="simResult">No simulation sent</pre></div>
 <div class="card"><h3>Trigger mapping (NVS)</h3><small>Reads the live IN1–IN8 map. Saving changes the controller's persistent trigger assignments. All previews and physical triggers must be off to save.</small>
@@ -224,7 +225,7 @@ let data;try{data=JSON.parse($('outputEditor').value);if(data.index!==integer('o
 if(!confirm('Save persistent output zone mapping to CORE? Stop all effects and release physical inputs first.'))return;
 const ok=await act('outputResult','/api/v1/outputs',data);if(ok){await loadOutputs();$('outputResult').textContent='Saved. Latest controller configuration read back.'}
 }
-async function loadTriggers(){try{triggerSnapshot=await request('/api/v1/triggers');$('triggerEditor').value=pretty({revision:triggerSnapshot.revision,inputs:triggerSnapshot.inputs.map(x=>({index:x.index,function:x.function}))});$('triggerResult').textContent='Current mapping loaded.'; }catch(e){$('triggerResult').textContent=e.message}}
+async function loadTriggers(){try{triggerSnapshot=await request('/api/v1/triggers');$('triggerEditor').value=pretty({revision:triggerSnapshot.revision,expected_config_revision:triggerSnapshot.config_revision,inputs:triggerSnapshot.inputs.map(x=>({index:x.index,function:x.function}))});$('triggerResult').textContent='Current mapping loaded.'; }catch(e){$('triggerResult').textContent=e.message}}
 async function saveTriggers(){if(!triggerSnapshot){$('triggerResult').textContent='Read the mapping before saving';return}
 let obj;try{obj=JSON.parse($('triggerEditor').value)}catch(e){$('triggerResult').textContent=e.message;return}
 if(!confirm('Save IN1–IN8 trigger assignments to CORE NVS? All triggers must be released.'))return;
@@ -255,7 +256,7 @@ async function previewEffect(){try{
  await act('fxResult','/api/v1/fx/preview',data);await refreshStatus();
  }catch(e){$('fxResult').textContent=e.message}}
 async function simulateSignals(){let arr=[...document.querySelectorAll('#signals input:checked')].map(x=>x.value);
-try{await act('simResult','/api/v1/simulate',{signals:arr,ttl_ms:integer('simTtl',100,10000)});await refreshStatus()}catch(e){$('simResult').textContent=e.message}}
+try{await act('simResult','/api/v1/simulate',{signals:arr,ttl_ms:integer('simTtl',100,15000)});await refreshStatus()}catch(e){$('simResult').textContent=e.message}}
 async function clearSimulation(){document.querySelectorAll('#signals input').forEach(x=>x.checked=false);await act('simResult','/api/v1/simulate',{signals:[],ttl_ms:100});await refreshStatus()}
 async function statusRgb(mode){await act('ledResult','/api/v1/status-led/self-test',{mode});await readLed()}
 async function readLed(){try{$('ledJson').textContent=pretty(await request('/api/v1/status-led'))}catch(e){$('ledJson').textContent=e.message}}

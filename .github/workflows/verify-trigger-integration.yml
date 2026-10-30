@@ -1,0 +1,59 @@
+# Narrow, independently reportable trigger regressions.
+# Does not replace the complete CORE/OTA/installer/physical release gates.
+name: Verify OpenTail trigger integration
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/main/trigger_manager.*'
+      - 'core-firmware/main/opentail_core.c'
+      - 'core-firmware/main/ble_status.c'
+      - 'core-firmware/main/core_logic.*'
+      - 'core-firmware/main/output_manager.*'
+      - 'core-firmware/main/assets/dev_console.htm'
+      - 'core-firmware/tests/test_trigger_manager.c'
+      - 'core-firmware/tests/test_trigger_runtime_contract.py'
+      - 'core-firmware/tools/capture_trigger_bench.py'
+      - 'core-firmware/tests/test_prior_trigger_profiles.c'
+      - 'core-firmware/tests/test_verified_bench_contract.c'
+      - 'core-firmware/tests/run-host-tests.sh'
+      - '.github/workflows/verify-trigger-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trigger-host-regressions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core-firmware
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify read-only hardware evidence collector syntax
+        run: python3 tools/capture_trigger_bench.py --help > /dev/null
+      - name: Audit the actual CORE GPIO, effects-overlay, BLE and NVS boundaries
+        run: python3 tests/test_trigger_runtime_contract.py
+      - name: Validate mapped inputs, optocoupler debounce, BLE codec and overlays
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c main/show_logic.c tests/test_trigger_manager.c \
+            -o /tmp/ot-trigger-manager-tests
+          /tmp/ot-trigger-manager-tests
+      - name: Validate universal profiles across two outputs and all remappings
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c tests/test_prior_trigger_profiles.c \
+            -o /tmp/ot-prior-trigger-profiles
+          /tmp/ot-prior-trigger-profiles
+      - name: Preserve prior bench-mask evidence without claiming physical proof
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/trigger_manager.c main/ble_config.c \
+            tests/test_verified_bench_contract.c \
+            -o /tmp/ot-verified-bench-contract
+          /tmp/ot-verified-bench-contract

@@ -18,6 +18,7 @@
 #include "effects_1d.h"
 #include "fx_preset_record.h"
 #include "ble_config.h"
+#include "trigger_manager.h"
 #include "ot_frame_snapshot.h"
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,9 @@ extern bool ot_ble_play_fx_preset(uint8_t slot);
 extern bool ot_ble_delete_fx_preset(uint8_t slot);
 extern bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision);
 extern int ot_ble_config_save(uint8_t index,const ot_om_output_t *out,uint16_t base_revision);
+extern bool ot_ble_trigger_get(ot_tm_profile_t *out,uint16_t *revision,
+                               uint8_t *raw,uint8_t *effective,bool *persistent);
+extern int ot_ble_trigger_save(const ot_tm_profile_t *out,uint16_t base_revision);
 static uint8_t token[OT_BLE_TOKEN_BYTES];
 static bool token_ready=false;
 /* Latched only after NimBLE accepts the first advertising request. */
@@ -124,6 +128,7 @@ static const ble_uuid128_t ot_challenge_uuid=BLE_UUID128_INIT(0x28,0xaf,0x2e,0x1
 static const ble_uuid128_t ot_fx_caps_uuid=BLE_UUID128_INIT(0x29,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_frame_cmd_uuid=BLE_UUID128_INIT(0x2a,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_frame_rsp_uuid=BLE_UUID128_INIT(0x2b,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_trigger_uuid=BLE_UUID128_INIT(0x2c,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -167,9 +172,10 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     if(chunk>max_chunk)chunk=max_chunk;
     return os_mbuf_append(ctx->om,payload+offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
-/* Revoked sessions must discard cached config and frame responses. */
+/* Revoked owner sessions discard cached output, frame and trigger replies. */
 static void cfg_reset(void);
 static void frame_reply_reset(void);
+static uint8_t trigger_last_status=0;
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR || conn!=active_conn)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
@@ -205,11 +211,12 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
         else last_result=OT_BLE_ERR_WIRE;
     } else last_result=ot_ble_parse(buf,n,token,&authorized,&show);
     if(was_authorized && !authorized){
-        /* Invalid re-auth revokes session-owned preview, not permanent scenes
-         * or physical triggers; stale configuration replies cannot survive. */
+        /* Re-authentication failure revokes temporary previews, never GPIO
+         * triggers, persistent scenes, or saved configuration profiles. */
         ot_ble_disconnect_show();
         cfg_reset();
         frame_reply_reset();
+        trigger_last_status=0;
     }
     if(last_result==OT_BLE_OK_SHOW && !ot_ble_apply_show(&show))last_result=OT_BLE_ERR_BUSY;
     if(last_result==OT_BLE_OK_STOP)ot_ble_stop_show();
@@ -389,6 +396,39 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     if(chunk>maximum)chunk=maximum;
     return os_mbuf_append(ctx->om,p+ctx->offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(conn!=active_conn||!authorized)
+        return ctx->op==BLE_GATT_ACCESS_OP_READ_CHR?
+            BLE_ATT_ERR_READ_NOT_PERMITTED:BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    if(ctx->op==BLE_GATT_ACCESS_OP_READ_CHR){
+        ot_tm_profile_t profile={0};
+        uint16_t revision=0;
+        uint8_t raw=0,effective=0;
+        bool persistent=false;
+        if(!ot_ble_trigger_get(&profile,&revision,&raw,&effective,&persistent))
+            return BLE_ATT_ERR_UNLIKELY;
+        uint8_t response[OT_TM_BLE_READ_BYTES]={0};
+        if(!ot_tm_ble_encode(&profile,revision,raw,effective,persistent,
+                             trigger_last_status,response))
+            return BLE_ATT_ERR_UNLIKELY;
+        return os_mbuf_append(ctx->om,response,sizeof(response))==0?
+            0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if(ctx->op==BLE_GATT_ACCESS_OP_WRITE_CHR){
+        uint8_t packet[OT_TM_BLE_WRITE_BYTES]={0};
+        uint16_t n=0,revision=0;
+        ot_tm_profile_t next={0};
+        if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
+           !ot_tm_ble_decode(packet,n,&revision,&next)){
+            trigger_last_status=1;
+            return 0; /* status is read back; malformed mapping never applies */
+        }
+        trigger_last_status=(uint8_t)ot_ble_trigger_save(&next,revision);
+        return 0;
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
 static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_info_uuid.u,.access_cb=info_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
@@ -398,6 +438,7 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_cfg_rsp_uuid.u,.access_cb=cfg_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_trigger_uuid.u,.access_cb=trigger_access,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_frame_cmd_uuid.u,.access_cb=frame_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_frame_rsp_uuid.u,.access_cb=frame_read,.flags=BLE_GATT_CHR_F_READ},
   {0}
@@ -431,7 +472,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
             }
             active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
             challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
-            cfg_reset();frame_reply_reset();
+            cfg_reset();frame_reply_reset();trigger_last_status=0;
         }else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         /* A rejected secondary connection can still deliver DISCONNECT. */
@@ -439,7 +480,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;
         challenge_ready=false;pair_failures=0;
         ot_st_ble_connected(false);ot_ble_disconnect_show();
-        cfg_reset();frame_reply_reset();advertise();
+        cfg_reset();frame_reply_reset();trigger_last_status=0;advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }

@@ -1,0 +1,103 @@
+# OpenTail Trigger Integration — team contract gate
+
+## Active trigger integration: PR #24
+
+**PR #24 is the only active trigger/audit PR.** Its latest branch now carries the selective current-CORE implementation previously staged in [closed PR #25](https://github.com/Srryastari/OPENTAIL-development/pull/25). The original PR #24 source tip `bdcca5e0da81f07d1901117df02127387dce9eab` is retained as [archived history](https://github.com/Srryastari/OPENTAIL-development/tree/archive/trigger-pr24-original-20261029); the original PR conversation, cross-team handoffs and evidence remain attached to #24.
+
+The current implementation was based on firmware PR #19 commit `c97a98feb0b3ee6843b4bae072e8ced7c6e2da3d` and selectively carries authenticated BLE trigger mapping, AUX simulation, revision-aware saves, raw GPIO busy checks, and deferred activation of input mappings/output geometry. It does **not** replace the newer CORE RMT fault, BOOT enrollment, advertising, OTA identity or frame-snapshot logic. PR #25 is closed **without merge** and must not be integrated as a second trigger feature.
+
+**Verification boundary:** source CI/ESP-IDF checks may verify the exact current PR #24 combined code. Optical/12V/phone/vehicle acceptance, flash and release are **deferred until 100% owner-approved team contracts**. Software checks are not physical evidence. PR #24 remains draft and unmerged.
+
+**Status:** BLOCKED — source/ABI reconciliation incomplete. **Physical testing is deferred until 100% of cross-team contracts below are agreed and reconciled.**
+
+**Engineering rules:** Simplicity first; solve root causes; minimum necessary code impact. Trigger/audit owner may merge **only trigger or audit PRs**. Cross-team comments are handoffs, **not permission to merge** firmware, effects, Android, Studio, or their mixed-scope PRs. No physical acceptance can be inferred from a host check or an earlier flashed build.
+
+## Source pins inspected (2026-10-29)
+
+| Workstream | Exact PR head inspected | Relevant contract |
+|---|---|---|
+| CORE / firmware | PR #19 `b84453dc2239e53494d64d3df1730ca0461fce35` | `docs/OPENTAIL-LOCKED-RELEASE-CONTRACT.md`, CORE frame snapshot v1 |
+| Trigger integration | PR #24 initial audit `81bdee8` (historical); current implementation transferred from formerly staged PR #25, on top of the current CORE safety baseline | `docs/TRIGGER-BLE-CONTRACT-V1.md`, 11-domain source audit |
+| Native Android | PR #21 `e53a0a6c74a664767c16e159c872e0449951804d` | `android/LIVE-EDIT-CONTRACT.md`, `android/EXACT-LED-PREVIEW-CONTRACT.md` |
+| Spark/flare engine | PR #22 `2f08e6717ae2ea71bac9a999719f51b6b929f79d` | Zone overlay after FX render, before trigger arbitration |
+| Borrowed effects and palettes | PR #23 `e5f590650184c5d9208b38008c3de79a17adf54e` | Source-derived modes, selected-palette compatibility |
+
+The pinned heads in the table preserve the **historical source-audit snapshot**, not the current PR heads. The active trigger implementation is PR #24, incorporating the selective current-CORE patch; Effects #23/#22 and Android #21 remain independent draft workstreams. This is not a single fully reconciled product image. Changes to those heads require repeating only the affected *source contract review* before any combined tests.
+
+## Required agreements (a complete source check is not an owner sign-off)
+
+| ID | Boundary to preserve | Source cross-check | Open decision / blocker | Owning team |
+|---|---|---|---|---|
+| TC-CORE-01 | CORE alone owns physical IN1–IN8 GPIO4–11, configured polarity, independent 10ms × 4 stable-sample debounce, Stop/BLE independence and render ownership | **Source-integration completed on #24 `3feccdad`:** `bool input_init` fails closed, BOOT/advertising readiness remains guarded, the single-owner GAP callback rejects extra BLE connections/disconnects without clearing trigger state, and Stop paths wake the render owner without clearing physical triggers | Firmware #19 must approve the **combined source** and its exact-head software checks. Real PC817 polarity, latency and BLE multi-central behavior are physical gates, not proven here | Firmware #19 |
+| TC-PERSIST-01 | Both trigger mapping and output-zone saves serialize through existing mutex. Successful NVS write followed by asserted raw/debounced pin must preserve **old active state** until release; no `state_lock` held across NVS. No second save while pending | Pure helper/source contract present on #24 | Define whether `saved_on_device` denotes durable NVS or matching *active* profile. Currently #24 reports false when pending even though flash commit succeeded. Agree pending readback and reboot policy, especially a reboot *while an input is held*, before client changes | Trigger #24 + firmware #19 |
+| TC-BLE-01 | Optional owner-auth trigger GATT `0x2c`: 11-byte write, 15-byte readback, LE revision/IDs 0–8; output BLE v2 remains 261 bytes | Source codec interoperates in #24/#21. Android #21 now displays an explicit **"may be pending trigger release; Reload"** message when post-commit output readback differs from requested bytes, and fails closed without claiming activation | The message is useful but **not proof of pending state or flash failure**. Android still cannot positively distinguish exact-old pending layout, unknown mismatch, reboot or lost owner session over output v2. Owner agreement on durable-vs-active semantics/explicit pending reporting remains open; do not auto-retry NVS | Android #21 + firmware #19 + trigger #24 |
+| TC-ANDROID-01 | Compose trigger effect/style authoring remains offline; an explicitly confirmed physical IN1–IN8 map save is available ONLY after authenticated CORE advertises optional trigger-map GATT `...af2c`; local Start/Stop is simulation | **Source gap closed on #21 `e53a0a6`:** `NativeTriggerMappingCodec` validates exactly 11/15 bytes, revision/function IDs, owner-auth capability and readback; Compose presents separate confirmed mapping controls | Android owner must confirm combined-image capability/permissions and GATT status/retry behavior; phone interoperability and persistence are deliberately untested | Android #21 |
+| TC-FX-01 | Source FX → optional additive spark/flare in the decorative zone → physical role-local trigger → logical RGB frame snapshot → color-order swizzle | **Source ordering confirmed separately** on effects/overlay draft PR #26 `b573441` (overlay before role trigger and frame capture) and current trigger #24 `3feccdad` (trigger before snapshot/swizzle). #26 unifies #22's overlays with #23 effects in one **effects-owned** candidate | #26 and #24 are **not one firmware candidate**. Effects + firmware owners must confirm buffer, timing, palette and Stop behavior in a common reconciled source before physical testing | Effects #26 + firmware #19 |
+| TC-FX-02 | Any borrowed effect, palette or particle mode must retain the final physical trigger priority and must not imply optical parity | #23 has source-derived candidates for **120/120 registry modes** at `e5f5906`, with direct golden host cases; #24 still uses role-local final trigger overlay | Registry/source-candidate completion does **not** prove complete option/gamma/audio/optical parity. Confirm final effect/palette paths do not skip arbitration or output fault handling in a reconciled renderer, with unsupported audio/palette inputs failing closed | Effects #23 |
+| TC-OUTPUT-01 | User-defined zone lengths/roles; firmware owns safe strip reconfigure, transfer fault latches, completion evidence and FPS budget | Current PR #24 `3feccdad` keeps CORE's per-lane write/submit/complete faults and failed-lane exclusion from FPS pacing; source regression contract checks post-trigger snapshot and completed-lane longest-pixels order | Await combined effects/firmware source approval and hardware proof. A green host test cannot certify the real 12V/LED driver under failed RMT lanes | Firmware #19 + trigger #24 |
+| TC-RELEASE-01 | Only the final reconciled CORE candidate can be judged by CI/ESP-IDF/phone/physical evidence; keep release-evidence gate and bench-only warnings intact | All PRs draft, release evidence missing | Agree integrated commit SHA and exact feature/protocol capabilities before scheduling any physical test. Prior CI success on other SHAs is historical evidence, not sign-off | All workstreams |
+
+## Source delta reviewed after initial gate
+
+- Android PR #21 now has a real **optional** GATT trigger-map client and native confirm/edit/readback path. The previous *no client exists* blocker is resolved **in source**. It is not yet a deployed feature and was not tested on a phone.
+- Effects PR #23 now has 120/120 registered source-derived 1D candidates. This is a **separate source milestone**, not proof that all effects, palettes, audio dependencies, and physical output are equivalent or integrated with trigger overrides.
+- Current firmware PR #19 includes BLE advertising and BOOT/GPIO owner-enrollment readiness controls, input initialization failure paths, and fail-closed output runtime fault handling. They must survive trigger integration. Do not cherry-pick wholesale `opentail_core.c` or `ble_status.c` from the older trigger branch.
+- **Unresolved output BLE semantic corner:** after a good NVS commit, pending output geometry still returns *previous active* output bytes and a new revision. [Minimal Android-side safe interpretation](https://github.com/Srryastari/OPENTAIL-development/pull/21#issuecomment-6511574996) has been proposed without extending the wire format; await owner agreement and preserve readback verification.
+- No written agreement or integrated exact-image candidate exists for **all** remaining rows. This source audit does not release software/physical tests or PR merge gates.
+
+## Pinned trigger-only integration cutlist for CORE #19
+
+**Historical pre-reconciliation review on October 29 (not the current PR #24 code):** The old trigger source at `a63787c02159cd3a7f9241d24e94c898e2e1590c` is **71 commits ahead / 52 behind** firmware PR #19 head `b84453dc2239e53494d64d3df1730ca0461fce35` in GitHub's bidirectional ancestry comparison. These numbers describe divergent histories, **not** 123 separate trigger fixes. This historical assessment predates the selective transfer onto the newer CORE source; it does not count as current physical acceptance.
+
+**Transfer from the trigger owner, with strictly limited hunks:**
+
+1. **Pure trigger manager:** `core-firmware/main/trigger_manager.h/.c` adds logical function-name/mask decoding, 11-byte write/15-byte read mapping codec, and `ot_tm_saved_apply / ot_tm_apply_if_released`. Do not replace default GPIO mapping or widen supported functions. Preserve disabled and duplicate assignments.
+2. **Pure universal-output pending helper:** `core-firmware/main/output_manager.h/.c` adds `ot_om_saved_apply / ot_om_apply_if_released`. Changes are **only** the pending configuration transaction; retain the current firmware team's output hardware budget, zone schema and geometry validation.
+3. **CORE save-admission and state hooks:** selectively transplant `tm_gpio_input_mask` and its declaration, `tm_commit`, authenticated `ot_ble_trigger_get/save`, HTTP `tm_get/post` revision/readback semantics, output HTTP/BLE save busy and post-NVS pending gates, `om_deferred / tm_deferred` state, and the sampler's release-only apply/wakeup. Preserve the current `bool input_init()` failure propagation and independent 10ms/4-sample sampler.
+4. **BLE owner-auth characteristic:** add only `ot_trigger_uuid`, `trigger_access`, characteristic registration and connection-status reset to the latest **firmware-owned** `ble_status.c`. Preserve its `boot_enrollment_ready` gating, `ble_radio_ever_ready` advertising readiness, HMAC owner authentication, frame snapshot, and existing output/FX characteristic state machine. Never overwrite the full BLE file with older trigger content.
+5. **Render/safety path stays with CORE:** retain latest firmware `output_runtime_fault_mask`, `native_outputs_ready=all_configured && output_runtime_fault_mask==0u`, error-aware `led_strip_set_pixel/refresh_async/refresh_async_done`, incomplete-frame rejection, OTA image identity/boot guards and `/api/v1/status.elf_sha256`. Only the sampler and configuration snapshots need trigger changes; any effect/overlay code belongs to #23/#22.
+6. **Traceability:** retain scoped `core-firmware/tests/test_trigger_manager.c`, `test_prior_trigger_profiles.c`, `test_verified_bench_contract.c`, `test_trigger_runtime_contract.py`, `test_dev_console_contract.py`, `verify-trigger-integration.yml`, the read-only bench-capture tool, and existing legacy tests. Update literal source-contract signatures *only* for verified new firmware structure, never to hide a missing guard.
+
+**ABI and acknowledgment invariants:** Trigger v1 remains 11-byte owner-authenticated write and 15-byte read; output config v2 stays 261-byte wire. The NVS save return code `0` confirms durable commit, **not** immediate live role/layout activation if physical pins asserted mid-write. REST `config_apply_pending` is explicit; BLE trigger `persisted=0` signals active profile is not NVS-matched. BLE output v2's current readback can be the previous active layout with incremented revision; see [Android #21 contract refinement](https://github.com/Srryastari/OPENTAIL-development/pull/21#issuecomment-6511574996). Do not invent a new BLE opcode or automatically rewrite flash to resolve this.
+
+**Rendering precedence agreement:** CORE effect phase and optional effects-team sparks/flares continue producing decorative RGB. The final per-zone trigger overlay wins *before* post-trigger logical frame snapshot and *before* wire color-order swizzle. Stop clears shows, demos and synthetic signals while leaving live vehicle inputs under physical trigger arbitration; a Stop intended to disable the actual physical lamps is a **different safety-critical command** and is not introduced under this trigger audit.
+
+**Staging sequence, without authorizing merge:** effects owners reconcile #23 + #22 first; firmware owner produces a pinned cross-team candidate using **only** trigger hunks above; trigger owner reviews against this list, the locked release contract and active Android readback; only then run software verification on the pinned image; perform physical checks only after 100% owner contract agreement. Do not create a release merely by merging stacked histories.
+
+## Current trigger/CORE code checkpoint — 2026-10-29 CDT
+
+**Trigger-only source on active PR #24:** `1fef06cf172911a3e87c619ca45b18456224f70c`, a normal two-parent merge of prior trigger head `e042e782` and firmware PR #19 `8fa0204b`. No force-push, no unrelated PR merges, no flashing or physical tests. GitHub compared this branch at **0 commits behind** the pinned firmware base, mergeable and draft; subsequent firmware head movement requires another scope review.
+
+**Start-to-render responsiveness:** firmware-owned successful HTTP Show start, authenticated BLE Show/FX start and saved-preset playback wake the render task only after `state_lock` release, and rejected/not-ready requests do not wake. Trigger-owned accepted HTTP demo and logical input `/simulate` updates also call the same helper (including an empty mask to clear simulation). The independent physical input sampler, final role-local overlay, and hardware RMT writer are untouched.
+
+**Revoked-session isolation:** newer firmware #19 auth logic clears temporary previews and stale output/frame replies on transition from authorized to unauthorized. The trigger GATT integration also clears `trigger_last_status` on that transition. The mapping characteristic still requires the active owner connection and authorization for read/write; a rejected second central is not permitted to clear owner session state or real input sampling. This is **source/host-level assurance, not a real-phone radio result**.
+
+**CI evidence:** trigger regression workflow [40994188042](https://github.com/Srryastari/OPENTAIL-development/actions/runs/40994188042) **PASSED** on implementation head `1fef06cf`. Full active-source workflow [40994188129](https://github.com/Srryastari/OPENTAIL-development/actions/runs/40994188129) pending at checkpoint; do not call it passed before completion. Release-evidence gate remains intentionally blocking for absent optical/electrical acceptance and incomplete combined effects provenance.
+
+**Still blocked:** source reconciliation of Effects/overlay #26 with current firmware/trigger; Android output BLE v2 durable-vs-active deferred readback agreement; pending mapping reboot-under-held-input safety; documented 22 physical release checks. All workstream owners must sign off on one exact combined SHA **before any physical tests**.
+
+## Latest scoped cross-team checkpoint
+
+**Trigger PR #24**, implementation head `48fa1b1ba5f85e54439cc4d29e3336893731467e`: reconciled against firmware #19 `75bf77bcef2ce7299e636502627fb61df4eed006` using a normal merge commit, **0 commits behind that firmware head** at review time. No branch force-push, other PR merge or physical flash. Trigger-only CI **PASSED**; full CORE exact-head software/build and release evidence remain separate checks. The default release-evidence gate must remain red until actual acceptance and full effects provenance exist.
+
+**Cross-team snapshots (not approvals):** Android #21 `a97a889baf86af3890efbf06c08f618590c3d2d3` uses an explicit pending/reload warning but cannot prove pending state on the unchanged output BLE v2 protocol. Effects #26 `b573441c4e51111c506722ee35dd963e562271f1` unifies source effect modes with spark/flare overlays and source-orders those overlays before physical trigger arbitration; it has **not** been merged with #24 and does not establish 1:1 physical parity. The Effects-owned direct-golden cases and palette/audio gaps are outside this trigger team's acceptance claim.
+
+**Unresolved gate:** explicit owner approval of the durable-vs-active save readback, effect/trigger buffer ownership on one pinned combined SHA, BLE physical ownership/reconnect, NVS reboot while a trigger is held, and 22 current physical release checks. Continue software source audits in scope. **No 12V/phone/optical hardware testing until 100% contract agreement**.
+
+**Stop render-wake cross-check (latest CORE):** firmware #19's `request_render_refresh()` snapshots the render-task handle under `state_lock`, notifies it outside the lock, and is invoked after HTTP show Stop, global Stop, BLE Stop and owner-disconnect cleanup. Trigger PR #24 integrated this without touching the independent 10ms input sampler, optical RMT output ownership or current Stop generation/full-frame completion credit. Scoped regression coverage checks the lock order and that no Stop path clears `live_input_mask`. Independent trigger CI passed on implementation head `48fa1b1`; final combined effects/Android acceptance remains open.
+
+## Ordered gate for physical tests
+
+1. **100% team-contract agreement:** each owning team confirms all of its row(s) with a dated PR comment, any source changes needed are completed, and no blocker remains. A handoff request does not count as agreement.
+2. **100% merged-source cross-check without production merge:** identify a reproducible integrated *candidate* commit/merge ref and inspect every affected boundary together. Keep other workstreams' PRs under their respective merge authorization.
+3. **Only then** execute software CI/ESP-IDF/ABI regression on that exact candidate, retaining the release evidence gate. Passing CI is not hardware acceptance.
+4. **Only after the above** conduct physical GPIO polarity/isolation, 8-input combinations, live LED arbitration/timing, BLE readback/reconnect and NVS power-cycle tests with exact flashed SHA and measurements.
+
+**Gate status today: NOT 100%.** Source review documented; cross-team approvals and a single reconciled candidate are missing. Physical testing, flashing and merge approval are **ON HOLD**. No new tests or production-code edits are required merely to record this gate.
+
+## Existing handoffs
+
+- Firmware #19: https://github.com/Srryastari/OPENTAIL-development/pull/19#issuecomment-6511396746
+- Android #21: https://github.com/Srryastari/OPENTAIL-development/pull/21#issuecomment-6511397769 (initial mismatch); refined no-new-opcode pending-state handoff: https://github.com/Srryastari/OPENTAIL-development/pull/21#issuecomment-6511574996
+- Overlay #22: https://github.com/Srryastari/OPENTAIL-development/pull/22#issuecomment-6511398264
+- Effects #23: https://github.com/Srryastari/OPENTAIL-development/pull/23#issuecomment-6511398802
