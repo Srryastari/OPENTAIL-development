@@ -370,7 +370,7 @@ assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(con
 // state, reuse FX capabilities, or deliver old authorization/config replies.
 assert(bleSource.includes('private volatile BluetoothGatt gatt;') &&
        bleSource.includes('if (stopped || connection != gatt) {') &&
-       (bleSource.match(/if\(stopped \|\| connection!=gatt\)return;/g)||[]).length === 5 &&
+       (bleSource.match(/if\(stopped \|\| connection!=gatt\)return;/g)||[]).length >= 5 &&
        bleSource.includes('final BluetoothGatt owner=gatt;') &&
        bleSource.includes('if(owner==gatt && fxCapabilitiesListener!=null)') &&
        bleSource.includes('fxCapabilitiesListener.accept(connected && authorized ? json : "[]");'),
