@@ -226,6 +226,12 @@ typedef uint8_t (*ot_wled_random_byte_fn)(void *context);
 bool ot_wled_palette_generate_random(ot_wled_random_byte_fn draw,
                                      void *context,ot_wled_palette16_t *out);
 /* WLED creates both global source palettes before any render service. */
+/* Pinned colors.cpp generateHarmonicRandomPalette(), the default
+ * WLED palette-1 generator: source RGB->HSV, harmony families, saturation
+ * and value shuffle, pastel option and exact hardware-byte draw order. */
+bool ot_wled_palette_generate_harmonic(const ot_wled_palette16_t *base,
+                                ot_wled_random_byte_fn draw,void *context,
+                                ot_wled_palette16_t *out);
 bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
                                 ot_wled_random_byte_fn draw,void *context);
 /* Call ONCE per CORE global frame; consumes exactly 12 hardware bytes
@@ -234,7 +240,19 @@ bool ot_wled_palette_global_init(ot_wled_palette_random_t *state,
 bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
                                 uint32_t now_ms,uint16_t interval_s,
                                 uint16_t frame_time_ms,uint16_t transition_ms,
-                                ot_wled_random_byte_fn draw,void *context);
+                                bool harmonic,ot_wled_random_byte_fn draw,
+                                void *context);
+
+/* Source colors.cpp NeoGammaWLEDMethod::calcGammaTable() (RGB only).
+ * Pure output-stage calibration; NOT enabled in the source effects renderer
+ * until CORE output ownership and brightness/gamma order are certified. */
+typedef struct {
+    uint8_t forward[256], inverse[256];
+} ot_wled_gamma_tables_t;
+bool ot_wled_gamma_tables_build(float exponent,ot_wled_gamma_tables_t *out);
+ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
+                                const ot_wled_gamma_tables_t *tables,
+                                bool inverse);
 
 /* Optional measured audio peak provided by the external audio subsystem.
  * No synthetic FFT, microphone acquisition or BLE extension is embedded in

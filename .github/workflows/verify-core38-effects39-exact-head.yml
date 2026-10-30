@@ -1,0 +1,107 @@
+name: Verify CORE 38 plus Effects 39 exact commit
+on:
+  pull_request:
+    branches: [integration/core-triggers-palette-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+# Additive host/build evidence only. The existing required release/physical
+# evidence gate remains untouched and cannot be satisfied by this workflow.
+jobs:
+  core-effects-triggers-ble-host:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/core38-effects39-harmonic-integration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0 # change-impact audit compares the pinned historical baseline
+      - name: Assert exact source commit
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: CORE full suite, all 120 RGB goldens, palette, BLE and trigger contracts
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Change-impact audit (not hardware release eligibility)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  core-exact-head-espidf:
+    needs: core-effects-triggers-ble-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same source commit as host
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Compile CORE ESP32-S3 using ESP-IDF 5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify generated image and manifest without flashing
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          build=Path("core-firmware/build")
+          files=json.loads((build/"flasher_args.json").read_text())["flash_files"]
+          assert len(files)>=3 and all((build/x).is_file() and (build/x).stat().st_size>0 for x in files.values())
+          print("Exact-head ESP32-S3 outputs verified without device access")
+          PY
+
+  android-compatibility-exact-head:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/core38-effects39-harmonic-integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Android compatibility and debug compilation
+        run: |
+          python3 android/qa/check_release.py
+          node android/qa/test_unified_ble_fx.cjs
+          node android/qa/test_ble_output_pending.cjs
+          cd android
+          gradle --no-daemon :app:assembleDebug
+
+  studio-compatibility-exact-head:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'firmware/core38-effects39-harmonic-integration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Studio regression
+        run: node --test web-studio/tests/*.test.cjs

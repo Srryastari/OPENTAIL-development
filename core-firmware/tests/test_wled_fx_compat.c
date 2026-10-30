@@ -15,7 +15,7 @@ int main(void) {
      * IDs without forcing CI changes for every newly ported mode. */
     uint16_t ids[120]={0};
     const size_t count=ot_wled_fx_supported_ids(NULL,0);
-    assert(count>=98u && count<=sizeof(ids)/sizeof(ids[0]));
+    assert(count>=116u && count<=sizeof(ids)/sizeof(ids[0]));
     assert(ot_wled_fx_supported_ids(ids,sizeof(ids)/sizeof(ids[0]))==count);
     for(size_t i=0;i<count;i++){
         ot_wled_fx_metadata_t entry={0};
@@ -48,7 +48,7 @@ int main(void) {
            ids[78]==110 && ids[79]==104 && ids[80]==79 && ids[81]==99 &&
            ids[82]==42 && ids[83]==43 && ids[84]==64 &&
            ids[85]==69 && ids[86]==70 && ids[87]==71 &&
-           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82);
+           ids[88]==72 && ids[89]==73 && ids[90]==105 && ids[91]==109 && ids[92]==63 && ids[93]==67 && ids[94]==49 && ids[95]==51 && ids[96]==91 && ids[97]==82 && ids[98]==48 && ids[99]==95 && ids[100]==96 && ids[101]==116 && ids[102]==218 && ids[103]==89 && ids[104]==44 && ids[105]==179 && ids[106]==87 && ids[107]==115 && ids[108]==65 && ids[109]==80 && ids[110]==81 && ids[111]==38 && ids[112]==74 && ids[113]==219 && ids[114]==112 && ids[115]==66);
     ot_wled_fx_metadata_t meta={0};
     assert(ot_wled_fx_metadata(0,&meta) && !strcmp(meta.name,"Solid") && !meta.supports_background);
     assert(ot_wled_fx_metadata(1,&meta) && !strcmp(meta.name,"Blink") && meta.supports_intensity);
@@ -944,11 +944,332 @@ int main(void) {
     ot_wled_fx_reset(&s);
     assert(s.scratch==NULL);
 
+
+    /* Rolling Balls is a real per-zone source port, not a catalog alias.
+     * Independent zones seeded alike must reproduce the same trajectories,
+     * with no outside-buffer writes and with scratch released at reset. */
+    c.effect_id=OT_WLED_ROLLING_BALLS;
+    c.speed=222u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t rolling_a={0},rolling_b={0};
+    ot_wled_rgb_t rolling_aa[33],rolling_bb[33];
+    for(unsigned k=0u;k<40u;k++) {
+        const uint32_t ms=k*913u;
+        for(size_t px=0;px<33u;px++) {
+            rolling_aa[px]=(ot_wled_rgb_t){99,88,77};
+            rolling_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&rolling_a,ms,&rolling_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&rolling_b,ms,&rolling_bb[1],31u));
+        assert(memcmp(rolling_aa,rolling_bb,sizeof(rolling_aa))==0);
+        assert(eq(rolling_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(rolling_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1;px<=31u;px++) {
+            assert(rolling_aa[px].r<=32u &&
+                   rolling_aa[px].g<=32u &&
+                   rolling_aa[px].b<=32u);
+        }
+    }
+    assert(rolling_a.scratch && rolling_a.scratch_bytes>=16u*16u);
+    ot_wled_fx_reset(&rolling_a);
+    ot_wled_fx_reset(&rolling_b);
+    assert(!rolling_a.scratch && !rolling_b.scratch);
+
+
+    /* Popcorn source mode: 21 independent Spark records per active zone,
+     * deterministic per-zone RNG, guard bytes and complete scratch cleanup. */
+    c.effect_id=OT_WLED_POPCORN;
+    c.speed=243u;c.intensity=240u;c.brightness=32u;
+    ot_wled_fx_state_t popcorn_a={0},popcorn_b={0};
+    ot_wled_rgb_t popcorn_aa[33],popcorn_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*839u;
+        for(size_t px=0;px<33u;px++) {
+            popcorn_aa[px]=(ot_wled_rgb_t){99,88,77};
+            popcorn_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&popcorn_a,ms,&popcorn_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&popcorn_b,ms,&popcorn_bb[1],31u));
+        assert(memcmp(popcorn_aa,popcorn_bb,sizeof(popcorn_aa))==0);
+        assert(eq(popcorn_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(popcorn_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(popcorn_aa[px].r<=32u &&
+                   popcorn_aa[px].g<=32u &&
+                   popcorn_aa[px].b<=32u);
+    }
+    assert(popcorn_a.scratch && popcorn_a.scratch_bytes>=420u);
+    ot_wled_fx_reset(&popcorn_a);
+    ot_wled_fx_reset(&popcorn_b);
+    assert(!popcorn_a.scratch && !popcorn_b.scratch);
+
+
+    /* Drip source mode: four independent Spark records per zone, deterministic
+     * physics and source RNG, bounds and scratch release on replacement. */
+    c.effect_id=OT_WLED_DRIP;
+    c.speed=241u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t drip_a={0},drip_b={0};
+    ot_wled_rgb_t drip_aa[33],drip_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*917u;
+        for(size_t px=0;px<33u;px++) {
+            drip_aa[px]=(ot_wled_rgb_t){99,88,77};
+            drip_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&drip_a,ms,&drip_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&drip_b,ms,&drip_bb[1],31u));
+        assert(memcmp(drip_aa,drip_bb,sizeof(drip_aa))==0);
+        assert(eq(drip_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(drip_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(drip_aa[px].r<=32u &&
+                   drip_aa[px].g<=32u &&
+                   drip_aa[px].b<=32u);
+    }
+    assert(drip_a.scratch && drip_a.scratch_bytes>=80u);
+    ot_wled_fx_reset(&drip_a);
+    ot_wled_fx_reset(&drip_b);
+    assert(!drip_a.scratch && !drip_b.scratch);
+
+
+    /* TV Simulator scene state stays independent for each zone, preserves
+     * bounded RGB and uses stable source RNG/timing, without pixel leakage. */
+    c.effect_id=OT_WLED_TV_SIMULATOR;
+    c.speed=128u;c.intensity=200u;c.brightness=32u;
+    ot_wled_fx_state_t tv_a={0},tv_b={0};
+    ot_wled_rgb_t tv_aa[33],tv_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*1013u;
+        for(size_t px=0;px<33u;px++) {
+            tv_aa[px]=(ot_wled_rgb_t){99,88,77};
+            tv_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&tv_a,ms,&tv_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&tv_b,ms,&tv_bb[1],31u));
+        assert(memcmp(tv_aa,tv_bb,sizeof(tv_aa))==0);
+        assert(eq(tv_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(tv_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(tv_aa[px].r<=32u && tv_aa[px].g<=32u && tv_aa[px].b<=32u);
+    }
+    assert(tv_a.scratch && tv_a.scratch_bytes>=40u);
+    ot_wled_fx_reset(&tv_a);
+    ot_wled_fx_reset(&tv_b);
+    assert(!tv_a.scratch && !tv_b.scratch);
+
+
+    /* Color Clouds must not reuse global random offsets between zones or
+     * accidentally leak beyond exact zero-based 1D frame boundaries. */
+    c.effect_id=OT_WLED_COLOR_CLOUDS;
+    c.speed=24u;c.intensity=32u;c.brightness=32u;
+    ot_wled_fx_state_t cloud_a={0},cloud_b={0};
+    ot_wled_rgb_t cloud_aa[33],cloud_bb[33];
+    for(unsigned k=0u;k<60u;k++) {
+        const uint32_t ms=k*1051u;
+        for(size_t px=0;px<33u;px++) {
+            cloud_aa[px]=(ot_wled_rgb_t){99,88,77};
+            cloud_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&cloud_a,ms,&cloud_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&cloud_b,ms,&cloud_bb[1],31u));
+        assert(memcmp(cloud_aa,cloud_bb,sizeof(cloud_aa))==0);
+        assert(eq(cloud_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(cloud_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(cloud_aa[px].r<=32u &&
+                   cloud_aa[px].g<=32u &&
+                   cloud_aa[px].b<=32u);
+    }
+    ot_wled_fx_reset(&cloud_a);
+    ot_wled_fx_reset(&cloud_b);
+
+
+    /* Source particles: verify repeatability per zone, no cross-zone state,
+     * bounded writes, ESP32 source star allocation and reset. */
+    c.effect_id=OT_WLED_STARBURST;
+    c.speed=255u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t burst_a={0},burst_b={0};
+    ot_wled_rgb_t burst_aa[33],burst_bb[33];
+    for(unsigned k=0u;k<250u;k++) {
+        const uint32_t ms=1u+k*171u; /* nonzero birth timestamps */
+        for(size_t px=0;px<33u;px++) {
+            burst_aa[px]=(ot_wled_rgb_t){99,88,77};
+            burst_bb[px]=(ot_wled_rgb_t){99,88,77};
+        }
+        assert(ot_wled_fx_render(&c,&burst_a,ms,&burst_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&burst_b,ms,&burst_bb[1],31u));
+        assert(memcmp(burst_aa,burst_bb,sizeof(burst_aa))==0);
+        assert(eq(burst_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(burst_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(burst_aa[px].r<=32u &&
+                   burst_aa[px].g<=32u &&
+                   burst_aa[px].b<=32u);
+    }
+    assert(burst_a.scratch && burst_a.scratch_bytes==4u*60u);
+    ot_wled_fx_reset(&burst_a);
+    ot_wled_fx_reset(&burst_b);
+    assert(!burst_a.scratch && !burst_b.scratch);
+
+
+    /* Tetrix: the single-zone 20-byte falling-stack state is independent,
+     * reuses persistent frames, and never reaches frame guard pixels. */
+    c.effect_id=OT_WLED_TETRIX;
+    c.speed=255u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t tetr_a={0},tetr_b={0};
+    ot_wled_rgb_t tetr_aa[33],tetr_bb[33];
+    for(size_t px=0;px<33u;px++) {
+        tetr_aa[px]=(ot_wled_rgb_t){99,88,77};
+        tetr_bb[px]=(ot_wled_rgb_t){99,88,77};
+    }
+    for(unsigned k=0u;k<240u;k++) {
+        const uint32_t ms=k*61u;
+        tetr_aa[0]=tetr_aa[32]=(ot_wled_rgb_t){99,88,77};
+        tetr_bb[0]=tetr_bb[32]=(ot_wled_rgb_t){99,88,77};
+        assert(ot_wled_fx_render(&c,&tetr_a,ms,&tetr_aa[1],31u));
+        assert(ot_wled_fx_render(&c,&tetr_b,ms,&tetr_bb[1],31u));
+        assert(memcmp(tetr_aa,tetr_bb,sizeof(tetr_aa))==0);
+        assert(eq(tetr_aa[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(tetr_aa[32],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1u;px<=31u;px++)
+            assert(tetr_aa[px].r<=99u &&
+                   tetr_aa[px].g<=88u &&
+                   tetr_aa[px].b<=77u);
+    }
+    assert(tetr_a.scratch && tetr_a.scratch_bytes==20u);
+    ot_wled_fx_reset(&tetr_a);
+    ot_wled_fx_reset(&tetr_b);
+    assert(!tetr_a.scratch && !tetr_b.scratch);
+
+
+    /* Palette core is deterministic/source-bounded. Unsupported IDs fail
+     * without modifying outputs; this must not silently enable other FX. */
+    const ot_wled_rgb_t prim={123u,56u,9u},sec={3u,88u,174u},ter={0u,0u,0u};
+    ot_wled_palette16_t palette={0};
+    assert(!ot_wled_palette_build(73u,prim,sec,ter,&palette));
+    assert(!ot_wled_palette_build(2u,prim,sec,ter,NULL));
+    for(unsigned pal=0;pal<=6u;pal++) {
+        if(pal==1u)continue; /* WLED's dynamic random palette needs RNG/state */
+        assert(ot_wled_palette_build((uint8_t)pal,prim,sec,ter,&palette));
+        for(unsigned ix=0u;ix<256u;ix++) {
+            const ot_wled_rgb_t full=ot_wled_palette_sample(&palette,
+                (uint8_t)ix,255u,OT_WLED_PALETTE_LINEAR);
+            const ot_wled_rgb_t black=ot_wled_palette_sample(&palette,
+                (uint8_t)ix,0u,OT_WLED_PALETTE_LINEAR);
+            assert(eq(black,(ot_wled_rgb_t){0u,0u,0u}));
+            if(pal==2u)assert(eq(full,prim));
+        }
+    }
+    assert(ot_wled_palette_build(6u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,0u,255u,
+                       OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0x9Bu,0x00u,0xD5u}));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,
+                       OT_WLED_PALETTE_LINEAR),
+              (ot_wled_rgb_t){0xBDu,0x00u,0xB8u}));
+
+    assert(ot_wled_palette_build(11u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,0u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){255u,0u,0u}));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0xEBu,0x70u,0u}));
+    assert(ot_wled_palette_build(12u,prim,sec,ter,&palette));
+    assert(eq(ot_wled_palette_sample(&palette,16u,255u,OT_WLED_PALETTE_NOBLEND),
+              (ot_wled_rgb_t){0u,0u,0u}));
+
+    for(uint8_t pal=2u;pal<=72u;pal++) {
+
+        c.effect_id=OT_WLED_COLOR_CLOUDS;
+        c.speed=24u;c.intensity=32u;c.brightness=32u;c.palette_id=pal;
+        ot_wled_fx_state_t state_pal={0};
+        ot_wled_rgb_t guarded[33]={0};
+        guarded[0]=guarded[32]=(ot_wled_rgb_t){99u,88u,77u};
+        assert(ot_wled_fx_render(&c,&state_pal,1234u,&guarded[1],31u));
+        assert(eq(guarded[0],(ot_wled_rgb_t){99u,88u,77u}));
+        assert(eq(guarded[32],(ot_wled_rgb_t){99u,88u,77u}));
+        ot_wled_fx_reset(&state_pal);
+        c.effect_id=OT_WLED_SOLID;
+        assert(!ot_wled_fx_render(&c,&state_pal,1234u,&guarded[1],31u));
+    }
+    c.palette_id=0u;
+
+
+    /* Flow Stripe spans short and long arbitrary 1D zones and reuses the
+     * palette renderer without hardcoded vehicle LED counts. */
+    for(uint8_t pal=0u;pal<=72u;pal++) {
+        if(pal==1u)continue;
+        c.effect_id=OT_WLED_FLOW_STRIPE;
+        c.speed=127u;c.intensity=100u;c.brightness=32u;c.palette_id=pal;
+        ot_wled_fx_state_t flow={0};
+        ot_wled_rgb_t flow_pixels[524];
+        for(size_t px=0;px<524u;px++)
+            flow_pixels[px]=(ot_wled_rgb_t){99,88,77};
+        assert(ot_wled_fx_render(&c,&flow,4000u,&flow_pixels[1],522u));
+        assert(eq(flow_pixels[0],(ot_wled_rgb_t){99,88,77}));
+        assert(eq(flow_pixels[523],(ot_wled_rgb_t){99,88,77}));
+        for(size_t px=1;px<523u;px++)
+            assert(flow_pixels[px].r<=32u &&
+                   flow_pixels[px].g<=32u &&
+                   flow_pixels[px].b<=32u);
+        ot_wled_fx_reset(&flow);
+    }
+    c.palette_id=0u;
+
+
+    /* Glitter's source palette + random white pixel must remain inside an
+     * arbitrary 522 pixel zone, even at the maximum spark intensity. */
+    c.effect_id=OT_WLED_GLITTER;
+    c.palette_id=11u;c.speed=255u;c.intensity=255u;c.brightness=32u;
+    ot_wled_fx_state_t glit={0};
+    ot_wled_rgb_t glit_pixels[524];
+    for(size_t i=0;i<524u;i++)glit_pixels[i]=(ot_wled_rgb_t){99u,88u,77u};
+    for(unsigned f=0;f<50u;f++) {
+        assert(ot_wled_fx_render(&c,&glit,f*223u,&glit_pixels[1],522u));
+        assert(eq(glit_pixels[0],(ot_wled_rgb_t){99u,88u,77u}));
+        assert(eq(glit_pixels[523],(ot_wled_rgb_t){99u,88u,77u}));
+        for(size_t i=1u;i<=522u;i++)
+            assert(glit_pixels[i].r<=32u&&
+                   glit_pixels[i].g<=32u&&
+                   glit_pixels[i].b<=32u);
+    }
+    ot_wled_fx_reset(&glit);
+    c.palette_id=0u;
+
+
+    /* New 1D ports: deterministic state, zero out-of-zone writes, and caps. */
+    const ot_wled_audio_peak_t measured={220.0f,1800.0f};
+    c.audio_peak=NULL;c.brightness=32u;c.speed=127u;c.intensity=192u;
+    c.palette_id=0u;c.effect_id=OT_WLED_ROCKTAVES;
+    ot_wled_fx_reset(&s);
+    assert(!ot_wled_fx_render(&c,&s,0,p,31)); /* require real peak data */
+    c.audio_peak=&measured;
+    assert(ot_wled_fx_render(&c,&s,0,p,31));
+    c.audio_peak=NULL;
+    for(unsigned variant=0u;variant<3u;variant++){
+        c.effect_id=variant==0u?OT_WLED_PACIFICA:
+                    variant==1u?OT_WLED_NOISE_PAL:OT_WLED_EXPLODING_FIREWORKS;
+        c.palette_id=0u;c.brightness=32u;
+        ot_wled_fx_state_t first={0},second={0};
+        ot_wled_rgb_t a[524]={0},b[524]={0};
+        a[0]=a[523]=b[0]=b[523]=(ot_wled_rgb_t){99u,88u,77u};
+        for(unsigned frame=0;frame<96u;frame++){
+            uint32_t ms=frame*137u;
+            assert(ot_wled_fx_render(&c,&first,ms,&a[1],522u));
+            assert(ot_wled_fx_render(&c,&second,ms,&b[1],522u));
+            assert(memcmp(a,b,sizeof(a))==0);
+            assert(eq(a[0],(ot_wled_rgb_t){99u,88u,77u}));
+            assert(eq(a[523],(ot_wled_rgb_t){99u,88u,77u}));
+            for(size_t px=1;px<=522u;px++)
+                assert(a[px].r<=32u&&a[px].g<=32u&&a[px].b<=32u);
+        }
+        ot_wled_fx_reset(&first);ot_wled_fx_reset(&second);
+    }
+
     /* Every source adapter must actually dispatch and honor zero brightness;
      * this keeps the release inventory from drifting into name-only claims. */
     c.brightness=0;
     for(size_t k=0;k<count;k++) {
         c.effect_id=ids[k];
+        c.audio_peak=c.effect_id==OT_WLED_ROCKTAVES?&measured:NULL;
         ot_wled_fx_reset(&s);
         for(size_t i=0;i<31;i++)p[i]=(ot_wled_rgb_t){99,99,99};
         assert(ot_wled_fx_render(&c,&s,0,p,31));

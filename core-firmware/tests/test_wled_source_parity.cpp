@@ -5869,6 +5869,118 @@ static uint8_t nextPaletteByte(void *context) {
     auto *s=(GlobalPaletteByteStream*)context;
     return s->bytes[(s->draws++)&255u];
 }
+/* Independent RGB/HSV source math and harmonic branch ordering from
+ * pinned colors.cpp. The test stream replaces only ESP hardware register
+ * reads; it never replaces source arithmetic or relaxes RGB comparisons. */
+static uint8_t sourceRawRange(GlobalPaletteByteStream *s,
+                              unsigned lo,unsigned hi) {
+    return (uint8_t)(lo+((unsigned)nextPaletteByte(s)*(hi-lo)>>8));
+}
+static CHSV sourceRgbHsv(CRGB c){
+    int32_t r=c.r,g=c.g,b=c.b;
+    uint32_t mx=(r>g)?(r>b?r:b):(g>b?g:b);
+    if(mx==0u)return CHSV(0u,0u,0u);
+    uint32_t mn=(r<g)?(r<b?r:b):(g<b?g:b);
+    const int32_t delta=(int32_t)(mx-mn);
+    if(delta==0)return CHSV(0u,0u,(uint8_t)mx);
+    uint16_t h;
+    if(mx==(uint32_t)r)h=(uint16_t)(10923*(g-b)/delta);
+    else if(mx==(uint32_t)g)h=(uint16_t)(21845+10923*(b-r)/delta);
+    else h=(uint16_t)(43690+10923*(r-g)/delta);
+    return CHSV((uint8_t)(h>>8),(uint8_t)((255*delta)/mx),(uint8_t)mx);
+}
+static CRGBPalette16 sourceHarmonicPalette(const ot_wled_palette16_t &base,
+                                           GlobalPaletteByteStream *stream,
+                                           uint8_t *harmony_type){
+    CHSV c[4]={CHSV(0,0,0),CHSV(0,0,0),CHSV(0,0,0),CHSV(0,0,0)};
+    uint8_t keep=sourceRawRange(stream,0u,4u);
+    const auto v=base.entries[keep*5u];
+    c[keep]=sourceRgbHsv(CRGB(v.r,v.g,v.b));
+    c[keep].h=(uint8_t)(c[keep].h+sourceRawRange(stream,0u,10u)-5u);
+    for(unsigned i=0;i<3u;i++){
+        c[i].s=sourceRawRange(stream,200u,255u);
+        c[i].v=sourceRawRange(stream,220u,255u);
+    }
+    c[3].s=sourceRawRange(stream,20u,255u);
+    c[3].v=sourceRawRange(stream,80u,255u);
+    for(int i=3;i>0;i--){
+        std::swap(c[i].s,c[sourceRawRange(stream,0u,(unsigned)i+1u)].s);
+        std::swap(c[i].v,c[sourceRawRange(stream,0u,(unsigned)i+1u)].v);
+    }
+    const uint8_t basehue=c[keep].h;
+    uint8_t hs[3]={0};
+    const uint8_t type=sourceRawRange(stream,0u,5u);
+    *harmony_type=type;
+    switch(type){
+    case 0:
+        hs[0]=(uint8_t)(basehue+sourceRawRange(stream,30u,50u));
+        hs[1]=(uint8_t)(basehue+sourceRawRange(stream,10u,30u));
+        hs[2]=(uint8_t)(basehue-sourceRawRange(stream,10u,30u));break;
+    case 1:
+        hs[0]=(uint8_t)(basehue+113u+sourceRawRange(stream,0u,15u));
+        hs[1]=(uint8_t)(basehue+233u+sourceRawRange(stream,0u,15u));
+        hs[2]=(uint8_t)(basehue-7u+sourceRawRange(stream,0u,15u));break;
+    case 2:
+        hs[0]=(uint8_t)(basehue+145u+sourceRawRange(stream,0u,10u));
+        hs[1]=(uint8_t)(basehue+205u+sourceRawRange(stream,0u,10u));
+        hs[2]=(uint8_t)(basehue-5u+sourceRawRange(stream,0u,10u));break;
+    case 3:
+        hs[0]=(uint8_t)(basehue+85u+sourceRawRange(stream,0u,10u));
+        hs[1]=(uint8_t)(basehue+175u+sourceRawRange(stream,0u,10u));
+        hs[2]=(uint8_t)(basehue+265u+sourceRawRange(stream,0u,10u));break;
+    default:
+        hs[0]=(uint8_t)(basehue+80u+sourceRawRange(stream,0u,20u));
+        hs[1]=(uint8_t)(basehue+170u+sourceRawRange(stream,0u,20u));
+        hs[2]=(uint8_t)(basehue-15u+sourceRawRange(stream,0u,30u));break;
+    }
+    if(nextPaletteByte(stream)<128u){
+        for(int i=2;i>0;i--)
+            std::swap(hs[i],hs[sourceRawRange(stream,0u,(unsigned)i+1u)]);
+    }
+    for(int i=0,j=0;i<4;i++)if(i!=keep)c[i].h=hs[j++];
+    if(nextPaletteByte(stream)<25u)
+        for(auto &v:c)if(v.s>180u)v.s=(uint8_t)(v.s-160u);
+    const CRGB colors[4]={CRGB(c[0]),CRGB(c[1]),CRGB(c[2]),CRGB(c[3])};
+    CRGBPalette16 expected{};
+    fill_gradient_RGB(expected.entries,0u,colors[0],5u,colors[1]);
+    fill_gradient_RGB(expected.entries,5u,colors[1],10u,colors[2]);
+    fill_gradient_RGB(expected.entries,10u,colors[2],15u,colors[3]);
+    return expected;
+}
+static void certifyPinnedHarmonicPalette(){
+    unsigned type_mask=0u;
+    for(unsigned seed=0;seed<240u;seed++){
+        GlobalPaletteByteStream actual{},reference{};
+        for(unsigned i=0;i<256u;i++)
+            actual.bytes[i]=reference.bytes[i]=(uint8_t)(seed*41u+i*97u+
+                ((i*seed)>>3));
+        ot_wled_palette16_t base{},out{};
+        for(unsigned i=0;i<16u;i++)
+            base.entries[i]={(uint8_t)(seed+i*17u),
+                             (uint8_t)(seed*3u+i*11u),
+                             (uint8_t)(seed*7u+i*5u)};
+        uint8_t harmony=0xffu;
+        const auto expected=sourceHarmonicPalette(base,&reference,&harmony);
+        type_mask|=(1u<<harmony);
+        if(!ot_wled_palette_generate_harmonic(&base,nextPaletteByte,&actual,&out)||
+           actual.draws!=reference.draws){
+            std::fprintf(stderr,"Harmonic palette source RNG mismatch seed=%u\\n",seed);
+            std::abort();
+        }
+        for(unsigned i=0;i<16u;i++){
+            if(pack(out.entries[i])!=(expected.entries[i].color32&0xffffffu)){
+                std::fprintf(stderr,"Harmonic palette RGB source mismatch seed=%u harmony=%u entry=%u expected=%06X got=%06X\\n",
+                    seed,(unsigned)harmony,i,
+                    (unsigned)(expected.entries[i].color32&0xffffffu),
+                    (unsigned)pack(out.entries[i]));
+                std::abort();
+            }
+        }
+    }
+    if(type_mask!=31u){std::fprintf(stderr,"Missing harmonic families: mask=%u\\n",type_mask);std::abort();}
+    std::puts("Pinned harmonic random palette source: 240 seeded traces, all 5 harmony families, shared byte draw order and 3840 exact RGB samples PASS.");
+}
+
 static void certifyGlobalHardwarePaletteProducer() {
     GlobalPaletteByteStream stream{};
     for(unsigned i=0;i<256u;i++)
@@ -5900,7 +6012,7 @@ static void certifyGlobalHardwarePaletteProducer() {
     if(!ot_wled_palette_global_init(&shared,nextPaletteByte,&stream)||
        stream.draws!=24u)std::abort();
     const ot_wled_palette_random_t init=shared;
-    if(!ot_wled_palette_global_tick(&shared,1000u,5u,23u,750u,
+    if(!ot_wled_palette_global_tick(&shared,1000u,5u,23u,750u,false,
                                    nextPaletteByte,&stream)||
        stream.draws!=24u)std::abort();
     ot_wled_palette_random_t expected=shared;
@@ -5912,7 +6024,7 @@ static void certifyGlobalHardwarePaletteProducer() {
        oracle.draws!=36u)std::abort();
     if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,&target))
         std::abort();
-    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,false,
                                    nextPaletteByte,&stream)||
        stream.draws!=36u||
        std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
@@ -5920,12 +6032,12 @@ static void certifyGlobalHardwarePaletteProducer() {
      * timestamp, but random HSV generation must NOT run a second time. */
     if(!ot_wled_palette_random_tick(&expected,6001u,5u,23u,750u,nullptr))
         std::abort();
-    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,
+    if(!ot_wled_palette_global_tick(&shared,6001u,5u,23u,750u,false,
                                    nextPaletteByte,&stream)||
        stream.draws!=36u||
        std::memcmp(&expected,&shared,sizeof(shared))!=0)std::abort();
     const ot_wled_palette_random_t before=shared;
-    if(ot_wled_palette_global_tick(&shared,10000u,5u,0u,750u,
+    if(ot_wled_palette_global_tick(&shared,10000u,5u,0u,750u,false,
                                   nextPaletteByte,&stream)||
        stream.draws!=36u||
        std::memcmp(&before,&shared,sizeof(shared))!=0)std::abort();
@@ -5934,7 +6046,57 @@ static void certifyGlobalHardwarePaletteProducer() {
     std::puts("Source non-harmonic global palette: raw hardware-byte draw order, independent CHSV RGB, one generator per global frame, 16-bit source lifecycle PASS.");
 }
 
+/* Source colors.cpp NeoGammaWLEDMethod::calcGammaTable() copied as an
+ * independent host oracle. RGB source effect profiles are still compared
+ * gamma-off; this certifies the reusable source output-stage transform,
+ * not the final bus ordering/optical gamma configuration. */
+static void certifyPinnedGammaRgbStage(){
+    for(float exp:{1.0f,1.8f,2.2f,2.8f,3.0f}){
+        ot_wled_gamma_tables_t actual{};
+        if(!ot_wled_gamma_tables_build(exp,&actual))std::abort();
+        uint8_t source_fw[256]={0},source_inv[256]={0};
+        const float gamma_inv=1.0f/exp;
+        for(size_t i=1;i<256;i++){
+            source_fw[i]=(int)(powf((float)i/255.0f,exp)*255.0f+0.5f);
+            source_inv[i]=(int)(powf(((float)i-0.5f)/255.0f,gamma_inv)*255.0f+0.5f);
+        }
+        for(unsigned i=0;i<256u;i++)
+            if(actual.forward[i]!=source_fw[i]||
+               actual.inverse[i]!=source_inv[i])std::abort();
+        for(unsigned id:{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}){
+            const CRGBPalette16 upstream=ref_palette((uint8_t)id,
+                                         0x007B3809u,0x000358AEu,0u);
+            for(unsigned ix=0;ix<256u;ix++){
+                const uint32_t src=ColorFromPalette(upstream,ix,255u,
+                                                     LINEARBLEND);
+                const ot_wled_rgb_t original={(uint8_t)(src>>16),
+                                              (uint8_t)(src>>8),(uint8_t)src};
+                const ot_wled_rgb_t out=ot_wled_gamma_rgb(original,&actual,false);
+                const uint32_t expect=((uint32_t)source_fw[original.r]<<16)|
+                      ((uint32_t)source_fw[original.g]<<8)|source_fw[original.b];
+                if(pack(out)!=expect)std::abort();
+                const ot_wled_rgb_t inverse=ot_wled_gamma_rgb(out,&actual,true);
+                if(inverse.r!=source_inv[out.r]||inverse.g!=source_inv[out.g]||
+                   inverse.b!=source_inv[out.b])std::abort();
+            }
+        }
+    }
+    ot_wled_gamma_tables_t untouched{};
+    untouched.forward[7]=123u;
+    const ot_wled_gamma_tables_t before=untouched;
+    if(ot_wled_gamma_tables_build(0.0f,&untouched)||
+       ot_wled_gamma_tables_build(-1.0f,&untouched)||
+       ot_wled_gamma_tables_build(NAN,&untouched)||
+       std::memcmp(&before,&untouched,sizeof(before))!=0)std::abort();
+    const ot_wled_rgb_t raw={77u,91u,201u};
+    const ot_wled_rgb_t no_lut=ot_wled_gamma_rgb(raw,nullptr,false);
+    if(pack(no_lut)!=pack(raw))std::abort();
+    std::puts("Pinned source RGB gamma: 5 exponents x 512 LUT values + 15,360 gradient samples x 2 directions, invalid-gamma atomicity PASS (host output stage only).");
+}
+
 int main() {
+    certifyPinnedHarmonicPalette();
+    certifyPinnedGammaRgbStage();
     certifyGlobalHardwarePaletteProducer();
     certifyLivePaletteInjection();
     certifyPaletteOneLifecycle();
