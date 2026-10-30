@@ -678,6 +678,15 @@ assert(compose.includes('Preview unavailable') && compose.includes('shared optio
        compose.includes('Other palette choices stay local'),
        'Palette UI must label unknown previews, restoration and BLE limitations');
 
+// A started trigger read or save must invalidate any older "active" mapping
+// until its originating CORE session supplies a fresh authenticated readback.
+assert(bleSource.includes('private void invalidateTriggerReadback(BluetoothGatt owner)') &&
+       bleSource.includes('if(!stopped && owner==gatt && triggerMapListener!=null)') &&
+       bleSource.includes('triggerMapListener.accept(null);') &&
+       bleSource.includes('if(gatt.readCharacteristic(triggerMapping)){') &&
+       bleSource.includes('if(started){invalidateTriggerReadback(gatt);return true;}'),
+       'Android cannot present a stale trigger snapshot as active during BLE edit/readback');
+
 // Firmware #49 durable uint16 revisions are monotonic and reject wrap.
 // A no-op upload may legitimately retain the base revision. A changed save
 // can only advance exactly once, and the active output bytes must still match.
