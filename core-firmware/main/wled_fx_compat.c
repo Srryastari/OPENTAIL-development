@@ -4341,18 +4341,26 @@ static void color_clouds_frame(const ot_wled_fx_config_t *cfg,
 
 /* Upstream FX.cpp Fill Noise, Noise 1–4 1D source animations. No WLED
  * runtime, Arduino global state or external LED bus is linked. */
+/* Source FX.cpp modes 69-73: Perlin spatial index selects the pinned
+ * default palette. The prior adapter calculated noise and discarded the
+ * index, leaving every pixel foreground-colored. Keep the WLED palette
+ * selection local; no BLE palette transport or zone geometry changes. */
 static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
                                ot_wled_fx_state_t *state,uint32_t now,
                                uint32_t old_call,ot_wled_rgb_t *pixels,
                                size_t count) {
+    const uint8_t default_pal=cfg->effect_id==OT_WLED_NOISE_1?20u:
+        cfg->effect_id==OT_WLED_NOISE_2?43u:
+        cfg->effect_id==OT_WLED_NOISE_3?35u:
+        cfg->effect_id==OT_WLED_NOISE_4?26u:0u;
+    ot_wled_palette16_t palette;
+    if(default_pal && !ot_wled_palette_build(default_pal,
+          cfg->foreground,cfg->background,(ot_wled_rgb_t){0,0,0},&palette))
+        return;
     if(cfg->effect_id==OT_WLED_FILL_NOISE) {
         if(old_call==0u)state->step=fx_prng(state);
-        for(size_t i=0;i<count;i++) {
-            const uint8_t index=fx_perlin8_2((uint16_t)((uint32_t)i*count),
-                                   (uint16_t)(state->step+(uint32_t)i*count));
-            (void)index;
+        for(size_t i=0;i<count;i++)
             pixels[i]=scaled(cfg->foreground,cfg->brightness);
-        }
         state->step+=fx_beatsin8(cfg->speed,1u,6u,now);
         return;
     }
@@ -4364,39 +4372,35 @@ static void perlin_noise_frame(const ot_wled_fx_config_t *cfg,
             const uint32_t sy=((uint32_t)i+state->step/42u)*320u;
             const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step)>>8);
             const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(cfg->foreground,cfg->brightness);
+            pixels[i]=scaled(ot_wled_palette_sample(&palette,index,255u,
+                          OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
         return;
     }
-    if(cfg->effect_id==OT_WLED_NOISE_2) {
-        state->step+=1u+((uint32_t)cfg->speed>>1);
+    if(cfg->effect_id==OT_WLED_NOISE_2 ||
+       cfg->effect_id==OT_WLED_NOISE_3) {
+        state->step+=cfg->effect_id==OT_WLED_NOISE_2?
+            1u+((uint32_t)cfg->speed>>1):1u+(uint32_t)cfg->speed;
         for(size_t i=0;i<count;i++) {
-            const uint32_t sx=((uint32_t)i+(state->step>>6))*1000u;
-            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,0u,4223u)>>8);
+            const uint32_t sx=cfg->effect_id==OT_WLED_NOISE_2?
+               ((uint32_t)i+(state->step>>6))*1000u:
+               ((uint32_t)i+4223u)*800u;
+            const uint32_t sy=cfg->effect_id==OT_WLED_NOISE_2?
+               0u:((uint32_t)i+1234u)*800u;
+            const uint32_t z=cfg->effect_id==OT_WLED_NOISE_2?
+               4223u:state->step*8u;
+            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,z)>>8);
             const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
-        }
-        return;
-    }
-    if(cfg->effect_id==OT_WLED_NOISE_3) {
-        state->step+=1u+(uint32_t)cfg->speed;
-        for(size_t i=0;i<count;i++) {
-            const uint32_t sx=((uint32_t)i+4223u)*800u;
-            const uint32_t sy=((uint32_t)i+1234u)*800u;
-            const uint8_t noise=(uint8_t)(fx_perlin16_3(sx,sy,state->step*8u)>>8);
-            const uint8_t index=wled_sin8((uint8_t)(noise*3u));
-            (void)index;
-            pixels[i]=scaled(scaled(cfg->foreground,noise),cfg->brightness);
+            pixels[i]=scaled(ot_wled_palette_sample(&palette,index,noise,
+                          OT_WLED_PALETTE_LINEAR),cfg->brightness);
         }
         return;
     }
     const uint32_t phase=(now*(uint32_t)cfg->speed)>>7;
     for(size_t i=0;i<count;i++) {
-        const uint16_t index=fx_perlin16_2((uint32_t)i<<12,phase);
-        (void)index;
-        pixels[i]=scaled(cfg->foreground,cfg->brightness);
+        const uint8_t index=(uint8_t)fx_perlin16_2((uint32_t)i<<12,phase);
+        pixels[i]=scaled(ot_wled_palette_sample(&palette,index,255u,
+                     OT_WLED_PALETTE_LINEAR),cfg->brightness);
     }
 }
 
