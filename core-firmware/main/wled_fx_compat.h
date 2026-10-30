@@ -236,6 +236,17 @@ bool ot_wled_palette_global_tick(ot_wled_palette_random_t *state,
                                 uint16_t frame_time_ms,uint16_t transition_ms,
                                 ot_wled_random_byte_fn draw,void *context);
 
+/* Source colors.cpp NeoGammaWLEDMethod::calcGammaTable() (RGB only).
+ * Pure output-stage calibration; NOT enabled in the source effects renderer
+ * until CORE output ownership and brightness/gamma order are certified. */
+typedef struct {
+    uint8_t forward[256], inverse[256];
+} ot_wled_gamma_tables_t;
+bool ot_wled_gamma_tables_build(float exponent,ot_wled_gamma_tables_t *out);
+ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
+                                const ot_wled_gamma_tables_t *tables,
+                                bool inverse);
+
 /* Optional measured audio peak provided by the external audio subsystem.
  * No synthetic FFT, microphone acquisition or BLE extension is embedded in
  * the rendering engine. This data is read only for FX 185 Rocktaves. */

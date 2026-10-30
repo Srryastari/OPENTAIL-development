@@ -5934,7 +5934,56 @@ static void certifyGlobalHardwarePaletteProducer() {
     std::puts("Source non-harmonic global palette: raw hardware-byte draw order, independent CHSV RGB, one generator per global frame, 16-bit source lifecycle PASS.");
 }
 
+/* Source colors.cpp NeoGammaWLEDMethod::calcGammaTable() copied as an
+ * independent host oracle. RGB source effect profiles are still compared
+ * gamma-off; this certifies the reusable source output-stage transform,
+ * not the final bus ordering/optical gamma configuration. */
+static void certifyPinnedGammaRgbStage(){
+    for(float exp:{1.0f,1.8f,2.2f,2.8f,3.0f}){
+        ot_wled_gamma_tables_t actual{};
+        if(!ot_wled_gamma_tables_build(exp,&actual))std::abort();
+        uint8_t source_fw[256]={0},source_inv[256]={0};
+        const float gamma_inv=1.0f/exp;
+        for(size_t i=1;i<256;i++){
+            source_fw[i]=(int)(powf((float)i/255.0f,exp)*255.0f+0.5f);
+            source_inv[i]=(int)(powf(((float)i-0.5f)/255.0f,gamma_inv)*255.0f+0.5f);
+        }
+        for(unsigned i=0;i<256u;i++)
+            if(actual.forward[i]!=source_fw[i]||
+               actual.inverse[i]!=source_inv[i])std::abort();
+        for(unsigned id:{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}){
+            const CRGBPalette16 upstream=ref_palette((uint8_t)id,
+                                         0x007B3809u,0x000358AEu,0u);
+            for(unsigned ix=0;ix<256u;ix++){
+                const uint32_t src=ColorFromPalette(upstream,ix,255u,
+                                                     LINEARBLEND);
+                const ot_wled_rgb_t original={(uint8_t)(src>>16),
+                                              (uint8_t)(src>>8),(uint8_t)src};
+                const ot_wled_rgb_t out=ot_wled_gamma_rgb(original,&actual,false);
+                const uint32_t expect=((uint32_t)source_fw[original.r]<<16)|
+                      ((uint32_t)source_fw[original.g]<<8)|source_fw[original.b];
+                if(pack(out)!=expect)std::abort();
+                const ot_wled_rgb_t inverse=ot_wled_gamma_rgb(out,&actual,true);
+                if(inverse.r!=source_inv[out.r]||inverse.g!=source_inv[out.g]||
+                   inverse.b!=source_inv[out.b])std::abort();
+            }
+        }
+    }
+    ot_wled_gamma_tables_t untouched{};
+    untouched.forward[7]=123u;
+    const ot_wled_gamma_tables_t before=untouched;
+    if(ot_wled_gamma_tables_build(0.0f,&untouched)||
+       ot_wled_gamma_tables_build(-1.0f,&untouched)||
+       ot_wled_gamma_tables_build(NAN,&untouched)||
+       std::memcmp(&before,&untouched,sizeof(before))!=0)std::abort();
+    const ot_wled_rgb_t raw={77u,91u,201u};
+    const ot_wled_rgb_t no_lut=ot_wled_gamma_rgb(raw,nullptr,false);
+    if(pack(no_lut)!=pack(raw))std::abort();
+    std::puts("Pinned source RGB gamma: 5 exponents x 512 LUT values + 15,360 gradient samples x 2 directions, invalid-gamma atomicity PASS (host output stage only).");
+}
+
 int main() {
+    certifyPinnedGammaRgbStage();
     certifyGlobalHardwarePaletteProducer();
     certifyLivePaletteInjection();
     certifyPaletteOneLifecycle();
