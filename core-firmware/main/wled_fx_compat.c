@@ -2491,21 +2491,15 @@ static ot_wled_rgb_t fx_scale256(ot_wled_rgb_t c,uint8_t amount) {
         (uint8_t)(((uint16_t)c.g*amount)>>8),
         (uint8_t)(((uint16_t)c.b*amount)>>8)};
 }
-/* Pinned colors.cpp color_add(preserveCR=true): overflow reduces all
- * channels with one shared fixed-point scale to preserve the original hue.
- * Clamping each channel independently is not source-equivalent. */
+/* Pinned colors.h color_add() defaults preserveCR=false. Each RGB
+ * channel saturates independently; ratio-preserving color_add(true) is
+ * a distinct opt-in operation and is NOT used by blur/Colortwinkles. */
 static ot_wled_rgb_t fx_source_color_add(ot_wled_rgb_t a,ot_wled_rgb_t b) {
-    if((a.r|a.g|a.b)==0u)return b;
-    if((b.r|b.g|b.b)==0u)return a;
-    const uint32_t r=(uint32_t)a.r+b.r,g=(uint32_t)a.g+b.g,
-                   blue=(uint32_t)a.b+b.b;
-    uint32_t top=r>g?r:g;
-    if(blue>top)top=blue;
-    if(top<=255u)return (ot_wled_rgb_t){(uint8_t)r,(uint8_t)g,(uint8_t)blue};
-    const uint32_t scale=(255u<<8)/top;
-    return (ot_wled_rgb_t){(uint8_t)((r*scale)>>8),
-                           (uint8_t)((g*scale)>>8),
-                           (uint8_t)((blue*scale)>>8)};
+    const unsigned r=(unsigned)a.r+b.r,g=(unsigned)a.g+b.g,
+                   blue=(unsigned)a.b+b.b;
+    return (ot_wled_rgb_t){(uint8_t)(r>255u?255u:r),
+                          (uint8_t)(g>255u?255u:g),
+                          (uint8_t)(blue>255u?255u:blue)};
 }
 static void fx_blur_1d(ot_wled_rgb_t *pixels,size_t count,uint8_t amount) {
     if(!count||!amount)return;
