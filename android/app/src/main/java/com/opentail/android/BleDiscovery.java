@@ -543,7 +543,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy()) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy() || nextPacket!=null) {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
