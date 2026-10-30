@@ -1,0 +1,210 @@
+# OpenTail Android / UI recheck — 2026-10-29
+
+**Scope:** Android PR #21, stacked on Studio PR #20. Firmware integration is PR #19. This is an audit of source and CI evidence, **not** a phone screenshot or bench certification. Keep both Android and firmware PRs draft until acceptance.
+
+## Confirmed in the current Kotlin/Compose source
+
+- Exactly one Compose launcher; six top destinations in locked order: Home, Show Modes, Layout, Triggers, Auto Events, Settings. No WebView runtime, bottom tab bar or Internet permission.
+- OLED-black and white schemes, pill action buttons/text fields, and retained white Connect button. Home BLE status and unified pairing/authorization action are present.
+- Local v4 designer: named zones, zero-based offsets (including manual gaps/reverse), individual painted pixels, trigger assignment editor, optional startup/shutdown definitions, sequence repeat/shuffle/shared palette, local presets, document import/export.
+- CORE remains authoritative for effects, vehicle trigger arbitration and physical output writes. BLE live effect previews are authenticated, bounded and temporary; hardware output configuration requires a separate explicit NVS save and controller readback.
+- Exact local pixel indexing and optional verified CORE logical RGB888 snapshot capture; no invented 1:1 effect simulation. The capture path is source-implemented but not physically validated on the bench.
+
+## Fixes made during this recheck
+
+1. Removed a GS400-era **623 LED per output** cap from the **active Compose editor and BLE codec**. Codec honors the unsigned 16-bit wire representation; installed firmware alone limits real board memory and may reject a requested mapping. Do not interpret 65535 as supported by a device.
+2. Prevented the output editor's Remove zone operation from leaving its reported output total out of agreement with surviving zone lengths. Refreshed positional editor state when zone count changes.
+3. Removed an invented hardcoded GPIO pin from BLE configuration decode; output wiring is owned by the firmware/board.
+4. Replaced obsolete Java Views source audits with assertions against **shipped Compose** pages and their real actions, plus new universal geometry regression guards.
+5. Invalidated stale captured CORE frames on local project edits. Live preview/STOP and GATT capture paths remain capability-gated.
+6. Restored the previous project on failed local import persistence and applied zone bounds to pixel-clear operations.
+7. Consolidated Layout and other editors onto a shared native **borderless soft-capsule Slider** (12dp track, rounded accent fill, subtle 22dp thumb glow), without replacing Material3 drag/keyboard/accessibility semantics. Corrected the color field's weighted row layout and gave action pills 48dp minimum height.
+8. Made action rows horizontally scroll on narrow phones, reset vertical scroll when switching top destinations, and added exact-address 8/16/32/64 LED inspection zoom. No pixel interpolation or animated-frame approximation was introduced.
+9. Added a local trigger-color swatch to Start/Stop instead of a misleading simulated animation; the test explicitly says CORE LEDs are unchanged.
+10. Added a confirmation before a local preset replaces the active project. Restored Settings **Preview Offline** beside the locked white Connect action. This opens a local-only Show Modes session, clears old CORE frames, suppresses new effect/snapshot BLE commands, and issues STOP only when a previous temporary hardware preview was already armed. Leaving Show Modes restores normal authorized preview behavior.
+11. Expanded active Compose regression checks for unified slider, touch targets, screen-scroll reset, zoom, preview isolation, and destructive-action confirmation.
+12. Serialized CORE output reads and writes against BLE owner pairing/authorization and effect-capability reads. A disabled adapter explicitly cancels frame capture, and connection teardown clears pending authorization/writes.
+13. Cleared cached CORE output readbacks and rendered pixel snapshots when controller authorization ends; disconnected devices can no longer appear to have a fresh output draft in the editor.
+14. Added native vector top-navigation glyphs using the locked four meanings: sparkle (Show Modes), squares (Layout), lightning (Triggers), sun (Auto Events). No third-party icon font, emoji, or additional Android dependency.
+15. Corrected the Home/Settings Bluetooth status pill to use the real BLE connection phase; transient diagnostic messages remain separate explanatory text.
+16. Made Auto Events' **Preview offline** enter the same explicitly BLE-isolated session as Settings' **Preview Offline**, and accurately described that offline pixel inspection does not generate CORE animation.
+17. Stopped preset snapshots from recursively embedding the entire saved preset collection. Loading an old design preserves today's preset library, including newer saved presets; malformed presets now show a local error instead of silently doing nothing.
+18. Closed a GATT race by guarding owner pairing/authentication against other active BLE operations and resetting pending authentication on disconnect/reconnect.
+19. Made native v4 preset-library updates **atomic** on disk commit failure; an unsuccessful save restores the prior in-memory collection instead of presenting an unsaved preset as persisted.
+
+## Native palette engine and locked styling (October 29 continuation)
+
+- **Android-only change:** Native Compose PalettePicker now replaces the sequence's unlabelled numeric palette slider and appears in Show Modes Effects and per-sequence-step editing. Same existing OLED/white Tone, pill controls and fields; no new tab, WebView, Internet permission or other UI theme.
+- Per-step palette is stored as `sequence[].settings.pal`, interoperable with Studio's v4 sequence settings. Shared palette remains `sequenceOptions.sharedPaletteEnabled/sharedPaletteId`, default OFF; toggling OFF restores stored step palette without overwriting it. The visible step summary reports the effective preference and clearly limits it to palette-compatible effects.
+- Native catalog identifies default IDs 0–4; other IDs remain honest numbered choices unless a project supplies `paletteNames`. Gradient swatches are drawn **only** from well-formed project `palettePreviews` fixed RGB stop entries with proper 0–255 offsets; no fabricated preview for a dynamic/unknown palette. Existing Studio v4 exports do not include those optional preview fields, so most palette swatches will correctly say “Preview unavailable.”
+- Standalone effect palette choice currently persists in **local Android preferences** like its existing speed/color settings; it is not yet a firmware scene or a portable Show Mode profile. Selecting a CORE-supported palette now routes through the existing authenticated **temporary** BLE FX palette byte, while unsupported palettes stay local and STOP any stale physical preview. There is no separate palette-write opcode or new firmware protocol. Sequence palette authoring is locally exported/imported with the v4 project.
+- The locked LED viewer remains the zero-based design strip or an authenticated single CORE RGB888 frame. A palette swatch is **not** a CORE-rendered animation; physical palette acceptance is limited to CORE's implemented subset and requires independent bench proof.
+- Native palette source/shape regression guards were added. **Current-head Kotlin build, Android unit tests, screenshots, TalkBack, BLE, and real palette parity require independent acceptance.** Keep Android PR #21 draft; no cross-domain merges.
+
+## Palette import fidelity and immediate sequence redraw (October 29 continuation)
+
+- No changes to approved screen structure, navigation, controls, fonts, colors, or capsule styling. No generated UI interpretation was used.
+- Sequence model explicitly observes its Compose revision on the active screen, so saved step palettes and shared-palette toggle/readback immediately update without changing the editor's appearance.
+- v4 imported and newly saved sequence steps reject invalid palette IDs rather than rendering a clamped number while exporting bad data. `sequenceOptions.sharedPaletteId` uses the same integer 0–255 validation. Rejection leaves the existing local project unchanged.
+- Only genuine supplied fixed stop data can produce palette swatches. The parser rejects malformed/fractional RGB values instead of silently truncating them into different colors.
+- Added executable JVM coverage of palette-byte boundaries, plus Android source contract regressions for v4 import, Compose model revision and exact palette stop parsing. Verify latest-head CI separately.
+- Existing limitations remain: full actual effect animation parity requires CORE frames; only palette 0 for any supported effect and palettes 2–4 for Embers are accepted by the existing FX BLE command. No other palette selection may be claimed as physical LED playback.
+
+## BLE STOP ordering under rapid Android edits (October 29 continuation)
+
+- **Root cause:** Android's BLE command queue had one last-write-wins successor (`nextPacket`). A STOP queued during an in-flight command, snapshot read or output config could be silently replaced by a following effect edit before the STOP reached CORE.
+- **Minimal Android transport correction:** retain a queued STOP ahead of one latest subsequent FX edit (`afterStopPacket`). Send the STOP first after the active ATT transaction completes, then dispatch the latest coalesced edit; an additional STOP cancels that follow-up. Snapshot cancellation still drains the GATT transaction before STOP. Clear both queue slots on adapter off, reconnect and GATT disconnect.
+- **Regression guards:** Android live-edit source tests enforce STOP-first ordering, coalescing, cancellation, and connection reset. No change to native locked styling, palette picker, CORE protocol, effect renderer, or trigger arbitration.
+- **Acceptance limit:** source/CI checks cannot prove on-phone BLE timing or optical timing. The existing bounded FX TTL remains a safety net; physical bench validation is still needed.
+
+## Unsupported palette/effect preview preflight (October 29 continuation)
+
+- **Root cause:** selecting a palette unsupported by the installed CORE stopped the prior transient show, but a subsequent speed/color/effect gesture silently substituted palette 0 in the BLE packet via `corePreviewPalette()`. This misrepresented the selected UI palette and could restart a misleading physical demo.
+- **Fix:** every effect-edit gesture now validates that the connected CORE advertises the selected effect and that the selected palette is accepted **before** arming the existing transient BLE preview. An unsupported selection stays editable locally, cancels any armed show and never sends a substituted default packet.
+- The palette picker now calls the same common preview path as sliders and effect selection; duplicate palette-specific STOP handling was removed. The existing locked UI geometry, navigation, themes, controls, authenticated packet, brightness cap, TTL and trigger ownership were left intact.
+- Effect IDs reported by a prior CORE are discarded when BLE is disconnected/unauthorized; reconnecting cannot inherit stale capabilities from another controller.
+- Static architecture/live-edit regressions assert that the preflight runs before BLE arm, that STOP handles stale demos, and that capabilities are invalidated on disconnect. This is a source-level proof only; phone/BLE/physical-LED observation remains outstanding.
+
+## Existing CORE palette BLE support restored accurately (October 29 continuation)
+
+- Verified current firmware `core-firmware/main/ble_fx_command.c` and `palette_1d.c`: existing `showFx` 17-byte command **does** contain palette ID byte 15. CORE permits ID 0 for all supported effects; effect 32768 Embers additionally permits 2 (Color 1), 3 (Colors 1&2) and 4 (Color Gradient). Palette 1 and other custom IDs are not physically supported.
+- The native palette engine now exposes a single restricted compatibility check. When the user selects a CORE-supported palette, Android sends it through the already-existing authorized, bounded 5-second FX preview with 24/255 brightness cap. All other choices remain locally editable and do not issue an unsupported palette packet.
+- Switching to an unsupported palette explicitly stops any armed temporary hardware FX preview and invalidates the previous captured CORE frame, avoiding a false on-device match. Other FX gestures preserve their existing BLE behavior; unsupported palette/effect combinations now fail the shared preflight before BLE is armed and are never silently substituted with default palette 0.
+- Updated existing source regression checks and added executable Kotlin/JUnit cases for 0, 2–4, invalid IDs and non-Embers effects; no new controls, routes, styling, firmware or effects code.
+- **Not physically proven:** the guarded packet and tests establish source compatibility, not that a connected CORE bench emits optical output matching Android's local palette choice or continuous 1:1 rendering.
+
+## CORE logical-frame preview race regression (October 29 continuation)
+
+- **Root cause:** the native RGB888 frame listener could publish a previously requested capture after an effect/color/palette/layout edit, offline-preview switch, disconnection, hardware output readback or explicit STOP had cleared the prior frame. A stale frame could thus be displayed under a current-state label.
+- **Android-only fix:** `invalidateCoreFrame()` now advances a UI revision and disarms pending captures whenever the design or physical preview context changes. The listener requires the initiating revision, selected output, owner capability and non-offline mode to remain valid before it may publish the bytes.
+- BLE `captureFrame` now returns a truthful started/rejected result; a short callback-delivery barrier prevents starting the next request between transport completion and delivery of its prior UI callback. Failed/busy requests do not claim to be capturing.
+- Added source regression assertions for stale-callback rejection, output routing and the BLE handoff. Existing authenticated snapshot CRC/offset/sequence verification remains unchanged. **Still not a physical LED frame/optical parity test.** An Android APK CI success alone does not certify transport race timing on a device.
+- No CORE, trigger, WLED source, Web Studio styling or unrelated PR was changed.
+
+## Not yet accepted; do NOT label these complete
+
+- **Visual 1:1 UI:** Shared native capsule slider styling is implemented across editors, but exact icons, optical glow strength, spacing, scrolling, dialogs and white-mode appearance still require on-phone screenshot comparison with the locked reference. Static checks cannot certify visual identity.
+- **Trigger test UI:** Start/Stop now shows the selected trigger's **local color swatch**, not a full CORE-rendered effect animation or a physical trigger simulation. Full motion or hardware-backed trigger tests still require the CORE render protocol and bench evidence.
+- **Full CORE parity:** optional snapshot proves individual logical RGB frames only. Continuous 53–120 FPS playback mirroring, optical light output, WLED 1:1 golden frames for every mode, flare/spark/particle equivalence, and dual-output synchronization are not yet certified.
+- **Physical integration:** Android BLE owner enrollment/reconnect, supported effects, low-MTU multi-chunk RGB snapshots, STOP priority, Output 1/2 NVS readback, eight 12V input priorities, actual LED color order and measured FPS need actual device evidence.
+- **Broader product behavior:** hardware live pixel/zone geometry edits need a separate authorized volatile-preview protocol; automatic Startup/Shutdown ignition transitions and controller power-off are firmware projects, not completed by the Android UI.
+- **Data/UI acceptance:** import/export interchange against a real Studio v4 file, Android restart persistence, edge counts, TalkBack/touch targets, narrow-screen scrolling, and actual approved navigation/style screenshots are still release gates.
+
+## CI and merge policy
+
+Use the **latest head** of PR #21 for Kotlin/Gradle/Android unit tests, source contract checks, Web Studio regression and APK integrity. Older successful runs cannot certify later commits. Firmware PR #19 has its own build, host, snapshot and physical release gates. No automated check should claim optical/automotive safety or pixel-perfect UI rendering. **No merge or flash until the corresponding approval and physical acceptance.**
+
+
+## Cross-domain 20-area Android audit (October 29 source-level recheck)
+
+Scope: **Android code, UI data model, BLE client, QA only.** Read CORE FX/palette code for compatibility; no firmware, effects renderer, particles, or physical trigger-engine changes. The matrix distinguishes source/CI observations from device or optical acceptance. No screenshots were invented to represent the locked UI.
+
+| # | Area | Source-level findings / status | Remaining acceptance |
+|---|---|---|---|
+| 1 | Native Android architecture | Compose launcher is native Kotlin; no WebView in shipped UI; lifecycle owns BLE preview STOP | Memory profiling and device lifecycle rotation tests |
+| 2 | UI styling | Existing locked OLED/white theme, icons, capsules, soft sliders and no-new-layout rule preserved; no styling changed in this audit | Pixel-accurate real Android screenshots against the approved reference in both modes |
+| 3 | Navigation / UX | Six single-screen destinations in locked order; no bottom navigation; page scroll resets | Narrow-screen, rotation, TalkBack and touch accessibility on phone |
+| 4 | Palette integration | Native picker accepts IDs 0–255, project-supplied names/stops, sequence shared/per-step data. Only first five fallback names are built in; **entire source-authoritative palette catalog is not yet populated in Android**. CORE currently accepts direct 0 and Embers 2–4 only | Effect-team catalog/metadata contract; installed CORE hardware palette playback and dynamic palette verification |
+| 5 | Effects interface | Native effect names/IDs, search, colors/parameters; BLE FX sent only with authorized, advertised IDs and compatible palettes | Compare installed CORE effect capabilities with catalog; real effect-parameter readback |
+| 6 | LED preview | Indexed logical RGB888 snapshots with CRC and stale-callback rejection; no invented animation | Continuous-frame synchronization and physical light/optical 1:1 parity |
+| 7 | Sequence designer | Add/edit/reorder/duplicate/delete, duration, Shuffle/Repeat/shared and per-step palette persisted with rollback | Restart, import/export and full deployed sequence playback |
+| 8 | Presets | Snapshot excludes recursive preset embedding; restore preserves current preset list; failed remove no longer claims success | Phone storage-full/failure injection and visual reload |
+| 9 | Universal Layout | Generic zero-based layout, dependent offsets, pixel painting, Add next is now **one atomic insert/reindex**, and reindex exceptions restore committed state | Live hardware boundaries/pixel edits require firmware volatile-preview support |
+| 10 | Trigger UI | Multi-select, style and local test swatches; selected zone assignments now commit as one project transaction | CORE input/arbitration physical verification owned by triggers chat |
+| 11 | Auto Events | Native local Startup/Shutdown configuration and offline preview; edits participate in shared rollback | Real ignition/shutdown automation owned by firmware chat |
+| 12 | BLE communication | Scan, BOOT auth, capability discovery, GATT serialization, STOP-before-following-edit ordering; stale capability list cleared on disconnect | Physical BLE reconnect / low-MTU / STOP race test |
+| 13 | Live hardware editing | FX-only transient preview, 120ms coalescing, 24/255 bench cap, TTL 5s, STOP protection; no NVS writes on edit | Hardware latency/current and trigger-overlay behavior |
+| 14 | Hardware Output Manager | Two discovered outputs, universal role/zone draft, validated explicit Save to CORE with readback; no automatic output writes on drag | Physical output readback, address/color-order and actual device limits |
+| 15 | Project compatibility | Studio v1–v4 JSON support; valid palette bytes; generic last-committed snapshot rollback for failed writes; atomic multi-trigger and Add next operations | Round-trip real Web Studio exports and injected disk-failure tests |
+| 16 | State and lifecycle | Compose revision invalidation, deferred snapshot guards, offline mode suppresses BLE, STOP on background | On-phone rotation, process death, rapid connect/disconnect |
+| 17 | Diagnostics | BLE phase/status, verification errors and snapshot origin/sequence indicators present | Compare reported status to real packet traces and measured output |
+| 18 | Regression tests | Source/contract and Android JUnit checks cover current architecture, palette, selected BLE behavior and indexed frames | CI latest-head verification below; add device instrumentation |
+| 19 | Performance | Lazy effect list; bounded palette list/search; coalesced BLE updates; no benchmark claims | CPU, heap/GC, battery and 1,246/6,000-LED profile on target phone and controller |
+| 20 | Cross-component integration | CORE `ble_fx_command.c`/`palette_1d.c` read-only confirmed palette subset; trigger arbitration and rendering remain CORE-owned | Firmware/effects/trigger teams validate deployed protocol and 1:1 timing parity |
+
+### Additional persistence root causes corrected during this audit
+
+- A failed `SharedPreferences.commit()` formerly left in-place pixel/zone/trigger/Auto Events edits in the live JSON, despite an unsuccessful save. The project model now retains a last-committed snapshot and restores it on failed commit, including runtime storage exceptions.
+- A rejected zone edit could fail during `reindex()` **before** reaching `save()`. Add/edit/remove/move zone exceptions now restore the previous committed state.
+- Multi-selected trigger zone assignments formerly saved each trigger individually, allowing partial changes. They now validate all selected triggers and perform a single copy-on-write commit.
+- Add-next-zone formerly saved an appended zone then performed a second move/save. It now inserts the new zone in its desired position, reindexes and commits once.
+- Invalid project-name saves restore the last committed displayed value; removing a preset only refreshes on successful persistence.
+
+**Release verdict:** static/source contracts can pass; **visual 1:1 styling, full upstream palette names/rendering, device BLE timing, live physical zone editing, complete trigger/effect integration, and measured performance are not yet accepted.** Do not merge Android PR #21 solely on a green APK build.
+
+
+## Android completion push — executable persistence and palette fidelity (October 29)
+
+- Introduced a small package-private SharedPreferences constructor for deterministic Android model testing. Production construction still uses the existing Context and key; no UI or on-device storage schema change.
+- Added Android JVM tests using an actual `org.json` implementation and a controllable in-memory SharedPreferences editor. Tests inject `commit() == false` and verify **identical exported JSON** after rejected zone, pixel, name and multi-trigger operations; an out-of-range manual offset proves rollback when reindex rejects a layout **before** a disk write. Multi-select commits exactly once.
+- Added native palette metadata tests that assert source-provided fixed RGB stops (including fractional stop positions) match their input and that missing, dynamic or malformed palette metadata cannot produce invented color swatches. Project-supplied palette names override only their specified IDs.
+- Sent a read-only, cross-team handoff to effects/palette PR #23 asking for a pinned, versioned machine-readable palette catalog and effect support map. Its draft source port of fixed palettes 2–72 does **not** prove those IDs are accepted by the user's currently installed CORE; Android's BLE gate remains conservative until a deployed protocol/capability contract is verified.
+- **Outstanding:** latest-head Android CI, phone screenshot comparison, physical BLE and optical parity, and the effects team's metadata delivery. Neither unit tests nor draft palette code certify optical 1:1 playback.
+
+
+## Software-first team-contract integration — Android trigger mapping v1 (October 29)
+
+- **Owner sequencing:** Complete source integration, team contracts, unit tests and Android APK before scheduled physical testing. No BLE hardware, vehicle-input, optical or on-phone acceptance claimed now.
+- **Trigger team contract:** Cross-checked draft trigger PR #24 `docs/TRIGGER-BLE-CONTRACT-V1.md` and production characteristic UUID ending `af2c`. Added Android-only `NativeTriggerMappingCodec`: 15-byte authenticated READ (version, last write status, little-endian revision, debounced physical/effective masks, pending/persisted flag, eight function IDs), 11-byte revision-guarded WRITE (version, expected revision, eight logical roles 0–8). Duplicates and disabled allowed. No hard-coded GPIO values or vehicle zones.
+- **Transport:** Optional owner-authorized characteristic; older CORE firmware remains on the local designer. All mapping reads/writes share the existing single-operation GATT gates and queue. Writes are verified by a subsequent authoritative read: nonzero status, stale revision, mismatch, or `persisted=0` cannot be called active/successful. A staged NVS write is reported as *pending application* until inputs release; the user can refresh readback without guessing. Reject callback deliveries from disconnected/switched devices.
+- **Native trigger UI:** Existing locked Compose capsules and six-section navigation are unchanged. A mapping panel appears inside Triggers only when authenticated characteristic exists, requires an explicit read before editing, has eight logical function selectors, and requires a separate confirmed Save. Editing the draft never issues physical writes. Existing custom trigger styles/zone assignments remain independent and cannot change CORE arbitration.
+- **Regression:** Added byte-exact JUnit for 15/11 bytes, revision endian, duplicate IDs, AUX1–3, invalid packets/status and pending application; Android source checks assert owner gates, explicit Save/readback and stale-callback rejection. No trigger-engine, firmware, particles or effects source modified by this tab.
+- **Team coordination:** Android protocol handoff posted on trigger PR #24; effects palette metadata handoff remains on PR #23. Physical acceptance remains deferred until software integration is complete. No cross-domain merges.
+
+
+## Android-only regression follow-through — controller callback and project I/O (October 29)
+
+- **Root cause 1 — late Compose mapping delivery:** The BLE callback checked GATT ownership at read completion but posted the decoded mapping to the UI asynchronously. Disconnect or switching controllers between those steps could resurrect old device state. The UI handoff now rechecks the originating GATT connection, current owner authorization, and listener before publishing. Mapping reads also refuse to overtake a queued STOP.
+- **Root cause 2 — insufficiently tested save success:** A successful ATT write was never sufficient to prove the physical mapping applied. A pure `NativeTriggerMappingCodec.Snapshot.confirmsApplied()` contract now requires a zero status, exactly one expected unsigned revision increment, matching eight input functions, and an active/persisted flag. Executable JUnit covers success, rejection, stale revision, mapping mismatch, pending apply and 16-bit revision wraparound. CORE retains authority over actual input application.
+- **Root cause 3 — unbounded Android document reads and false export status:** `OpenDocument` previously loaded the entire provider stream before the model's size rejection. A bounded reader now enforces the same 2,000,000-character limit *as it reads*. `CreateDocument` now rejects a null output stream and only reports success after its writer closes. Tests cover exactly-at-limit, one character over, and provider read failures. File storage error handling remains local to Android; no Studio format change.
+- **Scope and acceptance:** Only Android Java/Kotlin and Android QA/test files were changed; approved capsule styling, white mode, the six navigation destinations, and effects/trigger/firmware engines were not changed. Full source/CI build evidence must be recorded at the latest head. All phone, physical BLE and optical tests are deferred per owner instruction until software/integration contract completion. The complete authoritative palette metadata remains dependent on the effects team's approved source contract, not invented locally.
+
+
+## Android GATT cross-controller ownership and optional map visibility (Oct 29 continuation)
+
+- **Root cause:** Android's callback dispatcher previously trusted asynchronous GATT callbacks without checking the current GATT session. An old controller could report a late disconnect, authorize a replaced connection, or emit stale FX capability bytes while the new controller was being initialized. The callback owner is now checked before modifying session state for connection changes, MTU, services, both API-level characteristic-read callbacks and writes. An obsolete session is closed without clearing the current one. `gatt` is now `volatile` to publish session ownership across Android's asynchronous callback threads.
+- **Deferred FX capability delivery:** capability results capture the GATT owner and are delivered to Compose only while that same connection remains current. Disconnected/unauthorized results fail closed rather than advertising old palette/effect capabilities.
+- **Native Triggers visibility:** the optional CORE IN1–IN8 mapping panel now observes the already-existing Compose BLE status state before checking characteristic/authorization capability. It appears or disappears on connection/authorization changes without added navigation, WebView or visual redesign.
+- **Regression gates:** Android source audits require the session checks across all callback overloads, cross-thread visibility, and the Compose subscription. Latest-head CI plus Android JUnit and debug APK compilation are required; no device pass is claimed.
+- **Cross-team palette contract:** effects PR #23 now supports source-pinned fixed palettes 2–72 only on selected effect IDs. The installed CORE v1 BLE effect-capability response does not declare effect-to-palette support, so Android continues to fail closed to its verified deployed subset (0 default; Embers 2–4). An optional versioned per-effect palette-capability readback was requested from CORE firmware PR #19; a source-pinned machine-readable display metadata asset is still requested from effects PR #23. Do not duplicate renderer code or assume draft work has been flashed.
+- **Ownership:** This audit modifies only Android and Android QA. No firmware/effects/trigger PRs are changed or merged, and physical testing remains deferred until the owner's software-completion milestone.
+
+
+## Strict universal-layout import validation (software-first continuation)
+
+- **Root cause:** Android's v4 import checked zone `start`, `length` and sequence `ms` using `JSONObject.optInt`. On some valid JSON numeric values, `optInt` truncates a decimal into an apparently accepted integer while the original fractional value remains in the project. This can make rendered zero-based pixel indexes disagree with exported JSON and sequence timing.
+- **Fix:** A small shared whole-number check rejects fractional, string-encoded, non-finite and out-of-range values in the three integer fields on import, while preserving all valid universal integer ranges and zero-based offsets. Validation happens before any document mutation or storage commit; no display-only clamping or forced reinterpretation.
+- **Regression:** Executable `NativeProjectCommitTest.importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers` verifies rejected starts, lengths and durations, unchanged exported project bytes, zero storage commits for rejection, and acceptance at the 1,000,000-pixel ceiling. Android source QA enforces the validator and test. This does not alter the approved UI, JSON version, BLE protocol, firmware, renderer, or trigger arbitration.
+- **Acceptance:** CI must pass on the exact final Android PR head. No physical/optical tests have been performed; those remain deferred pending the owner's software-first gate and other teams' authoritative palette/capability metadata.
+
+
+## Android profile import and Layout state consistency (software-first follow-up)
+
+- **Profile import root cause:** A v1–v4 design could supply a non-object entry in its `profiles` dictionary. The old `trigger(name)` read helper treated such an entry as missing, implicitly created a default, and attempted to save it, silently overwriting malformed imported state. Validation now rejects malformed profile entries before saving; truly *absent* built-in profiles are still supplied during legacy upgrades. Looking up an unknown profile is now read-only, never a hidden local storage write.
+- **Executable regression:** `NativeProjectCommitTest.malformedTriggerProfilesNeverOverwriteSavedDataOnRead` covers malformed array/string/null entries, byte-for-byte unchanged export, zero additional disk commits, read-only unknown lookup and legacy v3 built-in default migration.
+- **Compose state root cause:** The Layout project-name editor previously remembered its value forever, even after importing/replacing the design through Settings or loading a preset. It now observes the committed `revision.intValue` and reloads the actual project name. The zone Done and Remove buttons no longer dismiss their dialogs after unsuccessful model writes. Existing capsule geometry/styling is preserved.
+- **Gates:** Android unit/QA source contracts and latest-head APK CI required. No firmware/render/trigger engine changes, no physical testing. Effects-owned palette metadata and firmware per-effect BLE capabilities remain independent prerequisites for full integration.
+
+
+## Layout project-name editing lifecycle (software-only follow-up)
+
+- **Root cause:** An earlier fix keyed the Layout name text state to the global project edit revision so import/preset loading would refresh the field. Each character save increments that revision, but `NativeProject.name()` trims pending whitespace. Compose consequently reconstructed the editable field from the trimmed saved name and discarded spaces while the user was typing multiword names (for example, `My Car`).
+- **Minimal fix:** Added a dedicated `projectLoadRevision` observable that changes **only** after a successful full-project import or preset load. The Layout name field remembers against this document-replacement revision, not every ordinary edit revision. The existing local authoring model remains authoritative; a rejected import does not refresh UI or replace the design. Native styling and save-on-edit semantics stay locked.
+- **Regression:** Source contract now requires both successful project-replacement pathways and rejects the global-revision-keyed name field. Android source checks, existing model/storage JUnit tests, Studio compatibility and APK compilation remain required; on-device IME behavior is explicitly a later physical acceptance gate, not claimed from static tests.
+- **Ownership:** Only Android Compose and Android QA were touched. No effects/CORE/triggers code modified or merged. Physical testing remains deferred until software and cross-team contracts are complete.
+
+
+## Android document-replacement state and CORE output reply isolation (Oct 29 continuation)
+
+- **Layout editing root cause and fix:** The Layout name field was keyed to the global `revision` counter. Every keystroke made a local `SharedPreferences.commit()`, and the saved value trims trailing spaces; Compose reconstructed the editable field from that trimmed value, making multiword names hard/impossible to type. A separate `projectLoadRevision` now advances *only* after successful Settings import or preset restoration, so the name field stays editable between ordinary saved keystrokes and still refreshes when the document is genuinely replaced. A rejected import no longer increments global revision or implies a successful reload.
+- **Output Manager session safety:** `cfgNotify()` previously queued a GATT output result for Compose without checking which CORE connection produced it. A queued old-controller readback could repopulate the new controller's `outputs` map after disconnect. Output status/readback handoff now verifies current GATT ownership at UI delivery, matching the existing FX and trigger-map callback safety contracts.
+- **Deferred output-apply contract:** CORE trigger PR #24 documents NVS commit-first geometry changes that may remain staged while physical inputs are active. An authenticated v2 BLE write/readback mismatch is now described as *possible pending trigger release*, not as verified hardware activation. Android does not update active output state, retry NVS writes or assume applied geometry; user must reload after physical inputs release. The wire protocol and firmware remain outside this Android tab.
+- **Scope and testing:** Only Android Compose, GATT client, and Android QA source changed. No additional UI navigation, styling or renderer. Source contract checks now guard both state-key separation and GATT ownership/pending feedback. Exact-head JUnit and debug APK CI are required, and physical tests remain deferred.
+
+## Android GATT admission / STOP priority and truthful output-save start (October 29 continuation)
+
+- Android-only root cause: a STOP queued behind an ATT operation could be postponed by newly admitted output read/save, effect-capability reads, owner-authentication or RGB snapshot reads. New GATT admission now checks the existing queued packet before admitting another operation, leaving the established STOP-first queue and packet formats unchanged.
+- The Output Manager's save-admission result now includes the **initial** GATT write-start result. A synchronous permission denial or rejected GATT write is reported as rejected, not “verifying hardware readback.” Successful admission is still not a flash or active-output confirmation; matching readback remains mandatory.
+- Selecting another controller now resets previous FX-capability characteristic/busy state. Added Android source regression guards. No Compose design changes, firmware/trigger/effects edits, merges, flash or physical acceptance.
+
+- Follow-up: the FX command enqueue gate also treats a pre-existing deferred command as busy. Previously a new effect gesture could bypass a queued STOP in the asynchronous GATT handoff after the preceding operation completed but before its queue pump ran. The existing STOP-first queue now wins that interleaving; Android live-edit regression checks enforce it.

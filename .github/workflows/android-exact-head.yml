@@ -1,0 +1,74 @@
+name: Android exact-head software integration
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-exact-head.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: opentail-android-exact-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-exact-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact Android PR head (never synthetic merge)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert immutable source SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA" || { echo "Wrong Android source: $actual expected $EXPECTED_SHA"; exit 1; }
+          echo "Android exact source SHA: $actual"
+      - name: Checkout immutable CORE Firmware 49 protocol
+        uses: actions/checkout@v4
+        with:
+          ref: adcdff0b2f43061bc3e222d1d77de0a34b095c0a
+          path: pinned-core49
+      - name: Checkout independent Trigger 48 source gate
+        uses: actions/checkout@v4
+        with:
+          ref: e44a98fcaa51ecbf5e9c15bf85b8d129adb4e1a9
+          path: pinned-trigger48
+      - name: Checkout approved Effects 50 render contract
+        uses: actions/checkout@v4
+        with:
+          ref: 1767b144e193ed6978816899ebb5eba237ee6e2d
+          path: pinned-effects50
+      - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
+        run: python3 android/qa/check_pinned_core49_contract.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Native Compose, BLE v3 and UI contracts
+        run: |
+          node --check android/qa/test_native_source.cjs
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - name: Exact-SHA Android JUnit suite
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Exact-SHA debug APK compile
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Upload exact-head Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-android-exact-head-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14

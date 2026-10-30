@@ -1,5 +1,7 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
@@ -10,8 +12,14 @@ android {
         applicationId 'com.opentail.android'
         minSdk 26
         targetSdk 35
-        versionCode 30
-        versionName '0.1.30'
+        versionCode 31
+        versionName '0.2.0-alpha1'
+    }
+    buildFeatures {
+        compose true
+    }
+    kotlinOptions {
+        jvmTarget = '17'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -20,5 +28,17 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.webkit:webkit:1.13.0'
+    testImplementation 'junit:junit:4.13.2'
+    // Android's local unit-test org.json stubs cannot execute JSON document
+    // transactions. Use the real JSON implementation for persistence tests.
+    testImplementation 'org.json:json:20240303'
+    // Kotlin Compose UI, preserve existing Java BLE transport and v4 document model.
+    implementation platform('androidx.compose:compose-bom:2025.01.00')
+    implementation 'androidx.activity:activity-compose:1.9.3'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    // Never introduce an Android WebView implementation.
 }
