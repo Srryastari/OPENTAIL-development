@@ -1710,58 +1710,110 @@ static bool config_write_active(nvs_handle_t h,const void *data,size_t n){
 static bool config_clear_stage(nvs_handle_t h){
     esp_err_t e=nvs_erase_key(h,OT_CFG_JOURNAL_KEY_STAGED);
     if(e==ESP_OK)e=nvs_commit(h);
-    return e==ESP_OK;
+    if(e!=ESP_OK)return false;
+    /* Explicitly verify the NVS marker is no longer readable. */
+    size_t n=0;
+    return nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
 }
+/* The durable active record retains BOTH the prior and the desired profile.
+ * After stage erasure, a concurrent GPIO edge may veto RAM publication.
+ * A later promoter retries from active_v3; reboot does likewise. No edge
+ * can make the newer profile active merely because stage_v3 disappeared. */
 static void tm_promote(uint32_t epoch){
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_tm_journal_t stage={0};size_t n=sizeof(stage);
-    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
-                     n==sizeof(stage)&&ot_tm_journal_valid(&stage);
-    if(!valid){
+    ot_tm_journal_t stage={0};
+    esp_err_t read=tm_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool staged=read==ESP_OK;
+    if(read==ESP_ERR_NVS_NOT_FOUND)
+        read=tm_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
+    if(read!=ESP_OK){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("trigger journal invalid during promotion");return;
     }
+    bool matches=false;
+    portENTER_CRITICAL(&state_lock);
+    matches=tm_deferred.pending&&
+        tm_revision==stage.candidate_revision&&
+        tm_active_revision==stage.previous_revision&&
+        memcmp(&tm_profile,&stage.previous,sizeof(tm_profile))==0&&
+        memcmp(&tm_deferred.profile,&stage.candidate,sizeof(tm_deferred.profile))==0;
+    portEXIT_CRITICAL(&state_lock);
+    if(!matches){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("trigger staging revision mismatch");return;
+    }
     if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    const bool durable=config_write_active(h,&stage,sizeof(stage));
-    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(staged){
+        if(!config_write_active(h,&stage,sizeof(stage))||
+           !config_activation_idle(epoch)){nvs_close(h);return;}
+        /* CRITICAL ORDER: erase staged recovery marker BEFORE publishing
+         * to active RAM, never after; active_v3 itself keeps prior recovery. */
+        if(!config_clear_stage(h)){
+            nvs_close(h);config_recovery_fault=true;
+            ot_st_set_fault("trigger journal finalization failed");return;
+        }
+    }
+    /* GPIO can change during NVS erase; no RAM swap occurs unless the
+     * complete durable boundary and the original edge epoch remain quiet. */
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+       tm_gpio_input_mask()==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         applied=ot_tm_apply_if_released(&tm_profile,&tm_deferred,0u,0u);
+        if(applied)tm_active_revision=stage.candidate_revision;
+    }
     portEXIT_CRITICAL(&state_lock);
     if(applied)request_render_refresh();
-    if(applied&&!config_clear_stage(h)){
-        config_recovery_fault=true;
-        ot_st_set_fault("trigger journal finalization failed");
-    }
     nvs_close(h);
 }
 static void om_promote(uint32_t epoch){
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_om_journal_t stage={0};size_t n=sizeof(stage);
-    const bool valid=nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&stage,&n)==ESP_OK &&
-                     n==sizeof(stage)&&ot_om_journal_valid(&stage);
-    if(!valid){
+    ot_om_journal_t stage={0};
+    esp_err_t read=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
+    const bool staged=read==ESP_OK;
+    if(read==ESP_ERR_NVS_NOT_FOUND)
+        read=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
+    if(read!=ESP_OK){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("output journal invalid during promotion");return;
     }
+    bool matches=false;
+    portENTER_CRITICAL(&state_lock);
+    matches=om_deferred.pending&&
+        memcmp(om_revision,stage.candidate_revision,sizeof(om_revision))==0&&
+        memcmp(om_active_revision,stage.previous_revision,sizeof(om_active_revision))==0&&
+        memcmp(om_outputs,stage.previous,sizeof(om_outputs))==0&&
+        memcmp(om_deferred.outputs,stage.candidate,sizeof(om_deferred.outputs))==0;
+    portEXIT_CRITICAL(&state_lock);
+    if(!matches){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("output staging revision mismatch");return;
+    }
     if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    const bool durable=config_write_active(h,&stage,sizeof(stage));
-    if(!durable||!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(staged){
+        if(!config_write_active(h,&stage,sizeof(stage))||
+           !config_activation_idle(epoch)){nvs_close(h);return;}
+        if(!config_clear_stage(h)){
+            nvs_close(h);config_recovery_fault=true;
+            ot_st_set_fault("output journal finalization failed");return;
+        }
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch)
+       tm_gpio_input_mask()==0u &&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         applied=ot_om_apply_if_released(om_outputs,&om_deferred,0u,0u);
+        if(applied)memcpy(om_active_revision,stage.candidate_revision,
+                          sizeof(om_active_revision));
+    }
     portEXIT_CRITICAL(&state_lock);
     if(applied)request_render_refresh();
-    if(applied&&!config_clear_stage(h)){
-        config_recovery_fault=true;
-        ot_st_set_fault("output journal finalization failed");
-    }
     nvs_close(h);
 }
 static void config_activation_task(void *unused){
