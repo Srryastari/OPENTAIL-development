@@ -2282,6 +2282,11 @@ static int8_t fx_tristate8(uint8_t x,uint8_t pulse,uint8_t attack) {
 static void washing_frame(const ot_wled_fx_config_t *cfg,
                            ot_wled_fx_state_t *state,uint32_t now,
                            ot_wled_rgb_t *pixels,size_t count) {
+    /* Source mode_washing_machine() samples default Party palette ID 0,
+     * not an interpolation between the user foreground/background colors. */
+    ot_wled_palette16_t source_palette;
+    (void)ot_wled_palette_build(0u,cfg->foreground,cfg->background,
+                                (ot_wled_rgb_t){0u,0u,0u},&source_palette);
     const int speed=fx_tristate8((uint8_t)(now>>7),90u,15u);
     const int delta=(speed*2048)/(512-(int)cfg->speed);
     state->step+=(uint32_t)delta;
@@ -2289,8 +2294,8 @@ static void washing_frame(const ot_wled_fx_config_t *cfg,
         const uint32_t angle=(((uint32_t)cfg->intensity/25u+1u)*255u*
                               (uint32_t)i)/(uint32_t)count+(state->step>>7);
         const uint8_t color_index=wled_sin8((uint8_t)angle);
-        pixels[i]=scaled(blend_colors(cfg->background,cfg->foreground,
-                                       color_index),cfg->brightness);
+        pixels[i]=scaled(ot_wled_palette_sample(&source_palette,color_index,255u,
+                                      OT_WLED_PALETTE_LINEAR),cfg->brightness);
     }
 }
 /* Pinned mode_flow() 1D zigzag zones and rotating stripe indices.
