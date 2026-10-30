@@ -366,6 +366,15 @@ assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(con
        mtuFlow.includes('BLE service discovery could not start; reconnect CORE'),
        'MTU/service discovery failure must not silently strand the GATT session');
 
+// Android connectGatt can reject without a callback or exception. Never
+// leave the app in a phantom connecting state on a null GATT handle.
+const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device) {')[1]
+  ?.split('private final BluetoothGattCallback callback')[0];
+assert(connectBlock &&
+       connectBlock.includes('if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}') &&
+       connectBlock.includes('connecting=false;notifyStatus("BLE connection permission denied");'),
+       'Rejected GATT connection start must clear the connecting state');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
