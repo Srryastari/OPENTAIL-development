@@ -396,6 +396,8 @@ static const struct ble_gatt_svc_def services[]={
 };
 static int gap_event(struct ble_gap_event *ev,void *arg);
 static void advertise(void){
+    /* One active owner session at a time: never offer a second connection. */
+    if(active_conn!=BLE_HS_CONN_HANDLE_NONE)return;
     struct ble_hs_adv_fields fields={0};
     fields.flags=BLE_HS_ADV_F_DISC_GEN|BLE_HS_ADV_F_BREDR_UNSUP;
     const char *name=ble_svc_gap_device_name();
@@ -410,11 +412,23 @@ static void advertise(void){
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
     if(ev->type==BLE_GAP_EVENT_CONNECT){
-        if(ev->connect.status==0){active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);cfg_reset();frame_reply_reset();}
-        else advertise();
+        if(ev->connect.status==0){
+            if(active_conn!=BLE_HS_CONN_HANDLE_NONE){
+                /* A second central must not replace the authenticated owner. */
+                (void)ble_gap_terminate(ev->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM);
+                return 0;
+            }
+            active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
+            challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
+            cfg_reset();frame_reply_reset();
+        }else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
-        active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;challenge_ready=false;pair_failures=0;
-        ot_st_ble_connected(false);ot_ble_disconnect_show();cfg_reset();frame_reply_reset();advertise();
+        /* A rejected secondary connection can still deliver DISCONNECT. */
+        if(ev->disconnect.conn.conn_handle!=active_conn)return 0;
+        active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;
+        challenge_ready=false;pair_failures=0;
+        ot_st_ble_connected(false);ot_ble_disconnect_show();
+        cfg_reset();frame_reply_reset();advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     return 0;
 }
