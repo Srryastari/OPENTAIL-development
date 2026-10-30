@@ -75,6 +75,20 @@ assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&
 assert "else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);" in ble
 assert 'if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}' in ble
+# GAP callbacks must only clear the actual owner session. Disconnects
+# from a rejected secondary central may never stop an owner's lighting show.
+gap=ble.split("static int gap_event(struct ble_gap_event *ev,void *arg){",1)[1].split(
+    "static void on_sync(void)",1
+)[0]
+advertise=ble.split("static void advertise(void){",1)[1].split(
+    "static int gap_event(struct ble_gap_event *ev,void *arg){",1
+)[0]
+assert "if(active_conn!=BLE_HS_CONN_HANDLE_NONE)return;" in advertise
+assert "if(active_conn!=BLE_HS_CONN_HANDLE_NONE){" in gap
+assert "ble_gap_terminate(ev->connect.conn_handle,BLE_ERR_REM_USER_CONN_TERM)" in gap
+assert "if(ev->disconnect.conn.conn_handle!=active_conn)return 0;" in gap
+assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < gap.index("ot_ble_disconnect_show();")
+assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < gap.index("active_conn=BLE_HS_CONN_HANDLE_NONE;")
 assert "boot_frame_verified=true;" not in led, "A failed flash confirmation must retry"
 ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
 assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
