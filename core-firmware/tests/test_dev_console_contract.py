@@ -89,13 +89,14 @@ assert "const bool busy=om_deferred.pending || tm_deferred.pending || raw_active
 assert commit.index("tm_gpio_input_mask()") < commit.index("portENTER_CRITICAL(&state_lock)")
 assert commit.index("const bool busy=om_deferred.pending") < commit.index("tm_save(next)")
 assert "if(!tm_save(next))code=4" in commit
-assert commit.index("if(!tm_save(next))code=4") < commit.index("ot_tm_saved_apply(")
-assert "const uint8_t pins_after=tm_gpio_input_mask();" in commit
-assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," in commit
+assert commit.index("if(!tm_save(next))code=4") < commit.index("tm_deferred.profile=*next;")
+assert "tm_deferred.pending=true;" in commit
+assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in commit
 assert "xSemaphoreGive(om_write_mutex)" in commit
 sampler = core.split("static void input_sampler_task(void *arg){",1)[1].split("static void frame_wake_callback(",1)[0]
-assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in sampler
-assert "instantaneous,physical" in sampler
+assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
+assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
+assert "input_quiet_samples" in sampler
 # Editing output zone roles during a pre-debounce asserted 12V input can
 # change which pixels will respond to that trigger. Both output-save APIs
 # must use the same instantaneous-pin admission gate as trigger mappings.
@@ -109,14 +110,15 @@ for save_path in (output_http, output_ble):
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
     assert save_path.index("bool busy=om_deferred.pending") < save_path.index("om_save(")
-    assert save_path.index("om_save(") < save_path.index("ot_om_saved_apply(")
-    assert "const uint8_t pins_after=tm_gpio_input_mask();" in save_path
+    assert save_path.index("om_save(") < save_path.index("om_deferred.pending=true;")
+    assert "ot_om_saved_apply(" not in save_path
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
 get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
     "static esp_err_t tm_post(",1)[0]
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in get
-assert "ot_om_apply_if_released(om_outputs,&om_deferred," in sampler
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert 'cJSON_AddNumberToObject(root,"raw_input_mask",physical)' in get
 assert 'cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask())' in get
