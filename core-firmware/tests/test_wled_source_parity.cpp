@@ -562,6 +562,7 @@ static uint32_t source_color_add(uint32_t c1,uint32_t c2) {
 }
 struct PinnedSeg {
     uint8_t speed=0, intensity=0, palette=0;
+    uint16_t mode=0; /* pinned FX ID, used by Chase Random source */
     uint32_t step=0u,call=0u;
     uint16_t aux0=0u,aux1=0u;
     uint8_t cct=0u;
@@ -4277,6 +4278,100 @@ void mode_random_color(void) {
   SEGMENT.fill(color_blend(SEGMENT.color_wheel(SEGENV.aux1), SEGMENT.color_wheel(SEGENV.aux0), uint8_t(fade)));
 }
 
+/* Pinned upstream chase() and wrappers. Source branch tests rely on
+ * 1D segment.mode to distinguish its random-chase path. */
+#define FX_MODE_CHASE_RANDOM 29u
+void chase(uint32_t color1, uint32_t color2, uint32_t color3, bool do_palette) {
+  uint16_t counter = strip.now * ((SEGMENT.speed >> 2) + 1);
+  uint16_t a = (counter * SEGLEN) >> 16;
+
+  bool chase_random = (SEGMENT.mode == FX_MODE_CHASE_RANDOM);
+  if (chase_random) {
+    if (a < SEGENV.step) //we hit the start again, choose new color for Chase random
+    {
+      SEGENV.aux1 = SEGENV.aux0; //store previous random color
+      SEGENV.aux0 = get_random_wheel_index(SEGENV.aux0);
+    }
+    color1 = SEGMENT.color_wheel(SEGENV.aux0);
+  }
+  SEGENV.step = a;
+
+  // Use intensity setting to vary chase up to 1/2 string length
+  unsigned size = 1 + ((SEGMENT.intensity * SEGLEN) >> 10);
+
+  uint16_t b = a + size; //"trail" of chase, filled with color1
+  if (b > SEGLEN) b -= SEGLEN;
+  uint16_t c = b + size;
+  if (c > SEGLEN) c -= SEGLEN;
+
+  //background
+  if (do_palette)
+  {
+    for (unsigned i = 0; i < SEGLEN; i++) {
+      SEGMENT.setPixelColor(i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 1));
+    }
+  } else SEGMENT.fill(color1);
+
+  //if random, fill old background between a and end
+  if (chase_random)
+  {
+    color1 = SEGMENT.color_wheel(SEGENV.aux1);
+    for (unsigned i = a; i < SEGLEN; i++)
+      SEGMENT.setPixelColor(i, color1);
+  }
+
+  //fill between points a and b with color2
+  if (a < b)
+  {
+    for (unsigned i = a; i < b; i++)
+      SEGMENT.setPixelColor(i, color2);
+  } else {
+    for (unsigned i = a; i < SEGLEN; i++) //fill until end
+      SEGMENT.setPixelColor(i, color2);
+    for (unsigned i = 0; i < b; i++) //fill from start until b
+      SEGMENT.setPixelColor(i, color2);
+  }
+
+  //fill between points b and c with color2
+  if (b < c)
+  {
+    for (unsigned i = b; i < c; i++)
+      SEGMENT.setPixelColor(i, color3);
+  } else {
+    for (unsigned i = b; i < SEGLEN; i++) //fill until end
+      SEGMENT.setPixelColor(i, color3);
+    for (unsigned i = 0; i < c; i++) //fill from start until c
+      SEGMENT.setPixelColor(i, color3);
+  }
+}
+
+void mode_chase_color(void) {
+  chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), true);
+}
+
+void mode_chase_random(void) {
+  chase(SEGCOLOR(1), (SEGCOLOR(2)) ? SEGCOLOR(2) : SEGCOLOR(0), SEGCOLOR(0), false);
+}
+
+void mode_chase_rainbow(void) {
+  unsigned color_sep = 256 / SEGLEN;
+  if (color_sep == 0) color_sep = 1;                                           // correction for segments longer than 256 LEDs
+  unsigned color_index = SEGENV.call & 0xFF;
+  uint32_t color = SEGMENT.color_wheel(((SEGENV.step * color_sep) + color_index) & 0xFF);
+
+  chase(color, SEGCOLOR(0), SEGCOLOR(1), false);
+}
+
+void mode_chase_rainbow_white(void) {
+  uint16_t n = SEGENV.step;
+  uint16_t m = (SEGENV.step + 1) % SEGLEN;
+  uint32_t color2 = SEGMENT.color_wheel(((n * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
+  uint32_t color3 = SEGMENT.color_wheel(((m * 256 / SEGLEN) + (SEGENV.call & 0xFF)) & 0xFF);
+
+  chase(SEGCOLOR(0), color2, color3, false);
+}
+#undef FX_MODE_CHASE_RANDOM
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4369,7 +4464,10 @@ static const RefCase refs[]={
     {6,mode_color_sweep,"Sweep"},
     {4,mode_color_wipe_random,"Wipe Random"},
     {36,mode_color_sweep_random,"Sweep Random"},
-    {5,mode_random_color,"Random Colors"}
+    {5,mode_random_color,"Random Colors"},
+    {28,mode_chase_color,"Chase"},
+    {30,mode_chase_rainbow,"Chase Rainbow"},
+    {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
 static uint32_t pack(ot_wled_rgb_t x) {
     return ((uint32_t)x.r<<16)|((uint32_t)x.g<<8)|x.b;
@@ -4491,7 +4589,7 @@ int main() {
                     PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
-                    seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;
+                    seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
                     seg.colors[0]=0x007B3809u; // configured primary 123,56,9
                     seg.colors[1]=0x000358AEu; // secondary 3,88,174
                     seg.colors[2]=0u;         // missing CORE tertiary stays black
