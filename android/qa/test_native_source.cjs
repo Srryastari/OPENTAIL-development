@@ -677,6 +677,21 @@ assert(compose.includes('Preview unavailable') && compose.includes('shared optio
        compose.includes('Other palette choices stay local'),
        'Palette UI must label unknown previews, restoration and BLE limitations');
 
+// Firmware #49 durable uint16 revisions are monotonic and reject wrap.
+// A no-op upload may legitimately retain the base revision. A changed save
+// can only advance exactly once, and the active output bytes must still match.
+assert(bleSource.includes('if(cfgKnownRevision[index]>=65535)') &&
+       bleSource.includes('cfgSaveBase=cfgRevision;') &&
+       bleSource.includes('cfgRevision<cfgSaveBase || cfgRevision>cfgSaveBase+1') &&
+       bleSource.includes('CORE active output already matched; no new revision committed') &&
+       bleSource.includes('CORE active output differs; may be pending trigger release'),
+       'CORE #49 output readback must distinguish no-op, staged and new active revisions');
+assert(bleSource.includes('if(expectedRevision>=65535)') &&
+       bleSource.includes('CORE trigger revision exhausted; cannot save or wrap') &&
+       compose.includes('snapshot.revision in 1..65534') &&
+       compose.includes('snapshot.persisted && snapshot.status == 0'),
+       'CORE #49 trigger saves must require active profile and non-exhausted revision');
+
 // CORE #38, exact pinned contract: f9614060b892f474e97501dc46a41e6242f60ec3
 // Transport and UI are optional/authenticated. A v3 palette transfer never
 // implies the selected FX supports it or that any optical LED pixel matched.
