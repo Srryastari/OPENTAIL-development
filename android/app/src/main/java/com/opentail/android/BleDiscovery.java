@@ -226,8 +226,13 @@ final class BleDiscovery {
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
-        try {if(!gatt.readCharacteristic(fxCaps)){fxCapsBusy=false;fxNotify("[]");}}
-        catch(SecurityException ex){fxCapsBusy=false;fxNotify("[]");}
+        try {
+            if(!gatt.readCharacteristic(fxCaps)){
+                fxCapsBusy=false;fxNotify("[]");pumpQueue();
+            }
+        } catch(SecurityException ex){
+            fxCapsBusy=false;fxNotify("[]");pumpQueue();
+        }
     }
     private void fxNotify(String json){
         // A capability reply may already be posted when disconnect or a
