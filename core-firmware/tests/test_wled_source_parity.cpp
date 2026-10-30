@@ -3872,16 +3872,6 @@ int main() {
                         }
                         for(size_t i=0;i<count;i++) {
                             if(pack(actual[i])!=(seg.pixels[i]&0xffffffu)) {
-                                if(fx.id==107u) {
-                                    std::fprintf(stderr,"Noise Pal diagnostic: ref RNG=%08X core RNG=%08X ref time=%u core time=%u refaux=%u coreaux=%u\\n",
-                                        ref_rng_state,state.rng_state,env.step,state.step,env.aux0,state.aux0);
-                                    for(unsigned q=0;q<96u;q++){
-                                        const unsigned source_byte=q<env.allocation.size()?env.allocation[q]:255u;
-                                        const unsigned core_byte=q<state.scratch_bytes?state.scratch[q]:255u;
-                                        if(source_byte!=core_byte)
-                                            std::fprintf(stderr," palette byte %u ref=%u core=%u\\n",q,source_byte,core_byte);
-                                    }
-                                }
                                 std::fprintf(stderr,
                                   "WLED 1:1 mismatch id=%u %s pal=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
                                   fx.id,fx.name,(unsigned)pal,count,speed,intensity,t,i,
