@@ -1522,7 +1522,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {
                     foundDevices.clear()
-                    ble.scanHeadless()
+                    ble.connectFromApp(prefs.getString("preferred_ble_address", null))
                 }
                 Pill("Preview Offline", t) {
                     enterOfflinePreview()
