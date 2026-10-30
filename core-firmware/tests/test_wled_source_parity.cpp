@@ -4793,7 +4793,12 @@ int main() {
                     std::vector<ot_wled_rgb_t> actual(count);
                     /* Tetrix needs post-initial-fade frames to exercise falling
                      * bricks; the six baseline frame instants miss that path. */
-                    const std::vector<uint32_t> frames=fx.id==35u ?
+                    const std::vector<uint32_t> frames=fx.id==29u ?
+                        /* Force Chase Random across the 16-bit phase wrap,
+                         * including transition at t=65536 for speed=0. */
+                        std::vector<uint32_t>{0u,17u,171u,389u,1500u,65530u,
+                                               65535u,65536u,65550u,70000u,131080u} :
+                        fx.id==35u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,5200u,10400u,25000u,60000u} :
                         fx.id==107u ?
                         std::vector<uint32_t>{0u,17u,171u,389u,1500u,4999u,5000u,10000u,20000u,65530u} :
