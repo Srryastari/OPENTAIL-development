@@ -284,6 +284,40 @@ for begin,end,persist in (
     assert op.index("if(!input_sampler_ready)") < op.index(persist)
     assert "tm_gpio_input_mask()" in op
 
+# 10: Combined CORE/effects/palette candidate retains physical trigger
+# ownership of the final logical pixel. This is source ordering evidence,
+# not measured LED output parity; standalone trigger #24 has no FX compositor.
+assert "ot_palette_runtime_snapshot(" in renderer
+assert "ot_fx_overlay_apply(" in renderer
+assert "ot_effects_1d_render(" in renderer
+assert (renderer.index("ot_palette_runtime_snapshot(") <
+        renderer.index("ot_effects_1d_render(") <
+        renderer.index("ot_fx_overlay_apply(") <
+        renderer.index("ot_om_trigger_overlay(role,combined,") <
+        renderer.index("ot_frame_snapshot_pixel(") <
+        renderer.index("ot_om_swizzle(c,output->color_order)") <
+        renderer.index("led_strip_set_pixel("))
+assert "slot->overlay.style" in renderer
+assert "ot_arbitrate(combined," in renderer
+assert "native_rendering=decision.show_requested;" in renderer
+assert "if(!trigger_here){" in renderer
+assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
+assert "if(trigger_here)c=ot_om_calibrate(" not in renderer
+# Palette mutation must share the existing physical-input save veto,
+# and unauthorized sessions cannot retain a partial palette transfer.
+mutation=between(core,"bool ot_ble_palette_mutation_begin(void){",
+                 "bool ot_ble_palette_in_use(")
+for guard in ("input_sampler_ready", "om_write_mutex", "tm_gpio_input_mask()!=0",
+              "om_deferred.pending", "tm_deferred.pending", "live_input_mask!=0"):
+    assert guard in mutation, guard
+assert "ot_palette_ble_session_reset();" in revoke
+assert gap.count("ot_palette_ble_session_reset();")==2
+assert "ot_palette_ble_session_reset();" in ble
+# Trigger BLE ABI stays v1 and remains owner-guarded during palette v3 work.
+assert 'OT_TM_BLE_READ_BYTES' in gatt
+assert 'OT_TM_BLE_WRITE_BYTES' in gatt
+assert '.uuid=&ot_trigger_uuid.u,.access_cb=trigger_access' in ble
+
 # 10–11: hardware proof remains explicitly required, not encoded as a host PASS.
 assert "OT_INPUT_ACTIVE_LOW 1" in board  # provisional bench assumption
 assert "BENCH ONLY" in core or "BENCH ONLY" in board
