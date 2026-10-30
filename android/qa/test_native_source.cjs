@@ -110,7 +110,7 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('3 -> { // Triggers: lightning') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
-assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
+assert(bleSource.includes('frameCapture.cancel();palette.reset();cancelBenchSession(); // GATT close may never produce a disconnect callback') &&
        (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
