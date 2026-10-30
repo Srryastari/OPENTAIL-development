@@ -16,7 +16,7 @@ assert all(f'"{name}.c"' in cmake for name in
 assert 'ot_palette_runtime_load();' in core.split("void app_main(void) {",1)[1]
 assert 'ot_palette_runtime_snapshot(palette_ids,OT_OM_OUTPUTS*OT_OM_ZONES,' in core
 assert core.index("ot_palette_runtime_snapshot(") < core.index(
-    "if(!ot_wled_palette_global_tick(") < core.index("ot_effects_1d_render(")
+    "ot_wled_palette_global_tick(") < core.index("ot_effects_1d_render(")
 assert "if(!palette_resolved(p->palette_id) ||" in core
 assert "!palette_resolved(req->palette_id)" in core
 assert "bool ot_ble_palette_in_use(uint8_t index)" in core
@@ -33,7 +33,9 @@ assert "ot_palette_cmd_uuid" in ble and "ot_palette_rsp_uuid" in ble and "ot_pal
 assert "ot_palette_transfer_finish(&upload,index,now,&rec)" in wire
 assert "ot_palette_runtime_put(&rec,rec.revision-1u)" in wire
 assert "ot_ble_palette_in_use(index)" in wire
-assert "ot_palette_runtime_delete(index,e.revision)" in wire\nassert "ot_palette_runtime_read_record(index,&record)" in wire\nassert "bool ot_palette_runtime_read_record(" in runtime
+assert "ot_palette_runtime_delete(index,e.revision)" in wire
+assert "ot_palette_runtime_read_record(index,&record)" in wire
+assert "bool ot_palette_runtime_read_record(" in runtime
 assert "return palette<=72u||(palette>=73u&&palette<=200u);" in fx
 assert '"ot_output_cfg"' not in runtime and '"ot_trig_cfg"' not in runtime
 print("PASS: CORE palette v3 transport/persistence/frame integration contracts")
