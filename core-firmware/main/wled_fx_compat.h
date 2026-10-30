@@ -162,6 +162,20 @@ bool ot_wled_palette_from_hsv4(const uint8_t hsv[12],
 bool ot_wled_palette_from_gradient_stops(const uint8_t *stops,
                                           size_t stop_count,
                                           ot_wled_palette16_t *out);
+/* Explicit source palette-ID lookup; arrays are caller-owned and ordered as
+ * WLED custom palette 200,199,... and usermod 255,254,... respectively.
+ * Built-ins 0,2-72 reuse verified fixed palettes; 1 reads the live shared
+ * random palette. Unprovided dynamic/custom IDs fail closed rather than
+ * fabricating fallback colors. No persistent or wire-format changes. */
+bool ot_wled_palette_resolve(uint8_t id,
+                              ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
+                              ot_wled_rgb_t tertiary,
+                              const ot_wled_palette_random_t *random_state,
+                              const ot_wled_palette16_t *custom,
+                              size_t custom_count,
+                              const ot_wled_palette16_t *usermod,
+                              size_t usermod_count,
+                              ot_wled_palette16_t *out);
 ot_wled_rgb_t ot_wled_palette_sample(const ot_wled_palette16_t *palette,
                                     uint8_t index, uint8_t brightness,
                                     ot_wled_palette_blend_t blend);
