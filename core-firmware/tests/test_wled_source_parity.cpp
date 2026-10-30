@@ -4467,6 +4467,50 @@ void mode_flow(void)
   }
 }
 
+void mode_sunrise() {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  //speed 0 - static sun
+  //speed 1 - 60: sunrise time in minutes
+  //speed 60 - 120 : sunset time in minutes - 60;
+  //speed above: "breathing" rise and set
+  if (SEGENV.call == 0 || SEGMENT.speed != SEGENV.aux0) {
+    SEGENV.step = millis(); //save starting time, millis() because strip.now can change from sync
+    SEGENV.aux0 = SEGMENT.speed;
+  }
+
+  SEGMENT.fill(BLACK);
+  unsigned stage = 0xFFFF;
+
+  uint32_t s10SinceStart = (millis() - SEGENV.step) /100; //tenths of seconds
+
+  if (SEGMENT.speed > 120) { //quick sunrise and sunset
+    unsigned counter = (strip.now >> 1) * (((SEGMENT.speed -120) >> 1) +1);
+    stage = triwave16(counter);
+  } else if (SEGMENT.speed) { //sunrise
+    unsigned durMins = SEGMENT.speed;
+    if (durMins > 60) durMins -= 60;
+    uint32_t s10Target = durMins * 600;
+    if (s10SinceStart > s10Target) s10SinceStart = s10Target;
+    stage = map(s10SinceStart, 0, s10Target, 0, 0xFFFF);
+    if (SEGMENT.speed > 60) stage = 0xFFFF - stage; //sunset
+  }
+
+  for (unsigned i = 0; i <= SEGLEN/2; i++)
+  {
+    //default palette is Fire    
+    unsigned wave = triwave16((i * stage) / SEGLEN);
+    wave = (wave >> 8) + ((wave * SEGMENT.intensity) >> 15);
+    uint32_t c;
+    if (wave > 240) { //clipped, full white sun
+      c = SEGMENT.color_from_palette( 240, false, true, 255);
+    } else { //transition
+      c = SEGMENT.color_from_palette(wave, false, true, 255);
+    }
+    SEGMENT.setPixelColor(i, c);
+    SEGMENT.setPixelColor(SEGLEN - i - 1, c);
+  }
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4566,6 +4610,7 @@ static const RefCase refs[]={
     {93,mode_sinelon_dual,"Sinelon Dual"},
     {94,mode_sinelon_rainbow,"Sinelon Rainbow"},
     {110,mode_flow,"Flow"},
+    {104,mode_sunrise,"Sunrise"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
 };
@@ -4686,7 +4731,7 @@ int main() {
                 for(unsigned intensity:{0u,64u,128u,200u,255u}) {
                     const std::vector<uint8_t> palette_ids=(fx.id==218u || fx.id==179u || fx.id==87u || fx.id==115u || fx.id==65u || fx.id==80u || fx.id==81u || fx.id==38u || fx.id==74u || fx.id==219u || fx.id==112u || fx.id==66u || fx.id==101u || fx.id==90u || fx.id==185u || fx.id==107u)?std::vector<uint8_t>{0u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u,13u,31u,45u,61u,72u}:std::vector<uint8_t>{0u};
                     for(uint8_t pal:palette_ids) {
-                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
+                    PinnedSeg seg(count);seg.palette=((fx.id==179u || fx.id==87u)&&pal==0u)?11u:(fx.id==65u&&pal==0u)?12u:(fx.id==38u&&pal==0u)?50u:(fx.id==219u&&pal==0u)?2u:(fx.id==66u&&pal==0u)?35u:(fx.id==104u&&pal==0u)?35u:(fx.id==78u&&pal==0u)?3u:pal;
                     if(fx.id==65u){seg.custom1=0u;seg.check1=true;seg.check3=true;}
                     PinnedEnv env;
                     seg.speed=(uint8_t)speed;seg.intensity=(uint8_t)intensity;seg.mode=fx.id;
