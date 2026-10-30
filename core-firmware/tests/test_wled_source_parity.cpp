@@ -4711,6 +4711,74 @@ void mode_dissolve_random(void) {
   dissolve(SEGMENT.color_wheel(hw_random8()));
 }
 
+void mode_larson_scanner(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+
+  const unsigned speed  = FRAMETIME * map(SEGMENT.speed, 0, 255, 96, 2); // map into useful range
+  const unsigned pixels = SEGLEN / speed; // how many pixels to advance per frame
+
+  SEGMENT.fade_out(255-SEGMENT.intensity);
+
+  if (SEGENV.step > strip.now) return;  // we have a pause
+
+  unsigned index = SEGENV.aux1 + pixels;
+  // are we slow enough to use frames per pixel?
+  if (pixels == 0) {
+    const unsigned frames = speed / SEGLEN; // how many frames per 1 pixel
+    if (SEGENV.step++ < frames) return;
+    SEGENV.step = 0;
+    index++;
+  }
+
+  if (index > SEGLEN) {
+
+    SEGENV.aux0 = !SEGENV.aux0; // change direction
+    SEGENV.aux1 = 0;            // reset position
+    // set delay
+    if (SEGENV.aux0 || SEGMENT.check2) SEGENV.step = strip.now + SEGMENT.custom1 * 25; // multiply by 25ms
+    else SEGENV.step = 0;
+
+  } else {
+
+    // paint as many pixels as needed
+    for (unsigned i = SEGENV.aux1; i < index; i++) {
+      unsigned j = (SEGENV.aux0) ? i : SEGLEN - 1 - i;
+      uint32_t c = SEGMENT.color_from_palette(j, true, PALETTE_SOLID_WRAP, 0);
+      SEGMENT.setPixelColor(j, c);
+      if (SEGMENT.check1) {
+        SEGMENT.setPixelColor(SEGLEN - 1 - j, SEGCOLOR(2) ? SEGCOLOR(2) : c);
+      }
+    }
+    SEGENV.aux1 = index;
+  }
+}
+
+void mode_dual_larson_scanner(void){
+  SEGMENT.check1 = true;
+  mode_larson_scanner();
+}
+
+void mode_comet(void) {
+  if (SEGLEN <= 1) FX_FALLBACK_STATIC;
+  unsigned counter = (strip.now * ((SEGMENT.speed >>2) +1)) & 0xFFFF;
+  unsigned index = (counter * SEGLEN) >> 16;
+  if (SEGENV.call == 0) SEGENV.aux0 = index;
+
+  SEGMENT.fade_out(SEGMENT.intensity);
+
+  SEGMENT.setPixelColor( index, SEGMENT.color_from_palette(index, true, PALETTE_SOLID_WRAP, 0));
+  if (index > SEGENV.aux0) {
+    for (unsigned i = SEGENV.aux0; i < index ; i++) {
+       SEGMENT.setPixelColor( i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    }
+  } else if (index < SEGENV.aux0 && index < 10) {
+    for (unsigned i = 0; i < index ; i++) {
+       SEGMENT.setPixelColor( i, SEGMENT.color_from_palette(i, true, PALETTE_SOLID_WRAP, 0));
+    }
+  }
+  SEGENV.aux0 = index++;
+}
+
 // END UPSTREAM FX.cpp functions.
 #undef SEGMENT
 #undef SEGENV
@@ -4816,6 +4884,9 @@ static const RefCase refs[]={
     {113,mode_washing_machine,"Washing Machine"},
     {54,mode_tricolor_chase,"Chase 3"},
     {31,mode_chase_flash,"Chase Flash"},
+    {40,mode_larson_scanner,"Scanner"},
+    {60,mode_dual_larson_scanner,"Scanner Dual"},
+    {41,mode_comet,"Lighthouse"},
     {32,mode_chase_flash_random,"Chase Flash Rnd"},
     {30,mode_chase_rainbow,"Chase Rainbow"},
     {33,mode_chase_rainbow_white,"Rainbow Runner"}
