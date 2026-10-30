@@ -17,12 +17,12 @@ assert(zoneBlock && triggerBlock && effectBlock && hardwareBlock);
 
 for(const required of [
   'project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished = { applyLiveZone() }',
-  'project.editZone(id, label, n, reverse)',
-  'project.setPixelColor(id, activePixel, hex)',
-  'project.clearPixelColor(id, activePixel)',
+  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'project.editZone(id,label,n,reverse)',
+  'project.setPixelColor(id,activePixel,hex)',
+  'project.clearPixelColor(id,activePixel)',
   'PaletteEditor("Pixel " + activePixel',
-  'name = it', 'project.name(it)', 'confirmButton = { Pill("Done"',
+  'name = it', 'project.name(it)', 'Pill("Done",t,true)',
 ]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
 assert(compose.includes('selectedEffect.intValue = effectId') &&
        compose.includes('val effect = selectedEffect.intValue'),
@@ -33,7 +33,7 @@ assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx
 for(const required of [
   'fun applyTriggerStyle(): Boolean','applyTriggerStyle()','project.assignMany(',
   'project.styleTriggers(selections, chosenFx, chosenColor)',
-  'if (applyTriggerStyle()) editing = false', 'confirmButton = { Pill("Done"',
+  'if (applyTriggerStyle()) editing = false', 'Pill("Done",t,true)',
 ]) assert(triggerBlock.includes(required), 'Live trigger regression: '+required);
 assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
