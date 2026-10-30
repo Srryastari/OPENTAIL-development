@@ -1294,11 +1294,10 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun TriggersPage(t: Tone) {
-        Title("Triggers", t)
-        Caption("Universal offline trigger assignments. Physical inputs and arbitration are authoritative in CORE.", t)
         var selections by remember { mutableStateOf(setOf<String>()) }
         var testing by remember { mutableStateOf(setOf<String>()) }
         var editing by remember { mutableStateOf(false) }
+        var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
         var searchFx by remember { mutableStateOf("") }
         var chosenFx by remember { mutableStateOf("Solid") }
@@ -1309,67 +1308,84 @@ class ComposeMainActivity : ComponentActivity() {
         val keys = (0 until (names?.length() ?: 0))
             .mapNotNull { names?.optString(it) }
             .filterNot { it == "Startup" || it == "Shutdown" || it == "Show" }
-        Panel(t) {
-            Caption("Multiple triggers can be selected and edited together. Nothing on this page sends BLE commands.", t)
-            if (triggerMessage.isNotEmpty()) Caption(triggerMessage, t)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(newTrigger, "Custom trigger name", t) { newTrigger = it.take(32) }
+            .sortedWith(compareBy({ name ->
+                val order = listOf("Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse")
+                val index = order.indexOf(name)
+                if (index >= 0) index else 100
+            }, { it }))
+        // Match the user-approved Studio Triggers grid. The test buttons
+        // affect only local authoring; CORE physical arbitration is untouched.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Title("Triggers", t)
+                Caption("Tap cards to select one or more for editing", t)
             }
-            Pill("+ Add trigger", t) {
-                if (project.customTrigger(newTrigger)) {
-                    selections = setOf(newTrigger)
-                    newTrigger = ""
-                    refresh()
-                }
-            }
-            Pill("Edit selected · " + selections.size, t, selections.isNotEmpty()) {
-                if (selections.isNotEmpty()) {
-                    val p = project.trigger(selections.first())
-                    chosenFx = p.optString("pattern", "Solid")
-                    chosenColor = p.optString("color", "#ff0000")
-                    searchFx = ""
-                    editing = true
-                }
-            }
+            Pill("+ Add", t) { adding = true }
         }
-        keys.forEach { name ->
-            val profile = project.trigger(name)
-            val selected = name in selections
-            val active = name in testing
-            Panel(t) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, modifier = Modifier.weight(1f),
-                        color = t.fg, fontWeight = FontWeight.SemiBold)
-                    Pill(if (selected) "Selected ✓" else "Select", t, selected) {
-                        selections = if (selected) selections - name else selections + name
-                    }
-                }
-                Caption("Effect: " + profile.optString("pattern", "Solid") +
-                    " · zones: " + (profile.optJSONArray("zones")?.length() ?: 0), t)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill(if (active) "Stop" else "Start", t, active) {
-                        testing = if (active) testing - name else testing + name
-                    }
-                    if (profile.optString("kind") == "trigger-custom")
-                        Pill("Remove", t) {
-                            if (project.deleteTrigger(name)) {
-                                selections = selections - name
-                                testing = testing - name
-                                refresh()
-                            }
+        if (triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
+        keys.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                pair.forEach { name ->
+                    val profile=project.trigger(name)
+                    val selected=name in selections
+                    val active=name in testing
+                    Row(Modifier.weight(1f).heightIn(min=62.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if(selected) t.raised else t.surface)
+                        .border(1.dp,if(selected) t.muted.copy(alpha=0.5f)
+                            else t.muted.copy(alpha=0.10f),RoundedCornerShape(16.dp))
+                        .clickable { selections=if(selected) selections-name else selections+name }
+                        .padding(horizontal=9.dp,vertical=10.dp),
+                        verticalAlignment=Alignment.CenterVertically,
+                        horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text(if(selected) "◉" else "○",color=t.fg,fontSize=13.sp)
+                        Text(name,Modifier.weight(1f),color=t.fg,
+                            fontSize=12.sp,fontWeight=FontWeight.SemiBold,maxLines=1)
+                        Box(Modifier.clip(RoundedCornerShape(99.dp))
+                            .background(t.raised)
+                            .clickable { testing=if(active) testing-name else testing+name }
+                            .padding(horizontal=9.dp,vertical=9.dp)) {
+                            Text(if(active) "■ Stop" else "▷ Test",
+                                color=t.fg,fontSize=11.sp,maxLines=1)
                         }
+                    }
                 }
-                if (active) {
-                    val previewColor = runCatching {
-                        Color(android.graphics.Color.parseColor(profile.optString("color", "#ff0000")))
-                    }.getOrDefault(t.accent)
-                    Box(Modifier.fillMaxWidth().height(24.dp).clip(RoundedCornerShape(99.dp))
-                        .background(previewColor))
-                    Caption("Local trigger color swatch only. No simulated effect or physical CORE output.", t)
-                }
+                if(pair.size==1) Spacer(Modifier.weight(1f))
             }
         }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Caption(selections.size.toString()+" selected for editing",t)
+            Spacer(Modifier.weight(1f))
+            Pill("All",t) { selections=keys.toSet() }
+            Pill("Clear",t) { selections=emptySet() }
+        }
+        Pill("Edit "+selections.size+" selected Triggers",t,selections.isNotEmpty()) {
+            if(selections.isNotEmpty()){
+                val p=project.trigger(selections.first())
+                chosenFx=p.optString("pattern","Solid")
+                chosenColor=p.optString("color","#ff0000")
+                searchFx=""
+                editing=true
+            }
+        }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text("Trigger testing · "+testing.size+" active",Modifier.weight(1f),
+                color=t.fg,fontSize=13.sp,fontWeight=FontWeight.SemiBold)
+            Pill(if(testing.isEmpty()) "⌄" else "⌃",t) { testing=emptySet() }
+        }
+        if(adding) AlertDialog(
+            onDismissRequest={ adding=false },
+            title={ Text("Add trigger") },
+            text={ Field(newTrigger,"Custom trigger name",t){ newTrigger=it.take(32) } },
+            confirmButton={ Pill("Add",t,true) {
+                if(project.customTrigger(newTrigger)){
+                    selections=setOf(newTrigger)
+                    newTrigger=""
+                    adding=false
+                    refresh()
+                }else triggerMessage="Could not add trigger"
+            } },
+            dismissButton={ Pill("Cancel",t){ adding=false } })
         if (editing) {
             fun applyTriggerStyle(): Boolean {
                 if (selections.isEmpty() ||
