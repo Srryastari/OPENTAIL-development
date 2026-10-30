@@ -963,6 +963,8 @@ final class BleDiscovery {
             // CORE is the authority for this connection's owner session.
             // A rejected command cannot leave Android claiming authorization.
             authorized=false;
+            Arrays.fill(cfgKnownRevision,-1);
+            Arrays.fill(cfgLatest,null);
             nextPacket=null;
             afterStopPacket=null;
             fxNotify("[]");
