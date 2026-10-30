@@ -296,7 +296,7 @@ for (const required of [
  'triggerMapBusy',
  'NativeTriggerMappingCodec.decode(raw)',
  'triggerMapBaseRevision+1',
- 'result.matches(triggerMapExpected)',
+ 'result.confirmsApplied(triggerMapBaseRevision,triggerMapExpected)',
  'if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}'
 ]) assert(bleSource.includes(required), 'Authenticated GATT trigger map integration regressed: '+required);
 assert(compose.includes('CoreTriggerMappingPage(t)') &&
