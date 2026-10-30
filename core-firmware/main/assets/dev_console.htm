@@ -216,21 +216,21 @@ async function loadCatalog(){const node=$('fxId');try{
 let outputsSnapshot=null,triggerSnapshot=null;
 async function loadOutputs(){try{outputsSnapshot=await request('/api/v1/outputs');$('outputSummary').textContent=pretty(outputsSnapshot);$('summary').textContent=outputsSnapshot.outputs.map(o=>'Output '+(o.index+1)+': '+o.name+' · '+o.pixels+' pixels · '+o.color_order+' · '+o.zone_count+' zones').join('\n');chooseOutput();}catch(e){$('outputResult').textContent=e.message}}
 function chooseOutput(){if(!outputsSnapshot?.outputs?.length)return;const i=integer('outputIndex',0,1);const v=outputsSnapshot.outputs[i];if(!v)return;
- const edit={index:v.index,name:v.name,pixels:v.pixels,color_order:v.color_order,calibration:v.calibration,
+ const edit={index:v.index,expected_config_revision:outputsSnapshot.config_revisions[i],name:v.name,pixels:v.pixels,color_order:v.color_order,calibration:v.calibration,
  zones:v.zones.map(z=>({name:z.name,pixels:z.pixels,role:z.role}))};
  $('outputEditor').value=pretty(edit);$('outputResult').textContent='Read successfully. No changes saved.'
 }
 async function saveOutput(){if(!outputsSnapshot){$('outputResult').textContent='Read the current mapping before saving';return}
 let data;try{data=JSON.parse($('outputEditor').value);if(data.index!==integer('outputIndex',0,1))throw Error('Output index mismatch')}catch(e){$('outputResult').textContent=e.message;return}
 if(!confirm('Save persistent output zone mapping to CORE? Stop all effects and release physical inputs first.'))return;
-const ok=await act('outputResult','/api/v1/outputs',data);if(ok){await loadOutputs();$('outputResult').textContent='Saved. Latest controller configuration read back.'}
+const ok=await act('outputResult','/api/v1/outputs',data);if(ok){await loadOutputs();$('outputResult').textContent='Staged in NVS; read current active geometry and pending status.'}
 }
 async function loadTriggers(){try{triggerSnapshot=await request('/api/v1/triggers');$('triggerEditor').value=pretty({revision:triggerSnapshot.revision,expected_config_revision:triggerSnapshot.config_revision,inputs:triggerSnapshot.inputs.map(x=>({index:x.index,function:x.function}))});$('triggerResult').textContent='Current mapping loaded.'; }catch(e){$('triggerResult').textContent=e.message}}
 async function saveTriggers(){if(!triggerSnapshot){$('triggerResult').textContent='Read the mapping before saving';return}
 let obj;try{obj=JSON.parse($('triggerEditor').value)}catch(e){$('triggerResult').textContent=e.message;return}
 if(!confirm('Save IN1–IN8 trigger assignments to CORE NVS? All triggers must be released.'))return;
 const ok=await act('triggerResult','/api/v1/triggers',obj);
-if(ok){await loadTriggers();$('triggerResult').textContent='Saved. Controller map read back.'}
+if(ok){await loadTriggers();$('triggerResult').textContent='Staged in NVS; read current active mapping and pending status.'}
 }
 async function refreshAll(){await Promise.all([refreshStatus(),loadOutputs(),loadTriggers(),loadCatalog()])}
 async function nativeShow(){try{const [r,g,b]=rgb('showColor');const body={effect:$('showMode').value,chain:$('showChain').value,r,g,b,brightness:integer('showBri',0,32),speed:integer('showSpeed',0,100),ttl_ms:integer('showTtl',1000,60000)};await act('nativeResult','/api/v1/show/start',body);await refreshStatus()}catch(e){$('nativeResult').textContent=e.message}}
