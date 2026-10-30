@@ -138,6 +138,7 @@ const queuePump = ble.split('private void pumpQueue(){')[1]?.split('private Stri
 assert(stopQueue && queuePump &&
   stopQueue.includes('nextPacket=Arrays.copyOf(data,data.length);') &&
   stopQueue.includes('afterStopPacket=null;') &&
+  stopQueue.includes('frameCapture.busy() || nextPacket!=null) {') &&
   stopQueue.includes('else if (isStopPacket(nextPacket))') &&
   stopQueue.includes('afterStopPacket=Arrays.copyOf(data,data.length);') &&
   stopQueue.includes('frameCapture.abortForStop();') &&
