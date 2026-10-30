@@ -154,6 +154,84 @@ int main(void){
   cfg.audio_peak=NULL;
   cfg.palette_id=0u;
 
+  /* The low-level palette adapter is not sufficient: the authoritative
+   * unified dispatcher must accept the SAME caller-owned global frame
+   * snapshot for independent zones, without per-zone palette advancement.
+   * BLE packet validation remains fixed-only until profile transport exists. */
+  {
+    const uint16_t palette_modes[]={OT_WLED_PALETTE,OT_WLED_SLOW_TRANSITION,
+                                   OT_WLED_GLITTER,OT_WLED_FIRE_2012};
+    const uint8_t external_ids[]={1u,73u,200u,201u,255u};
+    const uint8_t hsv[12]={16u,255u,200u,80u,200u,255u,
+                           144u,255u,180u,232u,175u,220u};
+    ot_wled_palette16_t generated={0};
+    assert(ot_wled_palette_from_hsv4(hsv,&generated));
+    for(size_t m=0;m<sizeof(palette_modes)/sizeof(palette_modes[0]);m++){
+      for(size_t p=0;p<sizeof(external_ids)/sizeof(external_ids[0]);p++){
+        ot_effects_1d_state_t zone_left={0},zone_right={0};
+        ot_wled_fx_state_t ref_left={0},ref_right={0};
+        ot_wled_palette_random_t shared={0};
+        shared.current=generated;shared.target=generated;
+        cfg.effect_id=palette_modes[m];cfg.palette_id=external_ids[p];
+        cfg.brightness=255u;cfg.speed=127u;cfg.intensity=128u;
+        cfg.frame_time_ms=23u;
+        cfg.foreground=(ot_wled_rgb_t){123u,56u,9u};
+        cfg.background=(ot_wled_rgb_t){3u,88u,174u};
+        cfg.resolved_palette=NULL;
+        ot_wled_rgb_t left[19]={0},right[71]={0};
+        ot_wled_rgb_t ref_a[19]={0},ref_b[71]={0};
+        left[0]=(ot_wled_rgb_t){7u,9u,11u};
+        assert(!ot_effects_1d_render(&cfg,&zone_left,0u,left,19u));
+        assert(left[0].r==7u&&left[0].g==9u&&left[0].b==11u);
+        assert(zone_left.wled.call==0u);
+        for(uint32_t tick=0;tick<5u;tick++){
+          const uint32_t now=tick*611u;
+          assert(ot_wled_palette_random_tick(&shared,now,1u,23u,700u,
+                                             &generated));
+          const ot_wled_palette_random_t prior=shared;
+          cfg.resolved_palette=&shared.current;
+          assert(ot_effects_1d_render(&cfg,&zone_left,now,left,19u));
+          assert(ot_effects_1d_render(&cfg,&zone_right,now,right,71u));
+          assert(memcmp(&shared,&prior,sizeof(shared))==0);
+          assert(ot_wled_fx_render(&cfg,&ref_left,now,ref_a,19u));
+          assert(ot_wled_fx_render(&cfg,&ref_right,now,ref_b,71u));
+          if(memcmp(left,ref_a,sizeof(left))||
+             memcmp(right,ref_b,sizeof(right))){
+            fprintf(stderr,"Resolved palette dispatch diverged mode=%u id=%u ms=%u\\n",
+                    (unsigned)cfg.effect_id,(unsigned)cfg.palette_id,
+                    (unsigned)now);
+            assert(0 && "two-zone external palette dispatch parity");
+          }
+        }
+        ot_effects_1d_reset(&zone_left,1u);
+        ot_effects_1d_reset(&zone_right,1u);
+        ot_wled_fx_reset(&ref_left);
+        ot_wled_fx_reset(&ref_right);
+      }
+    }
+    /* A pointer alone must not enable dynamic IDs in original/unsupported
+     * effects. It must not alter the existing fixed-palette render path. */
+    ot_wled_fx_config_t invalid=cfg;
+    invalid.resolved_palette=&generated;invalid.palette_id=1u;
+    invalid.effect_id=OT_FX_EMBERS;
+    ot_effects_1d_state_t rejection={0};
+    ot_wled_rgb_t frame[19]={0};
+    assert(!ot_effects_1d_render(&invalid,&rejection,0u,frame,19u));
+    invalid.effect_id=OT_WLED_WIPE;
+    assert(!ot_effects_1d_render(&invalid,&rejection,0u,frame,19u));
+    invalid.effect_id=OT_WLED_PALETTE;invalid.palette_id=2u;
+    ot_effects_1d_state_t fixed_a={0},fixed_b={0};
+    ot_wled_rgb_t with_pointer[19]={0},without_pointer[19]={0};
+    assert(ot_effects_1d_render(&invalid,&fixed_a,0u,with_pointer,19u));
+    invalid.resolved_palette=NULL;
+    assert(ot_effects_1d_render(&invalid,&fixed_b,0u,without_pointer,19u));
+    assert(memcmp(with_pointer,without_pointer,sizeof(with_pointer))==0);
+    ot_effects_1d_reset(&fixed_a,1u);
+    ot_effects_1d_reset(&fixed_b,1u);
+    printf("CORE unified resolved palette dispatch: 4 source modes, 5 external IDs, 2 independent zones, global frame-snapshot invariants PASS.\\n");
+  }
+  cfg.resolved_palette=NULL;
+
   /* Theater's phase is per-zone and is never shared across outputs. */
   ot_effects_1d_state_t zone_a,zone_b;
   ot_effects_1d_reset(&zone_a,1u);
