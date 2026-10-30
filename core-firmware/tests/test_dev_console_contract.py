@@ -30,8 +30,27 @@ for route in ["/dev", "/api/v1/status", "/api/v1/status-led",
     assert route in page, f"Developer dashboard missing operation: {route}"
 assert 'studio_embedded\\":false' in core
 assert 'developer_console\\":true' in core
-assert 'ot_ble_apply_fx_internal(&req,false,&spark)' in core, "Auto preview must use transient spark accents"
-assert 'ot_ble_apply_fx_internal(&req,false,NULL)' in core, "Regular effects must retain default accents"
+assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL)' in core, "Auto preview must retain existing transient spark accents"
+assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay)' in core, "Regular effects must accept optional volatile flare/spark overlays"
+assert 'fx_bank.zones[o][z].overlay=*overlay' in core, "Overlay must remain per-zone and RAM-only"
+# Source-order gate: decorative overlays cannot replace the authoritative
+# effects renderer or run after physical brake/turn/reverse arbitration.
+render_task = core.split('static void led_task(', 1)[1]
+fx_at = render_task.index('ot_effects_1d_render(')
+overlay_at = render_task.index('ot_fx_overlay_apply(')
+trigger_at = render_task.index('ot_om_trigger_overlay(')
+assert fx_at < overlay_at < trigger_at, "FX overlays must occur between effect rendering and physical trigger priority"
+slot_h=(root/"main/fx_zone_bank.h").read_text()
+assert 'ot_fx_overlay_config_t overlay;' in slot_h, "Overlay parameters must be per-zone, not global"
+assert 'fx_overlay_engine.c' in cmake, "CORE build must link the private flare/spark engine"
+assert 'ot_fx_bank_set_overlay(&fx_bank,om_outputs' in core, (
+    "Overlay-only preview must update live zone state, never restart the effect")
+assert 'phase_preserved' in core and 'overlay_only' in core, (
+    "Overlay-only request must report explicit non-restart semantics")
+assert 'if(native_outputs_ready&&ble_fx_enabled&&show_window(now))' in core, (
+    "Overlay-only edits must refuse inactive or expired previews")
+
+
 assert 'fx_bank.zones[o][z].spark=*spark' in core, "Spark style must remain volatile, not saved NVS"
 for control in ("eventSparkStyle","eventSparkPeak","eventSparkColor"):
     assert control in page, f"Developer console sparkle control missing: {control}"
