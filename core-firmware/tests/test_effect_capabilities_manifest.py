@@ -29,11 +29,11 @@ assert manifest["palettes"]["rgb_preview_stops"] == "not_included_do_not_synthes
 assert manifest["overlays"]["default_style"] == 0
 assert manifest["overlays"]["compositing"] == "effect_then_overlay_then_physical_trigger"
 
-ids = {k: int(v) for k, v in re.findall(r"\\b(OT_WLED_[A-Z0-9_]+)\\s*=\\s*(\\d+)", header)}
+ids = {k: int(v) for k, v in re.findall(r"\b(OT_WLED_[A-Z0-9_]+)\s*=\s*(\d+)", header)}
 source_registry = renderer.split("static const ot_wled_fx_metadata_t supported[] = {", 1)[1].split("bool ot_wled_fx_metadata(", 1)[0]
-registered = re.findall(r'\\{\\s*(OT_WLED_[A-Z0-9_]+)\\s*,\\s*"([^"]+)"', source_registry)
+registered = re.findall(r'\{\s*(OT_WLED_[A-Z0-9_]+)\s*,\s*"([^"]+)"', source_registry)
 palette_part = palette.split("if(effect_id==", 1)[1].split("return palette>=2u&&palette<=72u;", 1)[0]
-palette_modes = set(re.findall(r"\\bOT_WLED_[A-Z0-9_]+\\b", palette_part))
+palette_modes = set(re.findall(r"\bOT_WLED_[A-Z0-9_]+\b", palette_part))
 expected = {}
 for symbol, name in registered:
     assert symbol in ids, f"Undeclared effect {symbol}"
@@ -46,8 +46,8 @@ for symbol, name in registered:
     }
 assert len(expected) == 120 and len(palette_modes) == 16
 
-native_ids = {k: int(v) for k, v in re.findall(r"\\b(OT_FX_[A-Z0-9_]+)\\s*=\\s*(\\d+)u", original_h)}
-for symbol, name in re.findall(r'case\\s+(OT_FX_[A-Z0-9_]+)\\s*:\\s*name="([^"]+)";break;', original_c):
+native_ids = {k: int(v) for k, v in re.findall(r"\b(OT_FX_[A-Z0-9_]+)\s*=\s*(\d+)u", original_h)}
+for symbol, name in re.findall(r'case\s+(OT_FX_[A-Z0-9_]+)\s*:\s*name="([^"]+)";break;', original_c):
     assert symbol in native_ids, f"Undeclared original {symbol}"
     ident = native_ids[symbol]
     assert ident not in expected
