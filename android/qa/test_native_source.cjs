@@ -377,6 +377,15 @@ assert(connectBlock &&
        connectBlock.includes('connecting=false;notifyStatus("BLE connection permission denied");'),
        'Rejected GATT connection start must clear the connecting state');
 
+// A retired scan's delayed timeout must not cancel a new scan. A queued
+// scan result must never reopen GATT after scan stop or Activity shutdown.
+assert(bleSource.includes('private int scanGeneration=0;') &&
+       bleSource.includes('final int scanLease=++scanGeneration;') &&
+       bleSource.includes('if (!scanning || scanGeneration!=scanLease || stopped) return;') &&
+       bleSource.includes('if(stopped || !scanning)return;') &&
+       bleSource.includes('scanning = false;\n        scanGeneration++;'),
+       'BLE scan generations and shutdown must invalidate deferred callbacks');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
