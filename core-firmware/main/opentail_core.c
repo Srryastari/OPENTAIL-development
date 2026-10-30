@@ -283,33 +283,47 @@ static bool om_string(const cJSON *obj,const char *key,char dst[OT_OM_NAME_LEN])
 }
 static cJSON *om_json_output(const ot_om_output_t *o,int id,uint8_t mask,uint8_t show_zones){
     cJSON *item=cJSON_CreateObject();if(!item)return NULL;
-    cJSON_AddNumberToObject(item,"index",id);
-    cJSON_AddNumberToObject(item,"pin",(int)out_pin[id]);
-    cJSON_AddStringToObject(item,"name",o->name);
-    cJSON_AddNumberToObject(item,"pixels",o->active_pixels);
-    cJSON_AddNumberToObject(item,"zone_count",o->zone_count);
+    if(!cJSON_AddNumberToObject(item,"index",id) ||
+       !cJSON_AddNumberToObject(item,"pin",(int)out_pin[id]) ||
+       !cJSON_AddStringToObject(item,"name",o->name) ||
+       !cJSON_AddNumberToObject(item,"pixels",o->active_pixels) ||
+       !cJSON_AddNumberToObject(item,"zone_count",o->zone_count))goto oom;
     cJSON *cal=cJSON_AddObjectToObject(item,"calibration");
+    if(!cal)goto oom;
     cJSON *rgb=cJSON_AddArrayToObject(cal,"rgb_gain");
     cJSON *w=cJSON_AddArrayToObject(cal,"white_gain");
-    for(int k=0;k<3;k++){cJSON_AddItemToArray(rgb,cJSON_CreateNumber(o->rgb_gain[k]));cJSON_AddItemToArray(w,cJSON_CreateNumber(o->white_gain[k]));}
-    cJSON_AddBoolToObject(cal,"gamma_enabled",o->gamma_enabled);
-    cJSON_AddStringToObject(item,"color_order",ot_om_order_name(o->color_order));
+    if(!rgb||!w)goto oom;
+    for(int k=0;k<3;k++){
+        cJSON *r=cJSON_CreateNumber(o->rgb_gain[k]);
+        cJSON *white=cJSON_CreateNumber(o->white_gain[k]);
+        if(!r||!white){cJSON_Delete(r);cJSON_Delete(white);goto oom;}
+        (void)cJSON_AddItemToArray(rgb,r);(void)cJSON_AddItemToArray(w,white);
+    }
+    if(!cJSON_AddBoolToObject(cal,"gamma_enabled",o->gamma_enabled) ||
+       !cJSON_AddStringToObject(item,"color_order",ot_om_order_name(o->color_order)))goto oom;
     cJSON *zones=cJSON_AddArrayToObject(item,"zones");
+    if(!zones)goto oom;
     for(int i=0;i<o->zone_count;i++){
         const ot_om_zone_t *z=&o->zones[i];
         cJSON *entry=cJSON_CreateObject();
-        cJSON_AddStringToObject(entry,"name",z->name);
-        cJSON_AddNumberToObject(entry,"pixels",z->pixels);
-        cJSON_AddStringToObject(entry,"role",ot_om_role_name(z->role));
+        if(!entry)goto oom;
         const bool show_here=(show_zones&(1u<<i))!=0;
         ot_rgb_t overlay={0,0,0};
         bool trigger_here=ot_om_trigger_overlay(z->role,mask,show_here,
                                                  OT_MAX_BRIGHTNESS,&overlay);
-        cJSON_AddBoolToObject(entry,"trigger_active",trigger_here);
-        cJSON_AddBoolToObject(entry,"effect_selected",show_here);
-        cJSON_AddItemToArray(zones,entry);
+        if(!cJSON_AddStringToObject(entry,"name",z->name) ||
+           !cJSON_AddNumberToObject(entry,"pixels",z->pixels) ||
+           !cJSON_AddStringToObject(entry,"role",ot_om_role_name(z->role)) ||
+           !cJSON_AddBoolToObject(entry,"trigger_active",trigger_here) ||
+           !cJSON_AddBoolToObject(entry,"effect_selected",show_here)){
+            cJSON_Delete(entry);goto oom;
+        }
+        (void)cJSON_AddItemToArray(zones,entry);
     }
     return item;
+oom:
+    cJSON_Delete(item);
+    return NULL;
 }
 static esp_err_t om_get(httpd_req_t *r){
     ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent;uint8_t mask;
@@ -333,20 +347,27 @@ static esp_err_t om_get(httpd_req_t *r){
     portEXIT_CRITICAL(&state_lock);
     cJSON *obj=cJSON_CreateObject();
     if(!obj)return respond_err(r,500,"out of memory");
-    cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION);
-    cJSON_AddBoolToObject(obj,"saved_on_device",persistent);
-    cJSON_AddBoolToObject(obj,"bench_only",true);
-    cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT);
-    cJSON_AddNumberToObject(obj,"future_outputs_target",12);
-    /* Hardware build budget, not an active pixel count or a test-derived maximum. */
-    cJSON_AddNumberToObject(obj,"pixel_buffer_budget_per_output",OT_CHAIN_PIXELS);
-    cJSON_AddNumberToObject(obj,"max_configurable_pixels_per_output",OT_OM_MAX_PIXELS_PER_OUTPUT);
-    cJSON_AddNumberToObject(obj,"max_total_pixels",OT_OM_MAX_TOTAL_PIXELS);
-    cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES);
-    cJSON_AddBoolToObject(obj,"dynamic_zones",true);
-    cJSON_AddNumberToObject(obj,"effective_mask",mask);
+    if(!cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION) ||
+       !cJSON_AddBoolToObject(obj,"saved_on_device",persistent) ||
+       !cJSON_AddBoolToObject(obj,"bench_only",true) ||
+       !cJSON_AddNumberToObject(obj,"physical_outputs",OT_CHAIN_COUNT) ||
+       !cJSON_AddNumberToObject(obj,"future_outputs_target",12) ||
+       /* Hardware build budget, not an active pixel count. */
+       !cJSON_AddNumberToObject(obj,"pixel_buffer_budget_per_output",OT_CHAIN_PIXELS) ||
+       !cJSON_AddNumberToObject(obj,"max_configurable_pixels_per_output",OT_OM_MAX_PIXELS_PER_OUTPUT) ||
+       !cJSON_AddNumberToObject(obj,"max_total_pixels",OT_OM_MAX_TOTAL_PIXELS) ||
+       !cJSON_AddNumberToObject(obj,"max_zones_per_output",OT_OM_ZONES) ||
+       !cJSON_AddBoolToObject(obj,"dynamic_zones",true) ||
+       !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
+        cJSON_Delete(obj);return respond_err(r,500,"out of memory");
+    }
     cJSON *outputs=cJSON_AddArrayToObject(obj,"outputs");
-    for(int i=0;i<OT_OM_OUTPUTS;i++)cJSON_AddItemToArray(outputs,om_json_output(&copy[i],i,mask,show_zones[i]));
+    if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+    for(int i=0;i<OT_OM_OUTPUTS;i++){
+        cJSON *entry=om_json_output(&copy[i],i,mask,show_zones[i]);
+        if(!entry){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+        (void)cJSON_AddItemToArray(outputs,entry);
+    }
     char *payload=cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
     if(!payload)return respond_err(r,500,"out of memory");
