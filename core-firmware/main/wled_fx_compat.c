@@ -2277,8 +2277,7 @@ static int8_t fx_tristate8(uint8_t x,uint8_t pulse,uint8_t attack) {
     if(x<pulse)return (int8_t)(((int16_t)(pulse-x)*amplitude)/attack);
     return 0;
 }
-/* Pinned mode_washing_machine() sine and phase arithmetic; default
- * palette-index to RGB colors requires full palette mapper later. */
+/* Pinned mode_washing_machine() sine, phase and default Party palette. */
 static void washing_frame(const ot_wled_fx_config_t *cfg,
                            ot_wled_fx_state_t *state,uint32_t now,
                            ot_wled_rgb_t *pixels,size_t count) {
@@ -2298,8 +2297,7 @@ static void washing_frame(const ot_wled_fx_config_t *cfg,
                                       OT_WLED_PALETTE_LINEAR),cfg->brightness);
     }
 }
-/* Pinned mode_flow() 1D zigzag zones and rotating stripe indices.
- * The source palette mapping for mcol=255 still needs engine-wide parity. */
+/* Pinned mode_flow() 1D zigzag zones, rotating stripes and Party palette. */
 static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                        ot_wled_rgb_t *pixels,size_t count) {
     if(count<=1u) {
@@ -2338,9 +2336,7 @@ static void flow_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         }
     }
 }
-/* Pinned mode_sunrise() stage progress and center-out geometry. Upstream
- * Fire palette (ID 35) is not available yet; use the current two-color
- * interpolation only as a source-derived geometry port. */
+/* Pinned mode_sunrise() stage progress, center-out geometry and Fire palette 35. */
 static void sunrise_frame(const ot_wled_fx_config_t *cfg,
                           ot_wled_fx_state_t *state,uint32_t now,
                           uint32_t old_call,ot_wled_rgb_t *pixels,
