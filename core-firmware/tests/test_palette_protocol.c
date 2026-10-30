@@ -11,7 +11,8 @@ static ot_palette_record_t raw_saved[OT_PALETTE_SLOTS];
 static bool fail_commit=false,used=false;
 void ot_palette_runtime_load(void){memcpy(live,saved,sizeof(saved));}
 bool ot_palette_runtime_get(uint8_t i,ot_palette_entry_t *out){
-    if(i>=OT_PALETTE_SLOTS||!out)return false;*out=live[i];return true;
+    if(i>=OT_PALETTE_SLOTS||!out)return false;
+    *out=live[i];return true;
 }
 bool ot_palette_runtime_read_record(uint8_t i,ot_palette_record_t *r){
     ot_wled_palette16_t decoded;
