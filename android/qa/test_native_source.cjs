@@ -341,6 +341,17 @@ assert(capsStart && capsStart.includes('fxCapsBusy=false;fxNotify("[]");pumpQueu
        bleSource.includes('fxNotify(ids.append(\']\').toString());pumpQueue();'),
        'Failed capability-read admission must not strand a queued STOP');
 
+// A rejected optional CORE info read must not strand auto-auth. Normal
+// successful INFO callbacks still handle owner authentication once.
+const servicesBlock=bleSource.split('void onServicesDiscovered(')[1]
+  ?.split('void onCharacteristicRead(')[0];
+assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readCharacteristic(info);') &&
+       servicesBlock.includes('if (!infoStarted) {') &&
+       servicesBlock.includes('ui.post(thisAutoAuth());') &&
+       servicesBlock.includes('catch (SecurityException ex)') &&
+       bleSource.includes('if(challenge!=null&&BleOwnerVault.load(activity,activeAddress)!=null)ui.post(thisAutoAuth());'),
+       'Rejected optional CORE info read must preserve owner auto-auth');
+
 // GATT callback ownership must be checked on both modern/legacy Android
 // callback overloads. A retired controller must not erase live new-device
 // state, reuse FX capabilities, or deliver old authorization/config replies.
