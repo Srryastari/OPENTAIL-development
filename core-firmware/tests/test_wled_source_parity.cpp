@@ -5594,7 +5594,8 @@ static void source_handleRandomPalette(SourceRandomPaletteState& s,
     s.nextBlend = (uint16_t)now;
   }
   if ((uint16_t)now < s.nextBlend ||
-      now > ((s.lastChange*1000) + transition + 2*frameTime)) return;
+      now > ((uint32_t)s.lastChange*1000u+(uint32_t)transition+
+             2u*(uint32_t)frameTime)) return;
   unsigned transitionFrames = frameTime > transition ? 1 : transition / frameTime;
   unsigned noOfBlends = transitionFrames > 255 ? 1 :
                         (255 + (transitionFrames>>1)) / transitionFrames;
