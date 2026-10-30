@@ -44,6 +44,20 @@ bool ot_palette_record_build(ot_palette_record_t *r,uint8_t index,uint8_t count,
     *r=candidate;
     return true;
 }
+bool ot_palette_record_tombstone(ot_palette_record_t *r,uint8_t index,uint32_t revision){
+    if(!r||index>=OT_PALETTE_SLOTS||!revision)return false;
+    ot_palette_record_t candidate={0};
+    candidate.magic=OT_PALETTE_RECORD_MAGIC;candidate.version=OT_PALETTE_RECORD_VERSION;
+    candidate.index=index;candidate.revision=revision;
+    candidate.crc=record_crc(&candidate);*r=candidate;return true;
+}
+bool ot_palette_record_is_tombstone(const ot_palette_record_t *r){
+    if(!r||r->magic!=OT_PALETTE_RECORD_MAGIC||
+       r->version!=OT_PALETTE_RECORD_VERSION||r->index>=OT_PALETTE_SLOTS||
+       !r->revision||r->count||r->byte_length||r->crc!=record_crc(r))return false;
+    for(size_t i=0;i<OT_PALETTE_BYTES_MAX;i++)if(r->stops[i])return false;
+    return true;
+}
 bool ot_palette_record_valid(const ot_palette_record_t *r,
                               ot_wled_palette16_t *palette){
     if(!r||!palette||r->magic!=OT_PALETTE_RECORD_MAGIC||
