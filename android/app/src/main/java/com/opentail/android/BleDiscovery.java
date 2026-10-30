@@ -132,7 +132,7 @@ final class BleDiscovery {
     private boolean triggerMapAvailable(){
         if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
         if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
-           frameCapture.busy()||authPending||pairPending||challengePending){
+           frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry trigger mapping");return false;
         }
         return true;
@@ -194,7 +194,12 @@ final class BleDiscovery {
             } else notifyStatus("CORE trigger mapping read · rev "+result.revision);
             if(triggerMapListener!=null){
                 NativeTriggerMappingCodec.Snapshot delivered=result;
-                ui.post(()->triggerMapListener.accept(delivered));
+                // Delivery is asynchronous. Never restore a stale physical
+                // mapping after disconnect, adapter-off, or switching CORE.
+                ui.post(()->{
+                    if(connection==gatt && canMapTriggers() && triggerMapListener!=null)
+                        triggerMapListener.accept(delivered);
+                });
             }
         }
         triggerMapExpected=null;
