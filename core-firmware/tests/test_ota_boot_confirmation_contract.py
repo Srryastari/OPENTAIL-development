@@ -44,7 +44,7 @@ assert "return false;" in input_init and "return true;" in input_init
 assert "const bool inputs_ready=input_init();" in startup
 assert 'if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");' in startup
 assert "const bool sampler_ready=inputs_ready &&" in startup
-assert "bool outputs_ready=sampler_ready&&strip_init();" in startup
+assert "bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();" in startup
 assert startup.index("const bool inputs_ready=input_init();") < startup.index("xTaskCreate(led_task")
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup

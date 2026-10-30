@@ -228,8 +228,9 @@ assert "ot_tm_signal_mask_of(v->valuestring)" in between(
     core,"static esp_err_t simulate_post(httpd_req_t *r) {","static esp_err_t stop_post(httpd_req_t *r) {")
 
 
-# 9: save admission includes instant GPIO and settled GPIO, source-level
-# ordering preserves RAM on NVS failure. No claim of atomicity DURING NVS.
+# 9: active/staged journal protects power-loss and held-input reboot.
+# NVS writes never happen inside the 10ms sampler; the promoter requires
+# a stable GPIO any-edge epoch and independent four-sample idle window.
 raw = between(core, "static uint8_t tm_gpio_input_mask(void){",
               "/* Serialize authenticated BLE")
 assert "gpio_get_level(input_pin[i])" in raw
@@ -237,17 +238,22 @@ assert "OT_INPUT_ACTIVE_LOW?!high:high" in raw
 save = between(core, "static int tm_commit(", "bool ot_ble_trigger_get(")
 assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save
 assert "raw_active || live_input_mask!=0" in save
-assert save.index("if(!tm_save(next))code=4") < save.index("ot_tm_saved_apply(")
-assert "const uint8_t pins_after=tm_gpio_input_mask();" in save
-assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," in save
+assert save.index("if(!tm_save(next))code=4") < save.index("tm_deferred.profile=*next;")
+assert "tm_deferred.pending=true;" in save
+assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in save
 assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
-assert "ot_om_apply_if_released(om_outputs,&om_deferred," in sampler
-assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," in core
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
+assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
+assert "om_deferred.pending=true;" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
 assert "tm_persistent && !tm_deferred.pending" in core
-assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in sampler
-assert "instantaneous,physical" in sampler
+assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
+assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
+assert "if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;" in sampler
+assert "config_activation_task" in core and "input_edge_isr" in core
+assert "config_activation_idle(epoch)" in core
+assert "ot_tm_journal_recover(" in core and "ot_om_journal_recover(" in core
 assert "xSemaphoreGive(om_write_mutex)" in save
 assert "require_revision&&tm_revision!=expected" in save
 assert "tm_revision++;" in save
@@ -280,8 +286,8 @@ for begin,end,persist in (
     ("static int tm_commit(", "bool ot_ble_trigger_get(", "tm_save(next)"),
 ):
     op = between(core,begin,end)
-    assert "if(!input_sampler_ready)" in op
-    assert op.index("if(!input_sampler_ready)") < op.index(persist)
+    assert "if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)" in op
+    assert op.index("if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)") < op.index(persist)
     assert "tm_gpio_input_mask()" in op
 
 # Combined CORE #38 + Effects #39 final draw-order / role-isolation fence.
