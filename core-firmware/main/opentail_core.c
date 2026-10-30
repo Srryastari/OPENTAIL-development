@@ -453,10 +453,13 @@ oom:
 }
 static esp_err_t om_get(httpd_req_t *r){
     ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
+    uint16_t active_revisions[OT_OM_OUTPUTS],staged_revisions[OT_OM_OUTPUTS];
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
+    memcpy(active_revisions,om_active_revision,sizeof(active_revisions));
+    memcpy(staged_revisions,om_revision,sizeof(staged_revisions));
     persistent=om_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
@@ -489,6 +492,18 @@ static esp_err_t om_get(httpd_req_t *r){
        !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
         cJSON_Delete(obj);return respond_err(r,500,"out of memory");
     }
+    /* Schema revision stays 2; these arrays expose per-output durable edit
+     * revisions, with outputs[] reflecting ONLY the active geometry. */
+    cJSON *rev_active=cJSON_AddArrayToObject(obj,"active_config_revisions");
+    cJSON *rev_staged=cJSON_AddArrayToObject(obj,"config_revisions");
+    if(!rev_active||!rev_staged){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        cJSON *a=cJSON_CreateNumber(active_revisions[i]);
+        cJSON *b=cJSON_CreateNumber(staged_revisions[i]);
+        if(!a||!b){cJSON_Delete(a);cJSON_Delete(b);cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
+        cJSON_AddItemToArray(rev_active,a);
+        cJSON_AddItemToArray(rev_staged,b);
+    }
     cJSON *outputs=cJSON_AddArrayToObject(obj,"outputs");
     if(!outputs){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
     for(int i=0;i<OT_OM_OUTPUTS;i++){
@@ -504,7 +519,7 @@ static esp_err_t om_get(httpd_req_t *r){
 static esp_err_t om_post(httpd_req_t *r){
     cJSON *obj=NULL;int status=recv_json(r,&obj);
     if(status!=200){cJSON_Delete(obj);return respond_err(r,status,"invalid JSON request");}
-    unsigned index=0,pixels=0;
+    unsigned index=0,pixels=0,expected_rev=0;
     const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,"color_order");
     const char *order=cJSON_IsString(v)?v->valuestring:NULL;
     int order_id=ot_om_order_from_name(order);
@@ -545,6 +560,7 @@ static esp_err_t om_post(httpd_req_t *r){
         }
     }
     if(valid)valid=ot_om_valid(&next);
+    if(valid)valid=om_number(obj,"expected_config_revision",&expected_rev,1,UINT16_MAX);
     cJSON_Delete(obj);
     if(!valid)return respond_err(r,400,"invalid output mapping: zone lengths must total the configured active pixels and fit the board buffer budget");
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)
@@ -561,6 +577,11 @@ static esp_err_t om_post(httpd_req_t *r){
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stop shows and release all 12V triggers before saving output mapping");}
+    portENTER_CRITICAL(&state_lock);
+    const bool stale=om_revision[index]!=(uint16_t)expected_rev;
+    const bool exhausted=om_revision[index]==UINT16_MAX;
+    portEXIT_CRITICAL(&state_lock);
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stale or exhausted output edit revision");}
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
@@ -597,7 +618,7 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     bool stale=om_revision[index]!=base_revision;
     memcpy(next_all,om_outputs,sizeof(next_all));
     portEXIT_CRITICAL(&state_lock);
-    int result=busy?2:stale?3:0;
+    int result=busy?2:(stale||om_revision[index]==UINT16_MAX)?3:0;
     if(!result){
         next_all[index]=*next;
         if(!om_save(next_all))result=4;
@@ -644,7 +665,7 @@ static int tm_commit(const ot_tm_profile_t *next,uint16_t expected,bool require_
         show_window(now);
     const bool stale=require_revision&&tm_revision!=expected;
     portEXIT_CRITICAL(&state_lock);
-    int code=busy?2:stale?3:0;
+    int code=busy?2:(stale||tm_revision==UINT16_MAX)?3:0;
     if(!code){
         if(!tm_save(next))code=4;
         else {
@@ -683,17 +704,19 @@ int ot_ble_trigger_save(const ot_tm_profile_t *next,uint16_t revision){
  * Simulated signals remain logical functions, not raw GPIO assignments.
  */
 static esp_err_t tm_get(httpd_req_t *r){
-    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision;
+    ot_tm_profile_t cfg;bool saved,pending;uint8_t physical,sim;uint16_t config_revision,active_config_revision;
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     cfg=tm_profile;pending=tm_deferred.pending;saved=tm_persistent&&!pending;
     physical=live_input_mask;config_revision=tm_revision;
+    active_config_revision=tm_active_revision;
     sim=before_deadline(now,sim_deadline)?sim_mask:0;
     portEXIT_CRITICAL(&state_lock);
     cJSON *root=cJSON_CreateObject();if(!root)return respond_err(r,500,"out of memory");
     /* An incomplete trigger map must never be acknowledged as HTTP 200. */
     if(!cJSON_AddNumberToObject(root,"revision",OT_TM_VERSION) ||
        !cJSON_AddNumberToObject(root,"config_revision",config_revision) ||
+       !cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision) ||
        !cJSON_AddBoolToObject(root,"saved_on_device",saved) ||
        !cJSON_AddBoolToObject(root,"config_apply_pending",pending) ||
        !cJSON_AddBoolToObject(root,"bench_only",true) ||
@@ -756,6 +779,7 @@ static esp_err_t tm_post(httpd_req_t *r){
     }
     cJSON_Delete(root);
     if(!valid||!ot_tm_valid(&next))return respond_err(r,400,"invalid trigger mapping: require IN1..IN8 and supported functions");
+    if(!require_revision)return respond_err(r,409,"expected_config_revision required; read current revision");
     /* Same transaction and busy policy as authenticated BLE. The HTTP
      * 'revision' field is a schema version, not the BLE edit revision. */
     const int result=tm_commit(&next,(uint16_t)expected_config_revision,require_revision);
