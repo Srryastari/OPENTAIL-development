@@ -1264,15 +1264,21 @@ class ComposeMainActivity : ComponentActivity() {
         Caption("Startup and shutdown are optional offline designs. CORE alone controls real ignition transitions.", t)
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }
+        var eventMessage by remember { mutableStateOf("") }
+        if (eventMessage.isNotEmpty()) Caption(eventMessage, t)
+        fun applyAutoEvent(event: String, field: String, value: Any): Boolean {
+            val saved = project.setAutoEvent(event, field, value)
+            eventMessage = if (saved) "" else "Could not save " + event + " settings"
+            if (saved) refresh()
+            return saved
+        }
         listOf("Startup", "Shutdown").forEach { key ->
             val event = project.trigger(key)
             Panel(t) {
                 Text(key, color = t.fg, fontWeight = FontWeight.Bold)
                 val enabled = event.optBoolean("eventUiEnabled", false)
                 Pill(if (enabled) "Enabled ✓" else "Disabled", t, enabled) {
-                    event.put("eventUiEnabled", !enabled)
-                    project.save()
-                    refresh()
+                    applyAutoEvent(key, "eventUiEnabled", !enabled)
                 }
                 Caption("Animation · " + event.optString("eventFx", "Solid"), t)
                 Pill("Choose " + key + " animation", t) {
@@ -1281,15 +1287,11 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
                 ValueSlider("Transition fade (ms)", fade, 5000, t) {
-                    event.put("eventUiFadeMs", it)
-                    project.save()
-                    refresh()
+                    applyAutoEvent(key, "eventUiFadeMs", it)
                 }
                 val tenths = (event.optDouble("eventDuration", 2.0) * 10.0).toInt().coerceIn(2, 300)
                 ValueSlider("Duration (tenths of sec)", tenths, 300, t) {
-                    event.put("eventDuration", it.coerceAtLeast(2) / 10.0)
-                    project.save()
-                    refresh()
+                    applyAutoEvent(key, "eventDuration", it.coerceAtLeast(2) / 10.0)
                 }
                 Pill("Preview offline", t) {
                     val selected = NativeEffectCatalog.byName(event.optString("eventFx", "Solid"))
@@ -1309,10 +1311,8 @@ class ComposeMainActivity : ComponentActivity() {
                             .filter { it.name.contains(search, ignoreCase = true) }
                             .take(15).forEach { item ->
                                 Pill(item.name, t) {
-                                    project.trigger(key).put("eventFx", item.name)
-                                    project.save()
-                                    refresh()
-                                    choosing = null
+                                    if (applyAutoEvent(key, "eventFx", item.name))
+                                        choosing = null
                                 }
                             }
                     }
