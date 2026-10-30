@@ -55,6 +55,9 @@ final class BleDiscovery {
     private static final UUID FX_CAPS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf29");
     // Optional trigger-team v1 contract (PR #24); absent on older CORE firmware.
     private static final UUID TRIGGER_MAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2c");
+    private static final UUID PALETTE_CMD_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2d");
+    private static final UUID PALETTE_RSP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2e");
+    private static final UUID PALETTE_CAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2f");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
 
@@ -81,6 +84,41 @@ final class BleDiscovery {
     // The transport can become idle before its completed frame reaches Compose.
     // Hold capture admission until the previous callback has been consumed.
     private volatile boolean frameCallbackPending=false;
+    private BluetoothGattCharacteristic paletteCommand,paletteReply,paletteCapabilities;
+    private java.util.function.Consumer<NativePaletteBleTransport.Result> paletteListener;
+    private final NativePaletteBleTransport palette=new NativePaletteBleTransport(
+        result->{
+            final BluetoothGatt owner=gatt;
+            ui.post(()->{
+                if(!stopped && owner!=null && owner==gatt && paletteListener!=null)
+                    paletteListener.accept(result);
+            });
+        },this::pumpQueue);
+    void setPaletteListener(java.util.function.Consumer<NativePaletteBleTransport.Result> cb){paletteListener=cb;}
+    boolean canTransferPalettes(){return canControl() && palette.supported();}
+    private boolean paletteGate(){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry palette action after STOP/transfer");return false;
+        }
+        return true;
+    }
+    boolean negotiatePaletteV3(){
+        if(!canControl()||!palette.available()){notifyStatus("CORE palette v3 unavailable or unauthorized");return false;}
+        return paletteGate() && palette.negotiate();
+    }
+    boolean downloadPalette(int slot){return canTransferPalettes() && paletteGate() && palette.load(slot);}
+    boolean uploadPalette(int slot,long revision,String stops){
+        if(!canTransferPalettes()||!paletteGate())return false;
+        try{return palette.upload(slot,revision,NativePaletteV3.stops(stops));}
+        catch(IllegalArgumentException ex){notifyStatus(ex.getMessage());return false;}
+    }
+    boolean deletePalette(int slot,long revision){
+        if(!canTransferPalettes()||!paletteGate())return false;
+        try{return palette.delete(slot,revision);}
+        catch(IllegalArgumentException ex){notifyStatus(ex.getMessage());return false;}
+    }
     private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
         CoreFrameCapture.Listener cb=frameListener;
         if(cb!=null) {
@@ -97,7 +135,7 @@ final class BleDiscovery {
     void cancelFrameCapture() { frameCapture.abortForStop(); }
     boolean captureFrame(int output) {
         if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return false;}
-        if(frameCapture.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||
+        if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||
            readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending) {
             notifyStatus("BLE busy; retry frame capture");return false;
         }
@@ -134,7 +172,7 @@ final class BleDiscovery {
     private boolean triggerMapAvailable(){
         if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
         if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
-           frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){
+           frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry trigger mapping");return false;
         }
         return true;
@@ -223,7 +261,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void readFxCapabilities(){
         if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
@@ -274,14 +312,14 @@ final class BleDiscovery {
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return;}
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     /** Returns true when an output save enters the GATT transaction; only readback proves application. */
     boolean saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
@@ -422,7 +460,7 @@ final class BleDiscovery {
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
     void onAdapterDisabled() {
         stopScan();
-        frameCapture.cancel(); // GATT close may never produce a disconnect callback
+        frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
         command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); triggerMapping=null; triggerMapBusy=false; triggerMapSavePending=false; triggerMapExpected=null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
@@ -449,7 +487,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
@@ -460,7 +498,7 @@ final class BleDiscovery {
     void authorizeStored(){
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
         try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
@@ -499,7 +537,7 @@ final class BleDiscovery {
         // Legacy-token authorization must not mark authPending for an older
         // command's reply or overlap another ATT operation or queued STOP.
         if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||
-                frameCapture.busy() || nextPacket != null || pairPending ||
+                frameCapture.busy() || palette.busy() || nextPacket != null || pairPending ||
                 challengePending || authPending) {
             notifyStatus("BLE busy; retry authorization"); return;
         }
@@ -575,6 +613,7 @@ final class BleDiscovery {
     }
     private void enqueueWrite(byte[] data) {
         final boolean stop = isStopPacket(data);
+        if(palette.busy() && stop) palette.abortForStop();
         if(frameCapture.busy() && stop) {
             // STOP supersedes diagnostic reads. Drain the one in-flight GATT
             // operation before issuing STOP; never interrupt an ATT transaction.
@@ -583,7 +622,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy() || nextPacket!=null) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy() || palette.busy() || nextPacket!=null) {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
@@ -617,7 +656,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
-        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!triggerMapBusy&&!frameCapture.busy()&&nextPacket!=null){
+        if (!writePending&&!readReplyPending&&!cfgBusy&&!fxCapsBusy&&!triggerMapBusy&&!frameCapture.busy()&&!palette.busy()&&nextPacket!=null){
             pendingPacket=nextPacket;
             nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;
             afterStopPacket=null;
@@ -790,7 +829,7 @@ final class BleDiscovery {
             return;
         }
         if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -819,7 +858,7 @@ final class BleDiscovery {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+                frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
@@ -875,6 +914,10 @@ final class BleDiscovery {
             cfgCommand = service.getCharacteristic(CFG_CMD_UUID);
             cfgReply = service.getCharacteristic(CFG_RSP_UUID);
             frameCapture.configure(connection,service.getCharacteristic(FRAME_CMD_UUID),service.getCharacteristic(FRAME_RSP_UUID));
+            paletteCommand=service.getCharacteristic(PALETTE_CMD_UUID);
+            paletteReply=service.getCharacteristic(PALETTE_RSP_UUID);
+            paletteCapabilities=service.getCharacteristic(PALETTE_CAP_UUID);
+            palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities);
             authorized = false;
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             // The info read is optional discovery metadata. If Android rejects
@@ -895,6 +938,8 @@ final class BleDiscovery {
             if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,value,status);return;}
             if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(value,status);return;}
             if (CFG_RSP_UUID.equals(characteristic.getUuid())) { cfgResponse(value,status);return; }
+            if (PALETTE_RSP_UUID.equals(characteristic.getUuid())) {palette.read(connection,value,status);return;}
+            if (PALETTE_CAP_UUID.equals(characteristic.getUuid())) {palette.capability(connection,value,status);return;}
             if (FRAME_RSP_UUID.equals(characteristic.getUuid())) { frameCapture.read(connection,value,status);return; }
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
@@ -912,6 +957,8 @@ final class BleDiscovery {
                 if (ENROLL_UUID.equals(characteristic.getUuid())) {ownerRead(connection,characteristic.getValue(),status);return;}
                 if (CHALLENGE_UUID.equals(characteristic.getUuid())) {ownerChallenge(characteristic.getValue(),status);return;}
                 if (CFG_RSP_UUID.equals(characteristic.getUuid())) {cfgResponse(characteristic.getValue(),status);return;}
+                if (PALETTE_RSP_UUID.equals(characteristic.getUuid())) {palette.read(connection,characteristic.getValue(),status);return;}
+                if (PALETTE_CAP_UUID.equals(characteristic.getUuid())) {palette.capability(connection,characteristic.getValue(),status);return;}
                 if (FRAME_RSP_UUID.equals(characteristic.getUuid())) {frameCapture.read(connection,characteristic.getValue(),status);return;}
                 if (REPLY_UUID.equals(characteristic.getUuid())) {
                     acceptReply(characteristic.getValue(),status);return;
@@ -926,6 +973,7 @@ final class BleDiscovery {
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if(stopped || connection!=gatt)return;
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
+            if (PALETTE_CMD_UUID.equals(characteristic.getUuid())) {palette.written(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {frameCapture.written(connection,status);return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
@@ -971,6 +1019,7 @@ final class BleDiscovery {
         nextPacket=null;
         afterStopPacket=null;
         fxNotify("[]");
+        palette.configure(gatt,paletteCommand,paletteReply,paletteCapabilities);
     }
 
     private void acceptReply(byte[] raw,int status){
@@ -997,7 +1046,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void shutdown() {
         stopped = true;
-        frameCapture.cancel();
+        frameCapture.cancel();palette.reset();
         connected = false;
         connecting = false;
         authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;cfgWatchdog++;
