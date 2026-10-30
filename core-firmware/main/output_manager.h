@@ -57,6 +57,8 @@ typedef struct {
     ot_om_output_t outputs[OT_OM_OUTPUTS];
     bool pending;
 } ot_om_pending_t;
+/* A durable save is staged; the sampler alone activates it after release. */
+bool ot_om_stage(ot_om_pending_t *deferred,const ot_om_output_t saved[OT_OM_OUTPUTS]);
 bool ot_om_saved_apply(ot_om_output_t active[OT_OM_OUTPUTS],
                         ot_om_pending_t *deferred,
                         const ot_om_output_t saved[OT_OM_OUTPUTS],
