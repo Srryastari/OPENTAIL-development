@@ -239,6 +239,7 @@ const storageTest=fs.readFileSync(
 for (const required of [
  'failedCommitRestoresEveryNestedEditAndExport',
  'triggerMultiSelectCommitsOnceOrNotAtAll',
+ 'triggerStyleBatchIsAtomicAndRejectsIncompleteSelection',
  'failedReindexBeforeCommitCannotLeavePartialLayout',
  'store.fail = true',
  'assertEquals(before, project.exportJson())'
@@ -256,6 +257,7 @@ for (const required of ['private String committedJson;',
   'synchronized boolean assignMany(Set<String> triggers, String zoneId, boolean enabled)',
   'JSONObject draft = new JSONObject(data.toString());',
   'data = draft;', 'return save();',
+  'synchronized boolean styleTriggers(Set<String> triggers, String effect, String color)',
   'private void restoreCommitted()',
   'synchronized boolean name(String name)']) {
   assert(model.includes(required), 'Shared native project rollback/atomic-edit contract regressed: '+required);
