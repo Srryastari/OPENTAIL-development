@@ -1409,6 +1409,7 @@ static void led_task(void *p) {
        /* Vehicle inputs no longer pause the show engine. Effects render behind
         * per-zone trigger overlays and resume at their current phase. */
        bool native_rendering=decision.show_requested;
+       uint16_t longest_pixels=0; /* Only successfully refreshed RMT lanes. */
        ot_st_show_active(native_rendering);
        { /* render every loop; measured FPS reflects actual blocking RMT throughput */
            bool frame_ready[OT_CHAIN_COUNT]={false};
@@ -1583,6 +1584,9 @@ static void led_task(void *p) {
                    continue;
                }
                if(frame_captured[ch])ot_frame_snapshot_complete(true);
+               /* A failed lane must not throttle the surviving vehicle lights. */
+               if(local_outputs[ch].active_pixels>longest_pixels)
+                   longest_pixels=local_outputs[ch].active_pixels;
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
@@ -1627,10 +1631,6 @@ static void led_task(void *p) {
        int64_t work_elapsed=esp_timer_get_time()-frame_started_us;
        uint32_t work_us=work_elapsed<=0?0u:
            (uint32_t)(work_elapsed>2000000LL?2000000LL:work_elapsed);
-       uint16_t longest_pixels=0;
-       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
-           if(local_outputs[ch].active_pixels>longest_pixels)
-               longest_pixels=local_outputs[ch].active_pixels;
        ot_fps_pacer_observe(&pacer,work_us,longest_pixels);
        portENTER_CRITICAL(&state_lock);
        adaptive_target_fps=pacer.target_fps;
