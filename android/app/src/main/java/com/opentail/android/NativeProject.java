@@ -117,6 +117,14 @@ final class NativeProject {
         if (!(candidate.opt("layout") instanceof JSONArray)
                 || !(candidate.opt("profiles") instanceof JSONObject))
             throw new JSONException("Missing zone layout or profiles");
+        // Missing older optional sections are upgraded, but malformed present
+        // fields must never be silently replaced with empty authoring data.
+        for (String key : new String[]{"sequence", "savedPresets", "effectFavorites"})
+            if (candidate.has(key) && !(candidate.opt(key) instanceof JSONArray))
+                throw new JSONException("Invalid " + key + " array");
+        if (candidate.has("selectedPixels")
+                && !(candidate.opt("selectedPixels") instanceof JSONObject))
+            throw new JSONException("Invalid selectedPixels object");
         JSONArray layout = candidate.getJSONArray("layout");
         if (layout.length() > MAX_ZONES) throw new JSONException("Too many design zones");
         Set<String> ids = new HashSet<>();
