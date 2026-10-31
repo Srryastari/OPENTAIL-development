@@ -859,7 +859,10 @@ class ComposeMainActivity : ComponentActivity() {
         if(ble.captureFrame(captureOutput.intValue)) {
             pendingFrameRevision=frameRevision
             pendingFrameOutput=captureOutput.intValue
-            captureMessage.value="Capturing CORE frame"
+            // Keep the last failure visible while an opportunistic retry is in flight.
+            if (captureMessage.value == "CORE frame not captured" ||
+                captureMessage.value == "CORE render snapshot not captured")
+                captureMessage.value="Capturing CORE frame"
         }
     }
     @Composable
@@ -1038,11 +1041,12 @@ class ComposeMainActivity : ComponentActivity() {
                     localSketch -> "Offline animation unavailable"
                     animateOffline && (offlinePreview.value || !ble.canControl()) ->
                         "Offline animation unavailable"
-                    hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
+                    actualFrame != null && !offlinePreview.value -> CorePreviewEvidence.label(
+                        actualFrame,captureMessage.value,useConfiguredColors || frame?.origin == ExactLedFrame.Origin.PROJECT)
                     useConfiguredColors -> "Configured zone colors"
                     offlinePreview.value -> "Offline design preview"
                     hasProjectColors -> "Project pixel colors"
-                    else -> "Awaiting CORE frame"
+                    else -> CorePreviewEvidence.label(null,captureMessage.value,false)
                 }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
                 Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
                     .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
@@ -2301,7 +2305,11 @@ class ComposeMainActivity : ComponentActivity() {
                 val id = prefs.getInt("effectId", 0)
                 if (ble.canControl() && id in supportedIds.value) {
                     invalidateCoreFrame()
-                    ble.showFx(id, 3, 255, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
+                    val benchMask = CoreBenchTargets.enabledMask(
+                        arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)
+                    if (benchMask == 0)
+                        bleMessage.value = "No enabled CORE zone read back. Reload CORE Output Manager; local Layout zones are not hardware settings."
+                    else ble.showFx(id, benchMask, liveZoneMask.intValue, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
                 } else bleMessage.value = "Not authorized or effect unsupported by installed firmware"
                 confirm = false
             } }, dismissButton = { Pill("Cancel", t) { confirm = false } })

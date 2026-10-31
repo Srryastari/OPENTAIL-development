@@ -7,7 +7,8 @@
     "android": {
       "pr": 87,
       "sha": "449462c72f47baac2c66e56296d1166202b6174a",
-      "tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
+      "tree": "053b233a9ccb5048a146becfbd6fe5a8d48bfbca",
+      "baseline_tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
     },
     "firmware": {
       "pr": 84,
@@ -385,5 +386,16 @@
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/12",
       "disposition": "not selected; open history/alternative"
     }
-  ]
+  ],
+  "bench_correction": {
+    "base_sha": "68bbe544e1c56fa9331ef1bc36a75e348d27d37f",
+    "allowed_android_changes": [
+      "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+      "android/app/src/main/java/com/opentail/android/CorePreviewEvidence.java",
+      "android/app/src/main/java/com/opentail/android/CoreBenchTargets.java",
+      "android/app/src/test/java/com/opentail/android/CoreBenchEvidenceTest.java"
+    ],
+    "owner_evidence": "Owner reports LEDs illuminate after suggested CORE readback/bench-test flow; original root cause not conclusively isolated",
+    "physical_certification": false
+  }
 }
