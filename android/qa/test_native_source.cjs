@@ -464,10 +464,10 @@ assert(authFirst>=0 && optionalInfo>authFirst &&
 // explicit preset save to be silently coalesced away by continuous FX edits.
 const frameDelivery=bleSource.split('private final CoreFrameCapture frameCapture=')[1]
   ?.split('void setFrameListener(')[0];
-const presetBlock=bleSource.split('void fxPreset(int action,int slot) {')[1]
+const presetSafetyBlock=bleSource.split('void fxPreset(int action,int slot) {')[1]
   ?.split('void stopShow()')[0];
 assert(frameDelivery?.includes('owner==gatt && canCaptureFrame()') &&
-       presetBlock?.includes('BLE busy; retry preset action') &&
+       presetSafetyBlock?.includes('BLE busy; retry preset action') &&
        bleSource.includes('private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;') &&
        bleSource.includes('watchCommandTransaction(gatt);') &&
        bleSource.includes('(writePending || readReplyPending)'),
