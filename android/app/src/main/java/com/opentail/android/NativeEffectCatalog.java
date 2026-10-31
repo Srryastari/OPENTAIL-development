@@ -195,6 +195,41 @@ final class NativeEffectCatalog {
             .thenComparing(e -> e.name.toLowerCase(java.util.Locale.ROOT)));
         return Collections.unmodifiableList(choices);
     }
+    /** Dedicated one-shot effects belong to one lifecycle, not both.
+     * Standard WLED animation choices remain available in either Auto Event;
+     * WLED Strobe #23 is explicitly preserved for Startup and Shutdown.
+     * Do not reclassify the 15 general proprietary Show Mode animations. */
+    private static boolean startupOnly(int id) {
+        return id == 32769 || id == 32770 || id == 32771;
+    }
+    private static boolean shutdownOnly(int id) {
+        return id == 32773 || id == 32787;
+    }
+    static boolean isAllowedForAutoEvent(String event, int id) {
+        if (!"Startup".equals(event) && !"Shutdown".equals(event)) return false;
+        if (showModesOnly(id)) return false;
+        boolean found = false;
+        for (Effect candidate : ALL) if (candidate.id == id) { found = true; break; }
+        if (!found) return false;
+        return "Startup".equals(event) ? !shutdownOnly(id) : !startupOnly(id);
+    }
+    static List<Effect> autoEventChoices(String event) {
+        if (!"Startup".equals(event) && !"Shutdown".equals(event))
+            return Collections.emptyList();
+        ArrayList<Effect> choices = new ArrayList<>();
+        for (Effect effect : autoEventChoices())
+            if (isAllowedForAutoEvent(event,effect.id)) choices.add(effect);
+        return Collections.unmodifiableList(choices);
+    }
+    /** Fail closed on unknown names; byName intentionally falls back to Solid
+     * for imported legacy previews and is not safe as an eligibility check. */
+    static boolean isAllowedForAutoEvent(String event, String effectName) {
+        if (effectName == null) return false;
+        for (Effect effect : ALL)
+            if (effect.name.equalsIgnoreCase(effectName))
+                return isAllowedForAutoEvent(event,effect.id);
+        return false;
+    }
     static Effect byId(int id) {
         for (Effect effect : ALL) if (effect.id == id) return effect;
         return ALL[0];
