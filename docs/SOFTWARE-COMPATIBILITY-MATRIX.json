@@ -7,7 +7,7 @@
     "android": {
       "pr": 87,
       "sha": "449462c72f47baac2c66e56296d1166202b6174a",
-      "tree": "ddc833d558364f1e183a162cd6ffaf1546caa8f4",
+      "tree": "b22f1819ea4e588e005bcd25eaf3d159d6c3a7bf",
       "baseline_tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
     },
     "firmware": {
@@ -393,7 +393,8 @@
       "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
       "android/app/src/main/java/com/opentail/android/CorePreviewEvidence.java",
       "android/app/src/main/java/com/opentail/android/CoreBenchTargets.java",
-      "android/app/src/test/java/com/opentail/android/CoreBenchEvidenceTest.java"
+      "android/app/src/test/java/com/opentail/android/CoreBenchEvidenceTest.java",
+      "android/qa/check_release.py"
     ],
     "owner_evidence": "Owner reports LEDs illuminate after suggested CORE readback/bench-test flow; original root cause not conclusively isolated",
     "physical_certification": false
