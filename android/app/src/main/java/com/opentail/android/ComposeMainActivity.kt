@@ -1910,7 +1910,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .getOrDefault(0xffffffff.toInt())
                 ApprovedWledEffectsEditor(
                     selectedId=eventEffect.id,
-                    effectOptions=NativeEffectCatalog.autoEventChoices(),
+                    effectOptions=NativeEffectCatalog.autoEventChoices(key),
                     scopeKey="auto-event:"+key,
                     prefs=prefs,
                     paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
@@ -1970,7 +1970,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // Show all matching choices; the old 15-item
                         // alphabetic cap hid Materialize, Random Materialize,
                         // Smooth Fade and Strobe (owner Test 86).
-                        NativeEffectCatalog.autoEventChoices()
+                        NativeEffectCatalog.autoEventChoices(key)
                             .filter { it.name.contains(search, ignoreCase = true) }
                             .forEach { item ->
                                 Pill(item.name, t) {
