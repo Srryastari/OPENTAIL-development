@@ -37,6 +37,14 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/e
 # Singularity Shutdown, must compile, be registered and respect true black.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_proprietary_effects.c -o /tmp/ot-proprietary-fx-tests -lm && /tmp/ot-proprietary-fx-tests
 
+# Continuous proprietary Show Mode loops have separate deterministic golden
+# frames, phase-preserving Speed/Intensity changes and seven fixed one-shots.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c \
+  main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+  tests/test_proprietary_loop_continuity.c -o /tmp/ot-proprietary-continuity -lm
+/tmp/ot-proprietary-continuity
+
 # All decorative fade maths and strobe edge timings must survive every change.
 # This proves only host-side rendered frames; physical FPS/response is separate.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_render_quality.c -o /tmp/ot-render-quality-tests -lm && /tmp/ot-render-quality-tests

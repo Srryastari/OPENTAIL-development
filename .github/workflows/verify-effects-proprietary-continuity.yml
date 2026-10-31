@@ -1,0 +1,76 @@
+name: Effects proprietary continuity exact HEAD (software only)
+on:
+  pull_request:
+    branches: [firmware/fix-nimble-read-blob-offset-20261031]
+    paths:
+      - 'core-firmware/main/ot_auto_effects.*'
+      - 'core-firmware/main/effects_1d.*'
+      - 'core-firmware/tests/test_proprietary_loop_continuity.c'
+      - 'core-firmware/tests/run-host-tests.sh'
+      - '.github/workflows/verify-effects-proprietary-continuity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-golden-140-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Full host, source RGB goldens, one-shots, 140 effects, physical override matrix
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Regression impact audit (not physical evidence)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  esp32s3-5-5-5:
+    needs: source-golden-140-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Build ESP32-S3 without flash
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify image and boot manifest (software only)
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+
+  android-metadata-compatibility:
+    needs: source-golden-140-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Preserve 140 IDs, effect parameters and Android source ABI
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
