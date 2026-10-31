@@ -1873,12 +1873,11 @@ class ComposeMainActivity : ComponentActivity() {
         fun applyAutoEvent(event: String, field: String, value: Any): Boolean {
             val saved = project.setAutoEvent(event, field, value)
             eventMessage = if (saved) "" else "Could not save " + event + " settings"
-            if (saved) {
-                refresh()
-                // One-shot events replay their own source frames from t=0
-                // after a locally saved edit, never restart a physical Show.
-                if (offlinePreview.value && selectedEvent == event) offlineReplay.intValue++
-            }
+            if (saved) refresh()
+            // One-shot events replay their own source frames from t=0
+            // after a locally saved edit, never restart a physical Show.
+            if (saved && offlinePreview.value && selectedEvent == event)
+                offlineReplay.intValue++
             return saved
         }
         listOf("Startup", "Shutdown").forEach { key ->
