@@ -331,13 +331,18 @@ internal fun ApprovedWledEffectsEditor(
                 changeColor(role,android.graphics.Color.HSVToColor(
                     floatArrayOf(hsv[0],hsv[1],v/255f)))
             })
-            var temperature by rememberSaveable(currentId,role) {
-                mutableIntStateOf(prefs.getInt("wled.${currentId}.temp${role}",72))
+            // The same native editor serves four independent contexts.
+            // Temperature is a UI-only relative position, not a CORE Kelvin
+            // setting. Scope both the Compose state and persisted preference.
+            val temperatureKey = EditorTemperatureScope.preferenceKey(
+                scopeKey,currentId,role)
+            var temperature by remember(scopeKey,currentId,role) {
+                mutableIntStateOf(prefs.getInt(temperatureKey,72))
             }
             EditorNumeric("Kelvin/Temperature",temperature,100,{v->
                 // Relative position only: no unverified Kelvin->RGB or CORE write.
                 temperature=v
-                prefs.edit().putInt("wled.${currentId}.temp${role}",v).apply()
+                prefs.edit().putInt(temperatureKey,v).apply()
             })
         }
     }
