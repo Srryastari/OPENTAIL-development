@@ -96,6 +96,37 @@ int main(void){
  assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,4u,702u,&glow));
  assert(ot_fx_bank_apply_configured(&bank,&single,outputs,800u,false));
  assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_OFF);
+ /* Live parameter edits preserve running animation state and separate TTL.
+  * Never restart particles, trails, spark overlays or adjacent zones merely
+  * because an authenticated app changes color, speed or intensity. */
+ ot_fx_zone_bank_t live={0};
+ ot_ble_fx_packet_t edit=make(9,1,1,5);
+ edit.speed=22;edit.brightness=12;
+ assert(ot_fx_bank_apply(&live,&edit,100u,false));
+ const uint32_t phase_gen=live.zones[0][0].generation;
+ live.zones[0][0].overlay=glow;
+ edit.speed=90;edit.intensity=200;edit.brightness=24;
+ edit.r=44;edit.palette_id=0;edit.ttl_sec=2;
+ assert(ot_fx_bank_apply(&live,&edit,4000u,false));
+ assert(live.zones[0][0].generation==phase_gen);
+ assert(live.zones[0][0].started_ms==100u);
+ assert(live.zones[0][0].refreshed_ms==4000u);
+ assert(live.zones[0][0].request.speed==90);
+ assert(live.zones[0][0].overlay.style==OT_FX_OVERLAY_FLARES);
+ assert(ot_fx_slot_active(&live.zones[0][0],5999u));
+ assert(!ot_fx_slot_active(&live.zones[0][0],6000u));
+ edit.effect_id=10;
+ assert(ot_fx_bank_apply(&live,&edit,6001u,false));
+ assert(live.zones[0][0].generation!=phase_gen);
+ assert(live.zones[0][0].started_ms==6001u);
+ assert(live.zones[0][0].overlay.style==OT_FX_OVERLAY_OFF);
+ /* A saved standalone zone stays local even when its BLE client leaves. */
+ assert(ot_fx_bank_apply(&live,&edit,7000u,true));
+ assert(ot_fx_slot_active(&live.zones[0][0],700000u));
+ ot_fx_bank_stop_temporary(&live);
+ assert(ot_fx_slot_active(&live.zones[0][0],700000u));
+ ot_fx_bank_stop_all(&live);
+ assert(!ot_fx_bank_any_active(&live,700000u));
  a.zone_mask=0;assert(!ot_fx_bank_apply(&bank,&a,10,false));
  a=make(1,3,255,1);
  assert(ot_fx_bank_apply(&bank,&a,UINT32_MAX-500u,false));
