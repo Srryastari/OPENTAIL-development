@@ -3,16 +3,23 @@
   "files": {
     "wled_fx_compat.c": "63029d595c64db1c3913176dfdd48ea1b07e2eb74d66b71f9c4165ecbd511259",
     "wled_fx_compat.h": "e557cb9d5b620e5eb9d99faa9d9533d338364edc79e3708ef5f149f9dca67fa0",
-    "effects_1d.c": "05575879ac6e32cecf56f78dbf3370136edd2a41be7382f7334f3fbfea7eac48",
-    "effects_1d.h": "24daa33a12d482912e2e9e69bdaed0085587b6762192e7ba8aa08714a3f2dfd9",
+    "effects_1d.c": "5844a1992fd7916acf64d7162dfcede3e1ed9b556d2c1cf46b39f8cfefa99d1f",
+    "effects_1d.h": "5badd61a2fc5b2ac98ef9fbe7a681ef8419ca3ce4a4f5f63530a5d0be420e692",
     "wled_1d.c": "44116fbc03f467bf61b511f097f4edcbf093251e71818ca71b3525aab47542ab",
     "wled_1d.h": "ffa77e0da8f2f9efee32f20bc8c083beb0831440b39f7bcf3977e571147a3c55",
     "palette_1d.c": "c7b5d24b79d5e0a014eb892d45692a8e22c40996d0e4169786d291d1fad00afa",
     "palette_1d.h": "761471a3856a5ff64d225ae0f588775b441fff741d3669e09ff93be2bf3e28e9",
     "particle_system_1d.c": "3abdf07a051d0d9f4cb89973aed8450533c794b0787753f1df0ad7eb82c5c9cc",
     "particle_system_1d.h": "ab07b4d37ef0097c682d0822d646d839e06dbcfd96b51a35cee61defc98ada0d",
-    "ot_auto_effects.c": "a217e039336ed3ee7956d9a68c5ee564a2fe43a109156f6791f02e22b391eac8",
-    "ot_auto_effects.h": "4ce09a10c2fecce13b810a49987e985c6d6e127a3b7639e2e59baee7c24f5d59",
+    "ot_auto_effects.c": "5f6484066a8e070f5804470fee80c06d677cdc87ec6ce3bcc892df9da6cc3d90",
+    "ot_auto_effects.h": "3116eb326df2a06c863e86cdf89b15702a2eb9c0ad7daa3617b9fa6f6b73a395",
     "core_logic.h": "ee9c173fe24da57e4e2b4c52ad218f06de77bb789ceb6aa1eca9e7413379ad5e"
-  }
+  },
+  "seamless_loop_source_commit": "7c0fcc450a7619a57603aabf833dea855a18bcd8",
+  "seamless_loop_files": [
+    "effects_1d.c",
+    "effects_1d.h",
+    "ot_auto_effects.c",
+    "ot_auto_effects.h"
+  ]
 }
