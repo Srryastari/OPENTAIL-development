@@ -666,9 +666,12 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
-// Firmware has a narrow existing palette BLE byte. This must not be
-// generalized to WLED palette parity or new wire operations.
-assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+// CORE #49 advertises 16 source-derived palette modes plus Embers; only
+// these combinations pass BLE admission. No UI visual changes are required.
+const palettePolicy=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/BleFxPalettePolicy.java','utf8');
+assert(palettes.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId)') &&
+       palettePolicy.includes('case 179: case 185: case 218: case 219:') &&
        palettes.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(') &&
        compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
@@ -676,9 +679,8 @@ assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2
        compose.includes('livePreview.stop()') &&
        compose.includes('supportedIds.value = emptySet() // never reuse another CORE') &&
        compose.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
-       compose.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
-       bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))'),
-       'Only the verified existing CORE palette subset may be previewed over BLE');
+       bleSource.includes('!BleFxPalettePolicy.isWireCandidate(effectId,paletteId)'),
+       'Only the verified CORE palette-capable FX may be previewed over BLE');
 const preview=fs.readFileSync(
   'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
 assert(preview.includes('frame.paletteId, 5') &&
@@ -687,8 +689,9 @@ assert(preview.includes('frame.paletteId, 5') &&
 const corePaletteTest=fs.readFileSync(
   'android/app/src/test/java/com/opentail/android/NativePaletteCoreContractTest.kt','utf8');
 assert(corePaletteTest.includes('corePreviewPalette(32768, palette)') &&
-       corePaletteTest.includes('otherEffectsNeverClaimEmbersPaletteSupport'),
-       'Executable narrow-palette contract tests missing');
+       corePaletteTest.includes('sourcePaletteEffectIdsMirrorPinnedCoreMetadata') &&
+       corePaletteTest.includes('nonPaletteEffectsAreNotAdvertised'),
+       'Executable pinned CORE palette contract tests missing');
 
 // Native sequence/palette import boundaries are strict unsigned bytes;
 // source-backed RGB stop gradients must not round fractional samples.
