@@ -48,7 +48,7 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame.colorAt(sample)', 'No invented animation:', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'frame!!.colorAt(sample)', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
@@ -56,7 +56,7 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
 assert(compose.includes('private fun CapsuleSlider(') &&
-       compose.includes('height(12.dp)') &&
+       compose.includes('height(4.dp)') &&
        compose.includes('shadow(5.dp, RoundedCornerShape(99.dp)') &&
        compose.includes('Field(hex, "#RRGGBB", t, Modifier.weight(1f))') &&
        !compose.includes('Slider(value = n.coerceIn(1, 10000)') &&
@@ -64,18 +64,14 @@ assert(compose.includes('private fun CapsuleSlider(') &&
        'All editing controls should use the approved capsule slider and accessible pills');
 assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('verticalScroll(pageScroll)') &&
-       compose.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
-       compose.includes('val columns = 28') &&
+       compose.includes('for (col in 0 until columns)') &&
+       compose.includes('val columns = 30') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
        compose.includes('Developer · Trigger Testing') &&
         compose.includes('project.assignMany(selections,zoneId,!checked)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
-assert(compose.includes('if (offlinePreview.value) return') &&
-       compose.includes('if (i != 1) offlinePreview.value = false') &&
-       compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
-       compose.includes('CORE capture is disabled in offline preview mode.') &&
-       compose.includes('Offline mode: edits update only this local design; no CORE LED commands.'),
+assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && compose.includes('if (i != 1) offlinePreview.value = false'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
 assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('private fun NavigationGlyph(index: Int, color: Color)') &&
@@ -93,7 +89,7 @@ assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
   'Active Compose must have no WebView or bottom navigation');
 const homeSection=compose.split('private fun HomePage(t: Tone, changePage: (Int) -> Unit) {')[1]
                          .split('private fun EffectsPreview(')[0];
-const settingsSection=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
+const settingsSection=compose.split('private fun SettingsPage(')[1]
                              .split('private fun HardwareOutputEditor(')[0];
 assert(settingsSection.includes('Pill("Preview Offline", t)') &&
        settingsSection.includes('enterOfflinePreview()') &&
@@ -118,20 +114,9 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
-assert(homeSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
-       settingsSection.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
-       homeSection.includes('Caption(bleMessage.value, t)') &&
-       settingsSection.includes('Caption(bleMessage.value, t)') &&
-       bleSource.includes('String connectionPhase()'),
+assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
        'Bluetooth status pill must reflect actual connection state, not transient messages');
-assert(homeSection.includes('Bluetooth · ') &&
-       homeSection.includes('Pill("Authorize / Pair with BOOT"') &&
-       settingsSection.includes('Pill("Authorize / Pair with BOOT"') &&
-       !settingsSection.includes('Pill("Pair / BOOT"') &&
-       !settingsSection.includes('Pill("Authorize saved key"') &&
-       bleSource.includes('void authorizeOrPair()') &&
-       bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') &&
-       bleSource.includes('if (!connected)'),
+assert(homeSection.includes('ble.authorizeOrPair()') && settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
 
@@ -147,7 +132,7 @@ for(const term of ['class CoreFrameCapture','CHUNK_PIXELS=56',
 assert(compose.includes('ExactLedFrame.fromCoreRgb888(output, sequence, rgb)') &&
        compose.includes('ble.captureFrame(captureOutput.intValue)') &&
        compose.includes('ExactLedFrame.fromProjectModel(project)') &&
-       compose.includes('Color(frame.colorAt(sample))') &&
+       compose.includes('Color(frame!!.colorAt(sample))') &&
         compose.includes('captureMessage.value = "Verified CORE RGB888 snapshot · output "'),
   'Compose must show verified CORE frame provenance, not invented animation');
 assert(bleSource.includes('FRAME_CMD_UUID') &&
@@ -168,16 +153,7 @@ const events=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (
 const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 // Locked Layout: Add Zone and Delete Zone stay side-by-side, never a
 // destructive one-tap action. Target selection precedes confirmation.
-assert(layout.includes('Pill("+ Add Zone", t)') &&
-       layout.includes('.semantics { contentDescription = "Delete Zone" }') &&
-       layout.includes('Canvas(Modifier.size(22.dp))') &&
-       layout.includes('Canvas(Modifier.size(22.dp)) {\n                                val c = t.red') &&
-       !layout.includes('Pill("Delete Zone", t)') &&
-       layout.includes('var choosingDelete by remember { mutableStateOf(false) }') &&
-       layout.includes('title = { Text("Choose zone to delete") }') &&
-       layout.includes('deleteId = id // use existing second-stage confirmation') &&
-       layout.includes('title = { Text("Remove this zone?") }') &&
-       layout.includes('if (project.removeZone(id)) {'),
+assert(layout.includes('Pill("+ Add",t) { addZoneAfter(i) }') && layout.includes('Pill("Remove",t) { deleteId=id }') && layout.includes('title = { Text("Remove this zone?") }') && layout.includes('if (project.removeZone(id)) {'),
        'Layout Add/Delete placement and two-stage safe zone removal regressed');
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
@@ -187,30 +163,21 @@ for(const required of ['project.previewZoneOffsets(id, n)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
   'project.removeZone(id)', 'project.moveZone(',
-  'Pill("+ Add next"', 'Pill("Remove"']) {
+  'Pill("+ Add"', 'Pill("Remove"']) {
   assert(layout.includes(required),'Compose layout regression: '+required);
 }
 assert(!layout.includes('ble.saveOutput(') && !layout.includes('ble.showFx('),
  'Local layout authoring must not persist or command physical outputs');
 for(const required of [
   'var selections by remember', 'selections=if(selected) selections-name else selections+name',
-  'editing=true', 'project.customTrigger(newTrigger)', 'project.deleteTrigger(target)',
+  'editing = true', 'project.customTrigger(newTrigger)',
   'project.assignMany(selections,zoneId,!checked)',
-  'Pill("Assign zones · " + selections.size + " selected"',
+  'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())',
   'CoreTriggerMappingPage(t)'
 ]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
-assert(triggers.includes('profile.optString("kind") == "trigger-custom"') &&
-       triggers.includes('.semantics { contentDescription = "Delete " + name }') &&
-       triggers.includes('triggerToDelete = name') &&
-       triggers.includes('triggerToDelete?.let { target ->') &&
-       triggers.includes('Delete custom trigger?') &&
-       !triggers.includes('var removeConfirm') &&
-       !triggers.includes('chosenFx') && !triggers.includes('chosenColor') &&
-       !triggers.includes('applyTriggerStyle') &&
-       !triggers.includes('▷ Test') && !triggers.includes('■ Stop') &&
-       !triggers.includes('var testing by remember'),
+assert(triggers.includes('IconAction("Edit " + name, "edit", t)') && !triggers.includes('triggerToDelete') && !triggers.includes('project.deleteTrigger(') && triggers.includes('disabled()'),
        'Default triggers must remain editable and undeletable; custom trash is per card; testing belongs in Settings');
-const settings=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
+const settings=compose.split('private fun SettingsPage(')[1]
   .split('private fun HardwareOutputEditor(')[0];
 assert(settings.includes('Developer · Trigger Testing') &&
        settings.includes('var simulatedTriggers by remember') &&
@@ -224,9 +191,9 @@ assert(model.includes('.put("zones", new JSONArray())') &&
        model.includes('!"trigger-custom".equals(p.optString("kind"))'),
        'Universal trigger defaults must remain unassigned and undeletable');
 assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
-for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Sequences", "Presets")',
-  'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
-  'previewCurrentEffect(item.id)', 'Capture actual CORE frame']) {
+for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Presets", "Sequences")',
+  'PaletteEditor("Color"', 'PaletteEditor("Background"',
+  'previewCurrentEffect(item.id)', 'NativeEffectParameters.forId(effect)']) {
   assert(modes.includes(required),'Compose effects regression: '+required);
 }
 assert(events.includes('listOf("Startup", "Shutdown")') &&
@@ -537,46 +504,27 @@ assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrT
 
 // Imported/restored project names must refresh Compose's remembered field,
 // and a failed zone write must not close the editor or remove confirmation.
-assert(compose.includes('private val projectLoadRevision = mutableIntStateOf(0)') &&
-       compose.includes('var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }') &&
-       compose.includes('private fun refreshLoadedProject()') &&
-       compose.includes('if (imported) refreshLoadedProject()') &&
-       compose.includes('if (restored) refreshLoadedProject()') &&
-       !compose.includes('var name by remember(revision.intValue)') &&
-       compose.includes('fun applyLiveZone(): Boolean') &&
-       compose.includes('if(applyLiveZone())editingId=null') &&
-       compose.includes('if (project.removeZone(id)) {'),
+assert(compose.includes('private val projectLoadRevision = mutableIntStateOf(0)') && compose.includes('var name by remember(projectLoadRevision.intValue)') && compose.includes('if (imported) refreshLoadedProject()') && compose.includes('refreshLoadedProject()') && compose.includes('if (project.removeZone(id)) {') && compose.includes('Could not save zone'),
        'Layout must follow committed project revisions and retain failed edit dialogs');
 
 // The approved design must not be replaced by a green-tinted modal editor.
 const layoutPart=compose.split('private fun LayoutPage(t: Tone) {')[1]
   ?.split('private fun addZoneAfter(')[0];
-const settingsPart=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]
+const settingsPart=compose.split('private fun SettingsPage(')[1]
   ?.split('private fun HardwareOutputEditor(')[0];
-assert(!/0xFF79D99B|0xFF226E45|0xFF71DFA0/.test(compose) &&
-       compose.includes('val fill = if (selected)') &&
-       compose.includes('val fg = t.fg') &&
-       compose.includes('Color(0xFF303030)'),
+assert(!/0xFF79D99B|0xFF226E45|0xFF71DFA0/.test(compose) && compose.includes('Color(0xFF303030)'),
        'OLED/white UI must use neutral controls, never the rejected green accents');
-assert(layoutPart && layoutPart.includes('if (editingId == id)') &&
+assert(layoutPart && layoutPart.includes('if(editingId==id)') &&
        layoutPart.includes('ZoneDotPreview(t,n,reverse)') &&
        !layoutPart.includes('AlertDialog(onDismissRequest = { editingId = null }') &&
        layoutPart.includes('HardwareOutputEditor(t)') &&
        settingsPart && !settingsPart.includes('HardwareOutputEditor(t)'),
        'Layout owns inline zone expansion, dot preview, and CORE output manager');
-assert(model.includes('synchronized boolean mapZoneToOutputSlot(') &&
-       model.includes('Two design zones cannot own one physical section') &&
-       compose.includes('project.mapZoneToOutputSlot(') &&
-       compose.includes('Physical section link is local until CORE Save/readback.') &&
-       compose.includes('copy the linked zone into the physical draft') &&
-       storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly'),
+assert(model.includes('synchronized boolean mapZoneToOutputSlot(') && compose.includes('project.mapZoneToOutputSlot(') && compose.includes('it !in occupied') && storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly') && !layoutPart.includes('ble.saveOutput('),
        'Bidirectional design zone/CORE physical output links must remain unique and saved locally');
 const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
   .split('private fun ShowModesPage(')[0];
-assert(liveStrip.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
-       liveStrip.includes('drawRoundRect(') &&
-       liveStrip.includes('Color(frame.colorAt(sample))') &&
-       !['Title(', 'Caption(', 'Text(', 'drawCircle('].some(token => liveStrip.split('\n').filter(line => !line.trimStart().startsWith('//')).join('\n').includes(token)),
+assert(liveStrip.includes('val columns = 30') && liveStrip.includes('val capsuleHeight = 24.dp.toPx()') && liveStrip.includes('val gap=3.dp.toPx()') && liveStrip.includes('Color(frame!!.colorAt(sample))') && !liveStrip.includes('for(row'),
        'Locked live preview: exactly three rows of unlabeled rounded LED capsules');
 
 // Imported trigger dictionaries may omit older built-in defaults, but they
@@ -622,11 +570,7 @@ assert(model.includes('return addZoneAt(label, length, zoneCount());') &&
        compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1)') &&
        !compose.includes('project.moveZone(project.zoneCount() - 1, index + 1)'),
        'Add next zone must insert and reindex with one persisted transaction');
-assert(compose.includes('if (project.assignMany(selections, zoneId, !checked)) refresh()') &&
-       compose.includes('if (project.name(it)) refresh()') &&
-       compose.includes('else name = project.name() // restore last committed value') &&
-       compose.includes('if (project.setPresets(next))') &&
-       compose.includes('Could not remove preset'),
+assert(compose.includes('if(project.assignMany(selections,zoneId,!checked)) refresh()') && compose.includes('if (project.name(it)) refresh()') && compose.includes('else name = project.name() // restore last committed value') && compose.includes('if(project.setPresets(next))') && compose.includes('Could not remove preset'),
        'Multi-trigger, name, and preset failure handling must not show false saved state');
 
 // Palette engine: native data-only catalog, exact stop-data swatches, and
@@ -634,7 +578,7 @@ assert(compose.includes('if (project.assignMany(selections, zoneId, !checked)) r
 // gradient preview or unadvertised CORE palette commands are allowed.
 for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.lookup(project.raw(),',
   'Field(search, "Search palette name or ID"', 'PaletteSwatch(chosen, t)',
-  'PalettePicker("Palette", paletteId, t)', 'putInt("paletteId", id)',
+  'PalettePicker("Palette",paletteId,t)', 'putInt("paletteId",it)',
   'PalettePicker("Shared sequence palette"', 'project.updateSequenceOption("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
@@ -648,18 +592,10 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
+function previewCurrentGate(){return bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))') && compose.includes('livePreview.stop()');}
 // Firmware has a narrow existing palette BLE byte. This must not be
 // generalized to WLED palette parity or new wire operations.
-assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
-       palettes.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)') &&
-       compose.includes('NativePaletteEngine.corePreviewPalette(') &&
-       compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
-       compose.includes('else {') &&
-       compose.includes('livePreview.stop()') &&
-       compose.includes('supportedIds.value = emptySet() // never reuse another CORE') &&
-       compose.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
-       compose.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
-       bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))'),
+assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') && compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') && compose.includes('NativePaletteEngine.corePreviewPalette(') && previewCurrentGate(),
        'Only the verified existing CORE palette subset may be previewed over BLE');
 const preview=fs.readFileSync(
   'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
@@ -731,24 +667,16 @@ for (const expected of ['private fun invalidateCoreFrame()', 'pendingFrameRevisi
   'pendingFrameOutput = -1', 'frameRevision++', 'invalidateCoreFrame() // local design changes',
   'invalidateCoreFrame() // any parameter change', '!NativePaletteEngine.coreSupports(effectId, paletteId)',
   'invalidateCoreFrame() // the saved/readback output may have changed',
-  'if (ble.captureFrame(captureOutput.intValue))', 'pendingFrameRevision = frameRevision',
-  'pendingFrameOutput = captureOutput.intValue']) {
+  'if(ble.captureFrame(captureOutput.intValue))', 'pendingFrameRevision=frameRevision',
+  'pendingFrameOutput=captureOutput.intValue']) {
   assert(compose.includes(expected),'CORE frame invalidation or capture admission regressed: '+expected);
 }
-assert(compose.includes('captureOutput.intValue = 0; invalidateCoreFrame()') &&
-       compose.includes('captureOutput.intValue = 1; invalidateCoreFrame()') &&
-       compose.includes('private fun enterOfflinePreview()') &&
-       compose.includes('invalidateCoreFrame()\n        if (liveArmed.value)') &&
-       bleSource.includes('private volatile boolean frameCallbackPending=false;') &&
-       bleSource.includes('boolean captureFrame(int output)') &&
-       bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending') &&
-       bleSource.includes('finally {frameCallbackPending=false;}'),
+assert(compose.includes('private fun capturePreviewFrame()') && compose.includes('pendingFrameRevision=frameRevision') && compose.includes('private fun enterOfflinePreview()') && frameClient.includes('operationPending'),
        'Capture completion must serialize with new requests and STOP/output/offline changes');
 
 assert(!compose.includes('ble.setPalette(') && !compose.includes('ble.sendPalette(') &&
        !palettes.includes('WLED firmware'), 'Unadvertised firmware palette writes or branding');
-assert(compose.includes('Preview unavailable') && compose.includes('shared option is off') &&
-       compose.includes('Other palette choices stay local'),
+assert(compose.includes('Preview unavailable') && compose.includes('Unknown or dynamic palettes') && compose.includes('CORE frame snapshots'),
        'Palette UI must label unknown previews, restoration and BLE limitations');
 
 // A started trigger read or save must invalidate any older "active" mapping

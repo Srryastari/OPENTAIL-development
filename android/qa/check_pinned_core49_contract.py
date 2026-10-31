@@ -109,3 +109,24 @@ require_text("android/app/src/main/java/com/opentail/android/NativeTriggerMappin
     "revision == baseRevision + 1 && matches(expected);",
 )
 print("PASS: pinned CORE #49, Trigger #48, Effects #50 source-SHA/ABI read-only compatibility gate")
+
+# Parameter controls must reproduce the pinned CORE flags, not assume every
+# effect has three colors and universal motion/palette controls.
+metadata_source = Path('pinned-core49/core-firmware/main/wled_fx_compat.c').read_text()
+metadata_source = metadata_source.split('static const ot_wled_fx_metadata_t supported[]')[1].split('bool ot_wled_fx_metadata')[0]
+metadata_rows = re.findall(
+    r'\{\s*OT_\w+,\s*"([^"]+)",\s*"[^"]*",\s*(true|false),\s*(true|false),\s*(true|false),\s*(true|false),\s*(true|false)\s*\}', metadata_source)
+assert len(metadata_rows) == 120
+expected_flags = {row[0]: tuple(row[1:]) for row in metadata_rows}
+auto_source = Path('pinned-core49/core-firmware/main/ot_auto_effects.c').read_text()
+assert '*out=(ot_wled_fx_metadata_t){id,name,name,true,true,true,true,false};' in auto_source
+for name in re.findall(r'case OT_FX_\w+:name="([^"]+)";', auto_source):
+    expected_flags[name] = ('true', 'true', 'true', 'true', 'false')
+expected_flags['Embers'] = ('true', 'false', 'true', 'true', 'false')
+actual_flags = {
+    row[0]: tuple(row[1:]) for row in re.findall(
+        r'"([^"]+)" to EffectParameters\((true|false), (true|false), (true|false), (true|false), (true|false)\)',
+        Path('android/app/src/main/java/com/opentail/android/NativeEffectParameters.kt').read_text())
+}
+assert actual_flags == expected_flags, 'Android effect parameter flags diverge from pinned CORE #49'
+print('PASS: all 140 Android effect parameter definitions match pinned CORE metadata')

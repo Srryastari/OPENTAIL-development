@@ -511,6 +511,24 @@ final class NativeProject {
         } catch (JSONException e) { return false; }
     }
 
+    /** Update only the selected field, preserving mixed bulk values. Local v4 only. */
+    synchronized boolean editTriggerStyle(Set<String> triggers, String effect, String color) {
+        if (triggers == null || triggers.isEmpty() || (effect == null && color == null)) return false;
+        if (effect != null && (effect.isEmpty() || effect.length() > 64)) return false;
+        if (color != null && !color.matches("#[0-9A-Fa-f]{6}")) return false;
+        for (String name : triggers) if (name == null || profiles().optJSONObject(name) == null) return false;
+        try {
+            JSONObject draft = new JSONObject(data.toString());
+            for (String name : triggers) {
+                JSONObject p = draft.getJSONObject("profiles").getJSONObject(name);
+                if (effect != null) p.put("pattern", effect);
+                if (color != null) p.put("color", color);
+            }
+            data = draft;
+            return save();
+        } catch (JSONException ex) { return false; }
+    }
+
     /** Startup/shutdown authoring only; physical ignition is CORE-owned. */
     synchronized boolean setAutoEvent(String event, String key, Object value) {
         if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;
@@ -526,6 +544,11 @@ final class NativeProject {
                 if (!(value instanceof Number)) return false;
                 double seconds = ((Number)value).doubleValue();
                 if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0) return false;
+                break;
+            case "color":
+            case "secondary":
+                if (!(value instanceof String) || !((String)value).matches("#[0-9A-Fa-f]{6}"))
+                    return false;
                 break;
             case "eventFx":
                 if (!(value instanceof String) || ((String)value).isEmpty()
