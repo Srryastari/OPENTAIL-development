@@ -1158,9 +1158,23 @@ class ComposeMainActivity : ComponentActivity() {
                     val snapshot = JSONObject(project.exportJson())
                     snapshot.put("savedPresets", JSONArray())
                     val updated = JSONArray(presets.toString())
+                    // Effects editor values live in SharedPreferences, not the
+                    // Studio v4 document. Store them alongside the document.
+                    val effectSettings=JSONObject()
+                    for(key in listOf("speed","intensity","brightness","foreground","background","accent","paletteId")) {
+                        val fallback=when(key) {
+                            "speed","intensity" -> 128
+                            "brightness" -> 160
+                            "foreground","accent" -> -1
+                            "background" -> 0xff000000.toInt()
+                            else -> 0
+                        }
+                        effectSettings.put(key,prefs.getInt(key,fallback))
+                    }
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
                         .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
-                        .put("effectName",effectLabel(selectedEffect.intValue)))
+                        .put("effectName",effectLabel(selectedEffect.intValue))
+                        .put("effectSettings",effectSettings))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
@@ -1222,11 +1236,29 @@ class ComposeMainActivity : ComponentActivity() {
                     presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
                     if (restored) {
                         val selected=presets.optJSONObject(pendingLoad)
+                        val editor=prefs.edit()
                         if(selected?.has("fxId")==true) {
                             selectedEffect.intValue=selected.optInt("fxId",0)
-                            prefs.edit().putInt("effectId",selectedEffect.intValue).apply()
+                            editor.putInt("effectId",selectedEffect.intValue)
                         }
-                        refreshLoadedProject()
+                        // Backward compatible: old presets may have no FX
+                        // settings. Never clobber the user's current controls.
+                        selected?.optJSONObject("effectSettings")?.let {savedFx ->
+                            for(key in listOf("speed","intensity","brightness",
+                                "foreground","background","accent","paletteId")) {
+                                if(savedFx.has(key) && savedFx.opt(key) is Number) {
+                                    val raw=savedFx.optInt(key)
+                                    val safe=when(key) {
+                                        "speed","intensity","brightness" -> raw.coerceIn(0,255)
+                                        "paletteId" -> raw.coerceIn(0,NativePaletteEngine.MAX_ID)
+                                        else -> raw
+                                    }
+                                    editor.putInt(key,safe)
+                                }
+                            }
+                        }
+                        if(editor.commit()) refreshLoadedProject()
+                        else presetStatus="Design loaded; effect preferences could not be saved"
                     }
                     pendingLoad = -1
                 } },
