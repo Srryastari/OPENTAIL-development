@@ -1,9 +1,8 @@
 /*
- * OpenTail original one-shot startup/shutdown effects.
- * Independent of upstream WLED and all hardware output drivers. Runtime is
- * bounded by caller-selected universal output/zone pixels, without allocations.
- * This bench preview does NOT turn the controller off, arm ignition/ACC inputs,
- * persist automatic events, or bypass physical trigger arbitration.
+ * OpenTail-owned one-shot transitions and continuous Show Mode originals.
+ * Pure, deterministic per-zone RGB rendering; no BLE, GPIO, allocations or
+ * physical output ownership. The seven authored one-shot endpoints are kept
+ * separate from the twelve continuously animated proprietary concepts.
  */
 #include "ot_auto_effects.h"
 
@@ -131,9 +130,14 @@ static bool original_concept(uint16_t id){
 static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed,
                                     uint32_t ms,ot_wled_rgb_t *pixels,size_t count){
     const uint32_t duration=ot_auto_fx_duration_ms(cfg->speed);
-    const uint32_t cycle=ms/duration;
     const uint32_t elapsed=ms%duration;
-    const uint32_t t=(elapsed*255u)/duration;
+    /* All continuous motifs use integral full-turn phases. In particular,
+     * t*3 / t*5 in the old 0..254 progress clock ended mid-wave and snapped
+     * to the beginning; cycle-dependent hashes also teleported particles.
+     * A 512-unit wrapped turn closes every triangular waveform exactly. */
+    const uint32_t phase=((uint64_t)elapsed*512u)/duration;
+    const uint32_t pulse=tri8(phase); /* grow -> retract, no reveal reset */
+    const uint32_t t=(elapsed*255u)/duration; /* one-shot Event Horizon only */
     const uint32_t whole=(ms>=duration)?duration:ms;
     const uint32_t one_shot_t=(whole*255u)/duration;
     const uint32_t center=(uint32_t)count/2u;
@@ -144,12 +148,12 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
         const uint32_t p=(uint32_t)px;
         const uint32_t normalized=(p*255u)/(uint32_t)count;
         const uint32_t distance=absdiff(p,center);
-        const uint32_t h=hash32(p*2654435761u+seed+cycle*1037u);
-        const uint32_t drift=(t*(uint32_t)count)/255u;
+        const uint32_t h=hash32(p*2654435761u+seed);
+        const uint32_t drift=(phase*(uint32_t)count)/512u;
         ot_wled_rgb_t c=bg;
         switch(cfg->effect_id){
           case OT_FX_DIMENSIONAL_RIFT:{
-            uint32_t tear=(t*center)/255u;
+            uint32_t tear=(pulse*center)/255u;
             uint32_t d=absdiff(distance,tear);
             c=distance<tear?fg:bg;
             if(d<=width)c=blend(c,white,(uint8_t)(240u-(d*170u)/(width+1u)));
@@ -159,7 +163,7 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
           case OT_FX_METEOR_STORM:{
             c=bg;
             for(uint32_t lane=0;lane<4u;lane++){
-                uint32_t head=(drift+(hash32(cycle*977u+lane*137u+seed)%(uint32_t)count))%(uint32_t)count;
+                uint32_t head=(drift+(hash32(lane*137u+seed)%(uint32_t)count))%(uint32_t)count;
                 uint32_t d=(head+(uint32_t)count-p)%(uint32_t)count;
                 uint32_t tail=3u+width*7u;
                 if(d<tail){
@@ -170,29 +174,32 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
             break;
           }
           case OT_FX_HELIX_DRIVE:{
-            uint8_t a=tri8(normalized*5u+t*4u);
-            uint8_t b=tri8(normalized*5u+t*4u+255u);
+            uint8_t a=tri8(normalized*5u+phase*2u);
+            uint8_t b=tri8(normalized*5u+phase*2u+255u);
             c=blend(bg,fg,a);
             c=blend(c,white,(uint8_t)((b*(uint32_t)cfg->intensity)/510u));
             break;
           }
           case OT_FX_CRYSTAL_GROWTH:{
             uint32_t reveal=hash32(p*7919u+seed)%256u;
-            c=reveal<=t?fg:bg;
-            if(reveal<=t&&t-reveal<20u)
-                c=blend(c,white,(uint8_t)((20u-(t-reveal))*10u));
-            else if(reveal<=t)
+            c=reveal<=pulse?fg:bg;
+            if(reveal<=pulse&&pulse-reveal<20u)
+                c=blend(c,white,(uint8_t)((20u-(pulse-reveal))*10u));
+            else if(reveal<=pulse)
                 c=blend(c,wheel((uint8_t)(p*29u)),(uint8_t)(cfg->intensity/6u));
             break;
           }
           case OT_FX_FUSION_CORE:{
-            uint32_t radius=1u+(uint32_t)count*(32u+tri8(t*4u))/1536u;
+            uint32_t radius=1u+(uint32_t)count*(32u+tri8(phase*2u))/1536u;
             c=distance<radius?blend(fg,white,(uint8_t)(220u-distance*150u/(radius+1u))):bg;
-            if(distance>=radius&&distance<radius*4u)c=blend(bg,fg,(uint8_t)(128u-(distance-radius)*128u/(radius*3u+1u)));
+            if(distance>=radius&&distance<radius*4u){
+                uint32_t aura=128u-(distance-radius)*128u/(radius*3u+1u);
+                c=blend(bg,fg,(uint8_t)(aura*cfg->intensity/255u));
+            }
             break;
           }
           case OT_FX_PORTAL_GATE:{
-            uint32_t portal=(uint32_t)count*(32u+tri8(t*2u))/1024u;
+            uint32_t portal=(uint32_t)count*(32u+tri8(phase))/1024u;
             uint32_t d=absdiff(distance,portal);
             c=distance<portal?blend(bg,fg,90u):bg;
             if(d<width+3u)c=blend(c,white,(uint8_t)(230u-d*160u/(width+4u)));
@@ -201,38 +208,42 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
           case OT_FX_TIME_FRACTURE:{
             uint32_t chunk=p/(1u+(uint32_t)count/12u);
             uint32_t offset=hash32(chunk*109u+seed)%128u;
-            uint8_t v=tri8(normalized*3u+t*3u+offset);
-            c=blend(bg,(chunk&1u)?fg:wheel((uint8_t)(t+chunk*17u)),v);
+            uint8_t v=tri8(normalized*3u+phase*2u+offset);
+            c=blend(bg,(chunk&1u)?fg:wheel((uint8_t)((phase>>1)+chunk*17u)),
+                    (uint8_t)((uint32_t)v*cfg->intensity/255u));
             break;
           }
           case OT_FX_AURORA_SURGE:{
-            uint32_t v=(uint32_t)tri8(normalized*4u+t*2u)+tri8(normalized*7u+t*3u+90u);
+            uint32_t v=(uint32_t)tri8(normalized*4u+phase)+tri8(normalized*7u+phase*2u+90u);
             c=blend(bg,fg,(uint8_t)(v/2u));
-            c=blend(c,wheel((uint8_t)(normalized+t)),(uint8_t)(cfg->intensity/3u));
+            c=blend(c,wheel((uint8_t)(normalized+(phase>>1))),(uint8_t)(cfg->intensity/3u));
             break;
           }
           case OT_FX_CHROMATIC_SHATTER:{
             uint32_t shard=h&15u;
             uint32_t d=absdiff((p+shard*3u)%(uint32_t)count,drift);
+            /* Wrap the distance as well as the sweep coordinate. Without
+             * this, the last shard teleports from one endpoint to another. */
+            if((uint32_t)count-d<d)d=(uint32_t)count-d;
             c=d<width*4u?wheel((uint8_t)(h>>8)):bg;
             if(d<width)c=blend(c,white,180u);
             break;
           }
           case OT_FX_VORTEX:{
-            uint8_t v=tri8(distance*24u+t*5u);
-            c=blend(bg,wheel((uint8_t)(normalized*3u+t)),v);
+            uint8_t v=tri8(distance*24u+phase*2u);
+            c=blend(bg,wheel((uint8_t)(normalized*3u+(phase>>1))),v);
             if(distance<width)c=blend(c,white,150u);
             break;
           }
           case OT_FX_QUANTUM_COLLAPSE:{
-            uint32_t radius=((uint32_t)count*(255u-t))/512u+1u;
-            c=distance<=radius?blend(fg,white,(uint8_t)(t/2u)):bg;
+            uint32_t radius=((uint32_t)count*(255u-pulse))/512u+1u;
+            c=distance<=radius?blend(fg,white,(uint8_t)(pulse/2u)):bg;
             if(absdiff(distance,radius)<width)c=white;
             break;
           }
           case OT_FX_REALITY_BREAK:{
             uint32_t crack=(hash32(p/(1u+(uint32_t)count/25u)+seed)&255u);
-            uint8_t distortion=tri8(normalized*11u+t*6u+crack);
+            uint8_t distortion=tri8(normalized*11u+phase*3u+crack);
             c=blend(bg,fg,distortion);
             if(distortion>220u)c=blend(c,wheel((uint8_t)(h>>14)),cfg->intensity);
             break;
