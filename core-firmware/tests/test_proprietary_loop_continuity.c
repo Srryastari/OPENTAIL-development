@@ -77,8 +77,13 @@ int main(void){
     assert(memcmp(reference,frame,n*sizeof(frame[0]))==0);
     assert(ot_auto_fx_render(&cfg,0x1234u,duration*2u,frame,n));
     assert(memcmp(reference,frame,n*sizeof(frame[0]))==0);
-    assert(ot_auto_fx_render(&cfg,0x1234u,duration/2u,frame,n));
-    if(memcmp(reference,frame,n*sizeof(frame[0]))!=0)animated++;
+    /* A waveform may intentionally complete two turns per duration,
+     * so midpoint alone is not an animation test. */
+    const uint32_t sample_times[]={duration/4u,duration/3u,duration/2u};
+    for(size_t q=0;q<3u;q++){
+     assert(ot_auto_fx_render(&cfg,0x1234u,sample_times[q],frame,n));
+     if(memcmp(reference,frame,n*sizeof(frame[0]))!=0)animated++;
+    }
     /* The end of a cycle may advance a sharp moving edge, but must not
      * produce a frame-wide hard reset (measured normalized RGB delta). */
     assert(ot_auto_fx_render(&cfg,0x1234u,duration-1u,before,n));
@@ -98,6 +103,9 @@ int main(void){
    assert(ot_auto_fx_render(&cfg,0x1234u,t,frame,257u));
    if(memcmp(before,frame,257u*sizeof(frame[0]))!=0)intensity_sensitive++;
   }
+  if(!(animated&&speed_sensitive&&intensity_sensitive))
+   fprintf(stderr,"Effect %u responsiveness: animation=%u speed=%u intensity=%u\\n",
+      (unsigned)id,animated,speed_sensitive,intensity_sensitive);
   assert(animated&&speed_sensitive&&intensity_sensitive);
 
   /* The stateful CORE entry point preserves Q32 phase through a live Speed
