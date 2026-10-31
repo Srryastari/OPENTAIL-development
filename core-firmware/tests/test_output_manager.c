@@ -10,22 +10,25 @@ int main(void){
  assert(!strcmp(out[0].name,"Pixel OUT 1"));
  assert(!strcmp(out[1].name,"Pixel OUT 2"));
  for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
-   assert(out[i].active_pixels==1);
-   assert(out[i].zone_count==1);
-   assert(!strcmp(out[i].zones[0].name,"Zone 1"));
-   assert(out[i].zones[0].pixels==1 && out[i].zones[0].role==OT_OM_OFF);
-   assert(ot_om_section(&out[i],0)==0 && ot_om_section(&out[i],1)==-1);
-   ot_rgb_t inactive={1,1,1};
-   assert(!ot_om_trigger_overlay(out[i].zones[0].role,0xff,false,32,&inactive));
+   assert(out[i].active_pixels==0);
+   assert(out[i].zone_count==0);
+   assert(ot_om_section(&out[i],0)==-1);
+   assert(out[i].color_order==OT_OM_GRB);
+   assert(out[i].rgb_gain[0]==255 && out[i].white_gain[2]==255);
  }
-
- ot_layout_t layout;assert(ot_om_layout(&out[0],&layout));
+ ot_layout_t layout;assert(!ot_om_layout(&out[0],&layout));
  assert(ot_om_role_from_name("reverse")==OT_OM_REVERSE);
  assert(ot_om_order_from_name("BRG")==OT_OM_BRG);
  assert(ot_om_role_from_name("bad")==-1);
+ /* 0/N or N/0 may never be a live or saved output. */
+ out[0].zone_count=1;
+ strcpy(out[0].zones[0].name,"Zone 1");
  out[0].zones[0].pixels=7;assert(!ot_om_valid(&out[0]));
  out[0].active_pixels=7;assert(ot_om_valid(&out[0]));
- out[0].active_pixels=1;out[0].zones[0].pixels=1;assert(ot_om_valid(&out[0]));
+ out[0].active_pixels=0;assert(!ot_om_valid(&out[0]));
+ out[0].zone_count=0;assert(ot_om_valid(&out[0]));
+ out[0].active_pixels=1;assert(!ot_om_valid(&out[0]));
+ out[0].zone_count=1;out[0].zones[0].pixels=1;assert(ot_om_valid(&out[0]));
  out[0].color_order=9;assert(!ot_om_valid(&out[0]));out[0].color_order=OT_OM_GRB;
  strcpy(out[0].name,"<script>");assert(!ot_om_valid(&out[0]));strcpy(out[0].name,"Front DRL");assert(ot_om_valid(&out[0]));
  color(ot_om_trigger_color(OT_OM_PARK_BRAKE,0,32),0,0,0);
