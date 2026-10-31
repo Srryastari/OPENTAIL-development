@@ -41,7 +41,9 @@ int main(void){
  /* Recorded from the corrected authoritative CORE renderer. Changing any
   * original color, motion, timing or seed requires explicit rebaseline. */
  static const uint32_t goldens[12]={
-  0u,0u,0u,0u,0u,0u,0u,0u,0u,0u,0u,0u
+  0xeab38306u,0x602d0c51u,0xc274a35eu,0x0b2af920u,
+  0xf1b32409u,0x7b6782a5u,0x2fedb1c7u,0x829b4755u,
+  0xb8d9c6c8u,0x7ec54024u,0xd32803f9u,0xdc9fee09u
  };
  static ot_wled_rgb_t frame[260],reference[260],before[260];
  const ot_wled_rgb_t guard={73,91,117};
