@@ -434,14 +434,16 @@ assert(connectUi?.includes('ble.connectFromApp(prefs.getString("preferred_ble_ad
 // A real BLE session can drop without the user leaving the app. A bounded
 // reconnect may use the saved GATT address, but must never unpair the device
 // or enter an unlimited scanning/retry loop.
-const retryCode=bleSource.split('private void scheduleReconnect(String address) {')[1]
+const retryCode=bleSource.split('private void scheduleReconnect(String address, boolean afterScan) {')[1]
   ?.split('void setPreferredListener(')[0];
 assert(retryCode &&
        retryCode.includes('autoReconnectBudget--;') &&
        retryCode.includes('lease==autoReconnectLease') &&
        retryCode.includes('!connected && !connecting && !scanning') &&
        retryCode.includes('tryReconnect(address);') &&
-       bleSource.includes('scheduleReconnect(activeAddress);') &&
+       bleSource.includes('scheduleReconnect(activeAddress,fallback);') &&
+       bleSource.includes('scheduleReconnect(activeAddress,false);') &&
+       retryCode.includes('afterScan?SCAN_DURATION_MS+2000L:1800L') &&
        bleSource.includes('autoReconnectBudget=1;autoReconnectLease++;') &&
        bleSource.includes('lastReconnectAttempt!=0L') &&
        !/removeBond\s*\(/.test(bleSource),
