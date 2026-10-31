@@ -1,4 +1,5 @@
 # Narrow, independently reportable trigger regressions.
+# PR workflows test the actual pull-request HEAD, never refs/pull/N/merge.
 # Does not replace the complete CORE/OTA/installer/physical release gates.
 name: Verify OpenTail trigger integration
 on:
@@ -28,6 +29,18 @@ jobs:
         working-directory: core-firmware
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact checked-out commit (reject synthetic merge checkout)
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          echo "Trigger test checkout: $actual"
+          echo "Expected PR-head SHA: $EXPECTED_SHA"
+          test "$actual" = "$EXPECTED_SHA"
+          echo "Trigger tests executed on SHA: $actual" >> "$GITHUB_STEP_SUMMARY"
       - name: Verify read-only hardware evidence collector syntax
         run: python3 tools/capture_trigger_bench.py --help > /dev/null
       - name: Audit the actual CORE GPIO, effects-overlay, BLE and NVS boundaries
