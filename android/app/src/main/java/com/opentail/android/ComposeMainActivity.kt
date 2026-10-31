@@ -77,6 +77,7 @@ class ComposeMainActivity : ComponentActivity() {
     // must not reset in-progress TextField values (including typed spaces).
     private val projectLoadRevision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
+    private val firmwareVersion = mutableStateOf<String?>(null)
     private val supportedIds = mutableStateOf(setOf<Int>())
     private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
     private val foundDevices = mutableStateMapOf<String, String>()
@@ -207,6 +208,7 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilitiesAfterAuth()
+            if (!ble.isConnected()) firmwareVersion.value = null
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
@@ -223,6 +225,9 @@ class ComposeMainActivity : ComponentActivity() {
                 liveArmed.value = false
             }
         } }
+        ble.setInfoListener { version ->
+            runOnUiThread { firmwareVersion.value = version }
+        }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
@@ -798,7 +803,7 @@ class ComposeMainActivity : ComponentActivity() {
             Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             listOf("Connection" to connectionPhase,
                 "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
-                "Firmware" to "—").forEachIndexed { index, (label, value) ->
+                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
                 if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1964,7 +1969,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
         Panel(t) {
             Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
-            SettingsRow("Firmware", "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
+            SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             // No reset command exists in the pinned CORE interface. Do not
             // present a local document clear as a successful controller reset.
