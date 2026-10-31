@@ -304,7 +304,7 @@ for(const required of ['approved-prototype.fragment.html SHA256 37DB62A26E1622A7
   'selectedId: Int?', 'if(picked)null else item.id',
   'Dialog(onDismissRequest=onClose,',
   'dismissOnBackPress=true', 'ColorWheel(', 'role=r.slot',
-  'Modifier.fillMaxWidth().height(4.dp)', 'onParam(currentId,key,value)',
+  '.fillMaxWidth().height(4.dp)', 'onParam(currentId,key,value)',
   'onColor(currentId,slot,rgb)', 'onPalette(currentId,id)']) {
   assert(approved.includes(required),'Owner WLED+ design/interaction regression: '+required);
 }
