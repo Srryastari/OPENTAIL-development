@@ -115,7 +115,7 @@ assert(model.includes('JSONArray previous = data.optJSONArray("savedPresets")') 
        model.includes('if (save()) return true;'),
        'Persisted preset updates must roll back after a failed disk commit');
 assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
-       presetBlock.includes('design.put("savedPresets", JSONArray(project.presets().toString()))') &&
+       presetRestore.includes('draft.put("savedPresets",new JSONArray(project.presets().toString()))') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
