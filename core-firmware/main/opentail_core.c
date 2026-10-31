@@ -813,7 +813,7 @@ static esp_err_t show_get(httpd_req_t *r){
             if(!ot_fx_slot_active(slot,ms))continue;
             if(slot->standalone){persistent=true;continue;}
             const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
-            const uint32_t elapsed=ms-slot->started_ms;
+            const uint32_t elapsed=ms-slot->refreshed_ms;
             if(duration-elapsed>remaining)remaining=duration-elapsed;
         }
         if(persistent)remaining=0;
@@ -1363,29 +1363,10 @@ bool ot_ble_palette_in_use(uint8_t index){
     return used;
 }
 void ot_ble_disconnect_show(void){
- /* Disconnect expires only temporary zones; explicitly loaded NVS effects
-  * remain local on CORE. Vehicle inputs override only their assigned zones.
-  * A legacy HTTP show is not owned by the BLE session. */
- bool owned_before,enabled_before,owned_after,enabled_after,active_after;
- portENTER_CRITICAL(&state_lock);
- owned_before=ble_owns_show;
- enabled_before=ble_fx_enabled;
- if(ble_owns_show){
-     ot_fx_bank_stop_temporary(&fx_bank);
-     bool active=ble_fx_enabled&&
-         ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
-     if(!active){
-         ble_owns_show=false;ble_fx_enabled=false;native_show.mode=OT_SHOW_OFF;
-         stop_request_generation++;
-     }
- }
- owned_after=ble_owns_show;
- enabled_after=ble_fx_enabled;
- active_after=show_window(xTaskGetTickCount());
- portEXIT_CRITICAL(&state_lock);
- if(owned_before)request_render_refresh();
- ESP_LOGI(TAG,"BLE disconnect cleanup: owned=%d->%d enabled=%d->%d active_after=%d",
-          owned_before,owned_after,enabled_before,enabled_after,active_after);
+ /* CORE owns already-authorized effect playback, not the BLE connection.
+  * Temporary effects honor their own TTL; loaded standalone scenes remain
+  * active until explicit STOP/replacement/fault. No radio-event auto-STOP. */
+ ESP_LOGI(TAG,"BLE disconnected; locally running effects retain CORE lifetime");
 }
 
 static esp_err_t status_get(httpd_req_t *r) {
@@ -1975,7 +1956,8 @@ static void led_task(void *p) {
            local_show=native_show;show_started=native_show_started_ms;
            local_fx_enabled=ble_fx_enabled;
            if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
-       } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
+       } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;
+           ble_owns_show=false; /* expired on CORE; not a radio event */}
        portEXIT_CRITICAL(&state_lock);
        /* One immutable snapshot of every requested custom palette per frame.
         * No locks or NVS access occur in the per-pixel/FX draw loops. */
