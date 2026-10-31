@@ -405,9 +405,9 @@ assert(layout.includes('val zoneCount = remember(modelRevision) { project.zoneCo
        'Project editors must redraw from a committed revision without app restart');
 assert(compose.includes('var dragValue by remember { mutableFloatStateOf(committed) }') &&
        compose.includes('value = if (dragging) dragValue else committed') &&
-       triggers.includes('project.editTriggerParameter(selections, "speed", value)') &&
-       triggers.includes('project.editTriggerParameter(selections, "intensity", value)') &&
-       triggers.includes('project.editTriggerParameter(selections, "brightness", value)') &&
+       triggers.includes('field in setOf("brightness","speed","intensity")') &&
+       triggers.includes('project.editTriggerParameter(selections,field,fieldValue)') &&
+       triggers.includes('project.editTriggerEditorField(selections,field,fieldValue)') &&
        events.includes('eventEditing=if(eventEditing==key) null else key') &&
        compose.includes('formatDurationSeconds(item.optInt("ms", 1500))') &&
        compose.includes('BigDecimal(editedDuration).movePointRight(3).intValueExact()') &&
