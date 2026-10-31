@@ -171,6 +171,22 @@ final class NativeEffectCatalog {
                id==32787;
     }
 
+    /** General lighting effects are allowed in Shows and Triggers, while
+     * startup/shutdown transitions belong exclusively to Auto Events. */
+    static List<Effect> generalEffects() {
+        ArrayList<Effect> general = new ArrayList<>();
+        for (Effect effect : SORTED) if (!autoEventOnly(effect.id)) general.add(effect);
+        return Collections.unmodifiableList(general);
+    }
+    /** Keep the full catalog searchable for Auto Events. Show the dedicated
+     * transition effects first instead of burying them after 15 alphabetic
+     * results. Standard effects, including WLED Strobe #23, remain eligible. */
+    static List<Effect> autoEventChoices() {
+        ArrayList<Effect> choices = new ArrayList<>(SORTED);
+        choices.sort(Comparator.comparing((Effect e) -> !autoEventOnly(e.id))
+            .thenComparing(e -> e.name.toLowerCase(java.util.Locale.ROOT)));
+        return Collections.unmodifiableList(choices);
+    }
     static Effect byId(int id) {
         for (Effect effect : ALL) if (effect.id == id) return effect;
         return ALL[0];

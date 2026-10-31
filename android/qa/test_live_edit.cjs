@@ -24,9 +24,11 @@ for(const required of [
   'PaletteEditor("Pixel "+activePixel',
   'name=it', 'project.name(it)',
 ]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
-assert(compose.includes('selectedEffect.intValue = effectId') &&
-       compose.includes('val effect = selectedEffect.intValue'),
-       'Auto Events must preview the correct selected effect immediately.');
+assert(compose.includes('autoEventPreviewEffect.intValue = effectId') &&
+       compose.includes('EffectsPreview(t, eventPreviewId)') &&
+       !compose.includes('selectedEffect.intValue = effectId') &&
+       compose.includes('enterOfflinePreview()'),
+       'Auto Events preview stays local and never changes general Show Modes selection.');
 assert(!zoneBlock.includes('ble.saveOutput(') && !zoneBlock.includes('ble.showFx('),
   'Authoring layout must never directly write a physical output mapping.');
 

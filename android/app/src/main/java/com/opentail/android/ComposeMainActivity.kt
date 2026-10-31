@@ -94,6 +94,9 @@ class ComposeMainActivity : ComponentActivity() {
     private val liveArmed = mutableStateOf(false)
     private val offlinePreview = mutableStateOf(false)
     private val selectedEffect = mutableIntStateOf(0)
+    // Auto Events visual inspection must never change Show Modes' selected
+    // effect or navigate away to a general Effects page (owner Test 86).
+    private val autoEventPreviewEffect = mutableIntStateOf(-1)
     private val liveChainMask = mutableIntStateOf(3)
     private val liveZoneMask = mutableIntStateOf(255)
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
@@ -383,6 +386,9 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
+                        // Avoid showing the previous event's preview when
+                        // returning to Auto Events, which defaults to Startup.
+                        if(page==4 && i!=4) autoEventPreviewEffect.intValue=-1
                         // Preview Offline remains active across tabs (Test 79).
                         page = i
                     }
@@ -397,10 +403,8 @@ class ComposeMainActivity : ComponentActivity() {
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
                     4 -> AutoEventsPage(t) { effectId ->
-                        selectedEffect.intValue = effectId
-                        prefs.edit().putInt("effectId", effectId).apply()
+                        autoEventPreviewEffect.intValue = effectId
                         enterOfflinePreview()
-                        page = 1
                     }
                     5 -> SettingsPage(t, { page = it }, light) {
                         light = !light
@@ -925,7 +929,9 @@ class ComposeMainActivity : ComponentActivity() {
         Title("Show Modes", t)
         var view by rememberSaveable { mutableStateOf("Effects") }
         var query by rememberSaveable { mutableStateOf("") }
-        val effect = selectedEffect.intValue
+        // Legacy saved selections may refer to Auto Events-only transitions.
+        // Do not surface those in the general Show Modes editor.
+        val effect = selectedEffect.intValue.takeUnless { NativeEffectCatalog.autoEventOnly(it) } ?: 0
         var speed by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("speed", 128)) }
         var intensity by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("intensity", 128)) }
         var brightness by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("brightness", 160)) }
@@ -946,8 +952,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Field(query,"Search effects",t) { query=it }
                 Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 val matches=remember(query) {
-                    val preferred=listOf(9,32769,32770,32771,32772)
-                    NativeEffectCatalog.all().filter { !NativeEffectCatalog.autoEventOnly(it.id) &&
+                    val preferred=listOf(9,32772)
+                    NativeEffectCatalog.generalEffects().filter {
                         it.name.contains(query,ignoreCase=true) }
                         .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
                 }
@@ -1581,7 +1587,7 @@ class ComposeMainActivity : ComponentActivity() {
                     var effectMenu by remember(selections) { mutableStateOf(false) }
                     val colorText=first?.optString("color","#ffffff") ?: "#ffffff"
                     Pill(effectLabel(NativeEffectCatalog.byName(editingFx).id),t) { effectMenu=!effectMenu }
-                    if(effectMenu) NativeEffectCatalog.all().forEach { effect ->
+                    if(effectMenu) NativeEffectCatalog.generalEffects().forEach { effect ->
                         Pill(effectLabel(effect.id),t,editingFx==effect.name) {
                             val ok=if(selections.size==1) project.styleTriggers(selections,effect.name,colorText)
                                 else project.editTriggerStyle(selections,effect.name,null)
@@ -1687,9 +1693,14 @@ class ComposeMainActivity : ComponentActivity() {
             listOf("Startup", "Shutdown").associateWith { JSONObject(project.trigger(it).toString()) }
         }
         Title("Auto Events", t)
-        EffectsPreview(t, selectedEffect.intValue)
-        var eventEditing by remember { mutableStateOf<String?>(null) }
         var selectedEvent by remember { mutableStateOf("Startup") }
+        // The event's own saved animation drives this preview; it is not the
+        // last-used Show Modes effect. A Preview tap stays on Auto Events.
+        val eventPreviewId=autoEventPreviewEffect.intValue.takeIf { it >= 0 }
+            ?: NativeEffectCatalog.byName(eventProfiles.getValue(selectedEvent)
+                .optString("eventFx","Solid")).id
+        EffectsPreview(t, eventPreviewId)
+        var eventEditing by remember { mutableStateOf<String?>(null) }
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }
         var eventMessage by remember { mutableStateOf("") }
@@ -1706,6 +1717,7 @@ class ComposeMainActivity : ComponentActivity() {
                 val enabled = event.optBoolean("eventUiEnabled", false)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable {
+                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
                         selectedEvent=key
                         eventEditing=if(eventEditing==key) null else key
                     }) {
@@ -1713,6 +1725,7 @@ class ComposeMainActivity : ComponentActivity() {
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
                     IconAction("Edit " + key, "edit", t) {
+                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
                         selectedEvent=key
                         eventEditing = if (eventEditing == key) null else key
                     }
@@ -1766,12 +1779,17 @@ class ComposeMainActivity : ComponentActivity() {
                     Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Field(search, "Search effects", t) { search = it }
-                        NativeEffectCatalog.all()
+                        // Show all matching choices; the old 15-item
+                        // alphabetic cap hid Materialize, Random Materialize,
+                        // Smooth Fade and Strobe (owner Test 86).
+                        NativeEffectCatalog.autoEventChoices()
                             .filter { it.name.contains(search, ignoreCase = true) }
-                            .take(15).forEach { item ->
+                            .forEach { item ->
                                 Pill(item.name, t) {
-                                    if (applyAutoEvent(key, "eventFx", item.name))
+                                    if (applyAutoEvent(key, "eventFx", item.name)) {
+                                        autoEventPreviewEffect.intValue=-1
                                         choosing = null
+                                    }
                                 }
                             }
                     }
