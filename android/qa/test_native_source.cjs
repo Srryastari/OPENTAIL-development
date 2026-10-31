@@ -386,13 +386,22 @@ assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
        'Repeated authorization must not overlap active ATT operations or waiting STOP');
 
-// A capability-read GATT rejection must release a STOP queued during the
-// read. Successful reads already pump the queue through fxRead().
-const capsStart=bleSource.split('void readFxCapabilities(){')[1]?.split('private void fxNotify')[0];
-assert(capsStart && capsStart.includes('fxCapsBusy=false;fxNotify("[]");pumpQueue();') &&
+// A rejected capability read must release queued STOP; a missing long-read
+// callback cannot leave ATT and config reads wedged indefinitely. Recovery
+// closes the stale GATT owner rather than issuing a concurrent ATT command.
+const capsStart=bleSource.split('private void readFxCapabilitiesInternal() {')[1]?.split('private void fxNotify')[0];
+const capsCallback=bleSource.split('private void fxRead(byte[] raw,int status){')[1]?.split('private BluetoothGattCharacteristic enroll')[0];
+assert(capsStart && capsStart.includes('fxCapsBusy=false;') &&
        capsStart.includes('catch(SecurityException ex){') &&
-       bleSource.includes('fxNotify(BleFxCapabilities.decode(raw));'),
-       'Failed capability-read admission must not strand a queued STOP');
+       capsStart.includes('pumpQueue();') &&
+       capsStart.includes('lease!=fxCapsWatchLease || !fxCapsBusy') &&
+       capsStart.includes('recoverStalledGatt(owner,"CORE effects catalog ATT read timed out")') &&
+       capsCallback && capsCallback.includes('++fxCapsWatchLease;') &&
+       capsCallback.includes('String ids=BleFxCapabilities.decode(raw);') &&
+       capsCallback.includes('pumpQueue();') &&
+       bleSource.includes('readFxCapabilitiesAfterAuth()') &&
+       bleSource.includes('if (fxCapsAutoReadSuppressed) {'),
+       'Capability-read rejection, timeout and completion must not strand a queued STOP');
 
 // A rejected optional CORE info read must not strand auto-auth. Normal
 // successful INFO callbacks still handle owner authentication once.
