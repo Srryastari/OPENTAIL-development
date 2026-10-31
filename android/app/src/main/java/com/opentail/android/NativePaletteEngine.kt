@@ -17,6 +17,10 @@ internal data class NativePalette(
 
 internal object NativePaletteEngine {
     const val MAX_ID = 255
+    // Exact pinned CORE palette_1d semantics: 2..5 derive from user color
+    // slots. All other built-in gradients carry their own source RGB.
+    fun usesEditableColorSlots(id: Int): Boolean = id in 2..5
+    fun isImmutableFixedGradient(id: Int): Boolean = id == 0 || id in 6..72
     private val knownNames = listOf(
         "Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"
     )
@@ -51,8 +55,12 @@ internal object NativePaletteEngine {
                     (index.toFloat() / 15f) to Color(rgb)
                 })
         }
-        // A bundled/local JVM test may have no Android native library;
-        // retain the previously verified color-slot fallbacks there.
+        // Never substitute a project-defined gradient for a source-defined
+        // immutable WLED palette. If the exact JNI builder is unavailable,
+        // leave the swatch unknown, not misleading. Editable 2..5 retain
+        // their pinned CORE-derived local fallback for non-JNI JVM tests.
+        if (isImmutableFixedGradient(id))
+            return NativePalette(id, name, null)
         val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
             ?: return NativePalette(id, name, coreFixedStops(id, foreground, background))
         if (raw.length() !in 1..64) return NativePalette(id, name, null)
