@@ -40,9 +40,24 @@ def main():
     # Effects source. All source changes in this PR must be audit and CI.
     paths = git("ls-tree", "-r", "--name-only", "HEAD", "core-firmware/main").splitlines()
     assert paths, "Missing CORE runtime source tree"
+    additions = {
+        "core-firmware/main/ot_failover_essential.c",
+        "core-firmware/main/ot_failover_essential.h",
+    }
     for path in paths:
+        if path in additions:
+            assert git("cat-file", "-t", f"HEAD:{path}") == "blob"
+            continue
+        if path == "core-firmware/main/CMakeLists.txt":
+            original = git("show", f"{EFFECTS_HEAD}:{path}")
+            anchor = '"ot_fps_pacer.c" "ot_frame_snapshot.c"'
+            assert original.count(anchor) == 1
+            expected = original.replace(anchor, anchor + ' "ot_failover_essential.c"')
+            checked_equal(git("show", f"HEAD:{path}"), expected, path)
+            continue
         checked_equal(git("rev-parse", f"HEAD:{path}"),
                       git("rev-parse", f"{EFFECTS_HEAD}:{path}"), path)
+    assert additions.issubset(set(paths))
 
     # Both firmware and Effects source retain the same release-evidence gate.
     gate = ".github/workflows/verify-active-sources.yml"
@@ -56,11 +71,20 @@ def main():
         "scripts/check_effects80_firmware_integration.py",
         "docs/CORE-EFFECTS80-INTEGRATION-2026-10-31.md",
         ".github/workflows/verify-core-effects80-integration.yml",
+        "core-firmware/main/ot_failover_essential.c",
+        "core-firmware/main/ot_failover_essential.h",
+        "core-firmware/main/CMakeLists.txt",
+        "core-firmware/tests/run-host-tests.sh",
+        "core-firmware/tests/test_failover_essential.c",
+        "core-firmware/tests/test_failover_runtime_isolation.py",
+        "docs/FAILOVER-SOFTWARE-BOUNDARY-2026-10-31.md",
+        "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv",
+        ".github/workflows/verify-core-failover-policy.yml",
     }
     changed = set(git("diff", "--name-only", EFFECTS_HEAD, head).splitlines())
     assert changed <= allowed, f"Out-of-scope integration changes: {sorted(changed - allowed)}"
-    assert "core-firmware/main/" not in " ".join(changed)
-    print(f"PASS: CORE firmware runtime exactly matches approved Effects #80 {EFFECTS_HEAD}")
+    assert not any(p.startswith("core-firmware/main/") and p not in additions | {"core-firmware/main/CMakeLists.txt"} for p in changed)
+    print(f"PASS: approved Effects #80 runtime unchanged, except isolated backup module + CMake registration")
     print(f"PASS: #69 ancestry, 140-effect continuity test present, full release gate unchanged")
 
     if args.android_root:
