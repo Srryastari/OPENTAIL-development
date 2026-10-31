@@ -257,6 +257,43 @@ assert(model.includes('data = previous; // a failed disk commit') &&
        'Project import must be atomic and pixel editing must respect zone bounds');
 assert(!/GS400|GPIO16|GPIO17|522 pixels|1246/i.test(model),
   'Native project is universal, not specific to bench vehicle');
+// Shared root-cause guard: project JSON is not Compose State. Each editor
+// must observe committed revisions directly without destroying editor state.
+const presetsEditor = compose.split('private fun PresetsPage(t: Tone) {')[1]
+  ?.split('private fun LayoutPage(')[0];
+assert(layout.includes('val zoneCount = remember(modelRevision) { project.zoneCount() }') &&
+       layout.includes('for(i in 0 until zoneCount)') &&
+       triggers.includes('val profiles = remember(modelRevision) { JSONObject(project.profiles().toString()) }') &&
+       triggers.includes('val assigned=profiles.optJSONObject(name)?.optJSONArray("zones")') &&
+       events.includes('val eventProfiles = remember(modelRevision)') &&
+       events.includes('val event = eventProfiles.getValue(key)') &&
+       presetsEditor?.includes('val presets = remember(modelRevision) { JSONArray(project.presets().toString()) }'),
+       'Project editors must redraw from a committed revision without app restart');
+assert(compose.includes('var dragValue by remember { mutableFloatStateOf(committed) }') &&
+       compose.includes('value = if (dragging) dragValue else committed') &&
+       triggers.includes('project.editTriggerParameter(selections, "speed", value)') &&
+       triggers.includes('project.editTriggerParameter(selections, "intensity", value)') &&
+       triggers.includes('project.editTriggerParameter(selections, "brightness", value)') &&
+       events.includes('eventEditing=if(eventEditing==key) null else key') &&
+       compose.includes('formatDurationSeconds(item.optInt("ms", 1500))') &&
+       compose.includes('BigDecimal(editedDuration).movePointRight(3).intValueExact()') &&
+       layout.includes('Modifier.size(42.dp).clickable'),
+       'Requested live sliders, card toggle, decimal seconds and pixel hit areas regressed');
+assert(palettes.includes('parseVerifiedCustom(verifiedCustomStops)') &&
+       palettes.includes('coreFixedStops(id, foreground, background)') &&
+       compose.includes('val chosen = sourcePalette(value)') &&
+       compose.includes('val palette = sourcePalette(id)'),
+       'Palette gradients must use real CORE or verified readback metadata only');
+const numericTest=fs.readFileSync('android/app/src/test/java/com/opentail/android/NativeProjectCommitTest.java','utf8');
+const stopTest=fs.readFileSync('android/app/src/test/java/com/opentail/android/NativePaletteMetadataTest.kt','utf8');
+for(const scenario of ['triggerLiveParametersPersistImmediatelyAndRollbackAtomically',
+ 'offlineEventFadeAndDurationPersistAcrossReopen',
+ 'presetRenameCommitsImmediatelyAndReopenSeesSameText'])
+  assert(numericTest.includes(scenario),'Numeric/offline local commit test missing: '+scenario);
+assert(stopTest.includes('pinnedCoreFixedColorPalettesUseActualForegroundAndBackground') &&
+       stopTest.includes('onlyVerifiedCustomReadbackCanRenderDevicePalette'),
+       'Source-verified gradient tests missing');
+
 // The storage rollback invariant must be exercised with real JSON and
 // deterministic failed SharedPreferences.commit(), not only static source text.
 const storageTest=fs.readFileSync(
