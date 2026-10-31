@@ -12,6 +12,11 @@ typedef struct {
     uint32_t previous_ms;
     uint32_t emit_accumulator;
     bool initialized;
+    /* Continuous original phase has its own clock so Speed edits never
+     * reinterpret past time or restart a running animation. */
+    bool original_clock_initialized;
+    uint32_t original_last_ms;
+    uint32_t original_phase_q32;
 } ot_effects_1d_state_t;
 size_t ot_effects_1d_supported_ids(uint16_t *dst,size_t capacity);
 bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta);

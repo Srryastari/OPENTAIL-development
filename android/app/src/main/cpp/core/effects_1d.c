@@ -67,8 +67,28 @@ bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
            !ot_palette_1d_supported(cfg->effect_id,2u))
             return false;
     }
-    if(ot_auto_fx_id(cfg->effect_id))
-        return ot_auto_fx_render(cfg,s->particles.seed,ms,frame,count);
+    if(ot_auto_fx_id(cfg->effect_id)){
+        uint32_t local_ms=ms;
+        if(ot_auto_fx_continuous(cfg->effect_id)){
+            /* Source-owned Q32 phase accumulator: only the NEXT time delta
+             * uses a changed Speed, never a new absolute-time origin. One
+             * phase per zone, no allocations and no Android-side crossfade. */
+            const uint32_t duration=ot_auto_fx_duration_ms(cfg->speed);
+            if(!s->original_clock_initialized){
+                s->original_clock_initialized=true;
+                s->original_phase_q32=(uint32_t)(
+                    ((uint64_t)(ms%duration)<<32)/duration);
+            }else{
+                const uint32_t delta=ms-s->original_last_ms;
+                s->original_phase_q32+=(uint32_t)(
+                    ((uint64_t)delta<<32)/duration);
+            }
+            s->original_last_ms=ms;
+            local_ms=(uint32_t)(((uint64_t)s->original_phase_q32*
+                                duration)>>32);
+        }
+        return ot_auto_fx_render(cfg,s->particles.seed,local_ms,frame,count);
+    }
     if(cfg->effect_id!=OT_FX_EMBERS){
         /* Only effects explicitly registered by wled_fx_compat.c use source-
          * derived WLED adapters. Other catalog IDs use bounded compatibility

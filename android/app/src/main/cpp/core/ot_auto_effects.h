@@ -30,6 +30,8 @@ enum {
     OT_FX_SINGULARITY_SHUTDOWN = 32787u
 };
 bool ot_auto_fx_id(uint16_t id);
+/* Twelve continuous Show Mode originals; one-shot events remain clamped. */
+bool ot_auto_fx_continuous(uint16_t id);
 size_t ot_auto_fx_ids(uint16_t *dst, size_t capacity);
 bool ot_auto_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *meta);
 uint32_t ot_auto_fx_duration_ms(uint8_t speed);

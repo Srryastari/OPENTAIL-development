@@ -1085,8 +1085,6 @@ class ComposeMainActivity : ComponentActivity() {
                 ApprovedWledEffectsEditor(
                     selectedId = chosen.takeIf { it >= 0 },
                     effectOptions = NativeEffectCatalog.generalEffects(),
-                    segments = project.zoneCount(),
-                    liveEnabled = liveArmed.value,
                     prefs = prefs,
                     paletteFor = { id ->
                         val verified = if(paletteLoadedPresent.value &&
@@ -1126,17 +1124,6 @@ class ComposeMainActivity : ComponentActivity() {
                             editor.apply()
                             if(liveArmed.value) previewCurrentEffect(id)
                             else invalidateCoreFrame()
-                        }
-                    },
-                    onLiveToggle = {
-                        if(liveArmed.value) {
-                            livePreview.stop()
-                            liveArmed.value = false
-                            if(ble.canControl()) ble.stopShow()
-                        } else if(chosen >= 0) {
-                            // User-initiated live preview only: effect list
-                            // selection never activates Show Mode implicitly.
-                            previewCurrentEffect(chosen)
                         }
                     },
                     onParam = { id,key,value ->
@@ -1737,43 +1724,60 @@ class ComposeMainActivity : ComponentActivity() {
                 Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     val first=selections.firstOrNull()?.let { profiles.optJSONObject(it) }
-                    var editingFx by remember(selections, modelRevision) {
-                        mutableStateOf(first?.optString("pattern","Solid") ?: "Solid")
+                    val initialFx=NativeEffectCatalog.byName(first?.optString("pattern","Solid") ?: "Solid")
+                    val initialColor=first?.optString("color","#ffffff") ?: "#ffffff"
+                    fun roleHex(role: Int): String = when(role){
+                        0->first?.optString("color","#ffffff") ?: "#ffffff"
+                        1->first?.optString("secondary","#000000") ?: "#000000"
+                        else->first?.optString("accent","#ffffff") ?: "#ffffff"
                     }
-                    var effectMenu by remember(selections) { mutableStateOf(false) }
-                    val colorText=first?.optString("color","#ffffff") ?: "#ffffff"
-                    Pill(effectLabel(NativeEffectCatalog.byName(editingFx).id),t) { effectMenu=!effectMenu }
-                    if(effectMenu) NativeEffectCatalog.generalEffects().forEach { effect ->
-                        Pill(effectLabel(effect.id),t,editingFx==effect.name) {
-                            val ok=if(selections.size==1) project.styleTriggers(selections,effect.name,colorText)
-                                else project.editTriggerStyle(selections,effect.name,null)
-                            if(ok) { editingFx=effect.name;effectMenu=false;refresh() }
+                    fun roleArgb(role:Int):Int =
+                        runCatching { android.graphics.Color.parseColor(roleHex(role)) }
+                            .getOrDefault(0xffffffff.toInt())
+                    ApprovedWledEffectsEditor(
+                        selectedId = initialFx.id,
+                        effectOptions = NativeEffectCatalog.generalEffects(),
+                        scopeKey = "triggers:" + selections.sorted().joinToString("|"),
+                        prefs = prefs,
+                        paletteFor = { id ->
+                            NativePaletteEngine.lookup(project.raw(),id,roleArgb(0),
+                                roleArgb(1),null,roleArgb(2))
+                        },
+                        readSetting = { field, fallback ->
+                            if(field=="brightness")
+                                (first?.optInt("brightness",85) ?: 85)*255/100
+                            else first?.optInt(field,fallback) ?: fallback
+                        },
+                        readColor = { role -> roleArgb(role) },
+                        readPalette = { first?.optInt("paletteId",0) ?: 0 },
+                        onSelected = { selected ->
+                            // An unselected physical trigger stays assigned a safe
+                            // local Solid design, never a disabled vehicle signal.
+                            val fx=NativeEffectCatalog.byId(selected ?: 0).name
+                            if(project.editTriggerStyle(selections,fx,null)) refresh()
                             else triggerMessage="Could not save trigger effect"
-                        }
-                    }
-                    val styleCapabilities = NativeEffectParameters.forId(NativeEffectCatalog.byName(editingFx).id)
-                    if(styleCapabilities?.foreground==true)
-                        PaletteEditor("Color",android.graphics.Color.parseColor(colorText),t) { color ->
-                            val hex=String.format("#%06X",color and 0xffffff)
-                            if(project.editTriggerStyle(selections,null,hex)) refresh()
+                        },
+                        onParam = { _,field,value ->
+                            val fieldValue=if(field=="brightness")value*100/255 else value
+                            val saved=if(field in setOf("brightness","speed","intensity"))
+                                project.editTriggerParameter(selections,field,fieldValue)
+                            else project.editTriggerEditorField(selections,field,fieldValue)
+                            if(saved) refresh()
+                            else triggerMessage="Could not save trigger parameter"
+                        },
+                        onColor = { _,slot,rgb ->
+                            val hex=String.format("#%06X",rgb and 0xffffff)
+                            val saved=if(slot==0) project.editTriggerStyle(selections,null,hex)
+                                else project.editTriggerEditorField(selections,
+                                    if(slot==1)"secondary" else "accent",hex)
+                            if(saved) refresh()
                             else triggerMessage="Could not save trigger color"
+                        },
+                        onPalette = { _,id ->
+                            if(project.editTriggerEditorField(selections,"paletteId",id)) refresh()
+                            else triggerMessage="Could not save trigger palette"
                         }
-                    if (first != null) {
-                        ValueSlider("Brightness", first.optInt("brightness", 85), 100, t) { value ->
-                            if (project.editTriggerParameter(selections, "brightness", value)) refresh()
-                            else triggerMessage="Could not save trigger brightness"
-                        }
-                        if (styleCapabilities?.speed == true)
-                            ValueSlider("Speed", first.optInt("speed", 60), 255, t) { value ->
-                                if (project.editTriggerParameter(selections, "speed", value)) refresh()
-                                else triggerMessage="Could not save trigger speed"
-                            }
-                        if (styleCapabilities?.intensity == true)
-                            ValueSlider("Intensity", first.optInt("intensity", 60), 255, t) { value ->
-                                if (project.editTriggerParameter(selections, "intensity", value)) refresh()
-                                else triggerMessage="Could not save trigger intensity"
-                            }
-                    }
+                    )
                     if(project.zoneCount()==0) Caption("Add zones in Layout first.",t)
                     for(i in 0 until project.zoneCount()) {
                         val zone=project.zone(i) ?: continue
@@ -1895,20 +1899,43 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 if (eventEditing == key) {
-                Pill("Choose " + key + " animation", t) {
-                    choosing = key
-                    search = ""
-                }
+                // Dedicated Startup/Shutdown authoring reuses the exact
+                // approved WLED+ interface. Local event fields never write
+                // Show Modes settings, BLE, or trigger safety mappings.
                 val eventEffect=NativeEffectCatalog.byName(event.optString("eventFx","Solid"))
-                val eventParameters=NativeEffectParameters.forId(eventEffect.id)
-                if(eventParameters?.foreground==true) PaletteEditor("Color",
-                    android.graphics.Color.parseColor(event.optString("color","#ffffff")),t) {
-                    applyAutoEvent(key,"color",String.format("#%06X",it and 0xffffff))
-                }
-                if(eventParameters?.background==true) PaletteEditor("Background",
-                    android.graphics.Color.parseColor(event.optString("secondary","#000000")),t) {
-                    applyAutoEvent(key,"secondary",String.format("#%06X",it and 0xffffff))
-                }
+                fun eventColor(slot:Int):Int =
+                    runCatching { android.graphics.Color.parseColor(
+                        event.optString(when(slot){0->"color";1->"secondary";else->"accent"},
+                            if(slot==0)"#ffffff" else "#000000")) }
+                        .getOrDefault(0xffffffff.toInt())
+                ApprovedWledEffectsEditor(
+                    selectedId=eventEffect.id,
+                    effectOptions=NativeEffectCatalog.autoEventChoices(),
+                    scopeKey="auto-event:"+key,
+                    prefs=prefs,
+                    paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
+                        eventColor(0),eventColor(1),null,eventColor(2)) },
+                    readSetting={ field,fallback ->
+                        if(field=="brightness")event.optInt("brightness",100)*255/100
+                        else event.optInt(field,fallback)
+                    },
+                    readColor={ slot -> eventColor(slot) },
+                    readPalette={ event.optInt("paletteId",0) },
+                    onSelected={ id ->
+                        val fx=NativeEffectCatalog.byId(id ?: 0)
+                        if(applyAutoEvent(key,"eventFx",fx.name))
+                            autoEventPreviewEffect.intValue=-1
+                    },
+                    onParam={ _,field,value ->
+                        applyAutoEvent(key,field,
+                            if(field=="brightness")value*100/255 else value)
+                    },
+                    onColor={ _,slot,rgb ->
+                        applyAutoEvent(key,when(slot){0->"color";1->"secondary";else->"accent"},
+                            String.format("#%06X",rgb and 0xffffff))
+                    },
+                    onPalette={ _,id -> applyAutoEvent(key,"paletteId",id) }
+                )
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
                         applyAutoEvent(key,"eventUiFadeMs",1200)

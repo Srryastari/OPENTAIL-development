@@ -548,6 +548,36 @@ final class NativeProject {
         }catch(JSONException ex){return false;}
     }
 
+    /** Persist WLED+ authoring controls per trigger, atomically for bulk
+     * selections. No BLE, NVS or physical trigger behavior is modified. */
+    synchronized boolean editTriggerEditorField(Set<String> triggers,String field,Object value) {
+        if(triggers==null||triggers.isEmpty()||!editorFieldValid(field,value))
+            return false;
+        for(String name:triggers)
+            if(name==null||profiles().optJSONObject(name)==null||
+                    "Startup".equals(name)||"Shutdown".equals(name))return false;
+        try {
+            JSONObject draft=new JSONObject(data.toString());
+            JSONObject all=draft.getJSONObject("profiles");
+            for(String name:triggers)all.getJSONObject(name).put(field,value);
+            data=draft;
+            return save();
+        } catch(JSONException ex){return false;}
+    }
+
+    private static boolean editorFieldValid(String field,Object value) {
+        if("color".equals(field)||"secondary".equals(field)||"accent".equals(field))
+            return value instanceof String && ((String)value).matches("#[0-9A-Fa-f]{6}");
+        if("paletteId".equals(field))return validPaletteId(value);
+        if("speed".equals(field)||"intensity".equals(field)||"brightness".equals(field)||
+                field.matches("param[2-7]")) {
+            if(!(value instanceof Integer))return false;
+            int n=(Integer)value;
+            return n>=0&&n<=("brightness".equals(field)?100:255);
+        }
+        return false;
+    }
+
     /** Startup/shutdown authoring only; physical ignition is CORE-owned. */
     synchronized boolean setAutoEvent(String event, String key, Object value) {
         if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;
@@ -566,8 +596,18 @@ final class NativeProject {
                 break;
             case "color":
             case "secondary":
-                if (!(value instanceof String) || !((String)value).matches("#[0-9A-Fa-f]{6}"))
-                    return false;
+            case "accent":
+            case "paletteId":
+            case "brightness":
+            case "speed":
+            case "intensity":
+            case "param2":
+            case "param3":
+            case "param4":
+            case "param5":
+            case "param6":
+            case "param7":
+                if(!editorFieldValid(key,value))return false;
                 break;
             case "eventFx":
                 if (!(value instanceof String) || ((String)value).isEmpty()

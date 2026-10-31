@@ -474,4 +474,45 @@ public class NativeProjectCommitTest {
         assertEquals("New preset",new NativeProject(storage.prefs).presets().getJSONObject(0).getString("name"));
     }
 
+    @Test public void sharedWledEditorScopesKeepTriggerAndAutoEventIndependent() throws Exception {
+        Storage store = new Storage();
+        NativeProject model = new NativeProject(store.prefs);
+        Set<String> selected = new HashSet<>(Arrays.asList("Brake", "Right Turn"));
+        assertTrue(model.editTriggerEditorField(selected,"paletteId",4));
+        assertTrue(model.editTriggerEditorField(selected,"secondary","#112233"));
+        assertTrue(model.editTriggerEditorField(selected,"param5",1));
+        assertTrue(model.setAutoEvent("Startup","paletteId",12));
+        assertTrue(model.setAutoEvent("Startup","color","#ABCDEF"));
+        assertTrue(model.setAutoEvent("Startup","speed",240));
+        assertEquals(4,model.trigger("Brake").getInt("paletteId"));
+        assertEquals(4,model.trigger("Right Turn").getInt("paletteId"));
+        assertEquals("#112233",model.trigger("Brake").getString("secondary"));
+        assertEquals(1,model.trigger("Right Turn").getInt("param5"));
+        assertEquals(12,model.trigger("Startup").getInt("paletteId"));
+        assertEquals("#ABCDEF",model.trigger("Startup").getString("color"));
+        assertEquals(240,model.trigger("Startup").getInt("speed"));
+        assertEquals("Solid",model.trigger("Shutdown").getString("pattern"));
+
+        String before = model.exportJson();
+        store.fail = true;
+        assertFalse(model.editTriggerEditorField(selected,"paletteId",33));
+        assertFalse(model.setAutoEvent("Startup","speed",90));
+        assertEquals(before,model.exportJson());
+    }
+
+    @Test public void sharedWledEditorRejectsOutOfRangeAndSafetyUnscopedFields() throws Exception {
+        Storage store = new Storage();
+        NativeProject model = new NativeProject(store.prefs);
+        Set<String> brake = new HashSet<>(Arrays.asList("Brake"));
+        String before = model.exportJson();
+        assertFalse(model.editTriggerEditorField(brake,"paletteId",256));
+        assertFalse(model.editTriggerEditorField(brake,"param8",1));
+        assertFalse(model.editTriggerEditorField(brake,"color","#xyzxyz"));
+        assertFalse(model.editTriggerEditorField(brake,"hardwareOverride",1));
+        assertFalse(model.editTriggerEditorField(new HashSet<>(Arrays.asList("Startup")),"paletteId",2));
+        assertFalse(model.setAutoEvent("Startup","paletteId",-1));
+        assertFalse(model.setAutoEvent("Shutdown","param5",999));
+        assertEquals(before,model.exportJson());
+    }
+
 }
