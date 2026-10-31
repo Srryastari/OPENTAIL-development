@@ -481,7 +481,7 @@ assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) revokeOw
 const combinedAuth=bleSource.split('void authorizeOrPair() {')[1]?.split('void pairWithBoot()')[0];
 const tokenAuth=bleSource.split('void authorize(String tokenHex) {')[1]?.split('void show(')[0];
 assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("BLE already authorized"); return; }') &&
-       tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||') &&
+       tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy ||') &&
        tokenAuth.includes('frameCapture.busy() || palette.busy() || nextPacket != null || pairPending ||') &&
        tokenAuth.includes('challengePending || authPending) {') &&
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
