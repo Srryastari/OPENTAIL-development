@@ -31,6 +31,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,9 +47,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -94,6 +98,8 @@ class ComposeMainActivity : ComponentActivity() {
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
     private val sequenceMessage = mutableStateOf("")
     private val captureOutput = mutableIntStateOf(0)
+    private val previewPaused = mutableStateOf(false)
+    private val foregroundActivity = mutableStateOf(false)
     // A verified snapshot is valid only for the UI state and output at the
     // time its capture began. Old asynchronous GATT replies cannot resurrect
     // pixels after an edit, disconnect, or switch into offline preview.
@@ -292,7 +298,12 @@ class ComposeMainActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         ble.handlePermissions(requestCode, grantResults)
     }
+    override fun onStart() {
+        super.onStart()
+        foregroundActivity.value = true
+    }
     override fun onStop() {
+        foregroundActivity.value = false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
@@ -323,7 +334,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun tone(light: Boolean): Tone = if (light)
         Tone(Color.White, Color(0xFFF4F4F4), Color(0xFFE6E6E6),
              Color(0xFF181818), Color(0xFF606060), Color(0xFF242424), Color(0xFFBD3842))
-    else Tone(Color.Black, Color(0xFF080808), Color(0xFF191919),
+    else Tone(Color.Black, Color(0xFF111111), Color(0xFF191919),
               Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color.White, Color(0xFFED6472))
 
     @Composable
@@ -345,18 +356,17 @@ class ComposeMainActivity : ComponentActivity() {
             )
         }
         MaterialTheme(colorScheme = scheme) {
+        CompositionLocalProvider(LocalTextStyle provides TextStyle(
+            fontFamily=FontFamily.SansSerif,fontSize=14.sp,letterSpacing=0.sp)) {
         Column(Modifier.fillMaxSize().background(t.bg)
             .windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 14.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("OpenTail", color = t.fg, fontSize = 23.sp, fontWeight = FontWeight.Bold,
                      modifier = Modifier.weight(1f))
-                Pill(if (light) "OLED" else "White", t, false) {
-                    light = !light
-                    prefs.edit().putBoolean("whiteMode", light).apply()
-                }
+                UiIcon("bluetooth", t.muted)
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=28.dp,vertical=12.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
                         if (i != 1) offlinePreview.value = false
@@ -365,7 +375,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             Column(Modifier.fillMaxSize().verticalScroll(pageScroll)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 28.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (page) {
                     0 -> HomePage(t, { page = it })
@@ -378,26 +388,29 @@ class ComposeMainActivity : ComponentActivity() {
                         enterOfflinePreview()
                         page = 1
                     }
-                    5 -> SettingsPage(t) { page = it }
+                    5 -> SettingsPage(t, { page = it }, light) {
+                        light = !light
+                        prefs.edit().putBoolean("whiteMode", light).apply()
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
             }
         }
         }
+        }
     }
     @Composable
-    private fun Pill(label: String, t: Tone, selected: Boolean = false, action: () -> Unit) {
+    private fun Pill(label: String, t: Tone, selected: Boolean = false, enabled: Boolean = true, strong: Boolean = false, action: () -> Unit) {
         // Selected surfaces are neutral graphite, not colored brand accents.
-        val fill = if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
-            else Color(0xFFDEDEDE)) else t.raised
-        Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(99.dp))
+        val fill = if(strong && t.bg==Color.Black) Color(0xFF444444) else if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
+            else Color(0xFFDEDEDE)) else if(t.bg==Color.Black) Color(0xFF2B2B2B) else t.raised
+        Box(Modifier.height(28.dp).clip(RoundedCornerShape(99.dp))
                 .background(fill)
-                .border(1.dp,t.muted.copy(alpha=if(selected)0.36f else 0.18f),
-                    RoundedCornerShape(99.dp))
-                .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 10.dp),
+                .semantics { if(!enabled) disabled() }
+                .clickable(enabled=enabled,onClick = action).padding(horizontal = 14.dp),
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                 color = t.fg, maxLines = 1)
+                 color = if(enabled) t.fg else t.muted.copy(alpha=0.45f), maxLines = 1)
         }
     }
     // Native vector glyphs preserve the approved icon meanings without
@@ -405,19 +418,13 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
-        val fg = t.fg
-        val fill = if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
-            else Color(0xFFDEDEDE)) else t.bg
-        Row(Modifier.heightIn(min = 46.dp).clip(RoundedCornerShape(99.dp))
-                .background(fill)
-                .border(1.dp, if(selected) t.muted.copy(alpha = 0.7f)
-                        else t.muted.copy(alpha = 0.25f), RoundedCornerShape(99.dp))
-                .clickable(onClick = action).padding(horizontal = 14.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            if (index in 1..4) NavigationGlyph(index, fg)
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                color = fg, maxLines = 1)
+        val fill = if (selected) Color(0xFF303030) else t.raised
+        Box(Modifier.height(36.dp).clip(RoundedCornerShape(99.dp))
+            .background(fill).clickable(onClick = action)
+            .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 15.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) t.fg else t.muted, maxLines = 1)
         }
     }
     @Composable
@@ -476,11 +483,10 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun Panel(t: Tone, content: @Composable ColumnScope.() -> Unit) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .background(t.surface)
-            .border(1.dp,t.muted.copy(alpha=0.14f),RoundedCornerShape(20.dp))
-            .padding(14.dp),
+    private fun Panel(t: Tone, minHeight: Dp = 0.dp, fill: Color = t.surface, content: @Composable ColumnScope.() -> Unit) {
+        Column(Modifier.fillMaxWidth().heightIn(min=minHeight).clip(RoundedCornerShape(20.dp))
+            .background(fill)
+            .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
     }
     @Composable
@@ -489,7 +495,13 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun Title(text: String, t: Tone) {
-        Text(text, color = t.fg, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().padding(bottom=2.dp),
+            verticalAlignment=Alignment.CenterVertically) {
+            Text(text, Modifier.weight(1f), color=t.fg, fontSize=23.sp, fontWeight=FontWeight.Bold)
+            val index=pages.indexOf(text)
+            if(index in 1..4) NavigationGlyph(index,t.muted)
+            if(index==5) UiIcon("settings",t.muted)
+        }
     }
     @Composable
     private fun Field(value: String, hint: String, t: Tone,
@@ -499,7 +511,8 @@ class ComposeMainActivity : ComponentActivity() {
             cursorBrush = SolidColor(t.accent),
             textStyle = TextStyle(color = t.fg, fontSize = 14.sp),
             modifier = modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(t.raised).padding(horizontal = 15.dp, vertical = 13.dp),
+                .background(t.surface).border(1.dp,t.muted.copy(alpha=0.45f),RoundedCornerShape(99.dp))
+                .padding(horizontal = 18.dp, vertical = 11.dp),
             decorationBox = { inner ->
                 Box {
                     if (value.isEmpty()) Text(hint, fontSize = 14.sp, color = t.muted)
@@ -525,15 +538,16 @@ class ComposeMainActivity : ComponentActivity() {
                 inactiveTrackColor = t.raised
             ),
             thumb = {
-                Box(Modifier.size(22.dp)
+                Box(Modifier.size(20.dp)
                     .shadow(5.dp, RoundedCornerShape(99.dp),
                             ambientColor = t.accent.copy(alpha = 0.25f),
                             spotColor = t.accent.copy(alpha = 0.25f))
-                    .clip(RoundedCornerShape(99.dp)).background(t.accent))
+                    .clip(RoundedCornerShape(99.dp)).background(t.bg)
+                    .border(1.dp,t.muted.copy(alpha=0.4f),RoundedCornerShape(99.dp)))
             },
             track = { state ->
                 val progress = ((state.value - min) / (upper - min)).coerceIn(0f, 1f)
-                Box(Modifier.fillMaxWidth().height(12.dp)
+                Box(Modifier.fillMaxWidth().height(4.dp)
                     .clip(RoundedCornerShape(99.dp)).background(t.raised)) {
                     Box(Modifier.fillMaxHeight().fillMaxWidth(progress)
                         .clip(RoundedCornerShape(99.dp)).background(t.accent))
@@ -554,24 +568,27 @@ class ComposeMainActivity : ComponentActivity() {
         var hex by remember(color) {
             mutableStateOf(String.format("#%06X", color and 0xffffff))
         }
-        Caption(label + " · " + hex, t)
+        var expanded by remember { mutableStateOf(false) }
+        Text(label,color=t.fg,fontSize=13.sp,fontWeight=FontWeight.SemiBold)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(32.dp).clip(RoundedCornerShape(12.dp))
-                .background(Color(color)))
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(99.dp))
+                .background(Color(color)).semantics { contentDescription="Edit " + label }
+                .clickable { expanded=!expanded })
             Field(hex, "#RRGGBB", t, Modifier.weight(1f)) { entered ->
                 hex = entered.take(7)
                 if (Regex("^#[0-9A-Fa-f]{6}$").matches(hex))
                     change(android.graphics.Color.parseColor(hex))
             }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            listOf("White" to 0xffffff, "Red" to 0xff0000,
-                "Amber" to 0xffbf00, "Blue" to 0x0088ff,
-                "Green" to 0x00ff77, "Black" to 0x000000).forEach { (name, value) ->
-                val chosen = 0xff000000.toInt() or value
-                Pill(name, t, (color and 0xffffff) == value) { change(chosen) }
+        if(expanded) {
+            val hsv=FloatArray(3)
+            android.graphics.Color.colorToHSV(color,hsv)
+            ValueSlider("Brightness",(hsv[2]*255).toInt(),255,t) {
+                change(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0],hsv[1],it/255f)))
+            }
+            ValueSlider("Hue",hsv[0].toInt(),359,t) {
+                change(android.graphics.Color.HSVToColor(floatArrayOf(it.toFloat(),1f,hsv[2])))
             }
         }
     }
@@ -696,70 +713,110 @@ class ComposeMainActivity : ComponentActivity() {
 
     @Composable
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
+        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Home", t)
         Panel(t) {
-            Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
-                .padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text("Bluetooth · " + ble.connectionPhase(), color = t.fg, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Connection", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
+                    .padding(horizontal=12.dp,vertical=5.dp)) {
+                    Text(connectionPhase,color=t.muted,fontSize=11.sp,lineHeight=14.sp)
+                }
             }
-            Caption(bleMessage.value, t)
-            Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
-            Caption("Connect in Settings first. BOOT is required only for first-time enrollment.", t)
-        }
-        Panel(t) {
-            Text(project.name(), color = t.fg, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Caption(project.zoneCount().toString() + " zones · " +
-                    project.pixelCount().toString() + " design pixels", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Show Modes", t) { changePage(1) }
-                Pill("Edit Layout", t) { changePage(2) }
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                UiIcon("bluetooth",t.muted)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("OpenTail Controller", color = t.fg, fontSize = 14.sp)
+                    Caption(connectionPhase, t)
+                }
+                Pill("Connect", t, strong=true) { foundDevices.clear(); ble.scanHeadless() }
+            }
+            foundDevices.forEach { (address, label) ->
+                Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                UiIcon("shield",t.muted)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Authorization", color = t.fg, fontSize = 14.sp)
+                    Caption(if (ble.canControl()) "Authorized" else "Not authorized", t)
+                }
+                Pill("Authorize", t, enabled=ble.isConnected() && !ble.canControl()) { ble.authorizeOrPair() }
             }
         }
+        EffectsPreview(t, selectedEffect.intValue)
         Panel(t) {
-            Caption("Web Studio and Android author offline. CORE firmware renders animations, " +
-                    "owns trigger arbitration and drives the physical outputs.", t)
-            Caption("All editors update the local preview instantly. Owner-authorized BLE also previews supported effects transiently; physical geometry still requires explicit controller save.", t)
+            Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            listOf("Connection" to connectionPhase,
+                "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
+                "Firmware" to "—").forEachIndexed { index, (label, value) ->
+                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(label, color = t.muted, fontSize = 13.sp)
+                    Text(value, color = t.fg, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+    private fun capturePreviewFrame() {
+        if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return
+        if(ble.captureFrame(captureOutput.intValue)) {
+            pendingFrameRevision=frameRevision
+            pendingFrameOutput=captureOutput.intValue
+            captureMessage.value="Capturing CORE frame"
         }
     }
     @Composable
     private fun EffectsPreview(t: Tone, effect: Int) {
-        // Locked P4-baseline visual: exactly three unlabeled horizontal LED
-        // strips. The capsules are display samples, not claimed physical LEDs.
-        // No invented animation: only trusted CORE RGB or local design colors.
-        val revisionKey = revision.intValue
-        val localFrame = remember(revisionKey) {
-            runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
+        // Reference dimensions are logical UI pixels (dp), independent of
+        // display density. Never substitute design colors for CORE telemetry.
+        val connection = bleMessage.value
+        val localRevision = revision.intValue
+        val frame = coreFrame.value ?: if(offlinePreview.value)
+            remember(localRevision) { runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull() }
+            else null
+        LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
+            while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
+                capturePreviewFrame()
+                delay(500)
+            }
         }
-        val frame = coreFrame.value ?: localFrame
-        Canvas(Modifier.fillMaxWidth().height(150.dp)
-            .clip(RoundedCornerShape(20.dp)).background(t.surface)) {
-            val columns = 28
-            val pitch = size.width / columns
-            val rowPitch = size.height / 3f
-            val capsuleWidth = pitch * 0.65f
-            val capsuleHeight = rowPitch * 0.56f
-            // Each row remains present when disconnected, with no labels,
-            // counters, status indicators, playback buttons or extra text.
-            for(row in 0 until 3) for(col in 0 until columns) {
-                val sample = row * columns + col
-                val color = if(frame != null && sample < frame.size())
-                    Color(frame.colorAt(sample)) else t.muted.copy(alpha = 0.18f)
-                val lit = color.red + color.green + color.blue > 0.1f &&
-                    frame != null && sample < frame.size()
-                val x = col * pitch + (pitch - capsuleWidth) / 2f
-                val y = row * rowPitch + (rowPitch - capsuleHeight) / 2f
-                drawRoundRect(
-                    color = color.copy(alpha = if(lit) 0.18f else 0.12f),
-                    topLeft = Offset(x - 2f, y - 3f),
-                    size = androidx.compose.ui.geometry.Size(capsuleWidth + 4f,capsuleHeight + 6f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth * 0.5f)
-                )
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(x,y),
-                    size = androidx.compose.ui.geometry.Size(capsuleWidth,capsuleHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth * 0.5f)
-                )
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(t.surface).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("LED PREVIEW",color=t.muted,fontSize=11.sp,lineHeight=14.sp)
+            Canvas(Modifier.fillMaxWidth().height(24.dp)) {
+                val columns = 30
+                val gap=3.dp.toPx()
+                val capsuleWidth=(size.width-gap*(columns-1))/columns
+                val pitch=capsuleWidth+gap
+                val capsuleHeight = 24.dp.toPx()
+                for (col in 0 until columns) {
+                    val sample = if (frame != null && frame.size() > 0)
+                        col * (frame.size() - 1) / (columns - 1) else -1
+                    val color = if (sample >= 0) Color(frame!!.colorAt(sample))
+                        else t.raised
+                    drawRoundRect(color,
+                        topLeft = Offset(col * pitch, 0f),
+                        size = androidx.compose.ui.geometry.Size(capsuleWidth, capsuleHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth / 2f))
+                }
+            }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text(if(frame==null) "Awaiting CORE frame" else NativeEffectCatalog.byId(effect).name,
+                    Modifier.weight(1f),color=t.muted,fontSize=14.sp)
+                Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
+                    .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
+                Box(Modifier.size(24.dp).semantics { contentDescription=if(previewPaused.value) "Resume LED preview" else "Pause LED preview" }
+                    .clickable { previewPaused.value=!previewPaused.value },contentAlignment=Alignment.Center) {
+                    UiIcon(if(previewPaused.value) "play" else "pause",t.muted)
+                }
             }
         }
     }
@@ -779,95 +836,65 @@ class ComposeMainActivity : ComponentActivity() {
         var paletteId by rememberSaveable {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
-        Panel(t) {
-            Caption(if (offlinePreview.value)
-                "Offline preview · design changes stay local until you leave Show Modes."
-            else "Pixel-exact design inspection · effects require CORE rendered frames", t)
-            EffectsPreview(t, effect)
-            if (!offlinePreview.value && ble.canCaptureFrame()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("OUT 1", t, captureOutput.intValue == 0) {
-                        captureOutput.intValue = 0; invalidateCoreFrame()
-                    }
-                    Pill("OUT 2", t, captureOutput.intValue == 1) {
-                        captureOutput.intValue = 1; invalidateCoreFrame()
-                    }
-                    Pill("Capture actual CORE frame", t, true) {
-                        invalidateCoreFrame()
-                        if (ble.captureFrame(captureOutput.intValue)) {
-                            pendingFrameRevision = frameRevision
-                            pendingFrameOutput = captureOutput.intValue
-                            captureMessage.value = "Capturing next completed CORE RGB frame..."
-                        } else {
-                            captureMessage.value = "CORE frame unavailable or BLE busy; retry"
-                        }
-                    }
-                }
-                Caption(captureMessage.value, t)
-            } else Caption(if (offlinePreview.value)
-                "CORE capture is disabled in offline preview mode."
-            else "CORE frame capture unavailable until firmware supports " +
-                "the authenticated snapshot capability. Local pixel map remains available.", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Effects", "Sequences", "Presets").forEach {
-                    Pill(it, t, view == it) { view = it }
-                }
+        EffectsPreview(t, effect)
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            listOf("Effects", "Presets", "Sequences").forEach { tab ->
+                Box(Modifier.weight(1f)) { Pill(tab,t,view==tab) { view=tab } }
             }
         }
-        when (view) {
-            "Effects" -> {
-                Panel(t) {
-                    Field(query, "Search effects", t) { query = it }
-                    Caption("Selected: " + NativeEffectCatalog.byId(effect).name, t)
-                    PalettePicker("Palette", paletteId, t) { id ->
-                        paletteId = id
-                        prefs.edit().putInt("paletteId", id).apply()
-                        previewCurrentEffect(effect) // one safety gate for every edit gesture
-                    }
-                    ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
-                    ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
-                    ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply(); previewCurrentEffect(effect) }
-                    PaletteEditor("Foreground", foreground, t) {
-                        foreground = it; prefs.edit().putInt("foreground", it).apply(); previewCurrentEffect(effect)
-                    }
-                    PaletteEditor("Background", background, t) {
-                        background = it; prefs.edit().putInt("background", it).apply(); previewCurrentEffect(effect)
-                    }
-                    PaletteEditor("Accent", accent, t) {
-                        accent = it; prefs.edit().putInt("accent", it).apply(); previewCurrentEffect(effect)
-                    }
-                    Caption(if (offlinePreview.value)
-                        "Offline mode: edits update only this local design; no CORE LED commands."
-                    else "Supported color/speed/intensity edits preview over authorized BLE. " +
-                        "CORE accepts default palette 0 and Embers palettes 2–4 over BLE. " +
-                        "Other palette choices stay local; exact animation still requires " +
-                        "a CORE frame snapshot.", t)
+        when(view) {
+            "Effects" -> Panel(t) {
+                Field(query,"Search effects",t) { query=it }
+                Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                val matches=remember(query) {
+                    val preferred=listOf(9,32769,32770,32771,32772)
+                    NativeEffectCatalog.all().filter { it.name.contains(query,ignoreCase=true) }
+                        .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
                 }
-                // Only compose visible effect rows; never eagerly render 140
-                // cards inside the parent scroll (expensive on entry devices).
-                val matches = remember(query) {
-                    NativeEffectCatalog.all().filter {
-                        it.name.contains(query, ignoreCase = true)
-                    }
-                }
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    items(matches, key = { it.id }) { item ->
-                        Panel(t) {
-                            Pill(item.name, t, item.id == effect) {
-                                selectedEffect.intValue = item.id
-                                prefs.edit().putInt("effectId", item.id).apply()
+                LazyColumn(Modifier.fillMaxWidth().height(280.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    items(matches,key={it.id}) { item ->
+                        Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(15.dp))
+                            .background(if(item.id==effect) (if(t.bg==Color.Black) Color(0xFF292929) else Color(0xFFDEDEDE)) else t.raised)
+                            .clickable {
+                                selectedEffect.intValue=item.id
+                                prefs.edit().putInt("effectId",item.id).apply()
                                 previewCurrentEffect(item.id)
-                            }
+                            }.padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
+                            Text(effectLabel(item.id),Modifier.weight(1f),color=t.fg,fontSize=14.sp)
+                            if(item.id==effect) Text("✓",color=t.fg)
                         }
                     }
                 }
+                ValueSlider("Brightness",brightness,255,t) {
+                    brightness=it;prefs.edit().putInt("brightness",it).apply();previewCurrentEffect(effect)
+                }
+                val parameters=NativeEffectParameters.forId(effect)
+                if(parameters?.foreground==true) PaletteEditor("Color",foreground,t) {
+                    foreground=it;prefs.edit().putInt("foreground",it).apply();previewCurrentEffect(effect)
+                }
+                if(parameters?.background==true) PaletteEditor("Background",background,t) {
+                    background=it;prefs.edit().putInt("background",it).apply();previewCurrentEffect(effect)
+                }
+                if(parameters?.speed==true) ValueSlider("Speed",speed,255,t) {
+                    speed=it;prefs.edit().putInt("speed",it).apply();previewCurrentEffect(effect)
+                }
+                if(parameters?.intensity==true) ValueSlider("Intensity",intensity,255,t) {
+                    intensity=it;prefs.edit().putInt("intensity",it).apply();previewCurrentEffect(effect)
+                }
+                if(parameters?.palette==true) PalettePicker("Palette",paletteId,t) {
+                    paletteId=it;prefs.edit().putInt("paletteId",it).apply();previewCurrentEffect(effect)
+                }
             }
-            "Sequences" -> SequencePage(t, effect)
-            else -> PresetsPage(t)
+            "Presets" -> PresetsPage(t)
+            "Sequences" -> SequencePage(t,effect)
         }
     }
+    private fun effectLabel(id: Int): String = when(id) {
+        9 -> "Rainbow Show"
+        32769 -> "Materialize"
+        else -> NativeEffectCatalog.byId(id).name
+    }
+
     @Composable
     private fun SequencePage(t: Tone, selectedEffect: Int) {
         // NativeProject contains plain JSON, not Compose State: read the
@@ -1029,10 +1056,12 @@ class ComposeMainActivity : ComponentActivity() {
         val presets = project.presets()
         var pendingLoad by remember { mutableIntStateOf(-1) }
         var presetStatus by remember { mutableStateOf("") }
-        Panel(t) {
-            Title("Presets", t)
-            Caption("These save a local design snapshot, not CORE firmware.", t)
-            Pill("+ Save current design", t, true) {
+        var renamePreset by remember { mutableIntStateOf(-1) }
+        var renameText by remember { mutableStateOf("") }
+        var deletePreset by remember { mutableIntStateOf(-1) }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text("Presets",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Pill("+ Add", t) {
                 if (presets.length() < NativeProject.MAX_PRESETS) {
                     // Presets store the design only, not recursive copies of
                     // the entire preset library (which grow on every save).
@@ -1040,32 +1069,53 @@ class ComposeMainActivity : ComponentActivity() {
                     snapshot.put("savedPresets", JSONArray())
                     val updated = JSONArray(presets.toString())
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
-                        .put("studio", snapshot.toString()))
+                        .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
+                        .put("effectName",effectLabel(selectedEffect.intValue)))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
                     } else presetStatus = "Could not save preset"
                 }
             }
-            if (presetStatus.isNotEmpty()) Caption(presetStatus, t)
         }
+        if (presetStatus.isNotEmpty()) Caption(presetStatus, t)
         for (i in 0 until presets.length()) {
             val p = presets.optJSONObject(i) ?: continue
             Panel(t) {
-                Text(p.optString("name", "Preset"), color = t.fg)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("Load design", t) { pendingLoad = i }
-                    Pill("Remove", t) {
-                        val next = JSONArray()
-                        for (j in 0 until presets.length()) if (j != i) next.put(presets.opt(j))
-                        if (project.setPresets(next)) {
-                            presetStatus = ""
-                            refresh()
-                        } else presetStatus = "Could not remove preset"
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { pendingLoad = i }) {
+                        Text(p.optString("name", "Preset"), color = t.fg,
+                            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        if(p.has("effectName")) Caption(p.optString("effectName"),t)
+                    }
+                    IconAction("Rename preset", "edit", t) {
+                        renamePreset = i; renameText = p.optString("name", "Preset")
+                    }
+                    IconAction("Delete preset", "delete", t) { deletePreset = i }
+                }
+                if(renamePreset == i) {
+                    Field(renameText, "Preset name", t) { renameText = it }
+                    Pill("Done", t) {
+                        if(renameText.trim().isNotEmpty()) {
+                            val next = JSONArray(presets.toString())
+                            next.getJSONObject(i).put("name", renameText.trim())
+                            if(project.setPresets(next)) { renamePreset = -1; refresh() }
+                            else presetStatus = "Could not rename preset"
+                        }
                     }
                 }
             }
         }
+        if(deletePreset in 0 until presets.length()) AlertDialog(
+            onDismissRequest = { deletePreset = -1 },
+            title = { Text("Delete preset?") },
+            text = { Text(presets.optJSONObject(deletePreset)?.optString("name").orEmpty()) },
+            confirmButton = { Pill("Delete", t) {
+                val next = JSONArray()
+                for(j in 0 until presets.length()) if(j != deletePreset) next.put(presets.opt(j))
+                if(project.setPresets(next)) { deletePreset = -1; refresh() }
+                else presetStatus = "Could not remove preset"
+            } }, dismissButton = { Pill("Cancel", t) { deletePreset = -1 } })
         if (pendingLoad in 0 until presets.length()) {
             AlertDialog(onDismissRequest = { pendingLoad = -1 },
                 title = { Text("Replace current design?") },
@@ -1080,7 +1130,14 @@ class ComposeMainActivity : ComponentActivity() {
                         project.importJson(design.toString())
                     }.getOrDefault(false)
                     presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
-                    if (restored) refreshLoadedProject()
+                    if (restored) {
+                        val selected=presets.optJSONObject(pendingLoad)
+                        if(selected?.has("fxId")==true) {
+                            selectedEffect.intValue=selected.optInt("fxId",0)
+                            prefs.edit().putInt("effectId",selectedEffect.intValue).apply()
+                        }
+                        refreshLoadedProject()
+                    }
                     pendingLoad = -1
                 } },
                 dismissButton = { Pill("Cancel", t) { pendingLoad = -1 } })
@@ -1089,173 +1146,136 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun LayoutPage(t: Tone) {
         Title("Layout", t)
-        // Only document replacement reloads this field. Keying it to every
-        // keystroke's save revision would erase typed trailing spaces.
+        EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
-        var editingId by remember { mutableStateOf<String?>(null) }
+        var editingId by remember(projectLoadRevision.intValue) {
+            mutableStateOf(project.zone(0)?.optString("id"))
+        }
         var deleteId by remember { mutableStateOf<String?>(null) }
         var choosingDelete by remember { mutableStateOf(false) }
+        var layoutMessage by remember { mutableStateOf("") }
         Panel(t) {
-            Field(name, "Project name", t) {
-                name = it
-                if (it.trim().isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Project Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                Caption(project.pixelCount().toString()+" LEDs",t)
+            }
+            Field(name,"Project name",t) {
+                name=it
+                if(it.trim().isNotEmpty()) {
                     if (project.name(it)) refresh()
                     else name = project.name() // restore last committed value
                 }
             }
-            Caption("Project name saves as you type. No separate edit mode.", t)
-            Caption(project.zoneCount().toString() + " zones · " + project.pixelCount() + " design pixels", t)
-            PixelStrip(t, (0 until project.zoneCount()).map { i ->
-                val zone = project.zone(i)
-                (zone?.optInt("length", 0) ?: 0) to
-                    (if (i % 2 == 0) t.accent else t.fg)
-            })
-            Caption("Live layout strip · changes follow zone offsets immediately", t)
-            // The approved global Add/Delete actions remain adjacent and visible.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    Pill("+ Add Zone", t) { addZoneAfter(project.zoneCount() - 1) }
-                }
-                if (project.zoneCount() > 0)
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                        // Icon-only delete action; retains a spoken accessibility label.
-                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(99.dp))
-                            .background(t.raised)
-                            .border(1.dp, t.muted.copy(alpha = 0.28f),
-                                RoundedCornerShape(99.dp))
-                            .semantics { contentDescription = "Delete Zone" }
-                            .clickable {
-                                // Never infer a destructive target from list ordering.
-                                choosingDelete = true
-                            }, contentAlignment = Alignment.Center) {
-                            Canvas(Modifier.size(22.dp)) {
-                                val c = t.red
-                                val u = size.width / 24f
-                                drawLine(c, Offset(5*u, 7*u), Offset(19*u, 7*u), strokeWidth=2*u)
-                                drawLine(c, Offset(9*u, 4*u), Offset(15*u, 4*u), strokeWidth=2*u)
-                                drawLine(c, Offset(9*u, 4*u), Offset(9*u, 7*u), strokeWidth=2*u)
-                                drawLine(c, Offset(15*u, 4*u), Offset(15*u, 7*u), strokeWidth=2*u)
-                                drawLine(c, Offset(7*u, 9*u), Offset(8*u, 20*u), strokeWidth=2*u)
-                                drawLine(c, Offset(17*u, 9*u), Offset(16*u, 20*u), strokeWidth=2*u)
-                                drawLine(c, Offset(8*u, 20*u), Offset(16*u, 20*u), strokeWidth=2*u)
-                                drawLine(c, Offset(11*u, 10*u), Offset(11*u, 17*u), strokeWidth=1.5f*u)
-                                drawLine(c, Offset(14*u, 10*u), Offset(14*u, 17*u), strokeWidth=1.5f*u)
+            if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
+            for(i in 0 until project.zoneCount()) {
+                val z=project.zone(i) ?: continue
+                val id=z.optString("id")
+                val linkedOutput=z.optInt("physicalOutput",-1)
+                val linkedSection=z.optInt("physicalSection",-1)
+                val length=z.optInt("length")
+                val start=if(linkedOutput<0) z.optInt("start") else
+                    (0 until i).mapNotNull { project.zone(it) }
+                        .filter { it.optInt("physicalOutput",-1)==linkedOutput }.sumOf { it.optInt("length") }
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(t.raised).padding(12.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth().clickable { editingId=if(editingId==id) null else id },
+                        verticalAlignment=Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(z.optString("name"),color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
+                            Caption((if(linkedOutput<0) "Unassigned" else "Output "+(linkedOutput+1))+
+                                " · Start $start · $length LEDs",t)
+                        }
+                        UiIcon(if(editingId==id) "up" else "down",t.muted)
+                    }
+                    if(editingId==id) {
+                        var label by remember(id) { mutableStateOf(z.optString("name")) }
+                        var count by remember(id) { mutableStateOf(length.toString()) }
+                        var reverse by remember(id) { mutableStateOf(z.optBoolean("reverse")) }
+                        var outputOpen by remember(id) { mutableStateOf(false) }
+                        var advanced by remember(id) { mutableStateOf(false) }
+                        var selectedPixel by remember(id) { mutableIntStateOf(0) }
+                        fun applyLiveZone(): Boolean {
+                            val n=count.toIntOrNull() ?: return false
+                            if(n !in 1..10000 || label.trim().isEmpty()) return false
+                            if(!project.editZone(id,label,n,reverse)) {
+                                layoutMessage="Could not save zone";return false
+                            }
+                            layoutMessage="";refresh();return true
+                        }
+                        Caption("Zone name",t)
+                        Field(label,"Zone name",t) { label=it;applyLiveZone() }
+                        Caption("Output",t)
+                        Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(99.dp))
+                            .border(1.dp,t.muted.copy(alpha=0.45f),RoundedCornerShape(99.dp))
+                            .clickable { outputOpen=!outputOpen }.padding(horizontal=14.dp),contentAlignment=Alignment.CenterStart) {
+                            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                                Text(if(linkedOutput<0) "Unassigned" else "Output "+(linkedOutput+1),Modifier.weight(1f),color=t.fg,fontSize=14.sp)
+                                UiIcon("down",t.muted)
                             }
                         }
-                    }
-            }
-        }
-        for (i in 0 until project.zoneCount()) {
-            val z = project.zone(i) ?: continue
-            val id = z.optString("id")
-            val start = z.optInt("start")
-            val length = z.optInt("length")
-            Panel(t) {
-                Text(z.optString("name"), color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Caption("Pixels " + length + " · start " + start + " · end " + (start + length - 1), t)
-                Caption("Next zone starts at " + (start + length), t)
-                Pill(if (editingId == id) "Close editor" else "Edit", t) {
-                    editingId = if (editingId == id) null else id
-                }
-                // The approved Add / Remove pair is always fully visible,
-                // even on a narrow phone. No horizontal scrolling or hiding.
-                Row(Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        Pill("+ Add next", t) { addZoneAfter(i) }
-                    }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                        Pill("Remove", t) { deleteId = id }
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Move ↑", t) { if (project.moveZone(i, i - 1)) refresh() }
-                    Pill("Move ↓", t) { if (project.moveZone(i, i + 1)) refresh() }
-                }
-                // Approved Layout: the active zone expands INSIDE its card, not
-                // a blocking modal. Every valid edit updates the local preview.
-                if (editingId == id) {
-                    var label by remember(id) { mutableStateOf(z.optString("name")) }
-                    var count by remember(id) { mutableStateOf(z.optInt("length").toString()) }
-                    var reverse by remember(id) { mutableStateOf(z.optBoolean("reverse")) }
-                    var selectedPixel by remember(id) { mutableIntStateOf(0) }
-                    fun applyLiveZone(): Boolean {
-                        val n = count.toIntOrNull() ?: return false
-                        if (n !in 1..10000 || label.trim().isEmpty() ||
-                            !project.editZone(id,label,n,reverse)) return false
-                        refresh()
-                        return true
-                    }
-                    Caption("Zone name", t)
-                    Field(label, "Zone name", t) {
-                        label=it
-                        applyLiveZone()
-                    }
-                    Caption("Zone length", t)
-                    Field(count, "LED count", t) {
-                        count=it.filter(Char::isDigit).take(5)
-                        applyLiveZone()
-                    }
-                    val n=count.toIntOrNull() ?: 0
-                    CapsuleSlider(n, 1, 10000, t,
-                        change={ count=it.toString() },
-                        finished={ applyLiveZone() })
-                    Caption(project.previewZoneOffsets(id, n), t)
-                    Pill(if(reverse) "Reverse ✓" else "Reverse", t, reverse) {
-                        reverse=!reverse
-                        applyLiveZone()
-                    }
-                    Caption("Output assignment · design draft only", t)
-                    val linkedOutput=z.optInt("physicalOutput",-1)
-                    val linkedSection=z.optInt("physicalSection",-1)
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                        Pill("Unassigned",t,linkedOutput==-1) {
-                            if(project.mapZoneToOutputSlot(id,-1,-1))refresh()
-                        }
-                        (0..1).forEach { output ->
-                            Pill("OUT " + (output+1),t,linkedOutput==output) {
-                                if(project.mapZoneToOutputSlot(id,output,
-                                    if(linkedOutput==output) linkedSection.coerceIn(0,7) else 0))refresh()
+                        if(outputOpen) Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                            Pill("Unassigned",t,linkedOutput<0) {
+                                if(project.mapZoneToOutputSlot(id,-1,-1)) { refresh();outputOpen=false }
                             }
-                        }
-                    }
-                    if(linkedOutput>=0) {
-                        Caption("Section on OUT " + (linkedOutput+1) + " · choose hardware zone",t)
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                            (0 until 8).forEach { slot ->
-                                Pill((slot+1).toString(),t,linkedSection==slot) {
-                                    if(project.mapZoneToOutputSlot(id,linkedOutput,slot))refresh()
+                            (0..1).forEach { output ->
+                                Pill("Output "+(output+1),t,linkedOutput==output) {
+                                    val occupied=(0 until project.zoneCount()).mapNotNull { project.zone(it) }
+                                        .filter { it.optString("id")!=id && it.optInt("physicalOutput",-1)==output }
+                                        .map { it.optInt("physicalSection",-1) }.toSet()
+                                    val slot=if(linkedOutput==output) linkedSection else (0..7).firstOrNull { it !in occupied }
+                                    if(slot!=null && project.mapZoneToOutputSlot(id,output,slot)) {
+                                        refresh();outputOpen=false
+                                    } else layoutMessage="Output has no free zone slot"
                                 }
                             }
                         }
-                    }
-                    Caption("Linked assignment is local. In CORE Output Manager below, " +
-                        "copy the linked zone into the physical draft and explicitly Save to CORE.",t)
-                    Caption("LED preview · indexed dots, not simulated FX", t)
-                    ZoneDotPreview(t,n,reverse)
-                    val pixelLimit=n.coerceAtLeast(1)-1
-                    val activePixel=selectedPixel.coerceIn(0,pixelLimit)
-                    ValueSlider("Pixel", activePixel, pixelLimit.coerceAtLeast(1),t) {
-                        selectedPixel=it.coerceIn(0,pixelLimit)
-                    }
-                    val painted=project.pixelColor(id,activePixel)
-                    val liveColor=android.graphics.Color.parseColor(painted)
-                    PaletteEditor("Pixel " + activePixel,liveColor,t) { color ->
-                        val hex=String.format("#%06X",color and 0xFFFFFF)
-                        if(project.setPixelColor(id,activePixel,hex))refresh()
-                    }
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        Pill("Clear pixel",t) {
-                            if(project.clearPixelColor(id,activePixel))refresh()
+                        val n=count.toIntOrNull() ?: 1
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                            Text("Pixel count",color=t.fg,fontSize=13.sp);Text(n.toString(),color=t.fg,fontSize=13.sp)
                         }
-                        Pill("Done",t,true) { if(applyLiveZone())editingId=null }
+                        CapsuleSlider(n, 1, 10000, t,
+                            change={ count=it.toString();applyLiveZone() },
+                            finished={ applyLiveZone() })
+                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                            horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
+                            Spacer(Modifier.weight(1f))
+                            Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
+                                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Canvas(Modifier.size(20.dp)) {
+                                    drawCircle(t.muted.copy(alpha=0.5f),style=Stroke(1.dp.toPx()))
+                                    if(reverse) drawCircle(t.fg,radius=size.minDimension*0.3f)
+                                }
+                                Text("Reverse",color=t.fg,fontSize=14.sp)
+                            }
+                        }
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Pill("+ Add",t) { addZoneAfter(i) }
+                            Pill("Remove",t) { deleteId=id }
+                        }
+                        // Prior exact-pixel authoring remains available in the deeper editor.
+                        Pill(if(advanced) "Close pixel editor" else "Pixel editor",t) { advanced=!advanced }
+                        if(advanced) {
+                            Caption(project.previewZoneOffsets(id, n),t)
+                            ZoneDotPreview(t,n,reverse)
+                            val pixelLimit=n.coerceAtLeast(1)-1
+                            val activePixel=selectedPixel.coerceIn(0,pixelLimit)
+                            ValueSlider("Pixel",activePixel,pixelLimit.coerceAtLeast(1),t) { selectedPixel=it.coerceIn(0,pixelLimit) }
+                            PaletteEditor("Pixel "+activePixel,android.graphics.Color.parseColor(project.pixelColor(id,activePixel)),t) { color ->
+                                val hex=String.format("#%06X",color and 0xffffff)
+                                if(project.setPixelColor(id,activePixel,hex)) refresh()
+                            }
+                            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Pill("Move ↑",t) { if(project.moveZone(i,i-1)) refresh() }
+                                Pill("Move ↓",t) { if(project.moveZone(i,i+1)) refresh() }
+                                Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
+                            }
+                        }
                     }
-                } else {
-                    ZoneDotPreview(t,length,z.optBoolean("reverse"))
                 }
             }
+            if(project.zoneCount()==0) Pill("+ Add",t) { addZoneAfter(-1) }
         }
         // Actual hardware output/section assignment belongs beside Layout.
         // Saving to CORE still requires an explicit authenticated confirmation.
@@ -1295,7 +1315,6 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun TriggersPage(t: Tone) {
         var selections by remember { mutableStateOf(setOf<String>()) }
-        var triggerToDelete by remember { mutableStateOf<String?>(null) }
         var editing by remember { mutableStateOf(false) }
         var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
@@ -1310,75 +1329,49 @@ class ComposeMainActivity : ComponentActivity() {
                 val index = order.indexOf(name)
                 if (index >= 0) index else 100
             }, { it }))
-        // The six universal trigger profiles exist by default with empty
-        // zone assignments; testing is a Settings-only developer tool.
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Title("Triggers", t)
-                Caption("Tap cards to select one or more for editing", t)
-            }
-            Pill("+ Add", t) { adding = true }
-
-        }
-        if (triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
-        keys.chunked(2).forEach { pair ->
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                pair.forEach { name ->
-                    val profile=project.trigger(name)
-                    val selected=name in selections
-                    val assigned = profile.optJSONArray("zones")?.length() ?: 0
-                    Row(Modifier.weight(1f).heightIn(min=62.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if(selected) t.raised else t.surface)
-                        .border(1.dp,if(selected) t.muted.copy(alpha=0.5f)
-                            else t.muted.copy(alpha=0.10f),RoundedCornerShape(16.dp))
-                        .clickable { selections=if(selected) selections-name else selections+name }
-                        .padding(horizontal=9.dp,vertical=10.dp),
-                        verticalAlignment=Alignment.CenterVertically,
-                        horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                        Text(if(selected) "◉" else "○",color=t.fg,fontSize=13.sp)
-                        Column(Modifier.weight(1f)) {
-                            Text(name,color=t.fg,fontSize=12.sp,
-                                fontWeight=FontWeight.SemiBold,maxLines=1)
-                            Caption(if(assigned == 0) "Unassigned" else
-                                "$assigned zones",t)
-                        }
-                        if(profile.optString("kind") == "trigger-custom") {
-                            // Per-created-trigger trash: built-in profiles get none.
-                            Box(Modifier.size(35.dp)
-                                .clip(RoundedCornerShape(99.dp)).background(t.raised)
-                                .semantics { contentDescription = "Delete " + name }
-                                .clickable { triggerToDelete = name },
-                                contentAlignment = Alignment.Center) {
-                                Canvas(Modifier.size(19.dp)) {
-                                    val u=size.width/24f
-                                    val c=t.red
-                                    drawLine(c,Offset(5*u,7*u),Offset(19*u,7*u),strokeWidth=2*u)
-                                    drawLine(c,Offset(9*u,4*u),Offset(15*u,4*u),strokeWidth=2*u)
-                                    drawLine(c,Offset(7*u,9*u),Offset(8*u,20*u),strokeWidth=2*u)
-                                    drawLine(c,Offset(17*u,9*u),Offset(16*u,20*u),strokeWidth=2*u)
-                                    drawLine(c,Offset(8*u,20*u),Offset(16*u,20*u),strokeWidth=2*u)
-                                    drawLine(c,Offset(11*u,10*u),Offset(11*u,17*u),strokeWidth=1.5f*u)
-                                    drawLine(c,Offset(14*u,10*u),Offset(14*u,17*u),strokeWidth=1.5f*u)
-                                }
-                            }
-                        }
-                    }
-                }
-                if(pair.size==1) Spacer(Modifier.weight(1f))
-            }
-        }
+        Title("Triggers",t)
+        EffectsPreview(t,selectedEffect.intValue)
+        if(triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
+        Panel(t) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Caption(selections.size.toString()+" selected for editing",t)
-            Spacer(Modifier.weight(1f))
-            Pill("All",t) { selections=keys.toSet() }
-            Pill("Clear",t) { selections=emptySet() }
+            Text("Triggers",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Pill("+ Add",t) { adding=true }
         }
-        Pill("Assign zones · " + selections.size + " selected", t, selections.isNotEmpty()) {
-            if(selections.isNotEmpty()) editing=true
+        keys.forEach { name ->
+            val profile = project.trigger(name)
+            val selected = name in selections
+            val assigned = profile.optJSONArray("zones")?.length() ?: 0
+            Row(Modifier.fillMaxWidth().heightIn(min=44.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(if(selected) t.raised else t.surface)
+                .clickable { selections=if(selected) selections-name else selections+name },
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.size(16.dp)) {
+                    drawCircle(if(selected) t.fg else t.muted)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(name,color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
+                    Caption(profile.optString("pattern", "Solid") +
+                        if(assigned > 0) " · $assigned zones" else "", t)
+                }
+                IconAction("Edit " + name, "edit", t) {
+                    selections = setOf(name); editing = true
+                }
+                // The current protocol has no universal profile-test command.
+                // Preserve a disabled play target rather than target wrong zones.
+                Box(Modifier.size(width=44.dp,height=28.dp)
+                    .clip(RoundedCornerShape(99.dp)).background(t.raised)
+                    .semantics { contentDescription = "Test " + name + " unavailable"; disabled() },
+                    contentAlignment=Alignment.Center) {
+                    UiIcon("play",t.muted)
+                }
+            }
         }
-        Caption("Universal defaults are unassigned until you select zones. " +
-            "Developer trigger testing is in Settings.",t)
+        Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty()) {
+            if(selections.isNotEmpty()) editing = true
+        }
+        }
         if(adding) AlertDialog(
             onDismissRequest={ adding=false },
             title={ Text("Add trigger") },
@@ -1398,6 +1391,25 @@ class ComposeMainActivity : ComponentActivity() {
             text = {
                 Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    val first=selections.firstOrNull()?.let { project.trigger(it) }
+                    var editingFx by remember(selections) { mutableStateOf(first?.optString("pattern","Solid") ?: "Solid") }
+                    var effectMenu by remember(selections) { mutableStateOf(false) }
+                    val colorText=first?.optString("color","#ffffff") ?: "#ffffff"
+                    Pill(effectLabel(NativeEffectCatalog.byName(editingFx).id),t) { effectMenu=!effectMenu }
+                    if(effectMenu) NativeEffectCatalog.all().forEach { effect ->
+                        Pill(effectLabel(effect.id),t,editingFx==effect.name) {
+                            val ok=if(selections.size==1) project.styleTriggers(selections,effect.name,colorText)
+                                else project.editTriggerStyle(selections,effect.name,null)
+                            if(ok) { editingFx=effect.name;effectMenu=false;refresh() }
+                            else triggerMessage="Could not save trigger effect"
+                        }
+                    }
+                    if(NativeEffectParameters.forId(NativeEffectCatalog.byName(editingFx).id)?.foreground==true)
+                        PaletteEditor("Color",android.graphics.Color.parseColor(colorText),t) { color ->
+                            val hex=String.format("#%06X",color and 0xffffff)
+                            if(project.editTriggerStyle(selections,null,hex)) refresh()
+                            else triggerMessage="Could not save trigger color"
+                        }
                     if(project.zoneCount()==0) Caption("Add zones in Layout first.",t)
                     for(i in 0 until project.zoneCount()) {
                         val zone=project.zone(i) ?: continue
@@ -1416,25 +1428,6 @@ class ComposeMainActivity : ComponentActivity() {
             },
             confirmButton = { Pill("Done",t,true) { editing=false } },
             dismissButton = { Pill("Close",t) { editing=false } })
-        triggerToDelete?.let { target ->
-            if(project.trigger(target).optString("kind") == "trigger-custom")
-                AlertDialog(
-                    onDismissRequest={triggerToDelete=null},
-                    title={Text("Delete custom trigger?")},
-                    text={Text("Delete " + target + " from this project?")},
-                    confirmButton={Pill("Delete",t,true) {
-                        if(project.deleteTrigger(target)) {
-                            selections=selections-target
-                            triggerToDelete=null
-                            refresh()
-                        }else {
-                            triggerMessage="Cannot delete a default trigger"
-                            triggerToDelete=null
-                        }
-                    }},
-                    dismissButton={Pill("Cancel",t){triggerToDelete=null}})
-            else triggerToDelete=null
-        }
         CoreTriggerMappingPage(t)
     }
     @Composable
@@ -1488,7 +1481,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {
         Title("Auto Events", t)
-        Caption("Startup and shutdown are optional offline designs. CORE alone controls real ignition transitions.", t)
+        EffectsPreview(t, selectedEffect.intValue)
+        var eventEditing by remember { mutableStateOf<String?>(null) }
+        var selectedEvent by remember { mutableStateOf("Startup") }
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }
         var eventMessage by remember { mutableStateOf("") }
@@ -1501,16 +1496,43 @@ class ComposeMainActivity : ComponentActivity() {
         }
         listOf("Startup", "Shutdown").forEach { key ->
             val event = project.trigger(key)
-            Panel(t) {
-                Text(key, color = t.fg, fontWeight = FontWeight.Bold)
+            Panel(t,minHeight=70.dp,fill=if(selectedEvent==key) (if(t.bg==Color.Black) Color(0xFF272727) else t.raised) else t.surface) {
                 val enabled = event.optBoolean("eventUiEnabled", false)
-                Pill(if (enabled) "Enabled ✓" else "Disabled", t, enabled) {
-                    applyAutoEvent(key, "eventUiEnabled", !enabled)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { selectedEvent=key }) {
+                        Text(key, color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Caption(event.optString("eventFx", "Solid"), t)
+                    }
+                    IconAction("Edit " + key, "edit", t) {
+                        selectedEvent=key
+                        eventEditing = if (eventEditing == key) null else key
+                    }
+                    Pill(if (enabled) "On" else "Off", t, enabled) {
+                        applyAutoEvent(key, "eventUiEnabled", !enabled)
+                    }
                 }
-                Caption("Animation · " + event.optString("eventFx", "Solid"), t)
+                if (eventEditing == key) {
                 Pill("Choose " + key + " animation", t) {
                     choosing = key
                     search = ""
+                }
+                val eventEffect=NativeEffectCatalog.byName(event.optString("eventFx","Solid"))
+                val eventParameters=NativeEffectParameters.forId(eventEffect.id)
+                if(eventParameters?.foreground==true) PaletteEditor("Color",
+                    android.graphics.Color.parseColor(event.optString("color","#ffffff")),t) {
+                    applyAutoEvent(key,"color",String.format("#%06X",it and 0xffffff))
+                }
+                if(eventParameters?.background==true) PaletteEditor("Background",
+                    android.graphics.Color.parseColor(event.optString("secondary","#000000")),t) {
+                    applyAutoEvent(key,"secondary",String.format("#%06X",it and 0xffffff))
+                }
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
+                        applyAutoEvent(key,"eventUiFadeMs",1200)
+                    }
+                    Pill("Instant Snap",t,event.optInt("eventUiFadeMs",0)==0) {
+                        applyAutoEvent(key,"eventUiFadeMs",0)
+                    }
                 }
                 val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
                 ValueSlider("Transition fade (ms)", fade, 5000, t) {
@@ -1525,6 +1547,7 @@ class ComposeMainActivity : ComponentActivity() {
                     previewEffect(selected.id)
                 }
                 Caption("Offline preview inspects exact design pixels; CORE provides animation.", t)
+                }
             }
         }
         choosing?.let { key ->
@@ -1628,7 +1651,129 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
+    private fun UiIcon(kind: String, color: Color) {
+        Canvas(Modifier.size(18.dp)) {
+            val u=size.width/24f
+            val w=1.8f*u
+            fun line(x: Float,y: Float,xx: Float,yy: Float) =
+                drawLine(color,Offset(x*u,y*u),Offset(xx*u,yy*u),w)
+            when(kind) {
+                "bluetooth" -> { line(11f,2f,11f,22f);line(11f,2f,18f,8f)
+                    line(18f,8f,5f,18f);line(5f,6f,18f,16f);line(18f,16f,11f,22f) }
+                "shield" -> { val p=Path().apply { moveTo(12*u,2*u);lineTo(21*u,6*u)
+                    lineTo(20*u,15*u);quadraticTo(18*u,21*u,12*u,23*u)
+                    quadraticTo(6*u,21*u,4*u,15*u);lineTo(3*u,6*u);close() }
+                    drawPath(p,color,style=Stroke(w));line(8f,12f,11f,15f);line(11f,15f,16f,9f) }
+                "chevron" -> { line(9f,4f,16f,12f);line(16f,12f,9f,20f) }
+                "down" -> { line(5f,9f,12f,16f);line(12f,16f,19f,9f) }
+                "up" -> { line(5f,15f,12f,8f);line(12f,8f,19f,15f) }
+                "pause" -> { drawCircle(color);drawLine(Color.Black,Offset(10*u,8*u),Offset(10*u,16*u),w)
+                    drawLine(Color.Black,Offset(14*u,8*u),Offset(14*u,16*u),w) }
+                "play" -> { drawCircle(color,style=Stroke(w));val p=Path().apply {
+                    moveTo(10*u,7*u);lineTo(17*u,12*u);lineTo(10*u,17*u);close() };drawPath(p,color) }
+                "refresh", "reset" -> { drawArc(color,40f,290f,false,style=Stroke(w))
+                    line(20f,2f,20f,8f);line(20f,8f,14f,8f) }
+                "settings" -> { line(2f,7f,22f,7f);line(2f,17f,22f,17f)
+                    drawCircle(color,3*u,Offset(8*u,7*u),style=Stroke(w))
+                    drawCircle(color,3*u,Offset(16*u,17*u),style=Stroke(w)) }
+                "controller" -> { line(5f,4f,19f,4f);line(5f,4f,2f,10f)
+                    line(19f,4f,22f,10f);line(2f,10f,22f,10f);line(3f,15f,21f,15f);line(4f,20f,20f,20f) }
+                "firmware" -> { drawRect(color,Offset(5*u,5*u),androidx.compose.ui.geometry.Size(14*u,14*u),style=Stroke(w))
+                    for(i in listOf(8f,16f)){line(i,1f,i,5f);line(i,19f,i,23f);line(1f,i,5f,i);line(19f,i,23f,i)} }
+                "appearance" -> { drawCircle(color,9*u,Offset(12*u,12*u),style=Stroke(w))
+                    for(pt in listOf(Offset(8*u,8*u),Offset(14*u,6*u),Offset(18*u,11*u),Offset(7*u,14*u)))
+                        drawCircle(color,1.3f*u,pt) }
+            }
+        }
+    }
+    @Composable
+    private fun IconAction(label: String, kind: String, t: Tone, action: () -> Unit) {
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(99.dp))
+            .semantics { contentDescription = label }.clickable(onClick = action),
+            contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(18.dp)) {
+                val u = size.width / 24f
+                if (kind == "edit") {
+                    val p = Path().apply {
+                        moveTo(4*u, 16*u); lineTo(16*u, 4*u); lineTo(20*u, 8*u)
+                        lineTo(8*u, 20*u); lineTo(3*u, 21*u); close()
+                    }
+                    drawPath(p, t.muted, style = Stroke(1.8f*u))
+                    drawLine(t.muted, Offset(13*u,7*u), Offset(17*u,11*u), 1.8f*u)
+                } else {
+                    drawLine(t.muted,Offset(5*u,7*u),Offset(19*u,7*u),2*u)
+                    drawLine(t.muted,Offset(9*u,4*u),Offset(15*u,4*u),2*u)
+                    drawLine(t.muted,Offset(7*u,9*u),Offset(8*u,20*u),2*u)
+                    drawLine(t.muted,Offset(17*u,9*u),Offset(16*u,20*u),2*u)
+                    drawLine(t.muted,Offset(8*u,20*u),Offset(16*u,20*u),2*u)
+                }
+            }
+        }
+    }
+    @Composable
+    private fun SettingsRow(label: String, subtitle: String, t: Tone,
+                            actionLabel: String = "›", rowHeight: Int = 59, action: () -> Unit) {
+        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            UiIcon(when(label) { "Controller" -> "bluetooth"; "Authorization" -> "shield"
+                "Active Controller" -> "controller"; "Appearance" -> "appearance"
+                "Firmware" -> "firmware"; else -> "reset" },t.muted)
+            Column(Modifier.weight(1f)) {
+                Text(label, color = t.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Caption(subtitle, t)
+            }
+            if(actionLabel=="›") Box(Modifier.size(40.dp).clickable(onClick=action)
+                .semantics { contentDescription="Open " + label },contentAlignment=Alignment.Center) {
+                UiIcon("chevron",t.muted)
+            } else Pill(actionLabel, t, enabled=actionLabel!="Authorize" || (ble.isConnected() && !ble.canControl()), strong=actionLabel=="Connect", action = action)
+        }
+    }
+    @Composable
+    private fun SettingsPage(t: Tone, changePage: (Int) -> Unit,
+                             light: Boolean, toggleAppearance: () -> Unit) {
+        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
+        Title("Settings", t)
+        var controllers by remember { mutableStateOf(false) }
+        var appearance by remember { mutableStateOf(false) }
+        var diagnostics by remember { mutableStateOf(false) }
+        Panel(t) {
+            Text("Connection", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Controller", connectionPhase, t, "Connect") {
+                foundDevices.clear(); ble.scanHeadless(); controllers = true
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            SettingsRow("Authorization", if(ble.canControl()) "Authorized" else "Not authorized", t, "Authorize") {
+                ble.authorizeOrPair()
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            SettingsRow("Active Controller", if(ble.canControl()) "Connected controller" else "No controller selected", t) {
+                controllers = !controllers
+            }
+            if(controllers) foundDevices.forEach { (address,label) ->
+                Pill(label, t) { ble.connectFoundDevice(address); controllers=false }
+            }
+        }
+        Panel(t) {
+            Text("App Preferences", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Appearance", if(light) "Light mode" else "Dark mode", t, rowHeight=52) { appearance = !appearance }
+            if(appearance) Pill(if(light) "Dark mode" else "Light mode",t) { toggleAppearance() }
+        }
+        Panel(t) {
+            Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Firmware", "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            // No reset command exists in the pinned CORE interface. Do not
+            // present a local document clear as a successful controller reset.
+            SettingsRow("Reset Configuration", "Restore controller defaults", t, rowHeight=46) {
+                outputMessage.value = "Controller reset is unavailable in the current CORE protocol"
+                diagnostics = true
+            }
+        }
+        if(diagnostics) SettingsDiagnostics(t, changePage)
+    }
+    @Composable
+    private fun SettingsDiagnostics(t: Tone, changePage: (Int) -> Unit) {
         Title("Settings", t)
         // Developer testing is deliberately isolated from universal trigger
         // authoring. This is a local UI test; it does not assert GPIO or write NVS.
@@ -1786,8 +1931,8 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Hardware settings are separate from your Studio design. Reload each output over authorized BLE before editing.", t)
             Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Pill("Output 1", t, index == 0) { index = 0 }
-                Pill("Output 2", t, index == 1) { index = 1 }
+                Pill("Output 1", t, index == 0) { index = 0; captureOutput.intValue = 0; invalidateCoreFrame() }
+                Pill("Output 2", t, index == 1) { index = 1; captureOutput.intValue = 1; invalidateCoreFrame() }
             }
             Pill("Reload output " + (index + 1) + " from CORE", t) {
                 if (ble.canConfigure()) ble.readOutput(index)

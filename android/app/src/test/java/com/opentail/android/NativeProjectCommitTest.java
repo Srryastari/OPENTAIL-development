@@ -303,6 +303,38 @@ public class NativeProjectCommitTest {
         store.fail=true;
         assertFalse(reopened.mapZoneToOutputSlot(tail,0,1));
         assertEquals(old,reopened.exportJson());
-        assertEquals(committed,store.persisted); // no failed link leaked to disk
+        assertEquals(new JSONObject(committed).toString(),new JSONObject(store.persisted).toString()); // JSON formatting is not a disk-state change
     }
+    @Test public void bulkStyleEditsPreserveOtherColorsAndRollBackFailedSaves() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        Set<String> selected = new HashSet<>(Arrays.asList("Park", "Brake"));
+        assertTrue(project.styleTriggers(new HashSet<>(Arrays.asList("Park")), "Solid", "#123456"));
+        assertTrue(project.styleTriggers(new HashSet<>(Arrays.asList("Brake")), "Solid", "#abcdef"));
+        assertTrue(project.editTriggerStyle(selected, "Wipe", null));
+        assertEquals("#123456", project.trigger("Park").getString("color"));
+        assertEquals("#abcdef", project.trigger("Brake").getString("color"));
+        assertEquals("Wipe", project.trigger("Park").getString("pattern"));
+        String committed = project.exportJson();
+        store.fail = true;
+        assertFalse(project.editTriggerStyle(selected, null, "#ffffff"));
+        assertEquals(committed, project.exportJson());
+        assertFalse(project.editTriggerStyle(selected, null, "invalid"));
+        assertEquals(committed, project.exportJson());
+    }
+
+    @Test public void eventColorEditsValidateAndRemainTransactional() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        assertTrue(project.setAutoEvent("Startup", "color", "#123456"));
+        assertTrue(project.setAutoEvent("Shutdown", "secondary", "#abcdef"));
+        assertEquals("#123456", project.trigger("Startup").getString("color"));
+        String committed = project.exportJson();
+        assertFalse(project.setAutoEvent("Startup", "color", "red"));
+        assertFalse(project.setAutoEvent("Brake", "color", "#123456"));
+        store.fail = true;
+        assertFalse(project.setAutoEvent("Startup", "color", "#ffffff"));
+        assertEquals(committed, project.exportJson());
+    }
+
 }

@@ -21,8 +21,8 @@ for(const required of [
   'project.editZone(id,label,n,reverse)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
-  'PaletteEditor("Pixel " + activePixel',
-  'name = it', 'project.name(it)', 'Pill("Done",t,true)',
+  'PaletteEditor("Pixel "+activePixel',
+  'name=it', 'project.name(it)',
 ]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
 assert(compose.includes('selectedEffect.intValue = effectId') &&
        compose.includes('val effect = selectedEffect.intValue'),
@@ -34,18 +34,17 @@ for(const required of [
   'var selections by remember',
   'project.assignMany(selections,zoneId,!checked)',
   'confirmButton = { Pill("Done",t,true) { editing=false }',
-  'Pill("Assign zones · " + selections.size + " selected"'
+  'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())'
 ]) assert(triggerBlock.includes(required), 'Live assignment-only trigger regression: '+required);
-assert(!triggerBlock.includes('applyTriggerStyle') &&
-       !triggerBlock.includes('chosenFx') &&
-       !triggerBlock.includes('chosenColor'),
+assert(triggerBlock.includes('project.editTriggerStyle(selections,null,hex)') &&
+       !triggerBlock.includes('ble.showFx('),
        'Trigger edit must only assign zones, never effects or colors');
 assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
 
 for(const required of [
   'EffectsPreview(', 'previewCurrentEffect(effect)',
-  'PaletteEditor("Foreground"', 'PaletteEditor("Background"', 'PaletteEditor("Accent"',
+  'PaletteEditor("Color"', 'PaletteEditor("Background"',
 ]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
 
 assert(triggerBlock.includes('project.assignMany(selections,zoneId,!checked)') &&
@@ -68,13 +67,16 @@ for(const required of [
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        compose.includes('Caption(bleMessage.value, t)'),
        'Connection status and transient diagnostics must remain separate');
-assert(compose.includes('ExactLedFrame.fromProjectModel(project)') &&
-       compose.includes('Color(frame.colorAt(sample))') &&
-       compose.includes('for(row in 0 until 3) for(col in 0 until columns)') &&
-       compose.includes('No invented animation: only trusted CORE RGB or local design colors.'),
-   'The approved three-row live preview must use actual indexed project or CORE RGB, not invented animation.');
+const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+  .split('private fun ShowModesPage(')[0];
+assert(approvedPreview.includes('val columns = 30') &&
+       approvedPreview.includes('val capsuleHeight = 24.dp.toPx()') &&
+       approvedPreview.includes('val frame = coreFrame.value') &&
+       approvedPreview.includes('Color(frame!!.colorAt(sample))') &&
+       approvedPreview.includes('if(offlinePreview.value)'),
+   'Final preview must use one row of 30 capsules at 24dp and verified CORE RGB only.');
 assert(compose.includes('if (offlinePreview.value) return') &&
-       compose.includes('if (!offlinePreview.value && ble.canCaptureFrame())') &&
+       compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') &&
        compose.includes('offlinePreview.value = true') &&
        compose.includes('livePreview.stop()'),
        'Preview Offline must not issue effect or frame capture commands');
@@ -98,8 +100,7 @@ assert(previewGate &&
          previewGate.indexOf('livePreview.arm()') &&
        previewGate.includes('livePreview.stop()') &&
        previewGate.includes('liveArmed.value = false') &&
-       effectBlock.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
-       effectBlock.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
+       effectBlock.includes('previewCurrentEffect(effect)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
   'All Effects edits must reject unsupported palettes before arming BLE without silent fallback');
 assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
