@@ -533,6 +533,12 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         ESP_LOGI(TAG,"BLE negotiated ATT MTU: %u",(unsigned)ev->mtu.value);
     return 0;
 }
+static void on_sync(void){
+    int rc=ble_hs_util_ensure_addr(0);
+    if(!rc)rc=ble_hs_id_infer_auto(0,&addr_type);
+    if(rc){ESP_LOGE(TAG,"BLE address error: %d",rc);return;}
+    advertise();
+}
 /* A NimBLE host/controller reset does not promise a GAP DISCONNECT callback.
  * Clearing the old connection handle is essential: advertise() otherwise
  * refuses to restart on the next host sync, stranding a previously paired app.
@@ -545,12 +551,6 @@ static void on_reset(int reason){
     if(had_link){ot_st_ble_connected(false);ot_ble_disconnect_show();}
     cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
     ESP_LOGW(TAG,"BLE host reset (%d); advertising resumes after sync",reason);
-}
-static void on_sync(void){
-    int rc=ble_hs_util_ensure_addr(0);
-    if(!rc)rc=ble_hs_id_infer_auto(0,&addr_type);
-    if(rc){ESP_LOGE(TAG,"BLE address error: %d",rc);return;}
-    advertise();
 }
 static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freertos_deinit();}
 bool ot_ble_start(void){
