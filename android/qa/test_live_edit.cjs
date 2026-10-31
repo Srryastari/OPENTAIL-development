@@ -72,7 +72,7 @@ for(const required of [
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        compose.includes('Caption(bleMessage.value, t)'),
        'Connection status and transient diagnostics must remain separate');
-const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
   .split('private fun ShowModesPage(')[0];
 assert(approvedPreview.includes('val columns = 30') &&
        approvedPreview.includes('val capsuleHeight = 24.dp.toPx()') &&
