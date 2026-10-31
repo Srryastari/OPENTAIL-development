@@ -151,7 +151,7 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
 // Owner physical Test 38: read-only Output 1 reload now PASS. Restore
 // responsive preview between explicit reads without turning BLE BUSY into a
 // 60Hz status flood or inventing/smoothing unverified frame pixels.
-const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
   ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
 const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
   ?.split('private final ArrayAdapter<String> entries;')[0];
@@ -174,7 +174,7 @@ assert(captureLoop && captureLoop.includes('delay(16L)') &&
 // uninstalls can also erase all local project-painted pixels. Role colors must
 // originate from explicit CORE Output Manager readback, never claimed to be
 // a physical LED frame. Restore existing pill +/- controls on loaded hardware.
-const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
   ?.split('private fun ShowModesPage(t: Tone)')[0];
 const hardwareOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(previewSrc &&
@@ -200,8 +200,9 @@ assert(previewSrc &&
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
 // Owner's full Test 1-80 regression gates (Android-only source contracts).
 assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
-       compose.includes('selected?.optJSONObject("effectSettings")') &&
-       compose.includes('if(editor.commit()) refreshLoadedProject()') &&
+       compose.includes('NativePresetRestore.load(project,prefs,preset)') &&
+       compose.includes('if (restored) {') &&
+       compose.includes('refreshLoadedProject()') &&
        compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
        compose.includes('offlinePreview.value -> "Offline design preview"') &&
        compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
@@ -293,7 +294,7 @@ assert(model.includes('.put("zones", new JSONArray())') &&
        model.includes('!"trigger-custom".equals(p.optString("kind"))'),
        'Universal trigger defaults must remain unassigned and undeletable');
 assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
-for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Presets", "Sequences")',
+for(const required of ['EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)', 'listOf("Effects", "Presets", "Sequences")',
   'ApprovedWledEffectsEditor(', 'effectOptions = NativeEffectCatalog.generalEffects()',
   'onSelected = { id ->', 'onColor = { id,slot,rgb ->',
   'onPalette = { id,selected ->', 'onLiveToggle = {',
@@ -406,6 +407,32 @@ for(const scenario of ['triggerLiveParametersPersistImmediatelyAndRollbackAtomic
 assert(stopTest.includes('pinnedCoreFixedColorPalettesUseActualForegroundAndBackground') &&
        stopTest.includes('onlyVerifiedCustomReadbackCanRenderDevicePalette'),
        'Source-verified gradient tests missing');
+
+const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePresetRestore.java','utf8');
+const offlineSketch=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineFxSketch.kt','utf8');
+assert(compose.includes('var backStack by remember') &&
+       compose.includes('backStack = backStack + page') &&
+       compose.includes('backStack.lastOrNull() ?: 0') &&
+       compose.includes('navigate(i)') &&
+       compose.includes('HomePage(t, { navigate(it) })') &&
+       compose.includes('SettingsPage(t, { navigate(it) }'),
+       'Android Back must pop the shared six-screen history, not force Home or exit');
+assert(palettes.includes('foreground: Int? = null') &&
+       palettes.includes('if (fg == null) return null') &&
+       palettes.includes('if (bg == null) return null') &&
+       !palettes.includes('if (fg < 0) return null'),
+       'Opaque ARGB colors can be signed-negative and must remain valid');
+assert(presetRestore.includes('if(!editor.commit())return false;') &&
+       presetRestore.indexOf('if(!editor.commit())return false;') < presetRestore.indexOf('project.importJson(draft.toString())') &&
+       presetRestore.includes('rollback.commit()') &&
+       fs.readFileSync('android/app/src/test/java/com/opentail/android/NativePresetRestoreTest.java','utf8')
+         .includes('effectCommitFailureMustNotImportNewDesignOrChangeSelection'),
+       'Preset project import must never precede an effect preference commit');
+assert(compose.includes('val localSketch = animateOffline') &&
+       compose.includes('OfflineFxSketch.colorAt(') &&
+       compose.includes('Offline effect preview · local') &&
+       offlineSketch.includes('if (!supports(id) || pixels <= 0'),
+       'Local-only preview must animate known effects without fabricating CORE frames');
 
 // The storage rollback invariant must be exercised with real JSON and
 // deterministic failed SharedPreferences.commit(), not only static source text.
@@ -721,7 +748,7 @@ assert(layoutPart && layoutPart.includes('if(editingId==id)') &&
        'Layout owns inline zone expansion, dot preview, and CORE output manager');
 assert(model.includes('synchronized boolean mapZoneToOutputSlot(') && compose.includes('project.mapZoneToOutputSlot(') && compose.includes('it !in occupied') && storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly') && !layoutPart.includes('ble.saveOutput('),
        'Bidirectional design zone/CORE physical output links must remain unique and saved locally');
-const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
   .split('private fun ShowModesPage(')[0];
 assert(liveStrip.includes('val columns = 30') && liveStrip.includes('val capsuleHeight = 24.dp.toPx()') && liveStrip.includes('val gap=3.dp.toPx()') && liveStrip.includes('Color(frame!!.colorAt(sample))') && !liveStrip.includes('for(row'),
        'Locked live preview: exactly three rows of unlabeled rounded LED capsules');
