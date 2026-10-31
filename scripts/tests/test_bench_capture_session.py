@@ -68,6 +68,35 @@ class SessionContractTests(unittest.TestCase):
         self.assertEqual([s for i, s in enumerate(mod.SIGNALS) if 14 & (1 << i)],
                          ["brake", "left", "right"])
 
+    def test_synthetic_masks_use_window_ttl_and_always_clear(self):
+        class Args:
+            base_url = "http://192.168.4.1"
+            seconds = 2.0
+        observed = []
+        def transport(base, path, body=None):
+            observed.append((path, body))
+            return {"ok": True}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(mod, "request_json", side_effect=transport), \
+             patch.object(mod, "capture_window", return_value=0):
+            mod.run_simulation(Args(), Path(folder), io.StringIO(), io.StringIO())
+        self.assertEqual(len(observed), len(mod.MASKS) + 1)
+        self.assertTrue(all(body["ttl_ms"] == 3500 for _, body in observed[:-1]))
+        self.assertEqual(observed[-1][1]["signals"], [])
+        self.assertEqual(observed[-1][1]["ttl_ms"], 100)
+        observed.clear()
+        def uncertain_timeout(base, path, body=None):
+            observed.append((path, body))
+            if len(observed) == 1:
+                raise TimeoutError("request may already have reached device")
+            return {"ok": True}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(mod, "request_json", side_effect=uncertain_timeout), \
+             patch.object(mod, "capture_window", return_value=0):
+            with self.assertRaises(TimeoutError):
+                mod.run_simulation(Args(), Path(folder), io.StringIO(), io.StringIO())
+        self.assertEqual(observed[-1][1]["signals"], [])
+
     def test_dry_run_does_not_touch_hardware(self):
         with patch.object(mod, "request_json", side_effect=AssertionError("Network called")):
             with redirect_stdout(io.StringIO()) as result:
