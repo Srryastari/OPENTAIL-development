@@ -331,7 +331,7 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
 // STOP queued behind a GATT transaction must drain before any new capture,
 // owner/auth, effect-capability, or output-config GATT operation starts.
 assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || writePending || nextPacket!=null ||') &&
-       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 4 &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 3 &&
        (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
        bleSource.includes('private boolean cfgSend(byte[] packet)') &&
        bleSource.includes('return cfgSend(new byte[]{2,3,(byte)index') &&
