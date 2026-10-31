@@ -378,7 +378,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
-                        if (i != 1) offlinePreview.value = false
+                        // Preview Offline remains active across tabs (Test 79).
                         page = i
                     }
                 }
@@ -427,7 +427,7 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
-        val fill = if (selected) Color(0xFF303030) else t.raised
+        val fill = if (selected) (if(t.bg == Color.Black) Color(0xFF303030) else Color(0xFFDEDEDE)) else t.raised
         Box(Modifier.height(36.dp).clip(RoundedCornerShape(99.dp))
             .background(fill).clickable(onClick = action)
             .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
@@ -824,7 +824,8 @@ class ComposeMainActivity : ComponentActivity() {
         val hasProjectColors = projectPaint != null &&
             (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 }
         val frame = when {
-            offlinePreview.value -> projectPaint
+            offlinePreview.value && hasProjectColors -> projectPaint
+            offlinePreview.value -> null
             hasLiveColors -> actualFrame
             hasProjectColors -> projectPaint
             else -> null
@@ -888,6 +889,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Text(when {
                     hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
                     useConfiguredColors -> "Configured zone colors"
+                    offlinePreview.value -> "Offline design preview"
                     hasProjectColors -> "Project pixel colors"
                     else -> "Awaiting CORE frame"
                 }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
@@ -907,13 +909,13 @@ class ComposeMainActivity : ComponentActivity() {
         var view by rememberSaveable { mutableStateOf("Effects") }
         var query by rememberSaveable { mutableStateOf("") }
         val effect = selectedEffect.intValue
-        var speed by rememberSaveable { mutableIntStateOf(prefs.getInt("speed", 128)) }
-        var intensity by rememberSaveable { mutableIntStateOf(prefs.getInt("intensity", 128)) }
-        var brightness by rememberSaveable { mutableIntStateOf(prefs.getInt("brightness", 160)) }
-        var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
-        var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
-        var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
-        var paletteId by rememberSaveable {
+        var speed by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("speed", 128)) }
+        var intensity by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("intensity", 128)) }
+        var brightness by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("brightness", 160)) }
+        var foreground by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("foreground", -1)) }
+        var background by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
+        var accent by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("accent", -1)) }
+        var paletteId by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
         EffectsPreview(t, effect)
@@ -1239,7 +1241,7 @@ class ComposeMainActivity : ComponentActivity() {
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember(projectLoadRevision.intValue) {
-            mutableStateOf(project.zone(0)?.optString("id"))
+            mutableStateOf<String?>(null) // collapse cards on Layout page entry
         }
         var deleteId by remember { mutableStateOf<String?>(null) }
         var choosingDelete by remember { mutableStateOf(false) }
