@@ -299,7 +299,7 @@ for(const required of ['EffectsPreview(t, if(chosen >= 0) chosen else -1, animat
   'ApprovedWledEffectsEditor(', 'effectOptions = NativeEffectCatalog.generalEffects()',
   'onSelected = { id ->', 'onColor = { id,slot,rgb ->',
   'onPalette = { id,selected ->',
-  'if(liveArmed.value) previewCurrentEffect(id)']) {
+  'previewCurrentEffect(id)']) {
   assert(modes.includes(required),'Approved Effects binding regression: '+required);
 }
 for(const required of ['approved-prototype.fragment.html SHA256 37DB62A26E1622A7058B503EEB3A10B731C327269FB755E6289802AACE273D9D',
@@ -1054,3 +1054,17 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
        compose.includes('override fun onStop() {\n        localMicrophone.stop()') &&
        !fs.readFileSync('android/app/src/main/java/com/opentail/android/MicAudioPeak.java','utf8').includes('.join('),
        'Owner-approved microphone must remain local, foreground-only and off the UI thread');
+
+ // PR90 bench regression: the existing physical controls and authenticated
+ // editor gestures must actually reach CORE, including after Preview Offline.
+ const controllerEditor = compose.split('private fun ShowModesPage(')[1].split('private fun effectLabel(')[0];
+ assert(!controllerEditor.includes('if(liveArmed.value) previewCurrentEffect(id)') &&
+        !controllerEditor.includes('if(liveArmed.value && key in') &&
+        !controllerEditor.includes('if(liveArmed.value && slot < 2)') &&
+        controllerEditor.includes('if(key in setOf("speed","intensity","brightness"))') &&
+        controllerEditor.includes('if(slot < 2) previewCurrentEffect(id)'),
+        'Authenticated effect edits must not require an already-armed preview');
+ assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
+        compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&
+        compose.includes('if (ble.canControl() && id in supportedIds.value) {\n                    offlinePreview.value = false'),
+        'Explicit existing physical bench controls must leave Preview Offline');

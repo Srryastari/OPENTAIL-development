@@ -1142,8 +1142,7 @@ class ComposeMainActivity : ComponentActivity() {
                                     editor.putInt(key,prefs.getInt(scoped,0))
                             }
                             editor.apply()
-                            if(liveArmed.value) previewCurrentEffect(id)
-                            else invalidateCoreFrame()
+                            previewCurrentEffect(id)
                         }
                     },
                     onParam = { id,key,value ->
@@ -1151,7 +1150,7 @@ class ComposeMainActivity : ComponentActivity() {
                         if(key in setOf("speed","intensity","brightness"))
                             edit.putInt(key,value)
                         edit.apply()
-                        if(liveArmed.value && key in setOf("speed","intensity","brightness"))
+                        if(key in setOf("speed","intensity","brightness"))
                             previewCurrentEffect(id)
                         else invalidateCoreFrame()
                     },
@@ -1162,14 +1161,13 @@ class ComposeMainActivity : ComponentActivity() {
                             .putInt(key,rgb).apply()
                         // Slot 3 is saved correctly but the CORE BLE preview
                         // Frame contract has only foreground/background slots.
-                        if(liveArmed.value && slot < 2) previewCurrentEffect(id)
+                        if(slot < 2) previewCurrentEffect(id)
                         else invalidateCoreFrame()
                     },
                     onPalette = { id,selected ->
                         prefs.edit().putInt("wled.${id}.palette",selected)
                             .putInt("paletteId",selected).apply()
-                        if(liveArmed.value) previewCurrentEffect(id)
-                        else invalidateCoreFrame()
+                        previewCurrentEffect(id)
                     }
                 )
             }
@@ -2274,6 +2272,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .forEach { (label, mask) ->
                             Pill(label, t, liveChainMask.intValue == mask) {
                                 liveChainMask.intValue = mask
+                                offlinePreview.value = false
                                 previewCurrentEffect()
                             }
                         }
@@ -2282,12 +2281,14 @@ class ComposeMainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Pill("All zones", t, liveZoneMask.intValue == 255) {
                         liveZoneMask.intValue = 255
+                        offlinePreview.value = false
                         previewCurrentEffect()
                     }
                     (0 until 8).forEach { zone ->
                         val mask = 1 shl zone
                         Pill("Zone " + (zone + 1), t, liveZoneMask.intValue == mask) {
                             liveZoneMask.intValue = mask
+                            offlinePreview.value = false
                             previewCurrentEffect()
                         }
                     }
@@ -2312,6 +2313,7 @@ class ComposeMainActivity : ComponentActivity() {
             confirmButton = { Pill("Start bench test", t, true) {
                 val id = prefs.getInt("effectId", 0)
                 if (ble.canControl() && id in supportedIds.value) {
+                    offlinePreview.value = false
                     invalidateCoreFrame()
                     val benchMask = CoreBenchTargets.enabledMask(
                         arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)
