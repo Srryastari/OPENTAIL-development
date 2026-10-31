@@ -30,7 +30,7 @@ final class NativePresetRestore {
             draft.put("savedPresets",new JSONArray(project.presets().toString()));
             if (preset.has("fxId")) {
                 int id=preset.getInt("fxId");
-                if (id < 0 || id > 65535) return false;
+                if (id < -1 || id > 65535) return false; // -1 is a durable deselection
                 updates.put("effectId",id);
             }
             JSONObject values=preset.optJSONObject("effectSettings");
