@@ -813,7 +813,7 @@ static esp_err_t show_get(httpd_req_t *r){
             if(!ot_fx_slot_active(slot,ms))continue;
             if(slot->standalone){persistent=true;continue;}
             const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
-            const uint32_t elapsed=ms-slot->started_ms;
+            const uint32_t elapsed=ms-slot->refreshed_ms;
             if(duration-elapsed>remaining)remaining=duration-elapsed;
         }
         if(persistent)remaining=0;
