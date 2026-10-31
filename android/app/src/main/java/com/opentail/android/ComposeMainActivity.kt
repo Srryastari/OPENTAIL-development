@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -358,6 +359,9 @@ class ComposeMainActivity : ComponentActivity() {
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
         var page by rememberSaveable { mutableIntStateOf(0) }
+        // System Back returns from each non-Home screen without exiting the app.
+        // Compose Dialog has its own dismissOnBackPress and handles popup Back first.
+        BackHandler(enabled = page != 0) { page = 0 }
         val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
@@ -948,48 +952,95 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         when(view) {
-            "Effects" -> Panel(t) {
-                Field(query,"Search effects",t) { query=it }
-                Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
-                val matches=remember(query) {
-                    val preferred=listOf(9,32772)
-                    NativeEffectCatalog.generalEffects().filter {
-                        it.name.contains(query,ignoreCase=true) }
-                        .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
+            "Effects" -> {
+                // Owner-approved standalone native editor. Do not reintroduce
+                // generic search/list controls or replace the six-screen shell.
+                var chosen by rememberSaveable(projectLoadRevision.intValue) {
+                    mutableIntStateOf(effect)
                 }
-                LazyColumn(Modifier.fillMaxWidth().height(236.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                    items(matches,key={it.id}) { item ->
-                        Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(15.dp))
-                            .background(if(item.id==effect) (if(t.bg==Color.Black) Color(0xFF292929) else Color(0xFFDEDEDE)) else t.raised)
-                            .clickable {
-                                selectedEffect.intValue=item.id
-                                prefs.edit().putInt("effectId",item.id).apply()
-                                previewCurrentEffect(item.id)
-                            }.padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Text(effectLabel(item.id),Modifier.weight(1f),color=t.fg,fontSize=14.sp)
-                            if(item.id==effect) Text("✓",color=t.fg)
+                LaunchedEffect(effect) {
+                    // Explicit preset import/selection updates the editor only
+                    // when the authoritative selected effect actually changes.
+                    if (selectedEffect.intValue != chosen && chosen >= 0)
+                        chosen = selectedEffect.intValue
+                }
+                ApprovedWledEffectsEditor(
+                    selectedId = chosen.takeIf { it >= 0 },
+                    effectOptions = NativeEffectCatalog.generalEffects(),
+                    segments = project.zoneCount(),
+                    liveEnabled = liveArmed.value,
+                    prefs = prefs,
+                    paletteFor = { id ->
+                        val verified = if(paletteLoadedPresent.value &&
+                            paletteLoadedSlot.intValue in 0..127 &&
+                            id == 200 - paletteLoadedSlot.intValue &&
+                            paletteLoadedRevision.longValue >= 0L)
+                            paletteLoadedStops.value else null
+                        NativePaletteEngine.lookup(project.raw(), id,
+                            prefs.getInt("foreground",-1),
+                            prefs.getInt("background",0xff000000.toInt()), verified)
+                    },
+                    onSelected = { id ->
+                        if(id == null) {
+                            chosen = -1
+                            if(liveArmed.value) {
+                                livePreview.stop()
+                                liveArmed.value = false
+                            }
+                        } else {
+                            chosen = id
+                            selectedEffect.intValue = id
+                            val editor = prefs.edit().putInt("effectId",id)
+                            // On effect change restore the independently saved
+                            // values to the existing BLE/preset contract.
+                            listOf("speed","intensity","brightness","foreground",
+                                "background","accent","paletteId").forEach { key ->
+                                val scoped = "wled.${id}." + (if(key=="paletteId")"palette" else key)
+                                if(prefs.contains(scoped))
+                                    editor.putInt(key,prefs.getInt(scoped,0))
+                            }
+                            editor.apply()
+                            if(liveArmed.value) previewCurrentEffect(id)
+                            else invalidateCoreFrame()
                         }
+                    },
+                    onLiveToggle = {
+                        if(liveArmed.value) {
+                            livePreview.stop()
+                            liveArmed.value = false
+                            if(ble.canControl()) ble.stopShow()
+                        } else if(chosen >= 0) {
+                            // User-initiated live preview only: effect list
+                            // selection never activates Show Mode implicitly.
+                            previewCurrentEffect(chosen)
+                        }
+                    },
+                    onParam = { id,key,value ->
+                        val edit = prefs.edit().putInt("wled.${id}.${key}",value)
+                        if(key in setOf("speed","intensity","brightness"))
+                            edit.putInt(key,value)
+                        edit.apply()
+                        if(liveArmed.value && key in setOf("speed","intensity","brightness"))
+                            previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onColor = { id,slot,rgb ->
+                        val key = when(slot) { 0->"foreground";1->"background";else->"accent" }
+                        prefs.edit().putInt("wled.${id}.color${slot}",rgb)
+                            .putInt("wled.${id}.${key}",rgb)
+                            .putInt(key,rgb).apply()
+                        // Slot 3 is saved correctly but the CORE BLE preview
+                        // Frame contract has only foreground/background slots.
+                        if(liveArmed.value && slot < 2) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onPalette = { id,selected ->
+                        prefs.edit().putInt("wled.${id}.palette",selected)
+                            .putInt("paletteId",selected).apply()
+                        if(liveArmed.value) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
                     }
-                }
-                ValueSlider("Brightness",brightness,255,t) {
-                    brightness=it;prefs.edit().putInt("brightness",it).apply();previewCurrentEffect(effect)
-                }
-                val parameters=NativeEffectParameters.forId(effect)
-                if(parameters?.foreground==true) PaletteEditor("Color",foreground,t) {
-                    foreground=it;prefs.edit().putInt("foreground",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.background==true) PaletteEditor("Background",background,t) {
-                    background=it;prefs.edit().putInt("background",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.speed==true) ValueSlider("Speed",speed,255,t) {
-                    speed=it;prefs.edit().putInt("speed",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.intensity==true) ValueSlider("Intensity",intensity,255,t) {
-                    intensity=it;prefs.edit().putInt("intensity",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.palette==true) PalettePicker("Palette",paletteId,t) {
-                    paletteId=it;prefs.edit().putInt("paletteId",it).apply();previewCurrentEffect(effect)
-                }
+                )
             }
             "Presets" -> PresetsPage(t)
             "Sequences" -> SequencePage(t,effect)
