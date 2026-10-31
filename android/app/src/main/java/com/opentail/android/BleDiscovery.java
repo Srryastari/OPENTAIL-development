@@ -178,7 +178,7 @@ final class BleDiscovery {
     boolean canTransferPalettes(){return canControl() && palette.supported();}
     void cancelPaletteTransfer(){palette.abortForStop();}
     private boolean paletteGate(){
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry palette action after STOP/transfer");return false;
@@ -232,8 +232,8 @@ final class BleDiscovery {
         // is normal backpressure, not a connection failure or user-facing BLE
         // error. Do not publish status on every busy tick (or restart Compose's
         // effect coroutine). Crucially, never overlap any pending ATT action.
-        if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || writePending || nextPacket!=null ||
-           readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending)return false;
+        if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending || nextPacket!=null ||
+           readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy || authPending || pairPending || challengePending)return false;
         frameCapture.request(output);
         return true;
     }
@@ -264,6 +264,15 @@ final class BleDiscovery {
     private Consumer<NativeTriggerMappingCodec.Snapshot> triggerMapListener;
     private volatile boolean mtuNegotiating=false;
     private volatile boolean infoReadPending=false;
+    private BluetoothGattCharacteristic coreInfo;
+    private boolean infoReadQueued=false;
+    private Consumer<String> infoListener;
+    void setInfoListener(Consumer<String> listener){infoListener=listener;}
+    private void clearInfo(){
+        coreInfo=null;infoReadQueued=false;
+        final Consumer<String> receiver=infoListener;
+        if(receiver!=null)ui.post(()->receiver.accept(null));
+    }
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
     void setTriggerMapListener(Consumer<NativeTriggerMappingCodec.Snapshot> listener){
@@ -272,7 +281,7 @@ final class BleDiscovery {
     boolean canMapTriggers(){return canControl() && triggerMapping!=null;}
     private boolean triggerMapAvailable(){
         if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
-        if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+        if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
            frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry trigger mapping");return false;
         }
@@ -396,7 +405,7 @@ final class BleDiscovery {
             fxNotify("[]");
             return;
         }
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
@@ -499,7 +508,7 @@ final class BleDiscovery {
             pumpQueue();                 // runs only after GATT drains
             return;
         }
-        if(writePending||readReplyPending||fxCapsBusy||triggerMapBusy||palette.busy()||
+        if(writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||palette.busy()||
            nextPacket!=null||authPending||pairPending||challengePending){
             cfgNotify(false,"BLE is busy; "+configReadBlocker()+"; retry after current transfer",null,index);return;
         }
@@ -521,7 +530,7 @@ final class BleDiscovery {
     /** Returns true when an output save enters the GATT transaction; only readback proves application. */
     boolean saveOutput(int index,String json){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
         if(cfgKnownRevision[index]>=65535){cfgNotify(false,"CORE output revision exhausted; no wrap or additional save permitted",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
@@ -722,7 +731,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}
@@ -734,7 +743,7 @@ final class BleDiscovery {
     void authorizeStored(){
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
         try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}
             else watchOwnerTransaction(gatt);}
@@ -773,7 +782,7 @@ final class BleDiscovery {
         }
         // Legacy-token authorization must not mark authPending for an older
         // command's reply or overlap another ATT operation or queued STOP.
-        if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||
+        if (cfgBusy || writePending || readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy ||
                 frameCapture.busy() || palette.busy() || nextPacket != null || pairPending ||
                 challengePending || authPending) {
             notifyStatus("BLE busy; retry authorization"); return;
@@ -822,7 +831,7 @@ final class BleDiscovery {
             notifyStatus("Invalid CORE preset action or slot");return;
         }
         // Explicit preset NVS actions cannot be overwritten by live FX coalescing.
-        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry preset action");return;
@@ -865,7 +874,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || triggerMapBusy || frameCapture.busy() || palette.busy() || nextPacket!=null) {
+        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy || frameCapture.busy() || palette.busy() || nextPacket!=null) {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
@@ -900,7 +909,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
-        if(writePending||readReplyPending||cfgBusy||fxCapsBusy||triggerMapBusy||
+        if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
            frameCapture.busy()||palette.busy()||authPending||pairPending||challengePending)return;
         // Preserve existing STOP-before-FX order. Never prioritize a read
         // over a previously queued safety STOP.
@@ -918,6 +927,15 @@ final class BleDiscovery {
             int index=queuedOutputRead;
             clearQueuedOutputRead();
             beginOutputRead(index);
+            return;
+        }
+        if(infoReadQueued && coreInfo!=null && gatt!=null){
+            infoReadQueued=false;
+            infoReadPending=true;
+            boolean started=false;
+            try{started=gatt.readCharacteristic(coreInfo);}
+            catch(SecurityException ex){notifyStatus("CORE firmware information read permission denied");}
+            if(!started)infoReadPending=false;
         }
     }
     private String preferredPending = null;
@@ -1255,6 +1273,8 @@ final class BleDiscovery {
             }
             BluetoothGattService service = connection.getService(SERVICE_UUID);
             BluetoothGattCharacteristic info = service == null ? null : service.getCharacteristic(INFO_UUID);
+            clearInfo(); // never show a previous controller's firmware
+            coreInfo=info;
             if (info == null) {
                 notifyStatus("BLE connected; no supported OpenTail info characteristic");
                 recoverStalledGatt(connection,"CORE GATT service missing or outdated");
@@ -1365,11 +1385,21 @@ final class BleDiscovery {
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
         infoReadPending=false;
-        if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
-            notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
-        else notifyStatus("BLE connected; information read failed: " + status);
-        if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
+        if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
+            String info=new String(value,StandardCharsets.UTF_8);
+            String version=info.startsWith("OpenTail CORE ")
+                ? info.substring("OpenTail CORE ".length()).split(" \\|",2)[0].trim() : "";
+            final String reported=version.isEmpty()?null:version;
+            final Consumer<String> receiver=infoListener;
+            if(receiver!=null)ui.post(()->{
+                if(!stopped && connection==gatt)receiver.accept(reported);
+            });
+        }else notifyStatus("CORE information read failed: "+status);
+        // INFO is optional. Never gate or revoke owner authorization on it.
+        if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null &&
+           !canControl() && !challengePending && !authPending)
             ui.post(thisAutoAuth(connection));
+        pumpQueue();
     }
 
     private Runnable thisAutoAuth(BluetoothGatt owner) {
@@ -1395,7 +1425,19 @@ final class BleDiscovery {
         String response = status==BluetoothGatt.GATT_SUCCESS && raw!=null
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
-        if(authPending){authorized="OK AUTH".equals(response);authPending=false;}
+        if(authPending){
+            authorized="OK AUTH".equals(response);authPending=false;
+            if(authorized && coreInfo!=null) {
+                final BluetoothGatt owner=gatt;
+                // Allow the existing authorized FX catalog read to start
+                // before this optional metadata read enters the GATT queue.
+                ui.postDelayed(()->{
+                    if(!stopped && owner==gatt && connected && authorized){
+                        infoReadQueued=true;pumpQueue();
+                    }
+                },500L);
+            }
+        }
         if("ERR AUTH".equals(response)) revokeOwnerSession();
         if(response.startsWith("ERR"))notifyStatus("BLE · " + response + " (Wi-Fi control unaffected)");
         else notifyStatus("BLE · " + response + (authorized?" · lighting enabled":""));
