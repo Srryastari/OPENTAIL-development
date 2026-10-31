@@ -165,6 +165,34 @@ assert(captureLoop && captureLoop.includes('delay(16L)') &&
        compose.includes('Color(frame!!.colorAt(sample))'),
        'Fast live preview must be GATT-paced, silently backpressured, STOP-safe and CORE-authoritative');
 
+// Owner-confirmed UI regression after PR #71: empty/cold CORE frames must
+// not erase the approved 30-capsule preview's known configured colors; fresh
+// uninstalls can also erase all local project-painted pixels. Role colors must
+// originate from explicit CORE Output Manager readback, never claimed to be
+// a physical LED frame. Restore existing pill +/- controls on loaded hardware.
+const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+  ?.split('private fun ShowModesPage(t: Tone)')[0];
+const hardwareOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(previewSrc &&
+       previewSrc.includes('val actualFrame = coreFrame.value') &&
+       previewSrc.includes('val hasLiveColors = actualFrame != null') &&
+       previewSrc.includes('val readback = outputs[captureOutput.intValue]') &&
+       previewSrc.includes('configuredZones.optJSONObject(i)') &&
+       previewSrc.includes('rolePixelColor(zone.optString("role","off"))') &&
+       previewSrc.includes('Configured zone colors') &&
+       previewSrc.includes('Project pixel colors') &&
+       previewSrc.includes('Color(frame!!.colorAt(sample))') &&
+       previewSrc.includes('val columns = 30') &&
+       !previewSrc.includes('SIMULATED') &&
+       hardwareOutput &&
+       hardwareOutput.includes('ValueSlider("Total output pixels"') &&
+       hardwareOutput.includes('ValueSlider("Next start · zero-based"') &&
+       (hardwareOutput.match(/Pill\("−",t\)/g)||[]).length >= 2 &&
+       (hardwareOutput.match(/Pill\("\+",t\)/g)||[]).length >= 2 &&
+       hardwareOutput.includes('adjustZone(i,n)') &&
+       hardwareOutput.includes('adjustOutput(n)') &&
+       hardwareOutput.includes('Physical boundaries change only after confirmed NVS Save'),
+       'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
 assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
