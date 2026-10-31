@@ -424,6 +424,18 @@ class ComposeMainActivity : ComponentActivity() {
     }
     // Native vector glyphs preserve the approved icon meanings without
     // emoji, downloaded fonts, WebView or an additional icon dependency.
+    // Preserve the approved pill styling, but make the actual VISIBLE
+    // +/- button 56x48dp. A large invisible wrapper around a tiny Pill
+    // does not satisfy the physical phone accessibility requirement.
+    @Composable
+    private fun PixelStepPill(symbol: String, t: Tone, onClick: () -> Unit) {
+        Box(Modifier.size(width=56.dp,height=48.dp)
+            .clip(RoundedCornerShape(99.dp)).background(t.raised)
+            .semantics { contentDescription=if(symbol=="+") "Add one pixel" else "Remove one pixel" }
+            .clickable(onClick=onClick),contentAlignment=Alignment.Center) {
+            Text(symbol,color=t.fg,fontSize=22.sp,fontWeight=FontWeight.Bold)
+        }
+    }
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
@@ -1362,16 +1374,8 @@ class ComposeMainActivity : ComponentActivity() {
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(46.dp).clickable {
-                                count=(n-1).coerceAtLeast(1).toString();applyLiveZone()
-                            }, contentAlignment=Alignment.Center) {
-                                Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
-                            }
-                            Box(Modifier.size(46.dp).clickable {
-                                count=(n+1).coerceAtMost(10000).toString();applyLiveZone()
-                            }, contentAlignment=Alignment.Center) {
-                                Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
-                            }
+                            PixelStepPill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            PixelStepPill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
                             Spacer(Modifier.weight(1f))
                             Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
                                 verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -2164,23 +2168,15 @@ class ComposeMainActivity : ComponentActivity() {
             // Restore the approved pixel +/- controls beside the draft
             // slider. These change only RAM; Save still requires confirmation.
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(46.dp).clickable {
+                PixelStepPill("−",t) {
                     val n=(pixelCount-1).coerceAtLeast(1)
-                    adjustOutput(n);outputCountText=n.toString()
-                },contentAlignment=Alignment.Center) {
-                    Pill("−",t) {
-                        val n=(pixelCount-1).coerceAtLeast(1)
-                        adjustOutput(n);outputCountText=n.toString()
-                    }
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
-                Box(Modifier.size(46.dp).clickable {
+                PixelStepPill("+",t) {
                     val n=(pixelCount+1).coerceAtMost(outputLimit)
-                    adjustOutput(n);outputCountText=n.toString()
-                },contentAlignment=Alignment.Center) {
-                    Pill("+",t) {
-                        val n=(pixelCount+1).coerceAtMost(outputLimit)
-                        adjustOutput(n);outputCountText=n.toString()
-                    }
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
             }
             Caption("Color order · set this for the actual connected LED strips", t)
@@ -2223,31 +2219,17 @@ class ComposeMainActivity : ComponentActivity() {
                     outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(46.dp).clickable {
+                    PixelStepPill("−",t) {
                         val n=(count-1).coerceAtLeast(0)
                         adjustZone(i,n)
                         zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                    },contentAlignment=Alignment.Center) {
-                        Pill("−",t) {
-                            val n=(count-1).coerceAtLeast(0)
-                            adjustZone(i,n)
-                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
-                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                        }
                     }
-                    Box(Modifier.size(46.dp).clickable {
+                    PixelStepPill("+",t) {
                         val n=(count+1).coerceAtMost(outputLimit)
                         adjustZone(i,n)
                         zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                    },contentAlignment=Alignment.Center) {
-                        Pill("+",t) {
-                            val n=(count+1).coerceAtMost(outputLimit)
-                            adjustZone(i,n)
-                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
-                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                        }
                     }
                 }
                 // Bidirectional association: choose a design zone here, or
