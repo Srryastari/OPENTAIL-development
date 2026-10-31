@@ -186,9 +186,12 @@ def main():
                 if lib.palette_ok(effect,pal):profiles.append((128,128,160,pal,0xffd735f4,0xff174a03))
             if flags&16:profiles.append((128,128,160,200,0xffd735f4,0xff174a03))
             hashes=[];start_count=count
+            named_phone_dynamic=(1,26,38,91)
             for profile_index,profile in enumerate(profiles):
                 speed,intensity,bri,pal,fg,bg=profile
                 handle=lib.make(effect);h=hashlib.sha256()
+                distinct_frames=set() if profile_index==1 and (
+                    effect>=32768 or effect in named_phone_dynamic) else None
                 frames=420 if pal==1 else 180 if profile_index<4 else 12
                 for step in range(frames):
                     # Change all authoring parameters without resetting native state.
@@ -197,10 +200,15 @@ def main():
                     ms=step*16
                     assert lib.frame(handle,ms,speed,intensity,bri,pal,fg,bg,440,2048,frame),(effect,profile,step)
                     data=b''.join(int(x).to_bytes(4,'big') for x in frame)
+                    if distinct_frames is not None:
+                        distinct_frames.add(hashlib.sha256(data).digest())
                     if bri==0:assert all(x==0xff000000 for x in frame),(effect,'zero brightness')
                     expected.extend(data);h.update(data)
                     plan.append(','.join(map(str,[int(step==0),effect,ms,speed,intensity,bri,pal,fg,bg])))
                     count+=1
+                if distinct_frames is not None:
+                    assert len(distinct_frames)>1, (
+                        effect,name,'does not animate across 180 offline frames')
                 hashes.append(h.hexdigest());lib.drop(handle)
             rows.append({'id':effect,'name':name,'source_adapter':bool(flags&32),
                          'speed_supported':bool(flags&1),'intensity_supported':bool(flags&2),
