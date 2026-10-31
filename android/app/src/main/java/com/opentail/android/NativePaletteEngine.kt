@@ -34,7 +34,30 @@ internal object NativePaletteEngine {
             parseVerifiedCustom(verifiedCustomStops)?.let { return NativePalette(id, name, it) }
         }
         val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
-            ?: return NativePalette(id, name, coreFixedStops(id, foreground, background))
+        if (raw == null) {
+            // Native WLED source defines palette 0 and fixed IDs 2..72.
+            // IDs 0 and 6..72 never inherit Main/Set Color: their preset RGB
+            // gradients are independent of user-defined effect color slots.
+            // Color-slot palettes 2..5 may derive colors ONLY from their
+            // actual source-defined color roles. Dynamic IDs remain unknown
+            // without verified snapshots.
+            val colorSlotsPresent = id == 0 || id >= 6 ||
+                (foreground != null && (id == 2 || background != null))
+            if (id in 0..72 && id != 1 && colorSlotsPresent) {
+                val fixed = runCatching {
+                    OfflineCoreRenderer.fixedPalette(id,
+                        foreground ?: -1, background ?: 0xff000000.toInt(),
+                        0xff000000.toInt())
+                }.getOrNull()
+                if (fixed != null && fixed.size == 16) {
+                    val stops = fixed.mapIndexed { index, rgb ->
+                        (index.toFloat() / 15f) to Color(rgb)
+                    }
+                    return NativePalette(id, name, stops)
+                }
+            }
+            return NativePalette(id, name, coreFixedStops(id, foreground, background))
+        }
         if (raw.length() !in 1..64) return NativePalette(id, name, null)
         val stops = ArrayList<Pair<Float, Color>>(raw.length())
         for (i in 0 until raw.length()) {
