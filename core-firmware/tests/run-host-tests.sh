@@ -68,6 +68,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/fx_overlay_engine.c tests/test_effects_nvs_recovery_isolation.c \
   -o /tmp/ot-effects-nvs-isolation && /tmp/ot-effects-nvs-isolation
 python3 tests/test_effect_capabilities_manifest.py
+python3 tests/test_nimble_long_read_contract.py
 # Firmware-owned v3 palette codec + authenticated BLE transaction regression,
 # including simulated durable write failure and session reset.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
