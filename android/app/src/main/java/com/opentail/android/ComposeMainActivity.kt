@@ -94,9 +94,16 @@ class ComposeMainActivity : ComponentActivity() {
     private val paletteLoadedStops = mutableStateOf("")
     private val paletteLoadedPresent = mutableStateOf(false)
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
+    private val localMicrophone = MicAudioPeak()
+    private var microphonePermissionRevision by mutableIntStateOf(0)
+    private var microphonePermissionRequested = false
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        microphonePermissionRevision++
+    }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
     private val offlinePreview = mutableStateOf(false)
+    private val offlineReplay = mutableIntStateOf(0)
     private val selectedEffect = mutableIntStateOf(0)
     // Auto Events visual inspection must never change Show Modes' selected
     // effect or navigate away to a general Effects page (owner Test 86).
@@ -109,10 +116,11 @@ class ComposeMainActivity : ComponentActivity() {
     private val captureOutput = mutableIntStateOf(0)
     private val previewPaused = mutableStateOf(false)
     private val foregroundActivity = mutableStateOf(false)
+    private val foregroundEpoch = mutableIntStateOf(0)
     // A verified snapshot is valid only for the UI state and output at the
     // time its capture began. Old asynchronous GATT replies cannot resurrect
     // pixels after an edit, disconnect, or switch into offline preview.
-    private var frameRevision = 0L
+    private var frameRevision by mutableLongStateOf(0L)
     private var pendingFrameRevision = -1L
     private var pendingFrameOutput = -1
 
@@ -316,6 +324,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     override fun onStart() {
         super.onStart()
+        foregroundEpoch.intValue++
         foregroundActivity.value = true
         if (!ble.isConnected()) {
             prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
@@ -324,6 +333,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     override fun onStop() {
+        localMicrophone.stop()
         foregroundActivity.value = false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
@@ -338,6 +348,7 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterReceiver(adapterReceiver)
         if (liveArmed.value) livePreview.stop()
+        localMicrophone.stop()
         ble.shutdown()
         super.onDestroy()
     }
@@ -429,6 +440,7 @@ class ComposeMainActivity : ComponentActivity() {
                     3 -> TriggersPage(t)
                     4 -> AutoEventsPage(t) { effectId ->
                         autoEventPreviewEffect.intValue = effectId
+                        offlineReplay.intValue++
                         enterOfflinePreview()
                     }
                     5 -> SettingsPage(t, { navigate(it) }, light) {
@@ -851,21 +863,81 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {
+    private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {
         // Reference dimensions are logical UI pixels (dp), independent of
         // display density. Never substitute design colors for CORE telemetry.
-        val connection = bleMessage.value
+        val connection = bleMessage.value.let { ble.canCaptureFrame() }
         val localRevision = revision.intValue
-        // Local sketches are explicitly distinct from CORE frames and run
-        // only inside the approved Show Modes preview, with zero BLE traffic.
+        // Preference changes invalidate local settings independently of CORE
+        // capture invalidation. In particular, scoped Speed never goes stale.
+        var settingsRevision by remember { mutableIntStateOf(0) }
+        DisposableEffect(effect) {
+            val observer = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key?.startsWith("wled.${effect}.") == true ||
+                    key in setOf("foreground","background","speed","intensity","brightness","paletteId"))
+                    settingsRevision++
+            }
+            prefs.registerOnSharedPreferenceChangeListener(observer)
+            onDispose { prefs.unregisterOnSharedPreferenceChangeListener(observer) }
+        }
+        val storedSettings = remember(effect, frameRevision, settingsRevision) {
+            OfflinePreviewSettings.read(effect) { key, fallback -> prefs.getInt(key,fallback) }
+        }
+        val settings = settingsOverride ?: storedSettings
+        val renderer = remember(effect,offlineReplay.intValue) { OfflineCoreRenderer(effect,30) }
+        DisposableEffect(renderer) { onDispose { renderer.close() } }
         val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
-            OfflineFxSketch.supports(effect)
-        var localTick by remember(effect) { mutableLongStateOf(0L) }
-        LaunchedEffect(localSketch, effect, foregroundActivity.value, previewPaused.value) {
-            if (!localSketch || !foregroundActivity.value || previewPaused.value) return@LaunchedEffect
+            renderer.available()
+        // Read custom gradient stops exactly; no invented palette colors.
+        val customStops = remember(settings[5],localRevision,paletteLoadedStops.value,
+            paletteLoadedPresent.value,paletteLoadedSlot.intValue) {
+            val id=settings[5]
+            if(id !in 73..255) null else {
+                val verified=if(paletteLoadedPresent.value && id==200-paletteLoadedSlot.intValue)
+                    paletteLoadedStops.value else null
+                if(verified!=null) runCatching { NativePaletteV3.stops(verified) }.getOrNull()
+                else runCatching {
+                    val raw=JSONObject(project.exportJson()).optJSONObject("palettePreviews")?.optJSONArray(id.toString())
+                    if(raw==null || raw.length() !in 2..18) null else ByteArray(raw.length()*4) { index ->
+                        val value=(raw.getJSONArray(index/4).get(index%4) as? Number)?.toDouble()
+                            ?: error("Non-numeric palette stop")
+                        require(value.isFinite() && value in 0.0..255.0 && value % 1.0 == 0.0)
+                        value.toInt().toByte()
+                    }
+                }.getOrNull()
+            }
+        }
+        val localColors = remember { IntArray(30) }
+        val localTimeNanos = remember(effect,offlineReplay.intValue) { mutableLongStateOf(0L) }
+        val localRenderAvailable = remember(effect) { mutableStateOf(true) }
+        val localFrameMs = remember(effect) { mutableIntStateOf(16) }
+        val hasMicPermission = microphonePermissionRevision.let {
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value
+        DisposableEffect(needsMic,hasMicPermission,foregroundEpoch.intValue) {
+            if(needsMic) {
+                if(hasMicPermission) localMicrophone.start()
+                else if(!microphonePermissionRequested) {
+                    microphonePermissionRequested=true
+                    microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            onDispose { if(needsMic) localMicrophone.stop() }
+        }
+        LaunchedEffect(localSketch, effect, offlineReplay.intValue, foregroundActivity.value, previewPaused.value) {
+            if (!localSketch || effect == 0 || !foregroundActivity.value || previewPaused.value)
+                return@LaunchedEffect
+            var previous = -1L
             while (true) {
-                delay(33L)
-                localTick++
+                withFrameNanos { now ->
+                    if (previous >= 0L) {
+                        localTimeNanos.longValue += now - previous
+                        localFrameMs.intValue=((now-previous)/1_000_000L).toInt().coerceIn(1,65535)
+                    }
+                    previous = now
+                }
             }
         }
         // Separate honest CORE telemetry from the saved design / read-only
@@ -877,10 +949,10 @@ class ComposeMainActivity : ComponentActivity() {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
         }
         val actualFrame = coreFrame.value
-        val hasLiveColors = actualFrame != null &&
-            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 }
-        val hasProjectColors = projectPaint != null &&
-            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 }
+        val hasLiveColors = remember(actualFrame) { actualFrame != null &&
+            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 } }
+        val hasProjectColors = remember(projectPaint) { projectPaint != null &&
+            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 } }
         val frame = when {
             offlinePreview.value && hasProjectColors -> projectPaint
             offlinePreview.value -> null
@@ -894,7 +966,7 @@ class ComposeMainActivity : ComponentActivity() {
         val useConfiguredColors = frame == null && configuredPixels > 0 &&
             configuredZones != null && configuredZones.length() > 0
         LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
-            // Frame-paced admission (~60 Hz), NOT a fixed 500ms fetch timer.
+            // Display-paced admission; capture completion remains BLE-bound.
             // A full CORE RGB888 snapshot can require many serialized BLE ATT
             // exchanges. captureFrame() silently declines while busy, so the
             // next request starts as soon as GATT is free without overlapping
@@ -903,7 +975,7 @@ class ComposeMainActivity : ComponentActivity() {
             // intermediate pixels. Actual update rate is BLE-throughput bound.
             while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
                 capturePreviewFrame()
-                delay(16L)
+                withFrameNanos { }
             }
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
@@ -916,6 +988,12 @@ class ComposeMainActivity : ComponentActivity() {
                 val capsuleWidth=(size.width-gap*(columns-1))/columns
                 val pitch=capsuleWidth+gap
                 val capsuleHeight = 24.dp.toPx()
+                val audio = if(effect==185) localMicrophone.latest() else null
+                val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
+                    localFrameMs.intValue,settings[2],settings[3],settings[4],settings[5],
+                    settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
+                    audio?.get(1) ?: 0f,audio!=null,localColors)
+                if(localSketch) localRenderAvailable.value=localRendered
                 for (col in 0 until columns) {
                     val sample = if (frame != null && frame.size() > 0)
                         col * (frame.size() - 1) / (columns - 1) else -1
@@ -936,10 +1014,7 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                     val color = if (localSketch) {
-                        Color(OfflineFxSketch.colorAt(effect,col,columns,localTick,
-                            prefs.getInt("foreground",0xffffffff.toInt()),
-                            prefs.getInt("background",0xff000000.toInt()))
-                            ?: 0xff000000.toInt())
+                        if(localRendered) Color(localColors[col]) else t.raised
                     } else if (sample >= 0) Color(frame!!.colorAt(sample))
                         else configuredColor
                     drawRoundRect(color,
@@ -951,7 +1026,8 @@ class ComposeMainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(when {
                     effect < 0 && animateOffline -> "No effect selected"
-                    localSketch -> "Offline effect preview · local"
+                    localSketch && localRenderAvailable.value -> "Offline effect preview · local"
+                    localSketch -> "Offline animation unavailable"
                     animateOffline && (offlinePreview.value || !ble.canControl()) ->
                         "Offline animation unavailable"
                     hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
@@ -1776,7 +1852,12 @@ class ComposeMainActivity : ComponentActivity() {
         val eventPreviewId=autoEventPreviewEffect.intValue.takeIf { it >= 0 }
             ?: NativeEffectCatalog.byName(eventProfiles.getValue(selectedEvent)
                 .optString("eventFx","Solid")).id
-        EffectsPreview(t, eventPreviewId)
+        val eventPreview=eventProfiles.getValue(selectedEvent)
+        EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=intArrayOf(
+            android.graphics.Color.parseColor(eventPreview.optString("color","#ffffff")),
+            android.graphics.Color.parseColor(eventPreview.optString("secondary","#000000")),
+            eventPreview.optInt("speed",128),eventPreview.optInt("intensity",128),
+            eventPreview.optInt("brightness",100)*255/100,eventPreview.optInt("paletteId",0)))
         var eventEditing by remember { mutableStateOf<String?>(null) }
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }

@@ -82,7 +82,7 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('3 -> { // Triggers: lightning') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
-assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
+assert(bleSource.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        bleSource.includes('infoReadPending') && bleSource.includes('frameCapture.busy()') &&
         bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
         bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
@@ -105,7 +105,7 @@ assert(settingsSection.includes('Pill("Preview Offline", t)') &&
        compose.includes('livePreview.stop()'),
        'Locked Settings Connect and offline preview regression');
 assert(compose.includes('4 -> AutoEventsPage(t) { effectId ->') &&
-       compose.includes('autoEventPreviewEffect.intValue = effectId\n                        enterOfflinePreview()') &&
+       compose.includes('autoEventPreviewEffect.intValue = effectId\n                        offlineReplay.intValue++\n                        enterOfflinePreview()') &&
        !compose.includes('selectedEffect.intValue = effectId') &&
        compose.includes('Offline preview inspects exact design pixels; CORE provides animation.'),
        'Auto Events offline preview must use the same BLE-isolated session as Settings');
@@ -152,11 +152,11 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
 // Owner physical Test 38: read-only Output 1 reload now PASS. Restore
 // responsive preview between explicit reads without turning BLE BUSY into a
 // 60Hz status flood or inventing/smoothing unverified frame pixels.
-const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
+const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {')[1]
   ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
 const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
   ?.split('private final ArrayAdapter<String> entries;')[0];
-assert(captureLoop && captureLoop.includes('delay(16L)') &&
+assert(captureLoop && captureLoop.includes('withFrameNanos { }') &&
        !captureLoop.includes('delay(500)') &&
        captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
        captureStart &&
@@ -175,12 +175,12 @@ assert(captureLoop && captureLoop.includes('delay(16L)') &&
 // uninstalls can also erase all local project-painted pixels. Role colors must
 // originate from explicit CORE Output Manager readback, never claimed to be
 // a physical LED frame. Restore existing pill +/- controls on loaded hardware.
-const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
+const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {')[1]
   ?.split('private fun ShowModesPage(t: Tone)')[0];
 const hardwareOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(previewSrc &&
        previewSrc.includes('val actualFrame = coreFrame.value') &&
-       previewSrc.includes('val hasLiveColors = actualFrame != null') &&
+       previewSrc.includes('val hasLiveColors = remember(actualFrame)') &&
        previewSrc.includes('val readback = outputs[captureOutput.intValue]') &&
        previewSrc.includes('configuredZones.optJSONObject(i)') &&
        previewSrc.includes('rolePixelColor(zone.optString("role","off"))') &&
@@ -230,7 +230,7 @@ assert(catalog.includes('static List<Effect> generalEffects()') &&
        autoEvents.includes('NativeEffectCatalog.autoEventChoices()') &&
        !autoEvents.includes('.take(15)') &&
        autoEvents.includes('previewEffect(selected.id)') &&
-       autoEvents.includes('EffectsPreview(t, eventPreviewId)') &&
+       autoEvents.includes('EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=') &&
        compose.includes('autoEventPreviewEffect.intValue = effectId') &&
        !compose.includes('selectedEffect.intValue = effectId') &&
        !compose.includes('enterOfflinePreview()\\n                        page = 1') &&
@@ -409,7 +409,7 @@ assert(stopTest.includes('pinnedCoreFixedColorPalettesUseActualForegroundAndBack
        stopTest.includes('onlyVerifiedCustomReadbackCanRenderDevicePalette'),
        'Source-verified gradient tests missing');
 
-const offlineSketch=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineFxSketch.kt','utf8');
+const offlineBinding=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineCoreRenderer.java','utf8');
 assert(compose.includes('var backStack by remember') &&
        compose.includes('backStack = backStack + page') &&
        compose.includes('backStack.lastOrNull() ?: 0') &&
@@ -429,9 +429,9 @@ assert(presetRestore.includes('if(!editor.commit())return false;') &&
          .includes('effectCommitFailureMustNotImportNewDesignOrChangeSelection'),
        'Preset project import must never precede an effect preference commit');
 assert(compose.includes('val localSketch = animateOffline') &&
-       compose.includes('OfflineFxSketch.colorAt(') &&
+       compose.includes('renderer.render(') &&
        compose.includes('Offline effect preview · local') &&
-       offlineSketch.includes('if (!supports(id) || pixels <= 0'),
+       offlineBinding.includes('System.loadLibrary("opentail_preview")'),
        'Local-only preview must animate known effects without fabricating CORE frames');
 
 // Codex PR #76 P2: ensure old wheel callbacks cannot overwrite new
@@ -505,7 +505,7 @@ assert(outputRead &&
        queuedReadPump.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        queuedReadPump.includes('beginOutputRead(index);') &&
        bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
-       bleSource.includes('CORE snapshot ATT timed out during output reload') &&
+       bleSource.includes('CORE snapshot ATT timed out; reconnect required') &&
        bleSource.includes('clearQueuedOutputRead();') &&
        bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
@@ -762,7 +762,7 @@ assert(layoutPart && layoutPart.includes('if(editingId==id)') &&
        'Layout owns inline zone expansion, dot preview, and CORE output manager');
 assert(model.includes('synchronized boolean mapZoneToOutputSlot(') && compose.includes('project.mapZoneToOutputSlot(') && compose.includes('it !in occupied') && storageTest.includes('physicalOutputLinksAreUniqueBidirectionalAndLocalOnly') && !layoutPart.includes('ble.saveOutput('),
        'Bidirectional design zone/CORE physical output links must remain unique and saved locally');
-const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
+const liveStrip=compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {')[1]
   .split('private fun ShowModesPage(')[0];
 assert(liveStrip.includes('val columns = 30') && liveStrip.includes('val capsuleHeight = 24.dp.toPx()') && liveStrip.includes('val gap=3.dp.toPx()') && liveStrip.includes('Color(frame!!.colorAt(sample))') && !liveStrip.includes('for(row'),
        'Locked live preview: exactly three rows of unlabeled rounded LED capsules');
@@ -1000,3 +1000,34 @@ for(const exercise of ['capabilityNegotiationFailsClosed',
 }
 
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
+
+assert(captureLoop.includes('val localTimeNanos = remember(effect,offlineReplay.intValue)') &&
+       captureLoop.includes('withFrameNanos { now ->') &&
+       !captureLoop.includes('delay(33L)') && !captureLoop.includes('localTick++'),
+       'Local animation must use display timestamps and preserve phase across edits');
+const drawPreview=previewSrc.split('Canvas(Modifier.fillMaxWidth().height(24.dp))')[1].split('Row(Modifier.fillMaxWidth()')[0];
+assert(!drawPreview.includes('prefs.getInt(') && drawPreview.includes('renderer.render('),
+       'Preview draw must use one frame-stable parameter snapshot');
+for(const call of ['this::authorizeStored','this::pairWithBoot','this::readTriggerMap',
+                  '()->saveTriggerMap(expectedRevision,requested)','()->saveOutput(index,json)',
+                  '()->fxPreset(action,slot)','()->authorize(tokenHex)'])
+    assert(bleSource.includes('deferBehindFrame('+call+')'),'Capture must yield for '+call);
+assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOperation();') &&
+       frameClient.includes('byte[] complete=pixels;'), 'Bound snapshot timers and hand off owned RGB');
+
+const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8');
+const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
+assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d' &&
+       nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
+       nativePreview.includes('ot_wled_palette_global_tick('),
+       'All effects must use the pinned authoritative registry and palette producer');
+assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
+       compose.includes('registerOnSharedPreferenceChangeListener(observer)') &&
+       compose.includes('unregisterOnSharedPreferenceChangeListener(observer)') &&
+       compose.includes('settings[2],settings[3],settings[4],settings[5]'),
+       'Scoped parameter edits must update native preview without a CORE capture dependency');
+assert(manifest.includes('android.permission.RECORD_AUDIO') &&
+       compose.includes('val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value') &&
+       compose.includes('override fun onStop() {\n        localMicrophone.stop()') &&
+       !fs.readFileSync('android/app/src/main/java/com/opentail/android/MicAudioPeak.java','utf8').includes('.join('),
+       'Owner-approved microphone must remain local, foreground-only and off the UI thread');

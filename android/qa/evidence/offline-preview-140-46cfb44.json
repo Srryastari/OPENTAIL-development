@@ -1,0 +1,2674 @@
+{
+  "core_commit": "1767b144e193ed6978816899ebb5eba237ee6e2d",
+  "candidate_commit": "46cfb4491f5f88fe4d5d021665f0ee817e851178",
+  "tracked_android_dirty": false,
+  "effects": 140,
+  "source_adapters": 120,
+  "frames": 121380,
+  "argb_bytes": 14565600,
+  "parity": "byte-exact JNI vs independent pinned CORE build",
+  "timing_scope": "Linux host JNI renderer only; excludes Android display/composition/microphone acquisition/BLE. Not measured phone FPS.",
+  "audio_fixture": "test input 440 Hz, PCM magnitude 2048; app uses live Android microphone, never this fixture",
+  "per_effect": [
+    {
+      "id": 0,
+      "name": "Solid",
+      "source_adapter": true,
+      "speed_supported": false,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1017,
+        "p50_ns": 591,
+        "p95_ns": 1917,
+        "p99_ns": 6510
+      },
+      "host_renderer_only_fps": 983284.2
+    },
+    {
+      "id": 1,
+      "name": "Blink",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 554,
+        "p50_ns": 431,
+        "p95_ns": 1237,
+        "p99_ns": 1705
+      },
+      "host_renderer_only_fps": 1805054.2
+    },
+    {
+      "id": 2,
+      "name": "Breathe",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 573,
+        "p50_ns": 459,
+        "p95_ns": 1139,
+        "p99_ns": 1830
+      },
+      "host_renderer_only_fps": 1745200.7
+    },
+    {
+      "id": 3,
+      "name": "Wipe",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 703,
+        "p50_ns": 668,
+        "p95_ns": 1231,
+        "p99_ns": 1991
+      },
+      "host_renderer_only_fps": 1422475.1
+    },
+    {
+      "id": 4,
+      "name": "Wipe Random",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 874,
+        "p50_ns": 781,
+        "p95_ns": 1454,
+        "p99_ns": 2040
+      },
+      "host_renderer_only_fps": 1144164.8
+    },
+    {
+      "id": 5,
+      "name": "Random Colors",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 835,
+        "p50_ns": 662,
+        "p95_ns": 1410,
+        "p99_ns": 1940
+      },
+      "host_renderer_only_fps": 1197604.8
+    },
+    {
+      "id": 6,
+      "name": "Sweep",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1620,
+        "p50_ns": 691,
+        "p95_ns": 1359,
+        "p99_ns": 1863
+      },
+      "host_renderer_only_fps": 617284.0
+    },
+    {
+      "id": 7,
+      "name": "Dynamic",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1182,
+        "p50_ns": 988,
+        "p95_ns": 1719,
+        "p99_ns": 2233
+      },
+      "host_renderer_only_fps": 846023.7
+    },
+    {
+      "id": 8,
+      "name": "Colorloop",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 771,
+        "p50_ns": 629,
+        "p95_ns": 1269,
+        "p99_ns": 1910
+      },
+      "host_renderer_only_fps": 1297016.9
+    },
+    {
+      "id": 9,
+      "name": "Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1213,
+        "p50_ns": 1147,
+        "p95_ns": 1663,
+        "p99_ns": 2290
+      },
+      "host_renderer_only_fps": 824402.3
+    },
+    {
+      "id": 10,
+      "name": "Scan",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 706,
+        "p50_ns": 589,
+        "p95_ns": 1302,
+        "p99_ns": 1883
+      },
+      "host_renderer_only_fps": 1416430.6
+    },
+    {
+      "id": 11,
+      "name": "Scan Dual",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 750,
+        "p50_ns": 606,
+        "p95_ns": 1277,
+        "p99_ns": 1777
+      },
+      "host_renderer_only_fps": 1333333.3
+    },
+    {
+      "id": 12,
+      "name": "Fade",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 568,
+        "p50_ns": 438,
+        "p95_ns": 842,
+        "p99_ns": 1331
+      },
+      "host_renderer_only_fps": 1760563.4
+    },
+    {
+      "id": 13,
+      "name": "Theater",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 505,
+        "p50_ns": 462,
+        "p95_ns": 737,
+        "p99_ns": 897
+      },
+      "host_renderer_only_fps": 1980198.0
+    },
+    {
+      "id": 14,
+      "name": "Theater Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 550,
+        "p50_ns": 492,
+        "p95_ns": 745,
+        "p99_ns": 885
+      },
+      "host_renderer_only_fps": 1818181.8
+    },
+    {
+      "id": 15,
+      "name": "Running",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 618,
+        "p50_ns": 586,
+        "p95_ns": 841,
+        "p99_ns": 962
+      },
+      "host_renderer_only_fps": 1618123.0
+    },
+    {
+      "id": 16,
+      "name": "Saw",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 646,
+        "p50_ns": 628,
+        "p95_ns": 871,
+        "p99_ns": 1029
+      },
+      "host_renderer_only_fps": 1547987.6
+    },
+    {
+      "id": 17,
+      "name": "Twinkle",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 718,
+        "p50_ns": 602,
+        "p95_ns": 942,
+        "p99_ns": 1185
+      },
+      "host_renderer_only_fps": 1392757.7
+    },
+    {
+      "id": 18,
+      "name": "Dissolve",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 578,
+        "p50_ns": 552,
+        "p95_ns": 821,
+        "p99_ns": 958
+      },
+      "host_renderer_only_fps": 1730103.8
+    },
+    {
+      "id": 19,
+      "name": "Dissolve Rnd",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 636,
+        "p50_ns": 575,
+        "p95_ns": 847,
+        "p99_ns": 966
+      },
+      "host_renderer_only_fps": 1572327.0
+    },
+    {
+      "id": 20,
+      "name": "Sparkle",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 483,
+        "p50_ns": 429,
+        "p95_ns": 678,
+        "p99_ns": 819
+      },
+      "host_renderer_only_fps": 2070393.4
+    },
+    {
+      "id": 21,
+      "name": "Sparkle Dark",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 478,
+        "p50_ns": 424,
+        "p95_ns": 697,
+        "p99_ns": 861
+      },
+      "host_renderer_only_fps": 2092050.2
+    },
+    {
+      "id": 22,
+      "name": "Sparkle+",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 489,
+        "p50_ns": 439,
+        "p95_ns": 691,
+        "p99_ns": 823
+      },
+      "host_renderer_only_fps": 2044989.8
+    },
+    {
+      "id": 23,
+      "name": "Strobe",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 496,
+        "p50_ns": 422,
+        "p95_ns": 683,
+        "p99_ns": 803
+      },
+      "host_renderer_only_fps": 2016129.0
+    },
+    {
+      "id": 24,
+      "name": "Strobe Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 516,
+        "p50_ns": 460,
+        "p95_ns": 741,
+        "p99_ns": 1620
+      },
+      "host_renderer_only_fps": 1937984.5
+    },
+    {
+      "id": 25,
+      "name": "Strobe Mega",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 481,
+        "p50_ns": 431,
+        "p95_ns": 707,
+        "p99_ns": 881
+      },
+      "host_renderer_only_fps": 2079002.1
+    },
+    {
+      "id": 26,
+      "name": "Blink Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 519,
+        "p50_ns": 444,
+        "p95_ns": 730,
+        "p99_ns": 878
+      },
+      "host_renderer_only_fps": 1926782.3
+    },
+    {
+      "id": 27,
+      "name": "Android",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 527,
+        "p50_ns": 490,
+        "p95_ns": 751,
+        "p99_ns": 929
+      },
+      "host_renderer_only_fps": 1897533.2
+    },
+    {
+      "id": 28,
+      "name": "Chase",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 570,
+        "p50_ns": 433,
+        "p95_ns": 697,
+        "p99_ns": 826
+      },
+      "host_renderer_only_fps": 1754386.0
+    },
+    {
+      "id": 29,
+      "name": "Chase Random",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 538,
+        "p50_ns": 506,
+        "p95_ns": 745,
+        "p99_ns": 886
+      },
+      "host_renderer_only_fps": 1858736.1
+    },
+    {
+      "id": 30,
+      "name": "Chase Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 517,
+        "p50_ns": 473,
+        "p95_ns": 743,
+        "p99_ns": 906
+      },
+      "host_renderer_only_fps": 1934236.0
+    },
+    {
+      "id": 31,
+      "name": "Chase Flash",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 484,
+        "p50_ns": 442,
+        "p95_ns": 677,
+        "p99_ns": 822
+      },
+      "host_renderer_only_fps": 2066115.7
+    },
+    {
+      "id": 32,
+      "name": "Chase Flash Rnd",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 549,
+        "p50_ns": 480,
+        "p95_ns": 733,
+        "p99_ns": 887
+      },
+      "host_renderer_only_fps": 1821493.6
+    },
+    {
+      "id": 33,
+      "name": "Rainbow Runner",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 518,
+        "p50_ns": 486,
+        "p95_ns": 714,
+        "p99_ns": 847
+      },
+      "host_renderer_only_fps": 1930501.9
+    },
+    {
+      "id": 34,
+      "name": "Colorful",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 760,
+        "p50_ns": 728,
+        "p95_ns": 982,
+        "p99_ns": 1076
+      },
+      "host_renderer_only_fps": 1315789.5
+    },
+    {
+      "id": 35,
+      "name": "Traffic Light",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 598,
+        "p50_ns": 465,
+        "p95_ns": 1079,
+        "p99_ns": 1722
+      },
+      "host_renderer_only_fps": 1672240.8
+    },
+    {
+      "id": 36,
+      "name": "Sweep Random",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 594,
+        "p50_ns": 575,
+        "p95_ns": 808,
+        "p99_ns": 939
+      },
+      "host_renderer_only_fps": 1683501.7
+    },
+    {
+      "id": 37,
+      "name": "Chase 2",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 588,
+        "p50_ns": 502,
+        "p95_ns": 795,
+        "p99_ns": 1064
+      },
+      "host_renderer_only_fps": 1700680.3
+    },
+    {
+      "id": 38,
+      "name": "Aurora",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1469,
+        "p50_ns": 1340,
+        "p95_ns": 2396,
+        "p99_ns": 3408
+      },
+      "host_renderer_only_fps": 680735.2
+    },
+    {
+      "id": 39,
+      "name": "Stream",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 824,
+        "p50_ns": 866,
+        "p95_ns": 1132,
+        "p99_ns": 1560
+      },
+      "host_renderer_only_fps": 1213592.2
+    },
+    {
+      "id": 40,
+      "name": "Scanner",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 626,
+        "p50_ns": 580,
+        "p95_ns": 877,
+        "p99_ns": 1166
+      },
+      "host_renderer_only_fps": 1597444.1
+    },
+    {
+      "id": 41,
+      "name": "Lighthouse",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 601,
+        "p50_ns": 585,
+        "p95_ns": 826,
+        "p99_ns": 1000
+      },
+      "host_renderer_only_fps": 1663893.5
+    },
+    {
+      "id": 42,
+      "name": "Fireworks",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 981,
+        "p50_ns": 1031,
+        "p95_ns": 1448,
+        "p99_ns": 1582
+      },
+      "host_renderer_only_fps": 1019368.0
+    },
+    {
+      "id": 43,
+      "name": "Rain",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 643,
+        "p50_ns": 611,
+        "p95_ns": 922,
+        "p99_ns": 1104
+      },
+      "host_renderer_only_fps": 1555210.0
+    },
+    {
+      "id": 44,
+      "name": "Tetrix",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 523,
+        "p50_ns": 475,
+        "p95_ns": 737,
+        "p99_ns": 937
+      },
+      "host_renderer_only_fps": 1912045.9
+    },
+    {
+      "id": 45,
+      "name": "Fire Flicker",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 860,
+        "p50_ns": 595,
+        "p95_ns": 809,
+        "p99_ns": 954
+      },
+      "host_renderer_only_fps": 1162790.7
+    },
+    {
+      "id": 46,
+      "name": "Gradient",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 629,
+        "p50_ns": 581,
+        "p95_ns": 831,
+        "p99_ns": 1010
+      },
+      "host_renderer_only_fps": 1589825.1
+    },
+    {
+      "id": 47,
+      "name": "Loading",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 614,
+        "p50_ns": 566,
+        "p95_ns": 816,
+        "p99_ns": 990
+      },
+      "host_renderer_only_fps": 1628664.5
+    },
+    {
+      "id": 48,
+      "name": "Rolling Balls",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 588,
+        "p50_ns": 488,
+        "p95_ns": 750,
+        "p99_ns": 936
+      },
+      "host_renderer_only_fps": 1700680.3
+    },
+    {
+      "id": 49,
+      "name": "Fairy",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 915,
+        "p50_ns": 833,
+        "p95_ns": 1422,
+        "p99_ns": 2082
+      },
+      "host_renderer_only_fps": 1092896.2
+    },
+    {
+      "id": 50,
+      "name": "Two Dots",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 709,
+        "p50_ns": 621,
+        "p95_ns": 1229,
+        "p99_ns": 1646
+      },
+      "host_renderer_only_fps": 1410437.2
+    },
+    {
+      "id": 51,
+      "name": "Fairytwinkle",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 998,
+        "p50_ns": 970,
+        "p95_ns": 1449,
+        "p99_ns": 2120
+      },
+      "host_renderer_only_fps": 1002004.0
+    },
+    {
+      "id": 52,
+      "name": "Running Dual",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1226,
+        "p50_ns": 954,
+        "p95_ns": 1473,
+        "p99_ns": 1930
+      },
+      "host_renderer_only_fps": 815660.7
+    },
+    {
+      "id": 54,
+      "name": "Chase 3",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 726,
+        "p50_ns": 661,
+        "p95_ns": 1147,
+        "p99_ns": 1464
+      },
+      "host_renderer_only_fps": 1377410.5
+    },
+    {
+      "id": 55,
+      "name": "Tri Wipe",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 868,
+        "p50_ns": 674,
+        "p95_ns": 1230,
+        "p99_ns": 1752
+      },
+      "host_renderer_only_fps": 1152073.7
+    },
+    {
+      "id": 56,
+      "name": "Tri Fade",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 942,
+        "p50_ns": 532,
+        "p95_ns": 1318,
+        "p99_ns": 2079
+      },
+      "host_renderer_only_fps": 1061571.1
+    },
+    {
+      "id": 57,
+      "name": "Lightning",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 694,
+        "p50_ns": 507,
+        "p95_ns": 1149,
+        "p99_ns": 1747
+      },
+      "host_renderer_only_fps": 1440922.2
+    },
+    {
+      "id": 58,
+      "name": "ICU",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 661,
+        "p50_ns": 508,
+        "p95_ns": 1195,
+        "p99_ns": 1766
+      },
+      "host_renderer_only_fps": 1512859.3
+    },
+    {
+      "id": 59,
+      "name": "Multi Comet",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 706,
+        "p50_ns": 678,
+        "p95_ns": 1220,
+        "p99_ns": 1766
+      },
+      "host_renderer_only_fps": 1416430.6
+    },
+    {
+      "id": 60,
+      "name": "Scanner Dual",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 835,
+        "p50_ns": 758,
+        "p95_ns": 1394,
+        "p99_ns": 1988
+      },
+      "host_renderer_only_fps": 1197604.8
+    },
+    {
+      "id": 61,
+      "name": "Stream 2",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 780,
+        "p50_ns": 746,
+        "p95_ns": 1282,
+        "p99_ns": 1750
+      },
+      "host_renderer_only_fps": 1282051.3
+    },
+    {
+      "id": 62,
+      "name": "Oscillate",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 819,
+        "p50_ns": 785,
+        "p95_ns": 1314,
+        "p99_ns": 2046
+      },
+      "host_renderer_only_fps": 1221001.2
+    },
+    {
+      "id": 63,
+      "name": "Pride 2015",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1361,
+        "p50_ns": 1425,
+        "p95_ns": 1910,
+        "p99_ns": 2576
+      },
+      "host_renderer_only_fps": 734753.9
+    },
+    {
+      "id": 64,
+      "name": "Juggle",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 864,
+        "p50_ns": 658,
+        "p95_ns": 1237,
+        "p99_ns": 1824
+      },
+      "host_renderer_only_fps": 1157407.4
+    },
+    {
+      "id": 65,
+      "name": "Palette",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1736,
+        "p50_ns": 1443,
+        "p95_ns": 2112,
+        "p99_ns": 2596
+      },
+      "host_renderer_only_fps": 576036.9
+    },
+    {
+      "id": 66,
+      "name": "Fire 2012",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1443,
+        "p50_ns": 1426,
+        "p95_ns": 1926,
+        "p99_ns": 2247
+      },
+      "host_renderer_only_fps": 693000.7
+    },
+    {
+      "id": 67,
+      "name": "Colorwaves",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1139,
+        "p50_ns": 1147,
+        "p95_ns": 1604,
+        "p99_ns": 2187
+      },
+      "host_renderer_only_fps": 877963.1
+    },
+    {
+      "id": 68,
+      "name": "Bpm",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 974,
+        "p50_ns": 1012,
+        "p95_ns": 1452,
+        "p99_ns": 1913
+      },
+      "host_renderer_only_fps": 1026694.0
+    },
+    {
+      "id": 69,
+      "name": "Fill Noise",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 620,
+        "p50_ns": 547,
+        "p95_ns": 1134,
+        "p99_ns": 1452
+      },
+      "host_renderer_only_fps": 1612903.2
+    },
+    {
+      "id": 70,
+      "name": "Noise 1",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 2341,
+        "p50_ns": 2314,
+        "p95_ns": 2870,
+        "p99_ns": 4098
+      },
+      "host_renderer_only_fps": 427167.9
+    },
+    {
+      "id": 71,
+      "name": "Noise 2",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 2095,
+        "p50_ns": 2310,
+        "p95_ns": 2833,
+        "p99_ns": 3299
+      },
+      "host_renderer_only_fps": 477327.0
+    },
+    {
+      "id": 72,
+      "name": "Noise 3",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 2061,
+        "p50_ns": 2373,
+        "p95_ns": 2844,
+        "p99_ns": 3409
+      },
+      "host_renderer_only_fps": 485201.4
+    },
+    {
+      "id": 73,
+      "name": "Noise 4",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1513,
+        "p50_ns": 1381,
+        "p95_ns": 2019,
+        "p99_ns": 2759
+      },
+      "host_renderer_only_fps": 660938.5
+    },
+    {
+      "id": 74,
+      "name": "Colortwinkles",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1103,
+        "p50_ns": 970,
+        "p95_ns": 1537,
+        "p99_ns": 1958
+      },
+      "host_renderer_only_fps": 906618.3
+    },
+    {
+      "id": 75,
+      "name": "Lake",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 959,
+        "p50_ns": 996,
+        "p95_ns": 1475,
+        "p99_ns": 1887
+      },
+      "host_renderer_only_fps": 1042752.9
+    },
+    {
+      "id": 76,
+      "name": "Meteor",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 855,
+        "p50_ns": 892,
+        "p95_ns": 1269,
+        "p99_ns": 1709
+      },
+      "host_renderer_only_fps": 1169590.6
+    },
+    {
+      "id": 78,
+      "name": "Railway",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 704,
+        "p50_ns": 606,
+        "p95_ns": 1154,
+        "p99_ns": 1553
+      },
+      "host_renderer_only_fps": 1420454.5
+    },
+    {
+      "id": 79,
+      "name": "Ripple",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 683,
+        "p50_ns": 562,
+        "p95_ns": 1089,
+        "p99_ns": 1537
+      },
+      "host_renderer_only_fps": 1464128.8
+    },
+    {
+      "id": 80,
+      "name": "Twinklefox",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1652,
+        "p50_ns": 1581,
+        "p95_ns": 2268,
+        "p99_ns": 2760
+      },
+      "host_renderer_only_fps": 605326.9
+    },
+    {
+      "id": 81,
+      "name": "Twinklecat",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1667,
+        "p50_ns": 1601,
+        "p95_ns": 2256,
+        "p99_ns": 2846
+      },
+      "host_renderer_only_fps": 599880.0
+    },
+    {
+      "id": 82,
+      "name": "Halloween Eyes",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 650,
+        "p50_ns": 524,
+        "p95_ns": 1037,
+        "p99_ns": 1468
+      },
+      "host_renderer_only_fps": 1538461.5
+    },
+    {
+      "id": 83,
+      "name": "Solid Pattern",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 791,
+        "p50_ns": 469,
+        "p95_ns": 967,
+        "p99_ns": 1291
+      },
+      "host_renderer_only_fps": 1264222.5
+    },
+    {
+      "id": 84,
+      "name": "Solid Pattern Tri",
+      "source_adapter": true,
+      "speed_supported": false,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 640,
+        "p50_ns": 586,
+        "p95_ns": 1013,
+        "p99_ns": 1317
+      },
+      "host_renderer_only_fps": 1562500.0
+    },
+    {
+      "id": 85,
+      "name": "Spots",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 656,
+        "p50_ns": 635,
+        "p95_ns": 973,
+        "p99_ns": 1212
+      },
+      "host_renderer_only_fps": 1524390.2
+    },
+    {
+      "id": 86,
+      "name": "Spots Fade",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 688,
+        "p50_ns": 632,
+        "p95_ns": 1073,
+        "p99_ns": 1376
+      },
+      "host_renderer_only_fps": 1453488.4
+    },
+    {
+      "id": 87,
+      "name": "Glitter",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1337,
+        "p50_ns": 1151,
+        "p95_ns": 1717,
+        "p99_ns": 2117
+      },
+      "host_renderer_only_fps": 747943.2
+    },
+    {
+      "id": 88,
+      "name": "Candle",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 601,
+        "p50_ns": 436,
+        "p95_ns": 996,
+        "p99_ns": 1632
+      },
+      "host_renderer_only_fps": 1663893.5
+    },
+    {
+      "id": 89,
+      "name": "Fireworks Starburst",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1182,
+        "p50_ns": 779,
+        "p95_ns": 1402,
+        "p99_ns": 2142
+      },
+      "host_renderer_only_fps": 846023.7
+    },
+    {
+      "id": 90,
+      "name": "Fireworks 1D",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1384,
+        "p50_ns": 1084,
+        "p95_ns": 1519,
+        "p99_ns": 1974
+      },
+      "host_renderer_only_fps": 722543.4
+    },
+    {
+      "id": 91,
+      "name": "Bouncing Balls",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 642,
+        "p50_ns": 519,
+        "p95_ns": 967,
+        "p99_ns": 1508
+      },
+      "host_renderer_only_fps": 1557632.4
+    },
+    {
+      "id": 92,
+      "name": "Sinelon",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 771,
+        "p50_ns": 683,
+        "p95_ns": 1140,
+        "p99_ns": 1754
+      },
+      "host_renderer_only_fps": 1297016.9
+    },
+    {
+      "id": 93,
+      "name": "Sinelon Dual",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 729,
+        "p50_ns": 683,
+        "p95_ns": 1244,
+        "p99_ns": 1915
+      },
+      "host_renderer_only_fps": 1371742.1
+    },
+    {
+      "id": 94,
+      "name": "Sinelon Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 762,
+        "p50_ns": 698,
+        "p95_ns": 1206,
+        "p99_ns": 1692
+      },
+      "host_renderer_only_fps": 1312336.0
+    },
+    {
+      "id": 95,
+      "name": "Popcorn",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 736,
+        "p50_ns": 498,
+        "p95_ns": 1044,
+        "p99_ns": 1696
+      },
+      "host_renderer_only_fps": 1358695.7
+    },
+    {
+      "id": 96,
+      "name": "Drip",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 916,
+        "p50_ns": 508,
+        "p95_ns": 1152,
+        "p99_ns": 1948
+      },
+      "host_renderer_only_fps": 1091703.1
+    },
+    {
+      "id": 97,
+      "name": "Plasma",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1077,
+        "p50_ns": 872,
+        "p95_ns": 1422,
+        "p99_ns": 2239
+      },
+      "host_renderer_only_fps": 928505.1
+    },
+    {
+      "id": 98,
+      "name": "Percent",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 619,
+        "p50_ns": 426,
+        "p95_ns": 937,
+        "p99_ns": 1419
+      },
+      "host_renderer_only_fps": 1615508.9
+    },
+    {
+      "id": 99,
+      "name": "Ripple Rainbow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 704,
+        "p50_ns": 610,
+        "p95_ns": 1111,
+        "p99_ns": 1595
+      },
+      "host_renderer_only_fps": 1420454.5
+    },
+    {
+      "id": 100,
+      "name": "Heartbeat",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 515,
+        "p50_ns": 393,
+        "p95_ns": 815,
+        "p99_ns": 1262
+      },
+      "host_renderer_only_fps": 1941747.6
+    },
+    {
+      "id": 101,
+      "name": "Pacifica",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 4382,
+        "p50_ns": 4130,
+        "p95_ns": 5262,
+        "p99_ns": 6164
+      },
+      "host_renderer_only_fps": 228206.3
+    },
+    {
+      "id": 102,
+      "name": "Candle Multi",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 573,
+        "p50_ns": 374,
+        "p95_ns": 859,
+        "p99_ns": 1061
+      },
+      "host_renderer_only_fps": 1745200.7
+    },
+    {
+      "id": 103,
+      "name": "Solid Glitter",
+      "source_adapter": true,
+      "speed_supported": false,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 326,
+        "p50_ns": 258,
+        "p95_ns": 481,
+        "p99_ns": 640
+      },
+      "host_renderer_only_fps": 3067484.7
+    },
+    {
+      "id": 104,
+      "name": "Sunrise",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 600,
+        "p50_ns": 596,
+        "p95_ns": 807,
+        "p99_ns": 962
+      },
+      "host_renderer_only_fps": 1666666.7
+    },
+    {
+      "id": 105,
+      "name": "Phased",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 570,
+        "p50_ns": 530,
+        "p95_ns": 808,
+        "p99_ns": 1009
+      },
+      "host_renderer_only_fps": 1754386.0
+    },
+    {
+      "id": 106,
+      "name": "Twinkleup",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 501,
+        "p50_ns": 502,
+        "p95_ns": 778,
+        "p99_ns": 895
+      },
+      "host_renderer_only_fps": 1996008.0
+    },
+    {
+      "id": 107,
+      "name": "Noise Pal",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1704,
+        "p50_ns": 1059,
+        "p95_ns": 1395,
+        "p99_ns": 1756
+      },
+      "host_renderer_only_fps": 586854.5
+    },
+    {
+      "id": 108,
+      "name": "Sine",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 447,
+        "p50_ns": 416,
+        "p95_ns": 641,
+        "p99_ns": 731
+      },
+      "host_renderer_only_fps": 2237136.5
+    },
+    {
+      "id": 109,
+      "name": "Phased Noise",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 718,
+        "p50_ns": 705,
+        "p95_ns": 1011,
+        "p99_ns": 1160
+      },
+      "host_renderer_only_fps": 1392757.7
+    },
+    {
+      "id": 110,
+      "name": "Flow",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 722,
+        "p50_ns": 660,
+        "p95_ns": 879,
+        "p99_ns": 1130
+      },
+      "host_renderer_only_fps": 1385041.6
+    },
+    {
+      "id": 111,
+      "name": "Chunchun",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 473,
+        "p50_ns": 462,
+        "p95_ns": 786,
+        "p99_ns": 1017
+      },
+      "host_renderer_only_fps": 2114164.9
+    },
+    {
+      "id": 112,
+      "name": "Dancing Shadows",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1223,
+        "p50_ns": 1191,
+        "p95_ns": 1837,
+        "p99_ns": 2331
+      },
+      "host_renderer_only_fps": 817661.5
+    },
+    {
+      "id": 113,
+      "name": "Washing Machine",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 705,
+        "p50_ns": 731,
+        "p95_ns": 914,
+        "p99_ns": 1117
+      },
+      "host_renderer_only_fps": 1418439.7
+    },
+    {
+      "id": 115,
+      "name": "Blends",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 941,
+        "p50_ns": 798,
+        "p95_ns": 1161,
+        "p99_ns": 1753
+      },
+      "host_renderer_only_fps": 1062699.3
+    },
+    {
+      "id": 116,
+      "name": "TV Simulator",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 350,
+        "p50_ns": 277,
+        "p95_ns": 515,
+        "p99_ns": 677
+      },
+      "host_renderer_only_fps": 2857142.9
+    },
+    {
+      "id": 117,
+      "name": "Dynamic Smooth",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 562,
+        "p50_ns": 563,
+        "p95_ns": 915,
+        "p99_ns": 1058
+      },
+      "host_renderer_only_fps": 1779359.4
+    },
+    {
+      "id": 179,
+      "name": "Flow Stripe",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1804,
+        "p50_ns": 1394,
+        "p95_ns": 2113,
+        "p99_ns": 2508
+      },
+      "host_renderer_only_fps": 554323.7
+    },
+    {
+      "id": 184,
+      "name": "Wavesins",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 730,
+        "p50_ns": 731,
+        "p95_ns": 944,
+        "p99_ns": 1332
+      },
+      "host_renderer_only_fps": 1369863.0
+    },
+    {
+      "id": 185,
+      "name": "Rocktaves",
+      "source_adapter": true,
+      "speed_supported": false,
+      "intensity_supported": false,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 517,
+        "p50_ns": 461,
+        "p95_ns": 813,
+        "p99_ns": 1005
+      },
+      "host_renderer_only_fps": 1934236.0
+    },
+    {
+      "id": 218,
+      "name": "Color Clouds",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1580,
+        "p50_ns": 1503,
+        "p95_ns": 1852,
+        "p99_ns": 2345
+      },
+      "host_renderer_only_fps": 632911.4
+    },
+    {
+      "id": 219,
+      "name": "Slow Transition",
+      "source_adapter": true,
+      "speed_supported": true,
+      "intensity_supported": false,
+      "palette_supported": true,
+      "profiles": 77,
+      "frames": 2004,
+      "speed_0_vs_255_trace_differs": false,
+      "jni_timing": {
+        "frames": 2004,
+        "mean_ns": 1019,
+        "p50_ns": 748,
+        "p95_ns": 1097,
+        "p99_ns": 1372
+      },
+      "host_renderer_only_fps": 981354.3
+    },
+    {
+      "id": 32768,
+      "name": "Embers",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 7,
+      "frames": 756,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 756,
+        "mean_ns": 418,
+        "p50_ns": 421,
+        "p95_ns": 629,
+        "p99_ns": 875
+      },
+      "host_renderer_only_fps": 2392344.5
+    },
+    {
+      "id": 32769,
+      "name": "Materialize Sparks",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 283,
+        "p50_ns": 256,
+        "p95_ns": 515,
+        "p99_ns": 687
+      },
+      "host_renderer_only_fps": 3533568.9
+    },
+    {
+      "id": 32770,
+      "name": "Random Materialize",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 280,
+        "p50_ns": 255,
+        "p95_ns": 538,
+        "p99_ns": 710
+      },
+      "host_renderer_only_fps": 3571428.6
+    },
+    {
+      "id": 32771,
+      "name": "Smooth Fade",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 239,
+        "p50_ns": 168,
+        "p95_ns": 384,
+        "p99_ns": 541
+      },
+      "host_renderer_only_fps": 4184100.4
+    },
+    {
+      "id": 32772,
+      "name": "Plasma Sweep",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 273,
+        "p50_ns": 280,
+        "p95_ns": 469,
+        "p99_ns": 550
+      },
+      "host_renderer_only_fps": 3663003.7
+    },
+    {
+      "id": 32773,
+      "name": "Smooth Fade Out",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 202,
+        "p50_ns": 163,
+        "p95_ns": 379,
+        "p99_ns": 438
+      },
+      "host_renderer_only_fps": 4950495.0
+    },
+    {
+      "id": 32774,
+      "name": "Dimensional Rift",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 515,
+        "p50_ns": 477,
+        "p95_ns": 693,
+        "p99_ns": 922
+      },
+      "host_renderer_only_fps": 1941747.6
+    },
+    {
+      "id": 32775,
+      "name": "Meteor Storm",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 1378,
+        "p50_ns": 1327,
+        "p95_ns": 1734,
+        "p99_ns": 2084
+      },
+      "host_renderer_only_fps": 725689.4
+    },
+    {
+      "id": 32776,
+      "name": "Helix Drive",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 530,
+        "p50_ns": 437,
+        "p95_ns": 723,
+        "p99_ns": 843
+      },
+      "host_renderer_only_fps": 1886792.5
+    },
+    {
+      "id": 32777,
+      "name": "Crystal Growth",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 493,
+        "p50_ns": 457,
+        "p95_ns": 620,
+        "p99_ns": 741
+      },
+      "host_renderer_only_fps": 2028397.6
+    },
+    {
+      "id": 32778,
+      "name": "Fusion Core",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 482,
+        "p50_ns": 464,
+        "p95_ns": 633,
+        "p99_ns": 779
+      },
+      "host_renderer_only_fps": 2074688.8
+    },
+    {
+      "id": 32779,
+      "name": "Portal Gate",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 404,
+        "p50_ns": 366,
+        "p95_ns": 590,
+        "p99_ns": 845
+      },
+      "host_renderer_only_fps": 2475247.5
+    },
+    {
+      "id": 32780,
+      "name": "Time Fracture",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 569,
+        "p50_ns": 526,
+        "p95_ns": 755,
+        "p99_ns": 920
+      },
+      "host_renderer_only_fps": 1757469.2
+    },
+    {
+      "id": 32781,
+      "name": "Aurora Surge",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 684,
+        "p50_ns": 596,
+        "p95_ns": 829,
+        "p99_ns": 1084
+      },
+      "host_renderer_only_fps": 1461988.3
+    },
+    {
+      "id": 32782,
+      "name": "Chromatic Shatter",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 474,
+        "p50_ns": 444,
+        "p95_ns": 663,
+        "p99_ns": 860
+      },
+      "host_renderer_only_fps": 2109704.6
+    },
+    {
+      "id": 32783,
+      "name": "Vortex",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 618,
+        "p50_ns": 577,
+        "p95_ns": 800,
+        "p99_ns": 901
+      },
+      "host_renderer_only_fps": 1618123.0
+    },
+    {
+      "id": 32784,
+      "name": "Quantum Collapse",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 489,
+        "p50_ns": 329,
+        "p95_ns": 594,
+        "p99_ns": 785
+      },
+      "host_renderer_only_fps": 2044989.8
+    },
+    {
+      "id": 32785,
+      "name": "Reality Break",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 542,
+        "p50_ns": 510,
+        "p95_ns": 743,
+        "p99_ns": 942
+      },
+      "host_renderer_only_fps": 1845018.5
+    },
+    {
+      "id": 32786,
+      "name": "Event Horizon",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 503,
+        "p50_ns": 422,
+        "p95_ns": 761,
+        "p99_ns": 996
+      },
+      "host_renderer_only_fps": 1988071.6
+    },
+    {
+      "id": 32787,
+      "name": "Singularity Shutdown",
+      "source_adapter": false,
+      "speed_supported": true,
+      "intensity_supported": true,
+      "palette_supported": false,
+      "profiles": 4,
+      "frames": 720,
+      "speed_0_vs_255_trace_differs": true,
+      "jni_timing": {
+        "frames": 720,
+        "mean_ns": 354,
+        "p50_ns": 287,
+        "p95_ns": 632,
+        "p99_ns": 813
+      },
+      "host_renderer_only_fps": 2824858.8
+    }
+  ]
+}

@@ -25,7 +25,7 @@ for(const required of [
   'name=it', 'project.name(it)',
 ]) assert(zoneBlock.includes(required), 'Live layout regression: '+required);
 assert(compose.includes('autoEventPreviewEffect.intValue = effectId') &&
-       compose.includes('EffectsPreview(t, eventPreviewId)') &&
+       compose.includes('EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=') &&
        !compose.includes('selectedEffect.intValue = effectId') &&
        compose.includes('enterOfflinePreview()'),
        'Auto Events preview stays local and never changes general Show Modes selection.');
@@ -72,7 +72,7 @@ for(const required of [
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        compose.includes('Caption(bleMessage.value, t)'),
        'Connection status and transient diagnostics must remain separate');
-const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
+const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {')[1]
   .split('private fun ShowModesPage(')[0];
 assert(approvedPreview.includes('val columns = 30') &&
        approvedPreview.includes('val capsuleHeight = 24.dp.toPx()') &&
@@ -139,7 +139,7 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
        hardwareBlock.includes('Save to CORE · verify readback'),
  'Persistent hardware mapping requires explicit validated commit and readback.');
-assert(ble.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
+assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        ble.includes('||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
        'Disconnect and GATT operation sequencing regression');

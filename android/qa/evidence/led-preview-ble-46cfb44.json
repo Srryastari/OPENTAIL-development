@@ -1,0 +1,99 @@
+{
+  "baseline": "619298f1a574a502a06d769b9c7e0a02925ee8dd",
+  "core": "1767b144e193ed6978816899ebb5eba237ee6e2d",
+  "candidate_commit": "46cfb4491f5f88fe4d5d021665f0ee817e851178",
+  "tracked_android_dirty": false,
+  "scope": "Host tests; fake ATT=10ms/operation. No phone/radio FPS claims.",
+  "before": [
+    {
+      "pixels": 1,
+      "att_operations": 4,
+      "simulated_ms": 40,
+      "pending_timers": 2,
+      "peak_timers": 2
+    },
+    {
+      "pixels": 56,
+      "att_operations": 4,
+      "simulated_ms": 40,
+      "pending_timers": 2,
+      "peak_timers": 2
+    },
+    {
+      "pixels": 57,
+      "att_operations": 6,
+      "simulated_ms": 60,
+      "pending_timers": 3,
+      "peak_timers": 3
+    },
+    {
+      "pixels": 522,
+      "att_operations": 22,
+      "simulated_ms": 220,
+      "pending_timers": 11,
+      "peak_timers": 11
+    },
+    {
+      "pixels": 6000,
+      "att_operations": 218,
+      "simulated_ms": 2180,
+      "pending_timers": 109,
+      "peak_timers": 109
+    },
+    {
+      "pixels": 65535,
+      "att_operations": 2344,
+      "simulated_ms": 23440,
+      "pending_timers": 399,
+      "peak_timers": 400
+    }
+  ],
+  "after": [
+    {
+      "pixels": 1,
+      "att_operations": 4,
+      "simulated_ms": 40,
+      "pending_timers": 0,
+      "peak_timers": 1
+    },
+    {
+      "pixels": 56,
+      "att_operations": 4,
+      "simulated_ms": 40,
+      "pending_timers": 0,
+      "peak_timers": 1
+    },
+    {
+      "pixels": 57,
+      "att_operations": 6,
+      "simulated_ms": 60,
+      "pending_timers": 0,
+      "peak_timers": 1
+    },
+    {
+      "pixels": 522,
+      "att_operations": 22,
+      "simulated_ms": 220,
+      "pending_timers": 0,
+      "peak_timers": 1
+    },
+    {
+      "pixels": 6000,
+      "att_operations": 218,
+      "simulated_ms": 2180,
+      "pending_timers": 0,
+      "peak_timers": 1
+    },
+    {
+      "pixels": 65535,
+      "att_operations": 2344,
+      "simulated_ms": 23440,
+      "pending_timers": 0,
+      "peak_timers": 1
+    }
+  ],
+  "queue_regressions": "PASS (extracted production methods, fake ATT)",
+  "before_fx_dispatch_simulated_ms": 220,
+  "after_fx_dispatch_simulated_ms": 10,
+  "ui_source_invariants": "PASS: approved editor unchanged; capsule geometry preserved"
+}

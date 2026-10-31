@@ -47,6 +47,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: All 140 local preview effects against immutable CORE oracle
+        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50 > offline-preview-140.json
+      - name: Upload per-effect offline parity and host rendering timings
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-preview-140-exact-head
+          path: offline-preview-140.json
+          if-no-files-found: error
+          retention-days: 14
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
