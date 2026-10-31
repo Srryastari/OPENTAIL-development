@@ -444,7 +444,7 @@ assert(retryCode &&
        bleSource.includes('scheduleReconnect(activeAddress);') &&
        bleSource.includes('autoReconnectBudget=1;autoReconnectLease++;') &&
        bleSource.includes('lastReconnectAttempt!=0L') &&
-       !/removeBond\\s*\\(/.test(bleSource),
+       !/removeBond\s*\(/.test(bleSource),
        'Unexpected disconnect and Bluetooth-toggle recovery must be bounded and preserve OS bonding');
 
 // CORE info is optional: a known secure owner should not wait behind an INFO
