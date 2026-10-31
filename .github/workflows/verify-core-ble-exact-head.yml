@@ -1,0 +1,100 @@
+name: OpenTail CORE BLE exact-head software verification (bench only)
+on:
+  pull_request:
+    branches: [firmware/fix-esp32s3-main-stack-bootloop-20261030]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  firmware-ble-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact PR HEAD and stacked firmware baseline
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor fcaa90ee1a0376de6a5bf38b7424af44072ad7e3 HEAD
+          git merge-base --is-ancestor bc92d886560dab88c6a53316d8e4cddc5d2fb8ef HEAD
+      - name: Fail closed on unrelated source changes or changed release gate
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          baseline="fcaa90ee1a0376de6a5bf38b7424af44072ad7e3"
+          allowed={
+            "core-firmware/main/ble_status.c",
+            "core-firmware/tests/test_ble_gap_recovery_contract.py",
+            "core-firmware/tests/run-host-tests.sh",
+            "docs/CORE-BLE-ANDROID-CONTRACT-2026-10-30.md",
+            ".github/workflows/verify-core-ble-exact-head.yml",
+          }
+          changed=set(subprocess.check_output(
+            ["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          assert changed<=allowed, f"Non-firmware change: {changed-allowed}"
+          gate=Path(".github/workflows/verify-active-sources.yml").read_bytes()
+          previous=subprocess.check_output(["git","show",f"{baseline}:.github/workflows/verify-active-sources.yml"])
+          assert gate==previous, "Physical release gate changed"
+          assert "core-firmware/main/ble_status.c" in changed
+          print("PASS: exact stacked firmware BLE source scope; physical release gate unchanged")
+          PY
+  full-core-host:
+    needs: firmware-ble-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Full CORE effects, triggers, NVS, outputs, STOP, status and BLE host regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  esp-idf-5-5-5:
+    needs: full-core-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert same immutable SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Compile CORE for ESP32-S3 using ESP-IDF v5.5.5 (do not flash)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Validate complete bench flash manifest without waiving physical gate
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path("core-firmware/build")
+          for p in ("opentail_core_alpha.bin","bootloader/bootloader.bin",
+                    "partition_table/partition-table.bin","flasher_args.json"):
+              assert (b/p).is_file() and (b/p).stat().st_size>0,p
+          m=json.loads((b/"flasher_args.json").read_text())["flash_files"]
+          assert len(m)>=3 and all((b/p).is_file() for p in m.values())
+          print("PASS: ESP-IDF bench binary and partition manifest, NO FLASH")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-ble-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+          retention-days: 14
+          if-no-files-found: error
+# An all-green software workflow does not certify radio/RMT/LED timing, brownout,
+# GPIO edge races, physical failover, or authorization against active MITM.
