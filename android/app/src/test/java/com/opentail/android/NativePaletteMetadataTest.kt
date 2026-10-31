@@ -55,4 +55,47 @@ class NativePaletteMetadataTest {
         assertEquals("Default", NativePaletteEngine.lookup(project, 0).name)
         assertTrue(NativePaletteEngine.lookup(project, 255).stops == null)
     }
+    @Test fun pinnedCoreFixedColorPalettesUseActualForegroundAndBackground() {
+        val project = JSONObject()
+        assertNull(NativePaletteEngine.lookup(project, 4).stops)
+        val solid = NativePaletteEngine.lookup(project, 2, 0x00ff00, 0x000000)
+        val split = NativePaletteEngine.lookup(project, 3, 0xff0000, 0x0000ff)
+        val gradient = NativePaletteEngine.lookup(project, 4, 0xff0000, 0x0000ff)
+        assertEquals(2, solid.stops!!.size)
+        assertEquals(4, split.stops!!.size)
+        assertEquals(127f / 255f, split.stops!![1].first, 0.000001f)
+        assertEquals(128f / 255f, split.stops!![2].first, 0.000001f)
+        assertEquals(2, gradient.stops!!.size)
+        assertEquals(1f, gradient.stops!![0].second.red, 0.00001f)
+        assertEquals(1f, gradient.stops!![1].second.blue, 0.00001f)
+        assertNull(NativePaletteEngine.lookup(project, 72, 0xff0000, 0x000000).stops)
+    }
+
+    @Test fun onlyVerifiedCustomReadbackCanRenderDevicePalette() {
+        val project = JSONObject()
+        val confirmed = NativePaletteEngine.lookup(project, 200, verifiedCustomStops =
+            "0:#FF0000,128:#00FF00,255:#0000FF")
+        assertEquals(3, confirmed.stops!!.size)
+        assertEquals(128f/255f, confirmed.stops!![1].first, 0.000001f)
+        assertNull(NativePaletteEngine.lookup(project, 200,
+            verifiedCustomStops = "0:#FF0000,128:#00FF00").stops)
+        assertNull(NativePaletteEngine.lookup(project, 200,
+            verifiedCustomStops = "0:#FF0000,0:#00FF00,255:#0000FF").stops)
+        assertNull(NativePaletteEngine.lookup(project, 199).stops)
+    }
+
+    @Test fun opaqueArgbAsSignedIntIsARealColorNotMissingMetadata() {
+        val project=JSONObject()
+        val white=NativePaletteEngine.lookup(project,2,0xffffffff.toInt(),0xff000000.toInt())
+        assertEquals(2,white.stops!!.size)
+        assertEquals(1f,white.stops!![0].second.red,0.000001f)
+        val redBlue=NativePaletteEngine.lookup(project,4,
+            0xffee0000.toInt(),0xff0000ee.toInt())
+        assertEquals(2,redBlue.stops!!.size)
+        assertEquals(0xee/255f,redBlue.stops!![0].second.red,0.000001f)
+        assertEquals(0xee/255f,redBlue.stops!![1].second.blue,0.000001f)
+        assertNull(NativePaletteEngine.lookup(project,2).stops)
+        assertNull(NativePaletteEngine.lookup(project,4,0xffffffff.toInt()).stops)
+    }
+
 }

@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothStatusCodes;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import java.util.Arrays;
 
 /** Optional CORE snapshot v1 client; never guesses animation pixels or writes NVS.
  * Operates only when already authorized and when both v1 GATT chars are present.
@@ -23,6 +22,20 @@ final class CoreFrameCapture {
     private int output=0,count=0,offset=0,crc=0,polls=0,generation=0;
     private long sequence=0;
     private byte[] pixels;
+    private Runnable watchdog;
+    private Runnable poll;
+    private void clearTimers() {
+        if(watchdog!=null)handler.removeCallbacks(watchdog);
+        if(poll!=null)handler.removeCallbacks(poll);
+        watchdog=null;poll=null;
+    }
+    private void watchOperation() {
+        if(watchdog!=null)handler.removeCallbacks(watchdog);
+        final int lease=++generation;
+        watchdog=()->{if(busy && generation==lease)
+            fail("CORE snapshot BLE operation timed out");};
+        handler.postDelayed(watchdog,8000);
+    }
     CoreFrameCapture(Listener listener) {this.listener=listener;}
     void configure(BluetoothGatt connection,BluetoothGattCharacteristic cmd,
                    BluetoothGattCharacteristic rsp) {
@@ -31,6 +44,7 @@ final class CoreFrameCapture {
     boolean supported() {return gatt!=null && command!=null && reply!=null;}
     boolean busy() {return busy;}
     void cancel() {
+        clearTimers();
         busy=false;operationPending=false;abortRequested=false;generation++;pixels=null;
         gatt=null;command=null;reply=null;
     }
@@ -52,6 +66,7 @@ final class CoreFrameCapture {
     }
     private void fail(String message) {
         if(!busy)return;
+        clearTimers();
         busy=false;operationPending=false;abortRequested=false;generation++;pixels=null;
         listener.done(output,sequence,null,message);
     }
@@ -59,9 +74,7 @@ final class CoreFrameCapture {
     private void send(byte[] data) {
         if(!busy || !supported()){fail("CORE snapshot disconnected");return;}
         operationPending=true;
-        int lease=++generation;
-        handler.postDelayed(()->{if(busy && generation==lease)
-            fail("CORE snapshot BLE operation timed out");},8000);
+        watchOperation();
         try {
             boolean ok;
             if(Build.VERSION.SDK_INT>=33)
@@ -81,7 +94,7 @@ final class CoreFrameCapture {
         operationPending=false;
         if(abortRequested){fail("CORE snapshot canceled for STOP");return;}
         if(status!=BluetoothGatt.GATT_SUCCESS){fail("CORE frame command rejected: "+status);return;}
-        try{operationPending=true;if(!gatt.readCharacteristic(reply))fail("CORE frame response could not start");}
+        try{operationPending=true;watchOperation();if(!gatt.readCharacteristic(reply))fail("CORE frame response could not start");}
         catch(SecurityException e){fail("Bluetooth permission missing");}
     }
     private static int u16(byte[] a,int p) {return (a[p]&255)|((a[p+1]&255)<<8);}
@@ -92,6 +105,7 @@ final class CoreFrameCapture {
     void read(BluetoothGatt connection,byte[] a,int status) {
         if(!busy || connection!=gatt)return;
         operationPending=false;
+        clearTimers();
         if(abortRequested){fail("CORE snapshot canceled for STOP");return;}
         if(status!=BluetoothGatt.GATT_SUCCESS || a==null || a.length<11 || a[0]!=1) {
             fail("CORE returned an incomplete snapshot response");return;
@@ -100,11 +114,12 @@ final class CoreFrameCapture {
             if((a[3]&255)!=output){fail("CORE snapshot channel mismatch");return;}
             if(a[2]==0 && polls++<30){
                 final int lease=generation;
-                handler.postDelayed(()->{
+                poll=()->{
                     if(!busy || generation!=lease || connection!=gatt)return;
-                    try {operationPending=true;if(!gatt.readCharacteristic(reply))fail("Snapshot polling failed");}
+                    try {operationPending=true;watchOperation();if(!gatt.readCharacteristic(reply))fail("Snapshot polling failed");}
                     catch(SecurityException ex){fail("Bluetooth permission missing");}
-                },50);
+                };
+                handler.postDelayed(poll,50);
                 return;
             }
             if(a[2]!=1){fail("CORE did not complete the requested frame");return;}
@@ -125,7 +140,9 @@ final class CoreFrameCapture {
         System.arraycopy(a,11,pixels,offset*3,n*3);offset+=n;
         if(offset<count){next();return;}
         if(BleConfigCodec.crc16(pixels)!=crc){fail("CORE RGB888 checksum mismatch");return;}
-        byte[] complete=Arrays.copyOf(pixels,pixels.length);
+        // Transfer ownership of this private, validated buffer. The next
+        // request allocates a fresh one; no second RGB888 copy is necessary.
+        byte[] complete=pixels;
         busy=false;operationPending=false;abortRequested=false;pixels=null;generation++;
         listener.done(output,sequence,complete,null);
     }

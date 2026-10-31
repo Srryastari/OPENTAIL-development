@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Android v0.2.0-alpha1 release audit. Compilation is done separately."""
+"""Native Android v0.2.0-alpha4 release audit. Compilation is done separately."""
 from pathlib import Path
 import hashlib
 import re
@@ -30,8 +30,8 @@ effect = (source / "NativeEffectCatalog.java").read_text()
 ble = (source / "BleDiscovery.java").read_text()
 owner = (source / "BleOwnerVault.java").read_text()
 check("Android manifest and styles parse", manifest.tag == "manifest" and style.getroot().tag == "resources")
-check("Android v0.2.0-alpha1 native release numbers", 
-      "versionName '0.2.0-alpha1'" in gradle and "versionCode 31" in gradle and
+check("Android v0.2.0-alpha4 native release numbers", 
+      "versionName '0.2.0-alpha4'" in gradle and "versionCode 34" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
 check("Sole Kotlin Compose launcher; no Java UI entry or network transport permission",
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
@@ -102,8 +102,8 @@ check("Compose Material UI follows locked OLED/white colors",
       all(t in compose for t in (
           "MaterialTheme(colorScheme = scheme)", "lightColorScheme(", "darkColorScheme(",
           "Color.White", "ConnectPill", "RoundedCornerShape(99.dp)",
-          'previewCurrentEffect(item.id)',
-          "Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())")))
+          'ApprovedWledEffectsEditor(',
+          "if(editingId==id)", "ZoneDotPreview(t,n,reverse)", "HardwareOutputEditor(t)")))
 check("Compose authoring preserves zone offsets and separate BLE confirmation",
       all(k in compose for k in
           ("previewZoneOffsets(id, n)", "project.editZone(",
@@ -112,7 +112,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
            "ble.showFx(", "BleConfigCodec.encode(JSONObject(draftText))",
            "ble.saveOutput(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
-           "project.previewZoneOffsets(", "AlertDialog(onDismissRequest"))
+           "project.previewZoneOffsets(", "AlertDialog(containerColor=t.surface,"))
       and 'android:name=".MainActivity"' not in manifest_xml)
 check("Compose has full two-output draft editing without unsaved hardware mutation",
       all(word in compose for word in (
@@ -123,7 +123,8 @@ check("Compose has full two-output draft editing without unsaved hardware mutati
       and 'ble.saveOutput(index, draftText)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
-          "Repeat", "Edit time", "project.sequenceOptions()", "project.styleTriggers("))
+          "Repeat", "Edit time", "project.sequenceOptions()", "project.editTriggerStyle(",
+          'scopeKey = "triggers:"', 'scopeKey="auto-event:"+key'))
       and 'new Effect(32787, "Singularity Shutdown")' in effect)
 check("Universal live-edit contract and bounded transient CORE FX preview",
       subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],

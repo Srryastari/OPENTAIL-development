@@ -1,0 +1,389 @@
+{
+  "schema": 1,
+  "authority": "Codex centralized software integration and QA",
+  "release_approval": false,
+  "hardware_failover_certified": false,
+  "sources": {
+    "android": {
+      "pr": 87,
+      "sha": "449462c72f47baac2c66e56296d1166202b6174a",
+      "tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
+    },
+    "firmware": {
+      "pr": 84,
+      "sha": "b13894c0550366a0e74ef6fd93c83cfa6dd19aa4",
+      "tree": "b5143647c5b9f0ea6dac53a0ce58aacaf6c381ce"
+    },
+    "effects": {
+      "pr": 80,
+      "sha": "7c0fcc450a7619a57603aabf833dea855a18bcd8"
+    },
+    "triggers": {
+      "pr": 83,
+      "sha": "0477355fdbd562cfe357569bf8f15d0e08374e8f",
+      "tested_core": "d3ca7d036392d7709848b143a41f6bed1a26cb7b"
+    },
+    "evidence": {
+      "pr": 88,
+      "sha": "2bd1abf08e8fe2007e85f3c10a3b299513b74d00"
+    }
+  },
+  "compatibility": {
+    "catalog_ids": 140,
+    "renderer_files": 13,
+    "palette": "Locked: byte-identical Android #87 and authoritative CORE #84",
+    "ui": "Android subtree byte-identical #87; owner rendered six-screen approval pending",
+    "ble_nvs_stop_trigger_ota": "Exact integrated full host suite required; physical acceptance separate"
+  },
+  "baseline": {
+    "android_run": 41246386009,
+    "firmware_run": 41213287531,
+    "trigger_run": 41212582301,
+    "effects_run": 41210137685,
+    "evidence_run": 41247030531
+  },
+  "physical": {
+    "general_cases": 22,
+    "rev_b_electrical_cases": 30,
+    "automatic_takeover": "NOT_IMPLEMENTED_OR_CERTIFIED",
+    "owner_phone": "PENDING"
+  },
+  "active_pr_inventory": [
+    {
+      "pr": 88,
+      "title": "Release P0: one-run exact-SHA software evidence freeze; physical acceptance remains blocked",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/88",
+      "disposition": "selected software input"
+    },
+    {
+      "pr": 87,
+      "title": "Android: fix offline preview admission and disconnected one-shot replay; audit 140 animations",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/87",
+      "disposition": "selected software input"
+    },
+    {
+      "pr": 86,
+      "title": "Android P0: distinguish Startup/Shutdown proprietary transitions and verify offline one-shot playback",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/86",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 85,
+      "title": "Android: distinct Startup vs Shutdown proprietary transition catalogs; preserve all 20 originals",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/85",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 84,
+      "title": "Firmware: fail-closed backup essential-light engine and 22-case physical acceptance gates",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/84",
+      "disposition": "selected software input"
+    },
+    {
+      "pr": 48,
+      "title": "Triggers: block unsafe NVS finalization and recycled config revisions",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/48",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 32,
+      "title": "Hardware: dual-ESP32 Rev B electrical architecture, 623×2 GS400 mapping and acceptance gates",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/32",
+      "disposition": "hardware gate"
+    },
+    {
+      "pr": 83,
+      "title": "Triggers: correct synthetic-merge evidence and verify exact CORE #81 SHA",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/83",
+      "disposition": "selected software input"
+    },
+    {
+      "pr": 81,
+      "title": "Firmware: integrate exact Effects #80 seamless renderer into corrected CORE",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/81",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 82,
+      "title": "Android: isolate WLED+ temperature preferences across four editor contexts",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/82",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 79,
+      "title": "Android: share owner-approved WLED+ editor and enforce immutable palette gradients",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/79",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 80,
+      "title": "Effects P0: fix proprietary Show Mode loop seams and preserve live Speed phase",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/80",
+      "disposition": "selected software input"
+    },
+    {
+      "pr": 78,
+      "title": "Android: restore proprietary Effects routing and source-authentic palette gradients",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/78",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 77,
+      "title": "Android: authoritative 140-effect offline preview and preemptible CORE capture",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/77",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 69,
+      "title": "CORE P0: fix NimBLE double-offset Read Blob (Android GATT 7 for 140 FX)",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/69",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 63,
+      "title": "Effects: preserve live animation phase and local BLE-disconnect playback on corrected CORE",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/63",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 50,
+      "title": "Effects: certify OEM trigger color immunity and render order against corrected Firmware #49",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/50",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 76,
+      "title": "Android draft: native owner-approved WLED+ Effects editor handoff",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/76",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 74,
+      "title": "Android: owner Test 86 Auto Events-exclusive catalog and preview correction",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/74",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 61,
+      "title": "Android UI: approved screenshot implementation and architecture handoff",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/61",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 64,
+      "title": "Android final integration: locked Work UI + BLE #58 + offline Add Zone reliability",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/64",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 73,
+      "title": "Android: consolidate owner phone tests 49, 79, 80 and remaining visual/metadata regressions",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/73",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 72,
+      "title": "Android: restore approved Layout +/- pixel controls and colored LED preview from CORE configuration",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/72",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 71,
+      "title": "Android: remove 500ms LED preview throttle; pace CORE snapshots at available GATT throughput",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/71",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 70,
+      "title": "Android P0: prioritize CORE output read over continuous LED preview GATT captures",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/70",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 68,
+      "title": "Android: owner-approved minor phone corrections without UI redesign",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/68",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 51,
+      "title": "Firmware: final four-owner software candidate — CORE #49 + Triggers #48 + Effects #50 + native Android #21",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/51",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 67,
+      "title": "CORE draft: true zero-pixel / zero-zone first-boot outputs, preserving NVS profiles",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/67",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 66,
+      "title": "Android contract: decode genuinely unconfigured CORE outputs as 0 pixels / 0 zones",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/66",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 65,
+      "title": "Android BLE P0: recover stalled 140-effect catalog read without wedging GATT",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/65",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 56,
+      "title": "Android P0 BLE-only reliability: 140 effects, one-tap CORE connection and stored-key reconnect",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/56",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 58,
+      "title": "Android P0: fix Connect requiring OS unpair — bonded CORE GATT reuse and timeout recovery",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/58",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 62,
+      "title": "Firmware: recover NimBLE host resets and request low-latency CORE BLE links",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/62",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 54,
+      "title": "Firmware P0: fix v0.1.31 ESP32-S3 bootloop from undersized main task stack",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/54",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 49,
+      "title": "Firmware P0: crash-safe NVS finalization and durable configuration revisions",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/49",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 21,
+      "title": "Android v0.2.0-alpha1 — replace WebView with fully native OpenTail designer",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/21",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 55,
+      "title": "Android: remove green UI accents and ship monochrome v0.2.0-alpha2",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/55",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 43,
+      "title": "Firmware integration: CORE #38 + Effects #39 exact source harmonic/gamma parity",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/43",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 46,
+      "title": "Firmware: durable active/staged NVS journal and held-input boot recovery",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/46",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 24,
+      "title": "Triggers: universal mapping, authenticated BLE and deferred-NVS on current CORE",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/24",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 39,
+      "title": "Effects: integration-ready candidate — 120 effects, overlays, palettes, harmonic RNG, gamma (#26–#35)",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/39",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 38,
+      "title": "Integration: CORE #19 + Triggers #24 with BLE v3 custom palette transport",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/38",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 40,
+      "title": "Effects: certify combined harmonic RNG producer and source palette scheduler",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/40",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 36,
+      "title": "Firmware: authenticated BLE custom palettes with CRC-checked NVS and frame-safe rendering",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/36",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 35,
+      "title": "Effects: pinned WLED default harmonic global palette with all five harmony families",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/35",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 26,
+      "title": "Effects integration: combine 120 source ports with spark/flare compositor",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/26",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 20,
+      "title": "Studio v0.19.120 + Android v0.1.30 — approved UI parity and offline authoring",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/20",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 19,
+      "title": "Recover CORE v0.1.25 baseline; restore status patterns and integrate unified 1D effects",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/19",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 31,
+      "title": "Effects: CORE frame-owned ESP32 hardware random palette and on-device performance evidence",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/31",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 34,
+      "title": "Effects: pinned RGB gamma source table and palette parameter certification",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/34",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 28,
+      "title": "Effects: admit transient resolved palettes through unified 1D dispatch",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/28",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 30,
+      "title": "Effects: source-exact global random-palette generation gate",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/30",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 27,
+      "title": "Effects: inject resolved global/custom palettes into the 1D render path",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/27",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 23,
+      "title": "Effects: all 120 source-derived 1D ports + pinned RGB golden tests",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/23",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 22,
+      "title": "CORE engine: reusable 1D flare/spark compositor after FX render, before trigger arbitration",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/22",
+      "disposition": "not selected; open history/alternative"
+    },
+    {
+      "pr": 12,
+      "title": "Standalone CORE BLE effects: native Studio, independent zones and saved scenes",
+      "url": "https://github.com/Srryastari/OPENTAIL-development/pull/12",
+      "disposition": "not selected; open history/alternative"
+    }
+  ]
+}

@@ -8,10 +8,12 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -30,6 +32,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,12 +46,21 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
+import java.math.BigDecimal
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -69,6 +81,7 @@ class ComposeMainActivity : ComponentActivity() {
     // must not reset in-progress TextField values (including typed spaces).
     private val projectLoadRevision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
+    private val firmwareVersion = mutableStateOf<String?>(null)
     private val supportedIds = mutableStateOf(setOf<Int>())
     private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
     private val foundDevices = mutableStateMapOf<String, String>()
@@ -81,20 +94,33 @@ class ComposeMainActivity : ComponentActivity() {
     private val paletteLoadedStops = mutableStateOf("")
     private val paletteLoadedPresent = mutableStateOf(false)
     private val prefs by lazy { getSharedPreferences("opentail_native_ui_v1", Context.MODE_PRIVATE) }
+    private val localMicrophone = MicAudioPeak()
+    private var microphonePermissionRevision by mutableIntStateOf(0)
+    private var microphonePermissionRequested = false
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        microphonePermissionRevision++
+    }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
     private val offlinePreview = mutableStateOf(false)
+    private val offlineReplay = mutableIntStateOf(0)
     private val selectedEffect = mutableIntStateOf(0)
+    // Auto Events visual inspection must never change Show Modes' selected
+    // effect or navigate away to a general Effects page (owner Test 86).
+    private val autoEventPreviewEffect = mutableIntStateOf(-1)
     private val liveChainMask = mutableIntStateOf(3)
     private val liveZoneMask = mutableIntStateOf(255)
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
     private val sequenceMessage = mutableStateOf("")
     private val captureOutput = mutableIntStateOf(0)
+    private val previewPaused = mutableStateOf(false)
+    private val foregroundActivity = mutableStateOf(false)
+    private val foregroundEpoch = mutableIntStateOf(0)
     // A verified snapshot is valid only for the UI state and output at the
     // time its capture began. Old asynchronous GATT replies cannot resurrect
     // pixels after an edit, disconnect, or switch into offline preview.
-    private var frameRevision = 0L
+    private var frameRevision by mutableLongStateOf(0L)
     private var pendingFrameRevision = -1L
     private var pendingFrameOutput = -1
 
@@ -196,7 +222,8 @@ class ComposeMainActivity : ComponentActivity() {
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
-                ble.readFxCapabilities()
+                ble.readFxCapabilitiesAfterAuth()
+            if (!ble.isConnected()) firmwareVersion.value = null
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
@@ -213,6 +240,9 @@ class ComposeMainActivity : ComponentActivity() {
                 liveArmed.value = false
             }
         } }
+        ble.setInfoListener { version ->
+            runOnUiThread { firmwareVersion.value = version }
+        }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
@@ -239,6 +269,9 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                 }
             }
+        }
+        ble.setPreferredListener { address ->
+            runOnUiThread { prefs.edit().putString("preferred_ble_address", address).apply() }
         }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
@@ -289,7 +322,19 @@ class ComposeMainActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         ble.handlePermissions(requestCode, grantResults)
     }
+    override fun onStart() {
+        super.onStart()
+        foregroundEpoch.intValue++
+        foregroundActivity.value = true
+        if (!ble.isConnected()) {
+            prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
+        } else if (!ble.canControl()) {
+            ble.authorizeOrPair()
+        }
+    }
     override fun onStop() {
+        localMicrophone.stop()
+        foregroundActivity.value = false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
@@ -303,6 +348,7 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterReceiver(adapterReceiver)
         if (liveArmed.value) livePreview.stop()
+        localMicrophone.stop()
         ble.shutdown()
         super.onDestroy()
     }
@@ -319,14 +365,35 @@ class ComposeMainActivity : ComponentActivity() {
                             val fg: Color, val muted: Color, val accent: Color, val red: Color)
     private fun tone(light: Boolean): Tone = if (light)
         Tone(Color.White, Color(0xFFF4F4F4), Color(0xFFE6E6E6),
-             Color(0xFF181818), Color(0xFF606060), Color(0xFF226E45), Color(0xFFBD3842))
-    else Tone(Color.Black, Color(0xFF101010), Color(0xFF1B1B1B),
-              Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color(0xFF79D99B), Color(0xFFED6472))
+             Color(0xFF181818), Color(0xFF606060), Color(0xFF242424), Color(0xFFBD3842))
+    else Tone(Color.Black, Color(0xFF111111), Color(0xFF191919),
+              Color(0xFFF5F5F5), Color(0xFFA7A7A7), Color.White, Color(0xFFED6472))
 
     @Composable
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
         var page by rememberSaveable { mutableIntStateOf(0) }
+        var backStack by remember { mutableStateOf(listOf<Int>()) }
+        fun navigate(destination: Int) {
+            if (destination !in pages.indices || destination == page) return
+            backStack = backStack + page
+            page = destination
+        }
+        // All six screens share one navigation stack. Native Compose
+        // dialogs handle their own Back. When a field owns the IME, first
+        // Back dismisses the keyboard rather than silently leaving the editor.
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        BackHandler(enabled = page != 0 || backStack.isNotEmpty()) {
+            if (imeVisible) {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            } else {
+                page = backStack.lastOrNull() ?: 0
+                backStack = backStack.dropLast(1)
+            }
+        }
         val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
@@ -342,70 +409,89 @@ class ComposeMainActivity : ComponentActivity() {
             )
         }
         MaterialTheme(colorScheme = scheme) {
+        CompositionLocalProvider(LocalTextStyle provides TextStyle(
+            fontFamily=FontFamily.SansSerif,fontSize=14.sp,letterSpacing=0.sp)) {
         Column(Modifier.fillMaxSize().background(t.bg)
             .windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 14.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("OpenTail", color = t.fg, fontSize = 23.sp, fontWeight = FontWeight.Bold,
                      modifier = Modifier.weight(1f))
-                Pill(if (light) "OLED" else "White", t, false) {
-                    light = !light
-                    prefs.edit().putBoolean("whiteMode", light).apply()
-                }
+                UiIcon("bluetooth", t.muted)
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=28.dp,vertical=12.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
-                        if (i != 1) offlinePreview.value = false
-                        page = i
+                        // Avoid showing the previous event's preview when
+                        // returning to Auto Events, which defaults to Startup.
+                        if(page==4 && i!=4) autoEventPreviewEffect.intValue=-1
+                        // Preview Offline remains active across tabs (Test 79).
+                        navigate(i)
                     }
                 }
             }
             Column(Modifier.fillMaxSize().verticalScroll(pageScroll)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 28.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (page) {
-                    0 -> HomePage(t, { page = it })
+                    0 -> HomePage(t, { navigate(it) })
                     1 -> ShowModesPage(t)
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
                     4 -> AutoEventsPage(t) { effectId ->
-                        selectedEffect.intValue = effectId
-                        prefs.edit().putInt("effectId", effectId).apply()
+                        autoEventPreviewEffect.intValue = effectId
+                        offlineReplay.intValue++
                         enterOfflinePreview()
-                        page = 1
                     }
-                    5 -> SettingsPage(t) { page = it }
+                    5 -> SettingsPage(t, { navigate(it) }, light) {
+                        light = !light
+                        prefs.edit().putBoolean("whiteMode", light).apply()
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
             }
         }
         }
+        }
     }
     @Composable
-    private fun Pill(label: String, t: Tone, selected: Boolean = false, action: () -> Unit) {
-        Box(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(if (selected) t.accent else t.raised)
-                .clickable(onClick = action).padding(horizontal = 15.dp, vertical = 11.dp),
+    private fun Pill(label: String, t: Tone, selected: Boolean = false, enabled: Boolean = true, strong: Boolean = false, action: () -> Unit) {
+        // Selected surfaces are neutral graphite, not colored brand accents.
+        val fill = if(strong && t.bg==Color.Black) Color(0xFF444444) else if (selected) (if (t.bg == Color.Black) Color(0xFF303030)
+            else Color(0xFFDEDEDE)) else if(t.bg==Color.Black) Color(0xFF2B2B2B) else t.raised
+        Box(Modifier.height(28.dp).clip(RoundedCornerShape(99.dp))
+                .background(fill)
+                .semantics { if(!enabled) disabled() }
+                .clickable(enabled=enabled,onClick = action).padding(horizontal = 14.dp),
             contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                 color = if (selected) t.bg else t.fg, maxLines = 1)
+                 color = if(enabled) t.fg else t.muted.copy(alpha=0.45f), maxLines = 1)
         }
     }
     // Native vector glyphs preserve the approved icon meanings without
     // emoji, downloaded fonts, WebView or an additional icon dependency.
+    // Preserve the approved pill styling, but make the actual VISIBLE
+    // +/- button 56x48dp. A large invisible wrapper around a tiny Pill
+    // does not satisfy the physical phone accessibility requirement.
+    @Composable
+    private fun PixelStepPill(symbol: String, t: Tone, onClick: () -> Unit) {
+        Box(Modifier.size(width=56.dp,height=48.dp)
+            .clip(RoundedCornerShape(99.dp)).background(t.raised)
+            .semantics { contentDescription=if(symbol=="+") "Add one pixel" else "Remove one pixel" }
+            .clickable(onClick=onClick),contentAlignment=Alignment.Center) {
+            Text(symbol,color=t.fg,fontSize=22.sp,fontWeight=FontWeight.Bold)
+        }
+    }
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
-        val fg = if (selected) t.bg else t.fg
-        Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(if (selected) t.accent else t.raised)
-                .clickable(onClick = action).padding(horizontal = 14.dp, vertical = 11.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            if (index in 1..4) NavigationGlyph(index, fg)
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                color = fg, maxLines = 1)
+        val fill = if (selected) (if(t.bg == Color.Black) Color(0xFF303030) else Color(0xFFDEDEDE)) else t.raised
+        Box(Modifier.height(36.dp).clip(RoundedCornerShape(99.dp))
+            .background(fill).clickable(onClick = action)
+            .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 15.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = if (selected) t.fg else t.muted, maxLines = 1)
         }
     }
     @Composable
@@ -464,9 +550,10 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun Panel(t: Tone, content: @Composable ColumnScope.() -> Unit) {
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-            .background(t.surface).padding(16.dp),
+    private fun Panel(t: Tone, minHeight: Dp = 0.dp, fill: Color = t.surface, content: @Composable ColumnScope.() -> Unit) {
+        Column(Modifier.fillMaxWidth().heightIn(min=minHeight).clip(RoundedCornerShape(20.dp))
+            .background(fill)
+            .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
     }
     @Composable
@@ -475,7 +562,13 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun Title(text: String, t: Tone) {
-        Text(text, color = t.fg, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().padding(bottom=2.dp),
+            verticalAlignment=Alignment.CenterVertically) {
+            Text(text, Modifier.weight(1f), color=t.fg, fontSize=23.sp, fontWeight=FontWeight.Bold)
+            val index=pages.indexOf(text)
+            if(index in 1..4) NavigationGlyph(index,t.muted)
+            if(index==5) UiIcon("settings",t.muted)
+        }
     }
     @Composable
     private fun Field(value: String, hint: String, t: Tone,
@@ -485,7 +578,8 @@ class ComposeMainActivity : ComponentActivity() {
             cursorBrush = SolidColor(t.accent),
             textStyle = TextStyle(color = t.fg, fontSize = 14.sp),
             modifier = modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(99.dp))
-                .background(t.raised).padding(horizontal = 15.dp, vertical = 13.dp),
+                .background(t.surface).border(1.dp,t.muted.copy(alpha=0.45f),RoundedCornerShape(99.dp))
+                .padding(horizontal = 18.dp, vertical = 11.dp),
             decorationBox = { inner ->
                 Box {
                     if (value.isEmpty()) Text(hint, fontSize = 14.sp, color = t.muted)
@@ -501,25 +595,38 @@ class ComposeMainActivity : ComponentActivity() {
     private fun CapsuleSlider(value: Int, min: Int, max: Int, t: Tone,
                               change: (Int) -> Unit, finished: (() -> Unit)? = null) {
         val upper = max.coerceAtLeast(min + 1)
+        val committed = value.coerceIn(min, upper).toFloat()
+        // Keep the thumb responsive during every gesture, even while an
+        // immediate SharedPreferences commit and JSON snapshot are in flight.
+        var dragging by remember { mutableStateOf(false) }
+        var dragValue by remember { mutableFloatStateOf(committed) }
+        LaunchedEffect(committed, dragging) {
+            if (!dragging) dragValue = committed
+        }
         Slider(
-            value = value.coerceIn(min, upper).toFloat(),
-            onValueChange = { change(it.toInt().coerceIn(min, upper)) },
-            onValueChangeFinished = finished,
+            value = if (dragging) dragValue else committed,
+            onValueChange = {
+                dragging = true
+                dragValue = it.coerceIn(min.toFloat(), upper.toFloat())
+                change(dragValue.toInt().coerceIn(min, upper))
+            },
+            onValueChangeFinished = { dragging = false; finished?.invoke() },
             valueRange = min.toFloat()..upper.toFloat(),
             colors = SliderDefaults.colors(
                 thumbColor = t.accent, activeTrackColor = t.accent,
                 inactiveTrackColor = t.raised
             ),
             thumb = {
-                Box(Modifier.size(22.dp)
+                Box(Modifier.size(20.dp)
                     .shadow(5.dp, RoundedCornerShape(99.dp),
                             ambientColor = t.accent.copy(alpha = 0.25f),
                             spotColor = t.accent.copy(alpha = 0.25f))
-                    .clip(RoundedCornerShape(99.dp)).background(t.accent))
+                    .clip(RoundedCornerShape(99.dp)).background(t.bg)
+                    .border(1.dp,t.muted.copy(alpha=0.4f),RoundedCornerShape(99.dp)))
             },
             track = { state ->
                 val progress = ((state.value - min) / (upper - min)).coerceIn(0f, 1f)
-                Box(Modifier.fillMaxWidth().height(12.dp)
+                Box(Modifier.fillMaxWidth().height(4.dp)
                     .clip(RoundedCornerShape(99.dp)).background(t.raised)) {
                     Box(Modifier.fillMaxHeight().fillMaxWidth(progress)
                         .clip(RoundedCornerShape(99.dp)).background(t.accent))
@@ -540,24 +647,27 @@ class ComposeMainActivity : ComponentActivity() {
         var hex by remember(color) {
             mutableStateOf(String.format("#%06X", color and 0xffffff))
         }
-        Caption(label + " · " + hex, t)
+        var expanded by remember { mutableStateOf(false) }
+        Text(label,color=t.fg,fontSize=13.sp,fontWeight=FontWeight.SemiBold)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(32.dp).clip(RoundedCornerShape(12.dp))
-                .background(Color(color)))
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(99.dp))
+                .background(Color(color)).semantics { contentDescription="Edit " + label }
+                .clickable { expanded=!expanded })
             Field(hex, "#RRGGBB", t, Modifier.weight(1f)) { entered ->
                 hex = entered.take(7)
                 if (Regex("^#[0-9A-Fa-f]{6}$").matches(hex))
                     change(android.graphics.Color.parseColor(hex))
             }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            listOf("White" to 0xffffff, "Red" to 0xff0000,
-                "Amber" to 0xffbf00, "Blue" to 0x0088ff,
-                "Green" to 0x00ff77, "Black" to 0x000000).forEach { (name, value) ->
-                val chosen = 0xff000000.toInt() or value
-                Pill(name, t, (color and 0xffffff) == value) { change(chosen) }
+        if(expanded) {
+            val hsv=FloatArray(3)
+            android.graphics.Color.colorToHSV(color,hsv)
+            ValueSlider("Brightness",(hsv[2]*255).toInt(),255,t) {
+                change(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0],hsv[1],it/255f)))
+            }
+            ValueSlider("Hue",hsv[0].toInt(),359,t) {
+                change(android.graphics.Color.HSVToColor(floatArrayOf(it.toFloat(),1f,hsv[2])))
             }
         }
     }
@@ -567,7 +677,17 @@ class ComposeMainActivity : ComponentActivity() {
     private fun PalettePicker(label: String, value: Int, t: Tone, onSelect: (Int) -> Unit) {
         var browsing by rememberSaveable(label) { mutableStateOf(false) }
         var search by rememberSaveable(label) { mutableStateOf("") }
-        val chosen = NativePaletteEngine.lookup(project.raw(), value)
+        fun sourcePalette(id: Int): NativePalette {
+            val authoritative = if (paletteLoadedPresent.value &&
+                paletteLoadedSlot.intValue in 0..127 &&
+                id == 200 - paletteLoadedSlot.intValue &&
+                paletteLoadedRevision.longValue >= 0L) paletteLoadedStops.value else null
+            return NativePaletteEngine.lookup(project.raw(), id,
+                if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                if (prefs.contains("background")) prefs.getInt("background",0) else null,
+                authoritative)
+        }
+        val chosen = sourcePalette(value)
         Caption(label + " · " + chosen.name + " (#" + chosen.id + ")", t)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -588,7 +708,7 @@ class ComposeMainActivity : ComponentActivity() {
             LazyColumn(Modifier.fillMaxWidth().height(228.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 items(matching, key = { it }) { id ->
-                    val palette = NativePaletteEngine.lookup(project.raw(), id)
+                    val palette = sourcePalette(id)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(palette.name + " · " + id, color = t.fg, fontSize = 13.sp,
@@ -639,95 +759,299 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
     }
+    @Composable
+    private fun EmptyLightingPreview(t: Tone) {
+        // An unlit preview remains visible before zones or a CORE frame exist.
+        // Neutral dots are UI placeholders, never simulated effect output.
+        Canvas(Modifier.fillMaxWidth().height(96.dp)
+            .clip(RoundedCornerShape(16.dp)).background(t.raised)) {
+            val pitch=size.width/30f
+            val rowPitch=size.height/3f
+            for(i in 0 until 90){
+                val center=Offset((i%30+0.5f)*pitch,(i/30+0.5f)*rowPitch)
+                drawCircle(t.muted.copy(alpha=0.10f),radius=7.5f,center=center)
+                drawCircle(t.muted.copy(alpha=0.38f),radius=3.5f,center=center)
+            }
+        }
+    }
+
+    @Composable
+    private fun ZoneDotPreview(t: Tone, count: Int, reverse: Boolean) {
+        // Neutral, indexed LED-address preview. Never invent effect animation.
+        val dots = count.coerceIn(0, 30)
+        Canvas(Modifier.fillMaxWidth().height(34.dp)
+            .clip(RoundedCornerShape(99.dp)).background(t.raised)) {
+            val pitch = size.width / 31f
+            for(i in 0 until dots){
+                val x = (if (reverse) 30-i else i) * pitch + pitch/2f
+                val center = Offset(x,size.height/2f)
+                drawCircle(t.fg.copy(alpha = 0.10f),radius=8f,center=center)
+                drawCircle(t.fg.copy(alpha = 0.66f),radius=4.2f,center=center)
+            }
+        }
+    }
+
     private fun rolePixelColor(role: String): Color = when(role) {
         "park_brake", "parking", "brake" -> Color(0xFFEE3939)
         "left_turn", "right_turn" -> Color(0xFFFFB300)
         "reverse" -> Color.White
         "aux1", "aux2", "aux3" -> Color(0xFFB083F5)
-        "decorative" -> Color(0xFF71DFA0)
+        "decorative" -> Color(0xFF9D9D9D)
         else -> Color(0xFF333333)
     }
 
     @Composable
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
+        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Home", t)
         Panel(t) {
-            Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
-                .padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text("Bluetooth · " + ble.connectionPhase(), color = t.fg, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Connection", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Box(Modifier.clip(RoundedCornerShape(99.dp)).background(t.raised)
+                    .padding(horizontal=12.dp,vertical=5.dp)) {
+                    Text(connectionPhase,color=t.muted,fontSize=11.sp,lineHeight=14.sp)
+                }
             }
-            Caption(bleMessage.value, t)
-            Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
-            Caption("Connect in Settings first. BOOT is required only for first-time enrollment.", t)
-        }
-        Panel(t) {
-            Text(project.name(), color = t.fg, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Caption(project.zoneCount().toString() + " zones · " +
-                    project.pixelCount().toString() + " design pixels", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Show Modes", t) { changePage(1) }
-                Pill("Edit Layout", t) { changePage(2) }
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                UiIcon("bluetooth",t.muted)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("OpenTail Controller", color = t.fg, fontSize = 14.sp)
+                    Caption(connectionPhase, t)
+                }
+                Pill("Connect", t, strong=true) { foundDevices.clear(); ble.scanHeadless() }
+            }
+            // Discovered choices disappear while a controller is connected.
+            if (!ble.isConnected()) foundDevices.forEach { (address, label) ->
+                Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                UiIcon("shield",t.muted)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Authorization", color = t.fg, fontSize = 14.sp)
+                    Caption(if (ble.canControl()) "Authorized" else "Not authorized", t)
+                }
+                Pill("Authorize", t, enabled=ble.isConnected() && !ble.canControl()) { ble.authorizeOrPair() }
             }
         }
+        EffectsPreview(t, selectedEffect.intValue)
         Panel(t) {
-            Caption("Web Studio and Android author offline. CORE firmware renders animations, " +
-                    "owns trigger arbitration and drives the physical outputs.", t)
-            Caption("All editors update the local preview instantly. Owner-authorized BLE also previews supported effects transiently; physical geometry still requires explicit controller save.", t)
+            Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            listOf("Connection" to connectionPhase,
+                "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
+                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
+                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(label, color = t.muted, fontSize = 13.sp)
+                    Text(value, color = t.fg, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+    private fun capturePreviewFrame() {
+        if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return
+        if(ble.captureFrame(captureOutput.intValue)) {
+            pendingFrameRevision=frameRevision
+            pendingFrameOutput=captureOutput.intValue
+            captureMessage.value="Capturing CORE frame"
         }
     }
     @Composable
-    private fun EffectsPreview(t: Tone, effect: Int) {
-        // Every segment represents exactly one real zero-based LED index.
-        // No fabricated effect motion, fixed 28-dot count, or frame sampling.
-        val revisionKey = revision.intValue
-        val localFrame = remember(revisionKey) {
+    private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false, settingsOverride: IntArray? = null) {
+        // Reference dimensions are logical UI pixels (dp), independent of
+        // display density. Never substitute design colors for CORE telemetry.
+        val connection = bleMessage.value.let { ble.canCaptureFrame() }
+        val localRevision = revision.intValue
+        // Preference changes invalidate local settings independently of CORE
+        // capture invalidation. In particular, scoped Speed never goes stale.
+        var settingsRevision by remember { mutableIntStateOf(0) }
+        DisposableEffect(effect) {
+            val observer = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key?.startsWith("wled.${effect}.") == true ||
+                    key in setOf("foreground","background","speed","intensity","brightness","paletteId"))
+                    settingsRevision++
+            }
+            prefs.registerOnSharedPreferenceChangeListener(observer)
+            onDispose { prefs.unregisterOnSharedPreferenceChangeListener(observer) }
+        }
+        val storedSettings = remember(effect, frameRevision, settingsRevision) {
+            OfflinePreviewSettings.read(effect) { key, fallback -> prefs.getInt(key,fallback) }
+        }
+        val settings = settingsOverride ?: storedSettings
+        val renderer = remember(effect,offlineReplay.intValue) { OfflineCoreRenderer(effect,30) }
+        DisposableEffect(renderer) { onDispose { renderer.close() } }
+        val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
+            renderer.available()
+        // Read custom gradient stops exactly; no invented palette colors.
+        val customStops = remember(settings[5],localRevision,paletteLoadedStops.value,
+            paletteLoadedPresent.value,paletteLoadedSlot.intValue) {
+            val id=settings[5]
+            if(id !in 73..255) null else {
+                val verified=if(paletteLoadedPresent.value && id==200-paletteLoadedSlot.intValue)
+                    paletteLoadedStops.value else null
+                if(verified!=null) runCatching { NativePaletteV3.stops(verified) }.getOrNull()
+                else runCatching {
+                    val raw=JSONObject(project.exportJson()).optJSONObject("palettePreviews")?.optJSONArray(id.toString())
+                    if(raw==null || raw.length() !in 2..18) null else ByteArray(raw.length()*4) { index ->
+                        val value=(raw.getJSONArray(index/4).get(index%4) as? Number)?.toDouble()
+                            ?: error("Non-numeric palette stop")
+                        require(value.isFinite() && value in 0.0..255.0 && value % 1.0 == 0.0)
+                        value.toInt().toByte()
+                    }
+                }.getOrNull()
+            }
+        }
+        val localColors = remember { IntArray(30) }
+        val localTimeNanos = remember(effect,offlineReplay.intValue) { mutableLongStateOf(0L) }
+        val localRenderAvailable = remember(effect) { mutableStateOf(true) }
+        val localFrameMs = remember(effect) { mutableIntStateOf(16) }
+        val hasMicPermission = microphonePermissionRevision.let {
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value
+        DisposableEffect(needsMic,hasMicPermission,foregroundEpoch.intValue) {
+            if(needsMic) {
+                if(hasMicPermission) localMicrophone.start()
+                else if(!microphonePermissionRequested) {
+                    microphonePermissionRequested=true
+                    microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            onDispose { if(needsMic) localMicrophone.stop() }
+        }
+        LaunchedEffect(localSketch, effect, offlineReplay.intValue, foregroundActivity.value, previewPaused.value) {
+            if (!localSketch || effect == 0 || !foregroundActivity.value || previewPaused.value)
+                return@LaunchedEffect
+            var previous = -1L
+            while (true) {
+                withFrameNanos { now ->
+                    if (previous >= 0L) {
+                        localTimeNanos.longValue += now - previous
+                        localFrameMs.intValue=((now-previous)/1_000_000L).toInt().coerceIn(1,65535)
+                    }
+                    previous = now
+                }
+            }
+        }
+        // Separate honest CORE telemetry from the saved design / read-only
+        // CORE output profile. A fresh installation has an empty local project;
+        // an idle renderer is black even when all hardware zones are configured.
+        // The approved 30 capsules must not silently become colorless in either
+        // case. Static configured roles are NOT presented as live FX frames.
+        val projectPaint = remember(localRevision) {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
         }
-        val frame = coreFrame.value ?: localFrame
-        val isCore = frame?.origin == ExactLedFrame.Origin.CORE
-        val total = frame?.size() ?: 0
-        var visiblePixels by rememberSaveable { mutableIntStateOf(32) }
-        val window = total.coerceAtMost(visiblePixels)
-        var requestedFirst by rememberSaveable { mutableIntStateOf(0) }
-        val first = requestedFirst.coerceIn(0, (total - window).coerceAtLeast(0))
-        Caption((if (isCore) "Verified CORE-rendered RGB888 frame · output " +
-            (frame!!.output + 1) + " · sequence " + frame.frameNumber
-        else "Exact local pixel map · " + total + " indexed design LEDs"), t)
-        if (frame == null) {
-            Caption("Pixel map exceeds preview capacity; check manual zone offsets.", t)
-        } else if (total == 0) {
-            Caption("Add zones in Layout to inspect individual pixel addresses.", t)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Zoom", color = t.muted, fontSize = 12.sp)
-                listOf(8, 16, 32, 64).forEach { pixels ->
-                    Pill(pixels.toString(), t, visiblePixels == pixels) { visiblePixels = pixels }
-                }
-            }
-            Canvas(Modifier.fillMaxWidth().height(64.dp)
-                .clip(RoundedCornerShape(14.dp)).background(t.raised)) {
-                val pitch = size.width / window.toFloat()
-                for (i in 0 until window) {
-                    val x = i * pitch
-                    drawRect(Color(frame.colorAt(first + i)), topLeft = Offset(x, 9f),
-                        size = androidx.compose.ui.geometry.Size(
-                            (pitch - 1f).coerceAtLeast(0.5f),
-                            (size.height - 18f).coerceAtLeast(1f)))
-                }
-            }
-            Caption("LED " + first + "–" + (first + window - 1) +
-                " · one display segment per real LED index · black = unpainted", t)
-            if (total > window)
-                ValueSlider("First visible pixel", first, total - window, t) {
-                    requestedFirst = it
-                }
+        val actualFrame = coreFrame.value
+        val hasLiveColors = remember(actualFrame) { actualFrame != null &&
+            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 } }
+        val hasProjectColors = remember(projectPaint) { projectPaint != null &&
+            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 } }
+        val frame = when {
+            offlinePreview.value && hasProjectColors -> projectPaint
+            offlinePreview.value -> null
+            hasLiveColors -> actualFrame
+            hasProjectColors -> projectPaint
+            else -> null
         }
-        Caption(if (isCore) "Real CORE post-render logical RGB888 for ONE captured frame. " +
-            "This does not certify continuous animation timing or optical LED output."
-        else "Effect " + NativeEffectCatalog.byId(effect).name +
-            " · live animation unavailable without CORE frame capture. " +
-            "The strip above shows the pixel-address map, NOT a simulated effect.", t)
+        val readback = outputs[captureOutput.intValue]
+        val configuredZones = readback?.optJSONArray("zones")
+        val configuredPixels = readback?.optInt("pixels",0)?.coerceAtLeast(0) ?: 0
+        val useConfiguredColors = frame == null && configuredPixels > 0 &&
+            configuredZones != null && configuredZones.length() > 0
+        LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
+            // Display-paced admission; capture completion remains BLE-bound.
+            // A full CORE RGB888 snapshot can require many serialized BLE ATT
+            // exchanges. captureFrame() silently declines while busy, so the
+            // next request starts as soon as GATT is free without overlapping
+            // config reads, owner auth, pending STOP or other commands.
+            // The LED capsules always use verified CORE frames, never guessed
+            // intermediate pixels. Actual update rate is BLE-throughput bound.
+            while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
+                capturePreviewFrame()
+                withFrameNanos { }
+            }
+        }
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(t.surface).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("LED PREVIEW",color=t.muted,fontSize=11.sp,lineHeight=14.sp)
+            Canvas(Modifier.fillMaxWidth().height(24.dp)) {
+                val columns = 30
+                val gap=3.dp.toPx()
+                val capsuleWidth=(size.width-gap*(columns-1))/columns
+                val pitch=capsuleWidth+gap
+                val capsuleHeight = 24.dp.toPx()
+                val audio = if(effect==185) localMicrophone.latest() else null
+                // Keep an effect's saved palette, but do not send it to
+                // CORE when that effect's metadata declares no palette.
+                // A previous Rainbow/Palette selection otherwise makes
+                // Blink, Bouncing Balls and proprietary originals fail render.
+                // Preview-only: the locked palette engine is unchanged.
+                val selectedRendererPalette = OfflinePreviewPalettePolicy.rendererId(effect,settings[5])
+                val rendererPalette = OfflinePreviewPalettePolicy.availableRendererId(
+                    selectedRendererPalette, customStops != null)
+                val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
+                    localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
+                    settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
+                    audio?.get(1) ?: 0f,audio!=null,localColors)
+                if(localSketch) localRenderAvailable.value=localRendered
+                for (col in 0 until columns) {
+                    val sample = if (frame != null && frame.size() > 0)
+                        col * (frame.size() - 1) / (columns - 1) else -1
+                    // Physical output configuration is a *static authoring*
+                    // preview, never invented LED telemetry or renderer RGB.
+                    val configuredSample = if (useConfiguredColors)
+                        col * (configuredPixels - 1) / (columns - 1) else -1
+                    var configuredColor = t.raised
+                    if (configuredSample >= 0 && configuredZones != null) {
+                        var cursor = 0
+                        for (i in 0 until configuredZones.length()) {
+                            val zone = configuredZones.optJSONObject(i) ?: continue
+                            cursor += zone.optInt("pixels",0).coerceAtLeast(0)
+                            if (configuredSample < cursor) {
+                                configuredColor = rolePixelColor(zone.optString("role","off"))
+                                break
+                            }
+                        }
+                    }
+                    val color = if (localSketch) {
+                        if(localRendered) Color(localColors[col]) else t.raised
+                    } else if (sample >= 0) Color(frame!!.colorAt(sample))
+                        else configuredColor
+                    drawRoundRect(color,
+                        topLeft = Offset(col * pitch, 0f),
+                        size = androidx.compose.ui.geometry.Size(capsuleWidth, capsuleHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(capsuleWidth / 2f))
+                }
+            }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text(when {
+                    effect < 0 && animateOffline -> "No effect selected"
+                    localSketch && localRenderAvailable.value -> "Offline effect preview · local"
+                    localSketch -> "Offline animation unavailable"
+                    animateOffline && (offlinePreview.value || !ble.canControl()) ->
+                        "Offline animation unavailable"
+                    hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
+                    useConfiguredColors -> "Configured zone colors"
+                    offlinePreview.value -> "Offline design preview"
+                    hasProjectColors -> "Project pixel colors"
+                    else -> "Awaiting CORE frame"
+                }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
+                Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
+                    .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
+                Box(Modifier.size(24.dp).semantics { contentDescription=if(previewPaused.value) "Resume LED preview" else "Pause LED preview" }
+                    .clickable { previewPaused.value=!previewPaused.value },contentAlignment=Alignment.Center) {
+                    UiIcon(if(previewPaused.value) "play" else "pause",t.muted)
+                }
+            }
+        }
     }
 
     @Composable
@@ -735,105 +1059,119 @@ class ComposeMainActivity : ComponentActivity() {
         Title("Show Modes", t)
         var view by rememberSaveable { mutableStateOf("Effects") }
         var query by rememberSaveable { mutableStateOf("") }
-        val effect = selectedEffect.intValue
-        var speed by rememberSaveable { mutableIntStateOf(prefs.getInt("speed", 128)) }
-        var intensity by rememberSaveable { mutableIntStateOf(prefs.getInt("intensity", 128)) }
-        var brightness by rememberSaveable { mutableIntStateOf(prefs.getInt("brightness", 160)) }
-        var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
-        var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
-        var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
-        var paletteId by rememberSaveable {
+        // Legacy saved selections may refer to Auto Events-only transitions.
+        // Do not surface those in the general Show Modes editor.
+        val effect = selectedEffect.intValue.takeUnless { NativeEffectCatalog.autoEventOnly(it) } ?: 0
+        var speed by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("speed", 128)) }
+        var intensity by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("intensity", 128)) }
+        var brightness by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("brightness", 160)) }
+        var foreground by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("foreground", -1)) }
+        var background by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
+        var accent by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("accent", -1)) }
+        var paletteId by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
-        Panel(t) {
-            Caption(if (offlinePreview.value)
-                "Offline preview · design changes stay local until you leave Show Modes."
-            else "Pixel-exact design inspection · effects require CORE rendered frames", t)
-            EffectsPreview(t, effect)
-            if (!offlinePreview.value && ble.canCaptureFrame()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("OUT 1", t, captureOutput.intValue == 0) {
-                        captureOutput.intValue = 0; invalidateCoreFrame()
-                    }
-                    Pill("OUT 2", t, captureOutput.intValue == 1) {
-                        captureOutput.intValue = 1; invalidateCoreFrame()
-                    }
-                    Pill("Capture actual CORE frame", t, true) {
-                        invalidateCoreFrame()
-                        if (ble.captureFrame(captureOutput.intValue)) {
-                            pendingFrameRevision = frameRevision
-                            pendingFrameOutput = captureOutput.intValue
-                            captureMessage.value = "Capturing next completed CORE RGB frame..."
-                        } else {
-                            captureMessage.value = "CORE frame unavailable or BLE busy; retry"
-                        }
-                    }
-                }
-                Caption(captureMessage.value, t)
-            } else Caption(if (offlinePreview.value)
-                "CORE capture is disabled in offline preview mode."
-            else "CORE frame capture unavailable until firmware supports " +
-                "the authenticated snapshot capability. Local pixel map remains available.", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Effects", "Sequences", "Presets").forEach {
-                    Pill(it, t, view == it) { view = it }
-                }
+        var chosen by rememberSaveable(projectLoadRevision.intValue) {
+            mutableIntStateOf(effect)
+        }
+        EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            listOf("Effects", "Presets", "Sequences").forEach { tab ->
+                Box(Modifier.weight(1f)) { Pill(tab,t,view==tab) { view=tab } }
             }
         }
-        when (view) {
+        when(view) {
             "Effects" -> {
-                Panel(t) {
-                    Field(query, "Search effects", t) { query = it }
-                    Caption("Selected: " + NativeEffectCatalog.byId(effect).name, t)
-                    PalettePicker("Palette", paletteId, t) { id ->
-                        paletteId = id
-                        prefs.edit().putInt("paletteId", id).apply()
-                        previewCurrentEffect(effect) // one safety gate for every edit gesture
-                    }
-                    ValueSlider("Speed", speed, 255, t) { speed = it; prefs.edit().putInt("speed", it).apply(); previewCurrentEffect(effect) }
-                    ValueSlider("Intensity", intensity, 255, t) { intensity = it; prefs.edit().putInt("intensity", it).apply(); previewCurrentEffect(effect) }
-                    ValueSlider("Brightness", brightness, 255, t) { brightness = it; prefs.edit().putInt("brightness", it).apply(); previewCurrentEffect(effect) }
-                    PaletteEditor("Foreground", foreground, t) {
-                        foreground = it; prefs.edit().putInt("foreground", it).apply(); previewCurrentEffect(effect)
-                    }
-                    PaletteEditor("Background", background, t) {
-                        background = it; prefs.edit().putInt("background", it).apply(); previewCurrentEffect(effect)
-                    }
-                    PaletteEditor("Accent", accent, t) {
-                        accent = it; prefs.edit().putInt("accent", it).apply(); previewCurrentEffect(effect)
-                    }
-                    Caption(if (offlinePreview.value)
-                        "Offline mode: edits update only this local design; no CORE LED commands."
-                    else "Supported color/speed/intensity edits preview over authorized BLE. " +
-                        "CORE accepts default palette 0 and Embers palettes 2–4 over BLE. " +
-                        "Other palette choices stay local; exact animation still requires " +
-                        "a CORE frame snapshot.", t)
+                // Owner-approved standalone native editor. Do not reintroduce
+                // generic search/list controls or replace the six-screen shell.
+                LaunchedEffect(effect) {
+                    // Explicit preset import/selection updates the editor only
+                    // when the authoritative selected effect actually changes.
+                    if (selectedEffect.intValue != chosen && chosen >= 0)
+                        chosen = selectedEffect.intValue
                 }
-                // Only compose visible effect rows; never eagerly render 140
-                // cards inside the parent scroll (expensive on entry devices).
-                val matches = remember(query) {
-                    NativeEffectCatalog.all().filter {
-                        it.name.contains(query, ignoreCase = true)
-                    }
-                }
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    items(matches, key = { it.id }) { item ->
-                        Panel(t) {
-                            Pill(item.name, t, item.id == effect) {
-                                selectedEffect.intValue = item.id
-                                prefs.edit().putInt("effectId", item.id).apply()
-                                previewCurrentEffect(item.id)
+                ApprovedWledEffectsEditor(
+                    selectedId = chosen.takeIf { it >= 0 },
+                    effectOptions = NativeEffectCatalog.generalEffects(),
+                    prefs = prefs,
+                    paletteFor = { id ->
+                        val verified = if(paletteLoadedPresent.value &&
+                            paletteLoadedSlot.intValue in 0..127 &&
+                            id == 200 - paletteLoadedSlot.intValue &&
+                            paletteLoadedRevision.longValue >= 0L)
+                            paletteLoadedStops.value else null
+                        NativePaletteEngine.lookup(project.raw(), id,
+                            if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                            if (prefs.contains("background")) prefs.getInt("background",0) else null,
+                            verified,
+                            if (prefs.contains("wled.${chosen}.color2"))
+                                prefs.getInt("wled.${chosen}.color2",0)
+                            else if (prefs.contains("accent")) prefs.getInt("accent",0) else null)
+                    },
+                    onSelected = { id ->
+                        if(id == null) {
+                            chosen = -1
+                            selectedEffect.intValue = -1
+                            prefs.edit().putInt("effectId",-1).apply()
+                            if(liveArmed.value) {
+                                livePreview.stop()
+                                liveArmed.value = false
                             }
+                        } else {
+                            chosen = id
+                            selectedEffect.intValue = id
+                            val editor = prefs.edit().putInt("effectId",id)
+                            // On effect change restore the independently saved
+                            // values to the existing BLE/preset contract.
+                            listOf("speed","intensity","brightness","foreground",
+                                "background","accent","paletteId").forEach { key ->
+                                val scoped = "wled.${id}." + (if(key=="paletteId")"palette" else key)
+                                if(prefs.contains(scoped))
+                                    editor.putInt(key,prefs.getInt(scoped,0))
+                            }
+                            editor.apply()
+                            if(liveArmed.value) previewCurrentEffect(id)
+                            else invalidateCoreFrame()
                         }
+                    },
+                    onParam = { id,key,value ->
+                        val edit = prefs.edit().putInt("wled.${id}.${key}",value)
+                        if(key in setOf("speed","intensity","brightness"))
+                            edit.putInt(key,value)
+                        edit.apply()
+                        if(liveArmed.value && key in setOf("speed","intensity","brightness"))
+                            previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onColor = { id,slot,rgb ->
+                        val key = when(slot) { 0->"foreground";1->"background";else->"accent" }
+                        prefs.edit().putInt("wled.${id}.color${slot}",rgb)
+                            .putInt("wled.${id}.${key}",rgb)
+                            .putInt(key,rgb).apply()
+                        // Slot 3 is saved correctly but the CORE BLE preview
+                        // Frame contract has only foreground/background slots.
+                        if(liveArmed.value && slot < 2) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onPalette = { id,selected ->
+                        prefs.edit().putInt("wled.${id}.palette",selected)
+                            .putInt("paletteId",selected).apply()
+                        if(liveArmed.value) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
                     }
-                }
+                )
             }
-            "Sequences" -> SequencePage(t, effect)
-            else -> PresetsPage(t)
+            "Presets" -> PresetsPage(t)
+            "Sequences" -> SequencePage(t,effect)
         }
     }
+    private fun effectLabel(id: Int): String = when(id) {
+        -1 -> "No effect selected"
+        9 -> "Rainbow Show"
+        32769 -> "Materialize"
+        else -> NativeEffectCatalog.byId(id).name
+    }
+
     @Composable
     private fun SequencePage(t: Tone, selectedEffect: Int) {
         // NativeProject contains plain JSON, not Compose State: read the
@@ -894,7 +1232,7 @@ class ComposeMainActivity : ComponentActivity() {
                 val effectivePalette = NativePaletteEngine.effectiveStepPalette(
                     storedPalette, opts.optBoolean("sharedPaletteEnabled", false),
                     opts.optInt("sharedPaletteId", 0))
-                Text(item.optString("fx") + " · " + item.optInt("ms", 1500) + " ms", color = t.fg)
+                Text(item.optString("fx") + " · " + formatDurationSeconds(item.optInt("ms", 1500)), color = t.fg)
                 Caption("Palette preference · " +
                     NativePaletteEngine.lookup(project.raw(), effectivePalette).name +
                     " (#" + effectivePalette + ") · applies to palette-compatible effects", t)
@@ -912,7 +1250,7 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill("Edit time", t) {
                         editingPaletteStep = -1
                         editingStep = i
-                        editedDuration = item.optInt("ms", 1500).toString()
+                        editedDuration = BigDecimal.valueOf(item.optInt("ms", 1500).toLong(), 3).stripTrailingZeros().toPlainString()
                     }
                     Pill("Palette", t) {
                         editingStep = -1
@@ -939,18 +1277,20 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         if (editingStep in 0 until steps.length()) {
-            AlertDialog(onDismissRequest = { editingStep = -1 },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { editingStep = -1 },
                 title = { Text("Edit sequence duration") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Caption("50–600,000 milliseconds. Editable before saving to the design.", t)
-                        Field(editedDuration, "Duration in milliseconds", t) {
-                            editedDuration = it.filter(Char::isDigit).take(6)
+                        Caption("0.05–600 seconds. Editable before saving to the design.", t)
+                        Field(editedDuration, "Duration in seconds", t) {
+                            editedDuration = it.filter { c -> c.isDigit() || c == '.' }.take(10)
                         }
                     }
                 },
                 confirmButton = { Pill("Save", t, true) {
-                    val ms = editedDuration.toIntOrNull()
+                    val ms = runCatching {
+                        BigDecimal(editedDuration).movePointRight(3).intValueExact()
+                    }.getOrNull()
                     if (ms != null && ms in 50..600000) {
                         val updated = sequenceList()
                         updated[editingStep].put("ms", ms)
@@ -960,6 +1300,9 @@ class ComposeMainActivity : ComponentActivity() {
                 dismissButton = { Pill("Cancel", t) { editingStep = -1 } })
         }
     }
+    private fun formatDurationSeconds(ms: Int): String =
+        BigDecimal.valueOf(ms.toLong(), 3).stripTrailingZeros().toPlainString() + " seconds"
+
     private fun sequenceList(): MutableList<JSONObject> =
         (0 until project.sequence().length()).mapNotNull {
             project.sequence().optJSONObject(it)?.let { entry -> JSONObject(entry.toString()) }
@@ -992,61 +1335,106 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun PresetsPage(t: Tone) {
-        val presets = project.presets()
+        // Plain JSONObject/JSONArray is not observable Compose state.
+        // Always consume the committed revision here, not only in the shell.
+        val modelRevision = revision.intValue
+        val presets = remember(modelRevision) { JSONArray(project.presets().toString()) }
         var pendingLoad by remember { mutableIntStateOf(-1) }
         var presetStatus by remember { mutableStateOf("") }
-        Panel(t) {
-            Title("Presets", t)
-            Caption("These save a local design snapshot, not CORE firmware.", t)
-            Pill("+ Save current design", t, true) {
+        var renamePreset by remember { mutableIntStateOf(-1) }
+        var renameText by remember { mutableStateOf("") }
+        var deletePreset by remember { mutableIntStateOf(-1) }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text("Presets",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Pill("+ Add", t) {
                 if (presets.length() < NativeProject.MAX_PRESETS) {
                     // Presets store the design only, not recursive copies of
                     // the entire preset library (which grow on every save).
                     val snapshot = JSONObject(project.exportJson())
                     snapshot.put("savedPresets", JSONArray())
                     val updated = JSONArray(presets.toString())
+                    // Effects editor values live in SharedPreferences, not the
+                    // Studio v4 document. Store them alongside the document.
+                    val effectSettings=JSONObject()
+                    for(key in listOf("speed","intensity","brightness","foreground","background","accent","paletteId")) {
+                        val fallback=when(key) {
+                            "speed","intensity" -> 128
+                            "brightness" -> 160
+                            "foreground","accent" -> -1
+                            "background" -> 0xff000000.toInt()
+                            else -> 0
+                        }
+                        effectSettings.put(key,prefs.getInt(key,fallback))
+                    }
+                    val editorSettings=JSONObject()
+                    val prefix="wled.${selectedEffect.intValue}."
+                    for((key,value) in prefs.all) {
+                        if(key.startsWith(prefix) && value is Int) editorSettings.put(key,value)
+                    }
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
-                        .put("studio", snapshot.toString()))
+                        .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
+                        .put("effectName",effectLabel(selectedEffect.intValue))
+                        .put("effectSettings",effectSettings)
+                        .put("effectEditorSettings",editorSettings))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
                     } else presetStatus = "Could not save preset"
                 }
             }
-            if (presetStatus.isNotEmpty()) Caption(presetStatus, t)
         }
+        if (presetStatus.isNotEmpty()) Caption(presetStatus, t)
         for (i in 0 until presets.length()) {
             val p = presets.optJSONObject(i) ?: continue
             Panel(t) {
-                Text(p.optString("name", "Preset"), color = t.fg)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Pill("Load design", t) { pendingLoad = i }
-                    Pill("Remove", t) {
-                        val next = JSONArray()
-                        for (j in 0 until presets.length()) if (j != i) next.put(presets.opt(j))
-                        if (project.setPresets(next)) {
-                            presetStatus = ""
-                            refresh()
-                        } else presetStatus = "Could not remove preset"
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable { pendingLoad = i }) {
+                        Text(p.optString("name", "Preset"), color = t.fg,
+                            fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        if(p.has("effectName")) Caption(p.optString("effectName"),t)
+                    }
+                    IconAction("Rename preset", "edit", t) {
+                        renamePreset = i; renameText = p.optString("name", "Preset")
+                    }
+                    IconAction("Delete preset", "delete", t) { deletePreset = i }
+                }
+                if(renamePreset == i) {
+                    Field(renameText, "Preset name", t) { renameText = it }
+                    Pill("Done", t) {
+                        if(renameText.trim().isNotEmpty()) {
+                            val next = JSONArray(presets.toString())
+                            next.getJSONObject(i).put("name", renameText.trim())
+                            if(project.setPresets(next)) { renamePreset = -1; refresh() }
+                            else presetStatus = "Could not rename preset"
+                        }
                     }
                 }
             }
         }
+        if(deletePreset in 0 until presets.length()) AlertDialog(containerColor=t.surface, 
+            onDismissRequest = { deletePreset = -1 },
+            title = { Text("Delete preset?") },
+            text = { Text(presets.optJSONObject(deletePreset)?.optString("name").orEmpty()) },
+            confirmButton = { Pill("Delete", t) {
+                val next = JSONArray()
+                for(j in 0 until presets.length()) if(j != deletePreset) next.put(presets.opt(j))
+                if(project.setPresets(next)) { deletePreset = -1; refresh() }
+                else presetStatus = "Could not remove preset"
+            } }, dismissButton = { Pill("Cancel", t) { deletePreset = -1 } })
         if (pendingLoad in 0 until presets.length()) {
-            AlertDialog(onDismissRequest = { pendingLoad = -1 },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { pendingLoad = -1 },
                 title = { Text("Replace current design?") },
                 text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
                 confirmButton = { Pill("Load preset", t, true) {
-                    val saved = presets.optJSONObject(pendingLoad)?.optString("studio", "").orEmpty()
-                    val restored = runCatching {
-                        val design = JSONObject(saved)
-                        // Loading one design never deletes or rolls back the
-                        // user's independently saved preset collection.
-                        design.put("savedPresets", JSONArray(project.presets().toString()))
-                        project.importJson(design.toString())
-                    }.getOrDefault(false)
-                    presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
-                    if (restored) refreshLoadedProject()
+                    val preset=presets.optJSONObject(pendingLoad)
+                    val restored = NativePresetRestore.load(project,prefs,preset)
+                    presetStatus = if (restored) "Preset loaded"
+                        else "Preset restore failed; previous design retained"
+                    if (restored) {
+                        if(preset?.has("fxId")==true)
+                            selectedEffect.intValue=preset.optInt("fxId",selectedEffect.intValue)
+                        refreshLoadedProject()
+                    }
                     pendingLoad = -1
                 } },
                 dismissButton = { Pill("Cancel", t) { pendingLoad = -1 } })
@@ -1054,117 +1442,170 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun LayoutPage(t: Tone) {
+        val modelRevision = revision.intValue
+        val zoneCount = remember(modelRevision) { project.zoneCount() }
         Title("Layout", t)
-        // Only document replacement reloads this field. Keying it to every
-        // keystroke's save revision would erase typed trailing spaces.
+        EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
-        var editingId by remember { mutableStateOf<String?>(null) }
+        var editingId by remember(projectLoadRevision.intValue) {
+            mutableStateOf<String?>(null) // collapse cards on Layout page entry
+        }
         var deleteId by remember { mutableStateOf<String?>(null) }
+        var choosingDelete by remember { mutableStateOf(false) }
+        var layoutMessage by remember { mutableStateOf("") }
         Panel(t) {
-            Field(name, "Project name", t) {
-                name = it
-                if (it.trim().isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Project Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                Caption(project.pixelCount().toString()+" LEDs",t)
+            }
+            Field(name,"Project name",t) {
+                name=it
+                if(it.trim().isNotEmpty()) {
                     if (project.name(it)) refresh()
                     else name = project.name() // restore last committed value
                 }
             }
-            Caption("Project name saves as you type. No separate edit mode.", t)
-            Caption(project.zoneCount().toString() + " zones · " + project.pixelCount() + " design pixels", t)
-            PixelStrip(t, (0 until project.zoneCount()).map { i ->
-                val zone = project.zone(i)
-                (zone?.optInt("length", 0) ?: 0) to
-                    (if (i % 2 == 0) t.accent else t.fg)
-            })
-            Caption("Live layout strip · changes follow zone offsets immediately", t)
-            if (project.zoneCount() == 0) Pill("+ Add zone", t, true) { addZoneAfter(-1) }
-        }
-        for (i in 0 until project.zoneCount()) {
-            val z = project.zone(i) ?: continue
-            val id = z.optString("id")
-            val start = z.optInt("start")
-            val length = z.optInt("length")
-            Panel(t) {
-                Text(z.optString("name"), color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Caption("Pixels " + length + " · start " + start + " · end " + (start + length - 1), t)
-                Caption("Next zone starts at " + (start + length), t)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Edit", t) { editingId = id }
-                    Pill("+ Add next", t) { addZoneAfter(i) }
-                    Pill("Remove", t) { deleteId = id }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Move ↑", t) { if (project.moveZone(i, i - 1)) refresh() }
-                    Pill("Move ↓", t) { if (project.moveZone(i, i + 1)) refresh() }
-                }
-            }
-        }
-        editingId?.let { id ->
-            val index = project.indexOfZone(id)
-            val zone = if (index >= 0) project.zone(index) else null
-            if (zone != null) {
-                var label by remember(id) { mutableStateOf(zone.optString("name")) }
-                var count by remember(id) { mutableStateOf(zone.optInt("length").toString()) }
-                var reverse by remember(id) { mutableStateOf(zone.optBoolean("reverse")) }
-                var selectedPixel by remember(id) { mutableIntStateOf(0) }
-                fun applyLiveZone(): Boolean {
-                    val n = count.toIntOrNull() ?: return false
-                    if (n !in 1..10000 || label.trim().isEmpty() ||
-                        !project.editZone(id, label, n, reverse)) return false
-                    refresh()
-                    return true
-                }
-                AlertDialog(onDismissRequest = { editingId = null },
-                    title = { Text("Edit zone") },
-                    text = {
-                        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Caption("Live editing is always on. Changes appear immediately; " +
-                                "valid edits are auto-saved to the design. No controller NVS writes.", t)
-                            Field(label, "Zone name", t) {
-                                label = it
-                                applyLiveZone()
+            if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
+            for(i in 0 until zoneCount) {
+                val z=project.zone(i) ?: continue
+                val id=z.optString("id")
+                val linkedOutput=z.optInt("physicalOutput",-1)
+                val linkedSection=z.optInt("physicalSection",-1)
+                val length=z.optInt("length")
+                val start=if(linkedOutput<0) z.optInt("start") else
+                    (0 until i).mapNotNull { project.zone(it) }
+                        .filter { it.optInt("physicalOutput",-1)==linkedOutput }.sumOf { it.optInt("length") }
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(t.raised).padding(12.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth().clickable { editingId=if(editingId==id) null else id },
+                        verticalAlignment=Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(z.optString("name"),color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
+                            Caption((if(linkedOutput<0) "Unassigned" else "Output "+(linkedOutput+1))+
+                                " · Start $start · $length LEDs",t)
+                        }
+                        UiIcon(if(editingId==id) "up" else "down",t.muted)
+                    }
+                    if(editingId==id) {
+                        var label by remember(id) { mutableStateOf(z.optString("name")) }
+                        var count by remember(id) { mutableStateOf(length.toString()) }
+                        var reverse by remember(id) { mutableStateOf(z.optBoolean("reverse")) }
+                        var outputOpen by remember(id) { mutableStateOf(false) }
+                        var advanced by remember(id) { mutableStateOf(false) }
+                        var selectedPixel by remember(id) { mutableIntStateOf(0) }
+                        fun applyLiveZone(): Boolean {
+                            val n=count.toIntOrNull() ?: return false
+                            if(n !in 1..10000 || label.trim().isEmpty()) return false
+                            if(!project.editZone(id,label,n,reverse)) {
+                                layoutMessage="Could not save zone";return false
                             }
-                            Field(count, "Pixel count", t) {
-                                count = it.filter(Char::isDigit).take(5)
-                                applyLiveZone()
-                            }
-                            val n = count.toIntOrNull() ?: 0
-                            CapsuleSlider(n, 1, 10000, t,
-                                change = { count = it.toString() },
-                                finished = { applyLiveZone() })
-                            Caption(project.previewZoneOffsets(id, n), t)
-                            val pixelLimit = (n.coerceAtLeast(1) - 1)
-                            val activePixel = selectedPixel.coerceIn(0, pixelLimit)
-                            Caption("Pixel editor · zero-based index (saved locally immediately)", t)
-                            ValueSlider("Pixel", activePixel, pixelLimit.coerceAtLeast(1), t) {
-                                selectedPixel = it.coerceIn(0, pixelLimit)
-                            }
-                            val painted = project.pixelColor(id, activePixel)
-                            val liveColor = android.graphics.Color.parseColor(painted)
-                            PaletteEditor("Pixel " + activePixel, liveColor, t) { color ->
-                                val hex = String.format("#%06X", color and 0xFFFFFF)
-                                if (project.setPixelColor(id, activePixel, hex)) refresh()
-                            }
-                            Pill("Clear this pixel", t) {
-                                if (project.clearPixelColor(id, activePixel)) refresh()
-                            }
-                            Caption("Live per-pixel color is included in the v4 design export. " +
-                                "The existing CORE BLE protocol cannot stream individual pixel writes.", t)
-                            Pill(if (reverse) "Reverse pixels ✓" else "Reverse pixels", t, reverse) {
-                                reverse = !reverse
-                                applyLiveZone()
+                            layoutMessage="";refresh();return true
+                        }
+                        Caption("Zone name",t)
+                        Field(label,"Zone name",t) { label=it;applyLiveZone() }
+                        Caption("Output",t)
+                        Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(99.dp))
+                            .border(1.dp,t.muted.copy(alpha=0.45f),RoundedCornerShape(99.dp))
+                            .clickable { outputOpen=!outputOpen }.padding(horizontal=14.dp),contentAlignment=Alignment.CenterStart) {
+                            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                                Text(if(linkedOutput<0) "Unassigned" else "Output "+(linkedOutput+1),Modifier.weight(1f),color=t.fg,fontSize=14.sp)
+                                UiIcon("down",t.muted)
                             }
                         }
-                    },
-                    confirmButton = { Pill("Done", t, true) {
-                        if (applyLiveZone()) editingId = null
-                    } },
-                    dismissButton = { Pill("Close", t) { editingId = null } })
+                        if(outputOpen) Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                            Pill("Unassigned",t,linkedOutput<0) {
+                                if(project.mapZoneToOutputSlot(id,-1,-1)) { refresh();outputOpen=false }
+                            }
+                            (0..1).forEach { output ->
+                                Pill("Output "+(output+1),t,linkedOutput==output) {
+                                    val occupied=(0 until project.zoneCount()).mapNotNull { project.zone(it) }
+                                        .filter { it.optString("id")!=id && it.optInt("physicalOutput",-1)==output }
+                                        .map { it.optInt("physicalSection",-1) }.toSet()
+                                    val slot=if(linkedOutput==output) linkedSection else (0..7).firstOrNull { it !in occupied }
+                                    if(slot!=null && project.mapZoneToOutputSlot(id,output,slot)) {
+                                        refresh();outputOpen=false
+                                    } else layoutMessage="Output has no free zone slot"
+                                }
+                            }
+                        }
+                        val n=count.toIntOrNull() ?: 1
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                            Text("Pixel count",color=t.fg,fontSize=13.sp);Text(n.toString(),color=t.fg,fontSize=13.sp)
+                        }
+                        CapsuleSlider(n, 1, 10000, t,
+                            change={ count=it.toString();applyLiveZone() },
+                            finished={ applyLiveZone() })
+                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                            horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            PixelStepPill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            PixelStepPill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
+                            Spacer(Modifier.weight(1f))
+                            Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
+                                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Canvas(Modifier.size(20.dp)) {
+                                    drawCircle(t.muted.copy(alpha=0.5f),style=Stroke(1.dp.toPx()))
+                                    if(reverse) drawCircle(t.fg,radius=size.minDimension*0.3f)
+                                }
+                                Text("Reverse",color=t.fg,fontSize=14.sp)
+                            }
+                        }
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Pill("+ Add",t) {
+                                val created = addZoneAfter(i)
+                                if (created != null) { editingId=created; layoutMessage="" }
+                                else layoutMessage="Could not add zone"
+                            }
+                            Pill("Remove",t) { deleteId=id }
+                        }
+                        // Prior exact-pixel authoring remains available in the deeper editor.
+                        Pill(if(advanced) "Close pixel editor" else "Pixel editor",t) { advanced=!advanced }
+                        if(advanced) {
+                            Caption(project.previewZoneOffsets(id, n),t)
+                            ZoneDotPreview(t,n,reverse)
+                            val pixelLimit=n.coerceAtLeast(1)-1
+                            val activePixel=selectedPixel.coerceIn(0,pixelLimit)
+                            ValueSlider("Pixel",activePixel,pixelLimit.coerceAtLeast(1),t) { selectedPixel=it.coerceIn(0,pixelLimit) }
+                            PaletteEditor("Pixel "+activePixel,android.graphics.Color.parseColor(project.pixelColor(id,activePixel)),t) { color ->
+                                val hex=String.format("#%06X",color and 0xffffff)
+                                if(project.setPixelColor(id,activePixel,hex)) refresh()
+                            }
+                            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Pill("Move ↑",t) { if(project.moveZone(i,i-1)) refresh() }
+                                Pill("Move ↓",t) { if(project.moveZone(i,i+1)) refresh() }
+                                Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
+                            }
+                        }
+                    }
+                }
+            }
+            if(zoneCount==0) Pill("+ Add",t) {
+                val created=addZoneAfter(-1)
+                if (created!=null) { editingId=created; layoutMessage="" }
+                else layoutMessage="Could not add zone"
             }
         }
+        // Actual hardware output/section assignment belongs beside Layout.
+        // Saving to CORE still requires an explicit authenticated confirmation.
+        HardwareOutputEditor(t)
+        if (choosingDelete) AlertDialog(containerColor=t.surface, 
+            onDismissRequest = { choosingDelete = false },
+            title = { Text("Choose zone to delete") },
+            text = {
+                Column(Modifier.heightIn(max = 340.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (0 until project.zoneCount()).forEach { index ->
+                        val zone = project.zone(index) ?: return@forEach
+                        val id = zone.optString("id")
+                        Pill(zone.optString("name"), t) {
+                            choosingDelete = false
+                            deleteId = id // use existing second-stage confirmation
+                        }
+                    }
+                }
+            },
+            confirmButton = { Pill("Cancel", t) { choosingDelete = false } })
         deleteId?.let { id ->
-            AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
                 text = { Text("Only assignments to this zone will be removed.") },
                 confirmButton = { Pill("Remove", t, true) {
                     if (project.removeZone(id)) {
@@ -1174,140 +1615,195 @@ class ComposeMainActivity : ComponentActivity() {
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
-    private fun addZoneAfter(index: Int) {
-        if (project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1))
-            refresh()
+    private fun addZoneAfter(index: Int): String? {
+        val position = index + 1
+        if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position))
+            return null
+        val id=project.zone(position)?.optString("id")?.takeIf { it.isNotEmpty() }
+        refresh()
+        return id
     }
     @Composable
     private fun TriggersPage(t: Tone) {
-        Title("Triggers", t)
-        Caption("Universal offline trigger assignments. Physical inputs and arbitration are authoritative in CORE.", t)
+        val modelRevision = revision.intValue
+        // Snapshots refresh after each committed edit, including while the
+        // existing multi-select editor stays open.
+        val profiles = remember(modelRevision) { JSONObject(project.profiles().toString()) }
         var selections by remember { mutableStateOf(setOf<String>()) }
-        var testing by remember { mutableStateOf(setOf<String>()) }
         var editing by remember { mutableStateOf(false) }
+        var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
-        var searchFx by remember { mutableStateOf("") }
-        var chosenFx by remember { mutableStateOf("Solid") }
-        var chosenColor by remember { mutableStateOf("#ff0000") }
         var triggerMessage by remember { mutableStateOf("") }
-        val profiles = project.profiles()
+        var triggerToDelete by remember { mutableStateOf<String?>(null) }
         val names = profiles.names()
         val keys = (0 until (names?.length() ?: 0))
             .mapNotNull { names?.optString(it) }
             .filterNot { it == "Startup" || it == "Shutdown" || it == "Show" }
+            .sortedWith(compareBy({ name ->
+                val order = listOf("Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse")
+                val index = order.indexOf(name)
+                if (index >= 0) index else 100
+            }, { it }))
+        Title("Triggers",t)
+        EffectsPreview(t,selectedEffect.intValue)
+        if(triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
         Panel(t) {
-            Caption("Multiple triggers can be selected and edited together. Nothing on this page sends BLE commands.", t)
-            if (triggerMessage.isNotEmpty()) Caption(triggerMessage, t)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(newTrigger, "Custom trigger name", t) { newTrigger = it.take(32) }
-            }
-            Pill("+ Add trigger", t) {
-                if (project.customTrigger(newTrigger)) {
-                    selections = setOf(newTrigger)
-                    newTrigger = ""
-                    refresh()
-                }
-            }
-            Pill("Edit selected · " + selections.size, t, selections.isNotEmpty()) {
-                if (selections.isNotEmpty()) {
-                    val p = project.trigger(selections.first())
-                    chosenFx = p.optString("pattern", "Solid")
-                    chosenColor = p.optString("color", "#ff0000")
-                    searchFx = ""
-                    editing = true
-                }
-            }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text("Triggers",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Pill("+ Add",t) { adding=true }
         }
         keys.forEach { name ->
-            val profile = project.trigger(name)
+            val profile = profiles.optJSONObject(name) ?: project.trigger(name)
             val selected = name in selections
-            val active = name in testing
-            Panel(t) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, modifier = Modifier.weight(1f),
-                        color = t.fg, fontWeight = FontWeight.SemiBold)
-                    Pill(if (selected) "Selected ✓" else "Select", t, selected) {
-                        selections = if (selected) selections - name else selections + name
+            val assigned = profile.optJSONArray("zones")?.length() ?: 0
+            Row(Modifier.fillMaxWidth().heightIn(min=44.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(if(selected) t.raised else t.surface)
+                .clickable { selections=if(selected) selections-name else selections+name },
+                verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.size(16.dp)) {
+                    drawCircle(if(selected) t.fg else t.muted)
+                    if (selected) {
+                        // Check remains inside the original 16dp circle.
+                        val unit = size.minDimension / 16f
+                        drawLine(t.bg, Offset(4f*unit, 8f*unit),
+                            Offset(7f*unit, 11f*unit), strokeWidth = 2f*unit)
+                        drawLine(t.bg, Offset(7f*unit, 11f*unit),
+                            Offset(12.5f*unit, 5.5f*unit), strokeWidth = 2f*unit)
                     }
                 }
-                Caption("Effect: " + profile.optString("pattern", "Solid") +
-                    " · zones: " + (profile.optJSONArray("zones")?.length() ?: 0), t)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill(if (active) "Stop" else "Start", t, active) {
-                        testing = if (active) testing - name else testing + name
-                    }
-                    if (profile.optString("kind") == "trigger-custom")
-                        Pill("Remove", t) {
-                            if (project.deleteTrigger(name)) {
-                                selections = selections - name
-                                testing = testing - name
-                                refresh()
-                            }
-                        }
+                Column(Modifier.weight(1f)) {
+                    Text(name,color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
+                    Caption(profile.optString("pattern", "Solid") +
+                        if(assigned > 0) " · $assigned zones" else "", t)
                 }
-                if (active) {
-                    val previewColor = runCatching {
-                        Color(android.graphics.Color.parseColor(profile.optString("color", "#ff0000")))
-                    }.getOrDefault(t.accent)
-                    Box(Modifier.fillMaxWidth().height(24.dp).clip(RoundedCornerShape(99.dp))
-                        .background(previewColor))
-                    Caption("Local trigger color swatch only. No simulated effect or physical CORE output.", t)
+                IconAction("Edit " + name, "edit", t) {
+                    selections = setOf(name); editing = true
+                }
+                // Only user-created triggers may be deleted.
+                if (profile.optString("kind") == "trigger-custom")
+                    IconAction("Delete " + name, "delete", t) { triggerToDelete = name }
+                // The current protocol has no universal profile-test command.
+                // Preserve a disabled play target rather than target wrong zones.
+                Box(Modifier.size(width=44.dp,height=28.dp)
+                    .clip(RoundedCornerShape(99.dp)).background(t.raised)
+                    .semantics { contentDescription = "Test " + name + " unavailable"; disabled() },
+                    contentAlignment=Alignment.Center) {
+                    UiIcon("play",t.muted)
                 }
             }
         }
-        if (editing) {
-            fun applyTriggerStyle(): Boolean {
-                if (selections.isEmpty() ||
-                    !Regex("^#[0-9A-Fa-f]{6}$").matches(chosenColor) ||
-                    NativeEffectCatalog.all().none { it.name == chosenFx }) return false
-                val saved = project.styleTriggers(selections, chosenFx, chosenColor)
-                triggerMessage = if (saved) "" else "Could not save trigger styles"
-                if (saved) refresh()
-                return saved
-            }
-            AlertDialog(onDismissRequest = { editing = false },
-                title = { Text("Edit " + selections.size + " triggers") },
-                text = {
-                    Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Caption("Effect (applies to every selected trigger)", t)
-                        Field(searchFx, "Search effects", t) { searchFx = it }
-                        Caption("Selected: " + chosenFx, t)
-                        NativeEffectCatalog.all()
-                            .filter { it.name.contains(searchFx, ignoreCase = true) }
-                            .take(12).forEach { fx ->
-                                Pill(fx.name, t, chosenFx == fx.name) {
-                                    chosenFx = fx.name
-                                    applyTriggerStyle()
-                                }
-                            }
-                        Caption("Trigger color (hex #RRGGBB)", t)
-                        Field(chosenColor, "#ff0000", t) {
-                            chosenColor = it.take(7)
-                            applyTriggerStyle()
+        Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty()) {
+            if(selections.isNotEmpty()) editing = true
+        }
+        }
+        if(adding) AlertDialog(containerColor=t.surface, 
+            onDismissRequest={ adding=false },
+            title={ Text("Add trigger") },
+            text={ Field(newTrigger,"Custom trigger name",t){ newTrigger=it.take(32) } },
+            confirmButton={ Pill("Add",t,true) {
+                if(project.customTrigger(newTrigger)){
+                    selections=setOf(newTrigger)
+                    newTrigger=""
+                    adding=false
+                    refresh()
+                }else triggerMessage="Could not add trigger"
+            } },
+            dismissButton={ Pill("Cancel",t){ adding=false } })
+        if (triggerToDelete != null) AlertDialog(containerColor=t.surface, 
+            onDismissRequest = { triggerToDelete = null },
+            title = { Text("Delete custom trigger?") },
+            text = { Text("Remove " + triggerToDelete + " from this project?") },
+            confirmButton = { Pill("Delete", t, true) {
+                val target = triggerToDelete
+                if(target != null && project.deleteTrigger(target)) {
+                    selections = selections - target
+                    editing = false
+                    triggerToDelete = null
+                    refresh()
+                } else triggerMessage = "Could not delete custom trigger"
+            } },
+            dismissButton = { Pill("Cancel", t) { triggerToDelete = null } })
+        if (editing) AlertDialog(containerColor=t.surface, 
+            onDismissRequest = { editing = false },
+            title = { Text("Assign zones to " + selections.size + " triggers") },
+            text = {
+                Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    val first=selections.firstOrNull()?.let { profiles.optJSONObject(it) }
+                    val initialFx=NativeEffectCatalog.byName(first?.optString("pattern","Solid") ?: "Solid")
+                    val initialColor=first?.optString("color","#ffffff") ?: "#ffffff"
+                    fun roleHex(role: Int): String = when(role){
+                        0->first?.optString("color","#ffffff") ?: "#ffffff"
+                        1->first?.optString("secondary","#000000") ?: "#000000"
+                        else->first?.optString("accent","#ffffff") ?: "#ffffff"
+                    }
+                    fun roleArgb(role:Int):Int =
+                        runCatching { android.graphics.Color.parseColor(roleHex(role)) }
+                            .getOrDefault(0xffffffff.toInt())
+                    ApprovedWledEffectsEditor(
+                        selectedId = initialFx.id,
+                        effectOptions = NativeEffectCatalog.generalEffects(),
+                        scopeKey = "triggers:" + selections.sorted().joinToString("|"),
+                        prefs = prefs,
+                        paletteFor = { id ->
+                            NativePaletteEngine.lookup(project.raw(),id,roleArgb(0),
+                                roleArgb(1),null,roleArgb(2))
+                        },
+                        readSetting = { field, fallback ->
+                            if(field=="brightness")
+                                (first?.optInt("brightness",85) ?: 85)*255/100
+                            else first?.optInt(field,fallback) ?: fallback
+                        },
+                        readColor = { role -> roleArgb(role) },
+                        readPalette = { first?.optInt("paletteId",0) ?: 0 },
+                        onSelected = { selected ->
+                            // An unselected physical trigger stays assigned a safe
+                            // local Solid design, never a disabled vehicle signal.
+                            val fx=NativeEffectCatalog.byId(selected ?: 0).name
+                            if(project.editTriggerStyle(selections,fx,null)) refresh()
+                            else triggerMessage="Could not save trigger effect"
+                        },
+                        onParam = { _,field,value ->
+                            val fieldValue=if(field=="brightness")value*100/255 else value
+                            val saved=if(field in setOf("brightness","speed","intensity"))
+                                project.editTriggerParameter(selections,field,fieldValue)
+                            else project.editTriggerEditorField(selections,field,fieldValue)
+                            if(saved) refresh()
+                            else triggerMessage="Could not save trigger parameter"
+                        },
+                        onColor = { _,slot,rgb ->
+                            val hex=String.format("#%06X",rgb and 0xffffff)
+                            val saved=if(slot==0) project.editTriggerStyle(selections,null,hex)
+                                else project.editTriggerEditorField(selections,
+                                    if(slot==1)"secondary" else "accent",hex)
+                            if(saved) refresh()
+                            else triggerMessage="Could not save trigger color"
+                        },
+                        onPalette = { _,id ->
+                            if(project.editTriggerEditorField(selections,"paletteId",id)) refresh()
+                            else triggerMessage="Could not save trigger palette"
                         }
-                        Caption("Changes apply immediately to the local design; DONE only closes this editor.", t)
-                        Caption("Zone assignment (select to apply to all)", t)
-                        for (i in 0 until project.zoneCount()) {
-                            val z = project.zone(i) ?: continue
-                            val zoneId = z.optString("id")
-                            val checked = selections.all { name ->
-                                val assigned = project.trigger(name).optJSONArray("zones")
-                                (0 until (assigned?.length() ?: 0))
-                                    .any { assigned?.optString(it) == zoneId }
-                            }
-                            Pill(z.optString("name") + (if (checked) " ✓" else ""), t, checked) {
-                                if (project.assignMany(selections, zoneId, !checked)) refresh()
-                            }
+                    )
+                    if(project.zoneCount()==0) Caption("Add zones in Layout first.",t)
+                    for(i in 0 until project.zoneCount()) {
+                        val zone=project.zone(i) ?: continue
+                        val zoneId=zone.optString("id")
+                        val checked=selections.all { name ->
+                            val assigned=profiles.optJSONObject(name)?.optJSONArray("zones")
+                            (0 until (assigned?.length() ?: 0))
+                                .any { assigned?.optString(it)==zoneId }
+                        }
+                        Pill(zone.optString("name") + (if(checked) " ✓" else ""),t,checked) {
+                            if(project.assignMany(selections,zoneId,!checked)) refresh()
+                            else triggerMessage="Could not save zone assignments"
                         }
                     }
-                },
-                confirmButton = { Pill("Done", t, true) {
-                    if (applyTriggerStyle()) editing = false
-                } },
-                dismissButton = { Pill("Close", t) { editing = false } })
-        }
+                }
+            },
+            confirmButton = { Pill("Done",t,true) { editing=false } },
+            dismissButton = { Pill("Close",t) { editing=false } })
         CoreTriggerMappingPage(t)
     }
     @Composable
@@ -1348,7 +1844,7 @@ class ComposeMainActivity : ComponentActivity() {
             } else Caption("Read the authenticated CORE map before editing; no writes on selection.", t)
         }
         if (confirm && snapshot != null && snapshot.persisted &&
-            snapshot.revision in 1..65534) AlertDialog(
+            snapshot.revision in 1..65534) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { confirm = false },
             title = { Text("Save physical input mapping?") },
             text = { Text("CORE will reject active triggers or stale revisions. Readback must confirm the saved mapping. Offline trigger styles are separate.") },
@@ -1360,8 +1856,24 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {
+        val modelRevision = revision.intValue
+        val eventProfiles = remember(modelRevision) {
+            listOf("Startup", "Shutdown").associateWith { JSONObject(project.trigger(it).toString()) }
+        }
         Title("Auto Events", t)
-        Caption("Startup and shutdown are optional offline designs. CORE alone controls real ignition transitions.", t)
+        var selectedEvent by remember { mutableStateOf("Startup") }
+        // The event's own saved animation drives this preview; it is not the
+        // last-used Show Modes effect. A Preview tap stays on Auto Events.
+        val eventPreviewId=autoEventPreviewEffect.intValue.takeIf { it >= 0 }
+            ?: NativeEffectCatalog.byName(eventProfiles.getValue(selectedEvent)
+                .optString("eventFx","Solid")).id
+        val eventPreview=eventProfiles.getValue(selectedEvent)
+        EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=intArrayOf(
+            android.graphics.Color.parseColor(eventPreview.optString("color","#ffffff")),
+            android.graphics.Color.parseColor(eventPreview.optString("secondary","#000000")),
+            eventPreview.optInt("speed",128),eventPreview.optInt("intensity",128),
+            eventPreview.optInt("brightness",100)*255/100,eventPreview.optInt("paletteId",0)))
+        var eventEditing by remember { mutableStateOf<String?>(null) }
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }
         var eventMessage by remember { mutableStateOf("") }
@@ -1370,20 +1882,86 @@ class ComposeMainActivity : ComponentActivity() {
             val saved = project.setAutoEvent(event, field, value)
             eventMessage = if (saved) "" else "Could not save " + event + " settings"
             if (saved) refresh()
+            // One-shot events replay their own source frames from t=0
+            // after a locally saved edit, never restart a physical Show.
+            if (saved && (offlinePreview.value || !ble.canControl()) && selectedEvent == event)
+                offlineReplay.intValue++
             return saved
         }
         listOf("Startup", "Shutdown").forEach { key ->
-            val event = project.trigger(key)
-            Panel(t) {
-                Text(key, color = t.fg, fontWeight = FontWeight.Bold)
+            val event = eventProfiles.getValue(key)
+            Panel(t,minHeight=70.dp,fill=if(selectedEvent==key) (if(t.bg==Color.Black) Color(0xFF272727) else t.raised) else t.surface) {
                 val enabled = event.optBoolean("eventUiEnabled", false)
-                Pill(if (enabled) "Enabled ✓" else "Disabled", t, enabled) {
-                    applyAutoEvent(key, "eventUiEnabled", !enabled)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).clickable {
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
+                        }
+                        selectedEvent=key
+                        eventEditing=if(eventEditing==key) null else key
+                    }) {
+                        Text(key, color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Caption(event.optString("eventFx", "Solid"), t)
+                    }
+                    IconAction("Edit " + key, "edit", t) {
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
+                        }
+                        selectedEvent=key
+                        eventEditing = if (eventEditing == key) null else key
+                    }
+                    Pill(if (enabled) "On" else "Off", t, enabled) {
+                        applyAutoEvent(key, "eventUiEnabled", !enabled)
+                    }
                 }
-                Caption("Animation · " + event.optString("eventFx", "Solid"), t)
-                Pill("Choose " + key + " animation", t) {
-                    choosing = key
-                    search = ""
+                if (eventEditing == key) {
+                // Dedicated Startup/Shutdown authoring reuses the exact
+                // approved WLED+ interface. Local event fields never write
+                // Show Modes settings, BLE, or trigger safety mappings.
+                val eventEffect=NativeEffectCatalog.byName(event.optString("eventFx","Solid"))
+                fun eventColor(slot:Int):Int =
+                    runCatching { android.graphics.Color.parseColor(
+                        event.optString(when(slot){0->"color";1->"secondary";else->"accent"},
+                            if(slot==0)"#ffffff" else "#000000")) }
+                        .getOrDefault(0xffffffff.toInt())
+                ApprovedWledEffectsEditor(
+                    selectedId=eventEffect.id,
+                    effectOptions=NativeEffectCatalog.autoEventChoices(key),
+                    scopeKey="auto-event:"+key,
+                    prefs=prefs,
+                    paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
+                        eventColor(0),eventColor(1),null,eventColor(2)) },
+                    readSetting={ field,fallback ->
+                        if(field=="brightness")event.optInt("brightness",100)*255/100
+                        else event.optInt(field,fallback)
+                    },
+                    readColor={ slot -> eventColor(slot) },
+                    readPalette={ event.optInt("paletteId",0) },
+                    onSelected={ id ->
+                        val fx=NativeEffectCatalog.byId(id ?: 0)
+                        if(NativeEffectCatalog.isAllowedForAutoEvent(key,fx.id) &&
+                           applyAutoEvent(key,"eventFx",fx.name))
+                            autoEventPreviewEffect.intValue=-1
+                    },
+                    onParam={ _,field,value ->
+                        applyAutoEvent(key,field,
+                            if(field=="brightness")value*100/255 else value)
+                    },
+                    onColor={ _,slot,rgb ->
+                        applyAutoEvent(key,when(slot){0->"color";1->"secondary";else->"accent"},
+                            String.format("#%06X",rgb and 0xffffff))
+                    },
+                    onPalette={ _,id -> applyAutoEvent(key,"paletteId",id) }
+                )
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
+                        applyAutoEvent(key,"eventUiFadeMs",1200)
+                    }
+                    Pill("Instant Snap",t,event.optInt("eventUiFadeMs",0)==0) {
+                        applyAutoEvent(key,"eventUiFadeMs",0)
+                    }
                 }
                 val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
                 ValueSlider("Transition fade (ms)", fade, 5000, t) {
@@ -1398,21 +1976,27 @@ class ComposeMainActivity : ComponentActivity() {
                     previewEffect(selected.id)
                 }
                 Caption("Offline preview inspects exact design pixels; CORE provides animation.", t)
+                }
             }
         }
         choosing?.let { key ->
-            AlertDialog(onDismissRequest = { choosing = null },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { choosing = null },
                 title = { Text("Select " + key + " animation") },
                 text = {
                     Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Field(search, "Search effects", t) { search = it }
-                        NativeEffectCatalog.all()
+                        // Show all matching choices; the old 15-item
+                        // alphabetic cap hid Materialize, Random Materialize,
+                        // Smooth Fade and Strobe (owner Test 86).
+                        NativeEffectCatalog.autoEventChoices(key)
                             .filter { it.name.contains(search, ignoreCase = true) }
-                            .take(15).forEach { item ->
+                            .forEach { item ->
                                 Pill(item.name, t) {
-                                    if (applyAutoEvent(key, "eventFx", item.name))
+                                    if (applyAutoEvent(key, "eventFx", item.name)) {
+                                        autoEventPreviewEffect.intValue=-1
                                         choosing = null
+                                    }
                                 }
                             }
                     }
@@ -1484,7 +2068,7 @@ class ComposeMainActivity : ComponentActivity() {
                 "Unsupported effect/palette combinations stay local until CORE advertises them; " +
                 "only CORE frame snapshots can verify logical RGB output.", t)
         }
-        if (deleteConfirm) AlertDialog(
+        if (deleteConfirm) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { deleteConfirm = false },
             title = { Text("Delete stored CORE palette?") },
             text = { Text("This writes a revision tombstone to CORE flash. The palette must not be active or referenced.") },
@@ -1501,8 +2085,154 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {
+    private fun UiIcon(kind: String, color: Color) {
+        Canvas(Modifier.size(18.dp)) {
+            val u=size.width/24f
+            val w=1.8f*u
+            fun line(x: Float,y: Float,xx: Float,yy: Float) =
+                drawLine(color,Offset(x*u,y*u),Offset(xx*u,yy*u),w)
+            when(kind) {
+                "bluetooth" -> { line(11f,2f,11f,22f);line(11f,2f,18f,8f)
+                    line(18f,8f,5f,18f);line(5f,6f,18f,16f);line(18f,16f,11f,22f) }
+                "shield" -> { val p=Path().apply { moveTo(12*u,2*u);lineTo(21*u,6*u)
+                    lineTo(20*u,15*u);quadraticTo(18*u,21*u,12*u,23*u)
+                    quadraticTo(6*u,21*u,4*u,15*u);lineTo(3*u,6*u);close() }
+                    drawPath(p,color,style=Stroke(w));line(8f,12f,11f,15f);line(11f,15f,16f,9f) }
+                "chevron" -> { line(9f,4f,16f,12f);line(16f,12f,9f,20f) }
+                "down" -> { line(5f,9f,12f,16f);line(12f,16f,19f,9f) }
+                "up" -> { line(5f,15f,12f,8f);line(12f,8f,19f,15f) }
+                "pause" -> { drawCircle(color);drawLine(Color.Black,Offset(10*u,8*u),Offset(10*u,16*u),w)
+                    drawLine(Color.Black,Offset(14*u,8*u),Offset(14*u,16*u),w) }
+                "play" -> { drawCircle(color,style=Stroke(w));val p=Path().apply {
+                    moveTo(10*u,7*u);lineTo(17*u,12*u);lineTo(10*u,17*u);close() };drawPath(p,color) }
+                "refresh", "reset" -> { drawArc(color,40f,290f,false,style=Stroke(w))
+                    line(20f,2f,20f,8f);line(20f,8f,14f,8f) }
+                "settings" -> { line(2f,7f,22f,7f);line(2f,17f,22f,17f)
+                    drawCircle(color,3*u,Offset(8*u,7*u),style=Stroke(w))
+                    drawCircle(color,3*u,Offset(16*u,17*u),style=Stroke(w)) }
+                "controller" -> { line(5f,4f,19f,4f);line(5f,4f,2f,10f)
+                    line(19f,4f,22f,10f);line(2f,10f,22f,10f);line(3f,15f,21f,15f);line(4f,20f,20f,20f) }
+                "firmware" -> { drawRect(color,Offset(5*u,5*u),androidx.compose.ui.geometry.Size(14*u,14*u),style=Stroke(w))
+                    for(i in listOf(8f,16f)){line(i,1f,i,5f);line(i,19f,i,23f);line(1f,i,5f,i);line(19f,i,23f,i)} }
+                "appearance" -> { drawCircle(color,9*u,Offset(12*u,12*u),style=Stroke(w))
+                    for(pt in listOf(Offset(8*u,8*u),Offset(14*u,6*u),Offset(18*u,11*u),Offset(7*u,14*u)))
+                        drawCircle(color,1.3f*u,pt) }
+            }
+        }
+    }
+    @Composable
+    private fun IconAction(label: String, kind: String, t: Tone, action: () -> Unit) {
+        Box(Modifier.size(40.dp).clip(RoundedCornerShape(99.dp))
+            .semantics { contentDescription = label }.clickable(onClick = action),
+            contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(18.dp)) {
+                val u = size.width / 24f
+                if (kind == "edit") {
+                    val p = Path().apply {
+                        moveTo(4*u, 16*u); lineTo(16*u, 4*u); lineTo(20*u, 8*u)
+                        lineTo(8*u, 20*u); lineTo(3*u, 21*u); close()
+                    }
+                    drawPath(p, t.muted, style = Stroke(1.8f*u))
+                    drawLine(t.muted, Offset(13*u,7*u), Offset(17*u,11*u), 1.8f*u)
+                } else {
+                    drawLine(t.muted,Offset(5*u,7*u),Offset(19*u,7*u),2*u)
+                    drawLine(t.muted,Offset(9*u,4*u),Offset(15*u,4*u),2*u)
+                    drawLine(t.muted,Offset(7*u,9*u),Offset(8*u,20*u),2*u)
+                    drawLine(t.muted,Offset(17*u,9*u),Offset(16*u,20*u),2*u)
+                    drawLine(t.muted,Offset(8*u,20*u),Offset(16*u,20*u),2*u)
+                }
+            }
+        }
+    }
+    @Composable
+    private fun SettingsRow(label: String, subtitle: String, t: Tone,
+                            actionLabel: String = "›", rowHeight: Int = 59, action: () -> Unit) {
+        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            UiIcon(when(label) { "Controller" -> "bluetooth"; "Authorization" -> "shield"
+                "Active Controller" -> "controller"; "Appearance" -> "appearance"
+                "Firmware" -> "firmware"; else -> "reset" },t.muted)
+            Column(Modifier.weight(1f)) {
+                Text(label, color = t.fg, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Caption(subtitle, t)
+            }
+            if(actionLabel=="›") Box(Modifier.size(40.dp).clickable(onClick=action)
+                .semantics { contentDescription="Open " + label },contentAlignment=Alignment.Center) {
+                UiIcon("chevron",t.muted)
+            } else Pill(actionLabel, t, enabled=actionLabel!="Authorize" || (ble.isConnected() && !ble.canControl()), strong=actionLabel=="Connect", action = action)
+        }
+    }
+    @Composable
+    private fun SettingsPage(t: Tone, changePage: (Int) -> Unit,
+                             light: Boolean, toggleAppearance: () -> Unit) {
+        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Settings", t)
+        var controllers by remember { mutableStateOf(false) }
+        var appearance by remember { mutableStateOf(false) }
+        var diagnostics by remember { mutableStateOf(false) }
+        Panel(t) {
+            Text("Connection", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Controller", connectionPhase, t, "Connect") {
+                foundDevices.clear(); ble.scanHeadless(); controllers = true
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            SettingsRow("Authorization", if(ble.canControl()) "Authorized" else "Not authorized", t, "Authorize") {
+                ble.authorizeOrPair()
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            SettingsRow("Active Controller", if(ble.canControl()) "Connected controller" else "No controller selected", t) {
+                controllers = !controllers
+            }
+            if(controllers) foundDevices.forEach { (address,label) ->
+                Pill(label, t) { ble.connectFoundDevice(address); controllers=false }
+            }
+        }
+        Panel(t) {
+            Text("App Preferences", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Appearance", if(light) "Light mode" else "Dark mode", t, rowHeight=52) { appearance = !appearance }
+            if(appearance) Pill(if(light) "Dark mode" else "Light mode",t) { toggleAppearance() }
+        }
+        Panel(t) {
+            Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
+            SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
+            // No reset command exists in the pinned CORE interface. Do not
+            // present a local document clear as a successful controller reset.
+            SettingsRow("Reset Configuration", "Restore controller defaults", t, rowHeight=46) {
+                outputMessage.value = "Controller reset is unavailable in the current CORE protocol"
+                diagnostics = true
+            }
+        }
+        if(diagnostics) SettingsDiagnostics(t, changePage)
+    }
+    @Composable
+    private fun SettingsDiagnostics(t: Tone, changePage: (Int) -> Unit) {
+        Title("Settings", t)
+        // Developer testing is deliberately isolated from universal trigger
+        // authoring. This is a local UI test; it does not assert GPIO or write NVS.
+        var simulatedTriggers by remember { mutableStateOf(setOf<String>()) }
+        Panel(t) {
+            Title("Developer · Trigger Testing", t)
+            Caption("Local simulation only · physical trigger inputs remain CORE-authoritative.", t)
+            val defaults = listOf("Park","Brake","Left Turn","Right Turn","Hazards","Reverse")
+            defaults.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { name ->
+                        Box(Modifier.weight(1f)) {
+                            Pill((if(name in simulatedTriggers) "■ Stop " else "▷ Test ") + name,
+                                t,name in simulatedTriggers) {
+                                simulatedTriggers=if(name in simulatedTriggers)
+                                    simulatedTriggers-name else simulatedTriggers+name
+                            }
+                        }
+                    }
+                }
+            }
+            Caption(simulatedTriggers.size.toString() + " simulated triggers active", t)
+            if(simulatedTriggers.isNotEmpty())
+                Pill("Clear test states",t) { simulatedTriggers=emptySet() }
+        }
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
@@ -1511,7 +2241,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {
                     foundDevices.clear()
-                    ble.scanHeadless()
+                    ble.connectFromApp(prefs.getString("preferred_ble_address", null))
                 }
                 Pill("Preview Offline", t) {
                     enterOfflinePreview()
@@ -1564,7 +2294,7 @@ class ComposeMainActivity : ComponentActivity() {
                 liveArmed.value = false
             }
         }
-        if (confirm) AlertDialog(onDismissRequest = { confirm = false },
+        if (confirm) AlertDialog(containerColor=t.surface, onDismissRequest = { confirm = false },
             title = { Text("Test CORE LEDs on isolated bench?") },
             text = { Text("Requires BLE authorization and reported effect support. 15-second TTL, brightness 24/255. Vehicle inputs retain priority.") },
             confirmButton = { Pill("Start bench test", t, true) {
@@ -1581,7 +2311,6 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
             Caption(outputMessage.value, t)
         }
-        HardwareOutputEditor(t)
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
@@ -1636,8 +2365,8 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Hardware settings are separate from your Studio design. Reload each output over authorized BLE before editing.", t)
             Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Pill("Output 1", t, index == 0) { index = 0 }
-                Pill("Output 2", t, index == 1) { index = 1 }
+                Pill("Output 1", t, index == 0) { index = 0; captureOutput.intValue = 0; invalidateCoreFrame() }
+                Pill("Output 2", t, index == 1) { index = 1; captureOutput.intValue = 1; invalidateCoreFrame() }
             }
             Pill("Reload output " + (index + 1) + " from CORE", t) {
                 if (ble.canConfigure()) ble.readOutput(index)
@@ -1666,6 +2395,20 @@ class ComposeMainActivity : ComponentActivity() {
             ValueSlider("Total output pixels", pixelCount.coerceIn(1, outputLimit), outputLimit, t) { newCount ->
                 adjustOutput(newCount.coerceAtLeast(1))
                 outputCountText = newCount.coerceAtLeast(1).toString()
+            }
+            // Restore the approved pixel +/- controls beside the draft
+            // slider. These change only RAM; Save still requires confirmation.
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                PixelStepPill("−",t) {
+                    val n=(pixelCount-1).coerceAtLeast(1)
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
+                }
+                PixelStepPill("+",t) {
+                    val n=(pixelCount+1).coerceAtMost(outputLimit)
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
+                }
             }
             Caption("Color order · set this for the actual connected LED strips", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -1706,6 +2449,65 @@ class ComposeMainActivity : ComponentActivity() {
                     zoneCountText = n.toString()
                     outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    PixelStepPill("−",t) {
+                        val n=(count-1).coerceAtLeast(0)
+                        adjustZone(i,n)
+                        zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    }
+                    PixelStepPill("+",t) {
+                        val n=(count+1).coerceAtMost(outputLimit)
+                        adjustZone(i,n)
+                        zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    }
+                }
+                // Bidirectional association: choose a design zone here, or
+                // choose its physical output/section from the expanded design card.
+                val linkedId=(0 until project.zoneCount()).firstOrNull { localIndex ->
+                    val local=project.zone(localIndex)
+                    local?.optInt("physicalOutput",-1)==index &&
+                        local.optInt("physicalSection",-1)==i
+                }?.let { project.zone(it)?.optString("id") }
+                val linkedName=(0 until project.zoneCount()).firstOrNull { localIndex ->
+                    project.zone(localIndex)?.optString("id")==linkedId
+                }?.let { project.zone(it)?.optString("name") }
+                var choosingDesign by remember(index,i) { mutableStateOf(false) }
+                Pill("Design zone: " + (linkedName ?: "Unassigned"),t) {
+                    choosingDesign=!choosingDesign
+                }
+                if(choosingDesign) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        for(localIndex in 0 until project.zoneCount()) {
+                            val local=project.zone(localIndex) ?: continue
+                            val localId=local.optString("id")
+                            Pill(local.optString("name"),t,localId==linkedId) {
+                                val newPixels=local.optInt("length",0)
+                                val newTotal=pixelCount-count+newPixels
+                                if(newPixels !in 1..outputLimit || newTotal !in 1..outputLimit) {
+                                    outputMessage.value="Design zone does not fit this physical output"
+                                } else if(project.mapZoneToOutputSlot(localId,index,i)) {
+                                    // Update only the editable BLE draft; physical
+                                    // outputs do not change until confirmed Save.
+                                    edit { next ->
+                                        val part=next.getJSONArray("zones").getJSONObject(i)
+                                        part.put("name",local.optString("name"))
+                                            .put("pixels",newPixels)
+                                        next.put("pixels",newTotal)
+                                    }
+                                    zoneCountText=newPixels.toString()
+                                    outputCountText=newTotal.toString()
+                                    choosingDesign=false
+                                    structureVersion++
+                                    refresh()
+                                } else outputMessage.value="Could not save local output assignment"
+                            }
+                        }
+                    }
+                }
+                Caption("Physical section link is local until CORE Save/readback.",t)
                 Caption("Lighting role (only CORE assigns trigger priority)", t)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1784,7 +2586,7 @@ class ComposeMainActivity : ComponentActivity() {
                 "Cannot save: " + validationError, t)
             if (valid) Pill("Save to CORE · verify readback", t, true) { confirm = true }
         }
-        if (confirm) AlertDialog(
+        if (confirm) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { confirm = false },
             title = { Text("Apply saved hardware output settings?") },
             text = { Text("Stop all shows and release physical inputs before applying. Changes affect only output " +
