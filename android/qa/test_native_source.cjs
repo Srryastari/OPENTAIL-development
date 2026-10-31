@@ -81,7 +81,8 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
 assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
+       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=2 &&
+       bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
        'Clear stale CORE output UI and prevent conflicting GATT operations');
