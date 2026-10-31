@@ -12,7 +12,7 @@ reset = section("static void on_reset(int reason){", "static void on_sync(void){
 sync = section("static void on_sync(void){", "static void host_task(")
 gap = section("static int gap_event(struct ble_gap_event *ev,void *arg){", "static void on_reset(int reason){")
 advertise = section("static void advertise(void){", "static int gap_event(struct ble_gap_event *ev,void *arg){")
-init = section("bool ot_ble_start(void){", "#else")
+init = src.split("bool ot_ble_start(void){", 1)[1].split("#else", 1)[0]
 
 assert "ble_hs_cfg.reset_cb=on_reset;" in init
 assert "ble_hs_cfg.sync_cb=on_sync;" in init
