@@ -175,8 +175,14 @@ for(const required of [
   'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())',
   'CoreTriggerMappingPage(t)'
 ]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
-assert(triggers.includes('IconAction("Edit " + name, "edit", t)') && !triggers.includes('triggerToDelete') && !triggers.includes('project.deleteTrigger(') && triggers.includes('disabled()'),
-       'Default triggers must remain editable and undeletable; custom trash is per card; testing belongs in Settings');
+assert(triggers.includes('IconAction("Edit " + name, "edit", t)') &&
+       triggers.includes('if (profile.optString("kind") == "trigger-custom")') &&
+       triggers.includes('IconAction("Delete " + name, "delete", t)') &&
+       triggers.includes('title = { Text("Delete custom trigger?") }') &&
+       triggers.includes('project.deleteTrigger(target)') &&
+       triggers.includes('remember(selections, modelRevision)') &&
+       triggers.includes('disabled()'),
+       'Builtins cannot be deleted; custom trigger confirmation and bulk editing refresh required');
 const settings=compose.split('private fun SettingsPage(')[1]
   .split('private fun HardwareOutputEditor(')[0];
 assert(settings.includes('Developer · Trigger Testing') &&
