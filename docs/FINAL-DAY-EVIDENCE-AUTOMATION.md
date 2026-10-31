@@ -9,7 +9,7 @@ silently merge branches, alter approved UI/palettes, or invent physical PASS.
 
 | Owner | PR | Exact commit | Required workflow |
 | --- | --- | --- | --- |
-| Android | #86 | `5615bade61542f30a4a9c4375e2cadea30de2105` | Android exact-head software integration |
+| Android | #87 | `449462c72f47baac2c66e56296d1166202b6174a` | Android exact-head software integration |
 | Effects | #80 | `7c0fcc450a7619a57603aabf833dea855a18bcd8` | Effects proprietary continuity exact HEAD (software only) |
 | Triggers | #83 | `0477355fdbd562cfe357569bf8f15d0e08374e8f` | Trigger CORE81 pinned-source safety evidence |
 | Firmware | #84 | `b13894c0550366a0e74ef6fd93c83cfa6dd19aa4` | CORE backup essential policy exact-head software gates |
@@ -21,8 +21,36 @@ evidence freeze** on this feature PR. The job runs
 The second step queries GitHub's official API with the read-only GitHub
 Actions token and proves each PR's *current HEAD* matches the pinned SHA and has
 the named successful pull_request workflow run for that same head.
-Missing/mismatched/rebased/replaced or in-progress results return BLOCKED.
-An artifact records the four exact SHAs and run URLs.
+For each target the verifier first selects the **newest matching run regardless of
+conclusion** (including failed/cancelled/in-progress), then requires a completed
+successful result; an older success can never override a newer attempt.
+Each run must match the exact expected PR association (including nested head
+SHA), workflow ID **and** workflow file path, repository identity, exact
+commit, valid positive run ID/attempt and its canonical GitHub Actions URL.
+Malformed REST responses and missing run provenance fail closed.
+
+Before each remote verification, an old receipt is deleted and replaced with
+an explicit BLOCKED placeholder. API exceptions or invalid responses preserve
+a BLOCKED receipt; only successful completion writes a PASS receipt.
+The archived JSON artifact records four exact SHAs, workflow IDs, run IDs
+and valid run URLs.
+
+**Trigger evidence distinction:** PR #83's own test workflow runs at PR head
+`0477355...`, but intentionally tests the underlying pinned CORE #81
+`d3ca7d036392d7709848b143a41f6bed1a26cb7b` in its explicit checkout.
+Both SHAs are reported distinctly; the old synthetic-merge run is not
+accepted as exact-head evidence.
+
+**Independent software evidence pins and witnessed CI** (reviewed on
+2026-10-31 UTC, subject to the verifier's newest-run veto):
+- Android #87: `449462c72f47baac2c66e56296d1166202b6174a`,
+  [run 41246386009](https://github.com/Srryastari/OPENTAIL-development/actions/runs/41246386009), exact-head Android tests / APK.
+- Effects #80: `7c0fcc450a7619a57603aabf833dea855a18bcd8`,
+  [run 41210137685](https://github.com/Srryastari/OPENTAIL-development/actions/runs/41210137685), source goldens and ESP-IDF.
+- Triggers #83: `0477355fdbd562cfe357569bf8f15d0e08374e8f`,
+  [run 41212582301](https://github.com/Srryastari/OPENTAIL-development/actions/runs/41212582301), pinned CORE #81 test (distinct from PR HEAD).
+- Firmware #84: `b13894c0550366a0e74ef6fd93c83cfa6dd19aa4`,
+  [run 41213287531](https://github.com/Srryastari/OPENTAIL-development/actions/runs/41213287531), fail-closed essential-light host + ESP-IDF.
 
 This is a **pinned software evidence receipt**, not proof of a combined
 on-device app/firmware build, physical LED signal behavior, or automatic
