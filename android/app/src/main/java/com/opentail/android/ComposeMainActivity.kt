@@ -619,7 +619,17 @@ class ComposeMainActivity : ComponentActivity() {
     private fun PalettePicker(label: String, value: Int, t: Tone, onSelect: (Int) -> Unit) {
         var browsing by rememberSaveable(label) { mutableStateOf(false) }
         var search by rememberSaveable(label) { mutableStateOf("") }
-        val chosen = NativePaletteEngine.lookup(project.raw(), value)
+        fun sourcePalette(id: Int): NativePalette {
+            val authoritative = if (paletteLoadedPresent.value &&
+                paletteLoadedSlot.intValue in 0..127 &&
+                id == 200 - paletteLoadedSlot.intValue &&
+                paletteLoadedRevision.longValue >= 0L) paletteLoadedStops.value else null
+            return NativePaletteEngine.lookup(project.raw(), id,
+                prefs.getInt("foreground", -1),
+                prefs.getInt("background", 0xff000000.toInt()),
+                authoritative)
+        }
+        val chosen = sourcePalette(value)
         Caption(label + " · " + chosen.name + " (#" + chosen.id + ")", t)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -640,7 +650,7 @@ class ComposeMainActivity : ComponentActivity() {
             LazyColumn(Modifier.fillMaxWidth().height(228.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 items(matching, key = { it }) { id ->
-                    val palette = NativePaletteEngine.lookup(project.raw(), id)
+                    val palette = sourcePalette(id)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(palette.name + " · " + id, color = t.fg, fontSize = 13.sp,
@@ -1269,10 +1279,14 @@ class ComposeMainActivity : ComponentActivity() {
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(42.dp), contentAlignment=Alignment.Center) {
+                            Box(Modifier.size(42.dp).clickable {
+                                count=(n-1).coerceAtLeast(1).toString();applyLiveZone()
+                            }, contentAlignment=Alignment.Center) {
                                 Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
                             }
-                            Box(Modifier.size(42.dp), contentAlignment=Alignment.Center) {
+                            Box(Modifier.size(42.dp).clickable {
+                                count=(n+1).coerceAtMost(10000).toString();applyLiveZone()
+                            }, contentAlignment=Alignment.Center) {
                                 Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
                             }
                             Spacer(Modifier.weight(1f))
