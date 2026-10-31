@@ -74,5 +74,6 @@ jobs:
       - name: Verify CORE authoritative effect manifest and Android compatibility
         run: |
           python3 core-firmware/tests/test_effect_capabilities_manifest.py
-          node android/qa/test_unified_ble_fx.cjs
-          node android/qa/test_ble_output_pending.cjs
+          python3 android/qa/check_pinned_core49_contract.py
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
