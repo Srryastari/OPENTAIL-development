@@ -102,7 +102,7 @@ check("Compose Material UI follows locked OLED/white colors",
       all(t in compose for t in (
           "MaterialTheme(colorScheme = scheme)", "lightColorScheme(", "darkColorScheme(",
           "Color.White", "ConnectPill", "RoundedCornerShape(99.dp)",
-          'previewCurrentEffect(item.id)',
+          'ApprovedWledEffectsEditor(',
           "if(editingId==id)", "ZoneDotPreview(t,n,reverse)", "HardwareOutputEditor(t)")))
 check("Compose authoring preserves zone offsets and separate BLE confirmation",
       all(k in compose for k in

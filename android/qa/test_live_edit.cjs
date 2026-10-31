@@ -45,9 +45,12 @@ assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
 
 for(const required of [
-  'EffectsPreview(', 'previewCurrentEffect(effect)',
-  'PaletteEditor("Color"', 'PaletteEditor("Background"',
-]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
+  'EffectsPreview(', 'ApprovedWledEffectsEditor(',
+  'onLiveToggle = {', 'onParam = { id,key,value ->',
+  'onColor = { id,slot,rgb ->', 'onPalette = { id,selected ->',
+  'if(liveArmed.value) previewCurrentEffect(id)',
+  'livePreview.stop()', 'ble.stopShow()'
+]) assert(effectBlock.includes(required), 'Approved Live FX regression: '+required);
 
 assert(triggerBlock.includes('project.assignMany(selections,zoneId,!checked)') &&
        !triggerBlock.includes('selections.forEach { project.assign('),
@@ -69,7 +72,7 @@ for(const required of [
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
        compose.includes('Caption(bleMessage.value, t)'),
        'Connection status and transient diagnostics must remain separate');
-const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+const approvedPreview = compose.split('private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {')[1]
   .split('private fun ShowModesPage(')[0];
 assert(approvedPreview.includes('val columns = 30') &&
        approvedPreview.includes('val capsuleHeight = 24.dp.toPx()') &&
@@ -106,15 +109,15 @@ assert(previewGate &&
          previewGate.indexOf('livePreview.arm()') &&
        previewGate.includes('livePreview.stop()') &&
        previewGate.includes('liveArmed.value = false') &&
-       effectBlock.includes('previewCurrentEffect(effect)') &&
+       effectBlock.includes('if(liveArmed.value) previewCurrentEffect(id)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
-  'All Effects edits must reject unsupported palettes before arming BLE without silent fallback');
+  'Owner-triggered Effects preview must reject unsupported palettes before arming BLE without silent fallback');
 assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
        'Disconnect must clear stale effect capability ownership');
 
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
-  'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
+  'Owner-authorized live preview must retain secure gated arming; editor selection alone never starts live Show Mode.');
 assert(!compose.includes('Preview live on CORE bench') &&
        compose.includes('Every editor is live.'),
   'No optional Live Edit Mode toggle permitted in Android.');

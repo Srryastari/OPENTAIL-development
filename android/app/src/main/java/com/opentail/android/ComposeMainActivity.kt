@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -45,6 +46,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.disabled
@@ -358,6 +362,27 @@ class ComposeMainActivity : ComponentActivity() {
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
         var page by rememberSaveable { mutableIntStateOf(0) }
+        var backStack by remember { mutableStateOf(listOf<Int>()) }
+        fun navigate(destination: Int) {
+            if (destination !in pages.indices || destination == page) return
+            backStack = backStack + page
+            page = destination
+        }
+        // All six screens share one navigation stack. Native Compose
+        // dialogs handle their own Back. When a field owns the IME, first
+        // Back dismisses the keyboard rather than silently leaving the editor.
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        BackHandler(enabled = page != 0 || backStack.isNotEmpty()) {
+            if (imeVisible) {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            } else {
+                page = backStack.lastOrNull() ?: 0
+                backStack = backStack.dropLast(1)
+            }
+        }
         val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
@@ -390,7 +415,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // returning to Auto Events, which defaults to Startup.
                         if(page==4 && i!=4) autoEventPreviewEffect.intValue=-1
                         // Preview Offline remains active across tabs (Test 79).
-                        page = i
+                        navigate(i)
                     }
                 }
             }
@@ -398,7 +423,7 @@ class ComposeMainActivity : ComponentActivity() {
                 .padding(horizontal = 28.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (page) {
-                    0 -> HomePage(t, { page = it })
+                    0 -> HomePage(t, { navigate(it) })
                     1 -> ShowModesPage(t)
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
@@ -406,7 +431,7 @@ class ComposeMainActivity : ComponentActivity() {
                         autoEventPreviewEffect.intValue = effectId
                         enterOfflinePreview()
                     }
-                    5 -> SettingsPage(t, { page = it }, light) {
+                    5 -> SettingsPage(t, { navigate(it) }, light) {
                         light = !light
                         prefs.edit().putBoolean("whiteMode", light).apply()
                     }
@@ -646,8 +671,8 @@ class ComposeMainActivity : ComponentActivity() {
                 id == 200 - paletteLoadedSlot.intValue &&
                 paletteLoadedRevision.longValue >= 0L) paletteLoadedStops.value else null
             return NativePaletteEngine.lookup(project.raw(), id,
-                prefs.getInt("foreground", -1),
-                prefs.getInt("background", 0xff000000.toInt()),
+                if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                if (prefs.contains("background")) prefs.getInt("background",0) else null,
                 authoritative)
         }
         val chosen = sourcePalette(value)
@@ -826,11 +851,23 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun EffectsPreview(t: Tone, effect: Int) {
+    private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {
         // Reference dimensions are logical UI pixels (dp), independent of
         // display density. Never substitute design colors for CORE telemetry.
         val connection = bleMessage.value
         val localRevision = revision.intValue
+        // Local sketches are explicitly distinct from CORE frames and run
+        // only inside the approved Show Modes preview, with zero BLE traffic.
+        val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
+            OfflineFxSketch.supports(effect)
+        var localTick by remember(effect) { mutableLongStateOf(0L) }
+        LaunchedEffect(localSketch, effect, foregroundActivity.value, previewPaused.value) {
+            if (!localSketch || !foregroundActivity.value || previewPaused.value) return@LaunchedEffect
+            while (true) {
+                delay(33L)
+                localTick++
+            }
+        }
         // Separate honest CORE telemetry from the saved design / read-only
         // CORE output profile. A fresh installation has an empty local project;
         // an idle renderer is black even when all hardware zones are configured.
@@ -898,7 +935,12 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    val color = if (sample >= 0) Color(frame!!.colorAt(sample))
+                    val color = if (localSketch) {
+                        Color(OfflineFxSketch.colorAt(effect,col,columns,localTick,
+                            prefs.getInt("foreground",0xffffffff.toInt()),
+                            prefs.getInt("background",0xff000000.toInt()))
+                            ?: 0xff000000.toInt())
+                    } else if (sample >= 0) Color(frame!!.colorAt(sample))
                         else configuredColor
                     drawRoundRect(color,
                         topLeft = Offset(col * pitch, 0f),
@@ -908,6 +950,10 @@ class ComposeMainActivity : ComponentActivity() {
             }
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(when {
+                    effect < 0 && animateOffline -> "No effect selected"
+                    localSketch -> "Offline effect preview · local"
+                    animateOffline && (offlinePreview.value || !ble.canControl()) ->
+                        "Offline animation unavailable"
                     hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
                     useConfiguredColors -> "Configured zone colors"
                     offlinePreview.value -> "Offline design preview"
@@ -941,61 +987,112 @@ class ComposeMainActivity : ComponentActivity() {
         var paletteId by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
-        EffectsPreview(t, effect)
+        var chosen by rememberSaveable(projectLoadRevision.intValue) {
+            mutableIntStateOf(effect)
+        }
+        EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             listOf("Effects", "Presets", "Sequences").forEach { tab ->
                 Box(Modifier.weight(1f)) { Pill(tab,t,view==tab) { view=tab } }
             }
         }
         when(view) {
-            "Effects" -> Panel(t) {
-                Field(query,"Search effects",t) { query=it }
-                Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
-                val matches=remember(query) {
-                    val preferred=listOf(9,32772)
-                    NativeEffectCatalog.generalEffects().filter {
-                        it.name.contains(query,ignoreCase=true) }
-                        .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
+            "Effects" -> {
+                // Owner-approved standalone native editor. Do not reintroduce
+                // generic search/list controls or replace the six-screen shell.
+                LaunchedEffect(effect) {
+                    // Explicit preset import/selection updates the editor only
+                    // when the authoritative selected effect actually changes.
+                    if (selectedEffect.intValue != chosen && chosen >= 0)
+                        chosen = selectedEffect.intValue
                 }
-                LazyColumn(Modifier.fillMaxWidth().height(236.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                    items(matches,key={it.id}) { item ->
-                        Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(15.dp))
-                            .background(if(item.id==effect) (if(t.bg==Color.Black) Color(0xFF292929) else Color(0xFFDEDEDE)) else t.raised)
-                            .clickable {
-                                selectedEffect.intValue=item.id
-                                prefs.edit().putInt("effectId",item.id).apply()
-                                previewCurrentEffect(item.id)
-                            }.padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Text(effectLabel(item.id),Modifier.weight(1f),color=t.fg,fontSize=14.sp)
-                            if(item.id==effect) Text("✓",color=t.fg)
+                ApprovedWledEffectsEditor(
+                    selectedId = chosen.takeIf { it >= 0 },
+                    effectOptions = NativeEffectCatalog.generalEffects(),
+                    segments = project.zoneCount(),
+                    liveEnabled = liveArmed.value,
+                    prefs = prefs,
+                    paletteFor = { id ->
+                        val verified = if(paletteLoadedPresent.value &&
+                            paletteLoadedSlot.intValue in 0..127 &&
+                            id == 200 - paletteLoadedSlot.intValue &&
+                            paletteLoadedRevision.longValue >= 0L)
+                            paletteLoadedStops.value else null
+                        NativePaletteEngine.lookup(project.raw(), id,
+                            if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                            if (prefs.contains("background")) prefs.getInt("background",0) else null,
+                            verified)
+                    },
+                    onSelected = { id ->
+                        if(id == null) {
+                            chosen = -1
+                            selectedEffect.intValue = -1
+                            prefs.edit().putInt("effectId",-1).apply()
+                            if(liveArmed.value) {
+                                livePreview.stop()
+                                liveArmed.value = false
+                            }
+                        } else {
+                            chosen = id
+                            selectedEffect.intValue = id
+                            val editor = prefs.edit().putInt("effectId",id)
+                            // On effect change restore the independently saved
+                            // values to the existing BLE/preset contract.
+                            listOf("speed","intensity","brightness","foreground",
+                                "background","accent","paletteId").forEach { key ->
+                                val scoped = "wled.${id}." + (if(key=="paletteId")"palette" else key)
+                                if(prefs.contains(scoped))
+                                    editor.putInt(key,prefs.getInt(scoped,0))
+                            }
+                            editor.apply()
+                            if(liveArmed.value) previewCurrentEffect(id)
+                            else invalidateCoreFrame()
                         }
+                    },
+                    onLiveToggle = {
+                        if(liveArmed.value) {
+                            livePreview.stop()
+                            liveArmed.value = false
+                            if(ble.canControl()) ble.stopShow()
+                        } else if(chosen >= 0) {
+                            // User-initiated live preview only: effect list
+                            // selection never activates Show Mode implicitly.
+                            previewCurrentEffect(chosen)
+                        }
+                    },
+                    onParam = { id,key,value ->
+                        val edit = prefs.edit().putInt("wled.${id}.${key}",value)
+                        if(key in setOf("speed","intensity","brightness"))
+                            edit.putInt(key,value)
+                        edit.apply()
+                        if(liveArmed.value && key in setOf("speed","intensity","brightness"))
+                            previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onColor = { id,slot,rgb ->
+                        val key = when(slot) { 0->"foreground";1->"background";else->"accent" }
+                        prefs.edit().putInt("wled.${id}.color${slot}",rgb)
+                            .putInt("wled.${id}.${key}",rgb)
+                            .putInt(key,rgb).apply()
+                        // Slot 3 is saved correctly but the CORE BLE preview
+                        // Frame contract has only foreground/background slots.
+                        if(liveArmed.value && slot < 2) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
+                    },
+                    onPalette = { id,selected ->
+                        prefs.edit().putInt("wled.${id}.palette",selected)
+                            .putInt("paletteId",selected).apply()
+                        if(liveArmed.value) previewCurrentEffect(id)
+                        else invalidateCoreFrame()
                     }
-                }
-                ValueSlider("Brightness",brightness,255,t) {
-                    brightness=it;prefs.edit().putInt("brightness",it).apply();previewCurrentEffect(effect)
-                }
-                val parameters=NativeEffectParameters.forId(effect)
-                if(parameters?.foreground==true) PaletteEditor("Color",foreground,t) {
-                    foreground=it;prefs.edit().putInt("foreground",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.background==true) PaletteEditor("Background",background,t) {
-                    background=it;prefs.edit().putInt("background",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.speed==true) ValueSlider("Speed",speed,255,t) {
-                    speed=it;prefs.edit().putInt("speed",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.intensity==true) ValueSlider("Intensity",intensity,255,t) {
-                    intensity=it;prefs.edit().putInt("intensity",it).apply();previewCurrentEffect(effect)
-                }
-                if(parameters?.palette==true) PalettePicker("Palette",paletteId,t) {
-                    paletteId=it;prefs.edit().putInt("paletteId",it).apply();previewCurrentEffect(effect)
-                }
+                )
             }
             "Presets" -> PresetsPage(t)
             "Sequences" -> SequencePage(t,effect)
         }
     }
     private fun effectLabel(id: Int): String = when(id) {
+        -1 -> "No effect selected"
         9 -> "Rainbow Show"
         32769 -> "Materialize"
         else -> NativeEffectCatalog.byId(id).name
@@ -1195,10 +1292,16 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                         effectSettings.put(key,prefs.getInt(key,fallback))
                     }
+                    val editorSettings=JSONObject()
+                    val prefix="wled.${selectedEffect.intValue}."
+                    for((key,value) in prefs.all) {
+                        if(key.startsWith(prefix) && value is Int) editorSettings.put(key,value)
+                    }
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
                         .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
                         .put("effectName",effectLabel(selectedEffect.intValue))
-                        .put("effectSettings",effectSettings))
+                        .put("effectSettings",effectSettings)
+                        .put("effectEditorSettings",editorSettings))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
@@ -1249,40 +1352,14 @@ class ComposeMainActivity : ComponentActivity() {
                 title = { Text("Replace current design?") },
                 text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
                 confirmButton = { Pill("Load preset", t, true) {
-                    val saved = presets.optJSONObject(pendingLoad)?.optString("studio", "").orEmpty()
-                    val restored = runCatching {
-                        val design = JSONObject(saved)
-                        // Loading one design never deletes or rolls back the
-                        // user's independently saved preset collection.
-                        design.put("savedPresets", JSONArray(project.presets().toString()))
-                        project.importJson(design.toString())
-                    }.getOrDefault(false)
-                    presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
+                    val preset=presets.optJSONObject(pendingLoad)
+                    val restored = NativePresetRestore.load(project,prefs,preset)
+                    presetStatus = if (restored) "Preset loaded"
+                        else "Preset restore failed; previous design retained"
                     if (restored) {
-                        val selected=presets.optJSONObject(pendingLoad)
-                        val editor=prefs.edit()
-                        if(selected?.has("fxId")==true) {
-                            selectedEffect.intValue=selected.optInt("fxId",0)
-                            editor.putInt("effectId",selectedEffect.intValue)
-                        }
-                        // Backward compatible: old presets may have no FX
-                        // settings. Never clobber the user's current controls.
-                        selected?.optJSONObject("effectSettings")?.let {savedFx ->
-                            for(key in listOf("speed","intensity","brightness",
-                                "foreground","background","accent","paletteId")) {
-                                if(savedFx.has(key) && savedFx.opt(key) is Number) {
-                                    val raw=savedFx.optInt(key)
-                                    val safe=when(key) {
-                                        "speed","intensity","brightness" -> raw.coerceIn(0,255)
-                                        "paletteId" -> raw.coerceIn(0,NativePaletteEngine.MAX_ID)
-                                        else -> raw
-                                    }
-                                    editor.putInt(key,safe)
-                                }
-                            }
-                        }
-                        if(editor.commit()) refreshLoadedProject()
-                        else presetStatus="Design loaded; effect preferences could not be saved"
+                        if(preset?.has("fxId")==true)
+                            selectedEffect.intValue=preset.optInt("fxId",selectedEffect.intValue)
+                        refreshLoadedProject()
                     }
                     pendingLoad = -1
                 } },
