@@ -95,24 +95,27 @@ jobs:
               assert (build/file).is_file() and (build/file).stat().st_size>0,file
           refs=json.loads((build/"flasher_args.json").read_text())["flash_files"]
           assert len(refs)>=3 and all((build/path).is_file() for path in refs.values())
-          import hashlib, subprocess
-          files=list(build.rglob("*.bin"))+[build/"flasher_args.json"]
-          sums={str(p.relative_to(build)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
-          (build/"SHA256SUMS.json").write_text(json.dumps(sums,indent=2))
-          (build/"SOURCE_SHA.txt").write_text(subprocess.check_output(["git","rev-parse","HEAD"],text=True))
+          import hashlib, subprocess, shutil
+          package=Path("core-software-package")
+          package.mkdir(exist_ok=True)
+          # IDF container owns build/: stage read-only outputs into a runner-owned package.
+          files=list(refs.values())+["flasher_args.json"]
+          for name in files:
+              rel=Path(name)
+              assert not rel.is_absolute() and ".." not in rel.parts, name
+              dest=package/rel
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(build/rel,dest)
+          shutil.copyfile("core-firmware/sdkconfig",package/"sdkconfig")
+          sums={str(p.relative_to(package)):hashlib.sha256(p.read_bytes()).hexdigest() for p in package.rglob("*") if p.is_file()}
+          (package/"SHA256SUMS.json").write_text(json.dumps(sums,indent=2))
+          (package/"SOURCE_SHA.txt").write_text(subprocess.check_output(["git","rev-parse","HEAD"],text=True))
           print("PASS: exact-SHA bench image complete; no actual hardware takeover")
           PY
       - uses: actions/upload-artifact@v4
         with:
           name: opentail-failover-software-bench-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            core-firmware/build/*.bin
-            core-firmware/build/bootloader/bootloader.bin
-            core-firmware/build/partition_table/partition-table.bin
-            core-firmware/build/flasher_args.json
-            core-firmware/build/SHA256SUMS.json
-            core-firmware/build/SOURCE_SHA.txt
-            core-firmware/sdkconfig
+          path: core-software-package/
           if-no-files-found: error
           retention-days: 14
 # Software-only policy + bench build; mandatory physical release-evidence
