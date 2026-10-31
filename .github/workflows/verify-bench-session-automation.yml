@@ -1,0 +1,65 @@
+name: OpenTail 22-case bench observation automation exact-head QA
+on:
+  pull_request:
+    branches: [firmware/failover-essential-policy-20261031]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-unchanged-and-session-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert source exactly matches verified CORE bench image #84
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor b13894c0550366a0e74ef6fd93c83cfa6dd19aa4 HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base="b13894c0550366a0e74ef6fd93c83cfa6dd19aa4"
+          allowed={
+              "scripts/bench-automation-sessions.json",
+              "scripts/bench_capture_session.py",
+              "scripts/tests/test_bench_capture_session.py",
+              "docs/FINAL-BENCH-AUTOMATION-2026-10-31.md",
+              ".github/workflows/verify-bench-session-automation.yml",
+          }
+          changed=set(subprocess.check_output(
+              ["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          assert changed<=allowed, "Non-bench source changed: "+str(changed-allowed)
+          assert "scripts/bench_capture_session.py" in changed
+          for path in (
+              "core-firmware/main/opentail_core.c",
+              "core-firmware/main/ot_failover_essential.c",
+              "core-firmware/main/ot_failover_essential.h",
+              "core-firmware/main/CMakeLists.txt",
+              "core-firmware/tests/run-host-tests.sh",
+              "docs/CI-REGRESSION-BASELINE.json",
+              "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv",
+              ".github/workflows/verify-active-sources.yml",
+              "scripts/check_regressions.py"
+          ):
+              before=subprocess.check_output(["git","rev-parse",base+":"+path],text=True)
+              now=subprocess.check_output(["git","rev-parse","HEAD:"+path],text=True)
+              assert before==now,path+" is not byte-identical"
+          print("PASS: exact base CORE #84 firmware and physical release gate unchanged")
+          PY
+      - name: Verify mapping and non-energizing recorder flags
+        run: |
+          python3 scripts/bench_capture_session.py --self-test
+          python3 scripts/bench_capture_session.py --list
+          python3 -m unittest discover -v -s scripts/tests -p test_bench_capture_session.py
+      - name: Existing regression impact gate (audit only, NOT physical release)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+# This is deliberately a lightweight non-flashing bench tool gate.
+# Firmware #84 already compiled/tested at its exact SHA.
+# Every physical case is NOT_RUN pending operator/equipment proof.
