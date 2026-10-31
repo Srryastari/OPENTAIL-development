@@ -46,6 +46,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.disabled
@@ -365,12 +368,20 @@ class ComposeMainActivity : ComponentActivity() {
             backStack = backStack + page
             page = destination
         }
-        // All six screens share one navigation stack. Native Compose dialogs
-        // consume Back first, IME closes through Android, then Back returns to
-        // the previous actual screen (not always Home).
+        // All six screens share one navigation stack. Native Compose
+        // dialogs handle their own Back. When a field owns the IME, first
+        // Back dismisses the keyboard rather than silently leaving the editor.
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
         BackHandler(enabled = page != 0 || backStack.isNotEmpty()) {
-            page = backStack.lastOrNull() ?: 0
-            backStack = backStack.dropLast(1)
+            if (imeVisible) {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+            } else {
+                page = backStack.lastOrNull() ?: 0
+                backStack = backStack.dropLast(1)
+            }
         }
         val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
