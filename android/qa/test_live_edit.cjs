@@ -77,9 +77,9 @@ assert(compose.includes('if (offlinePreview.value) return') &&
 // Selecting a local-only palette must stop any stale physical palette demo.
 const palette=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
 assert(palette.includes('fun coreSupports(effectId: Int, paletteId: Int): Boolean') &&
-       palette.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+       palette.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId)') &&
        palette.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)'),
-  'CORE palette support must remain a narrowly scoped protocol gate');
+  'CORE palette admission must match pinned firmware source metadata');
 assert(preview.includes('val paletteId: Int,') &&
        preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)') &&
        preview.includes('frame.paletteId, 5'),
