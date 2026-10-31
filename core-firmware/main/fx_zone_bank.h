@@ -20,7 +20,8 @@ typedef struct {
     ot_ble_fx_packet_t request;
     ot_fx_spark_style_t spark;
     ot_fx_overlay_config_t overlay; /* volatile per-zone compositor */
-    uint32_t started_ms;
+    uint32_t started_ms; /* stable animation/overlay phase anchor */
+    uint32_t refreshed_ms; /* independent transient TTL renewal */
     uint32_t generation; /* changes only on this zone's replacement */
 } ot_fx_zone_slot_t;
 

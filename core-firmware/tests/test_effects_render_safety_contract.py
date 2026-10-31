@@ -81,4 +81,14 @@ assert "if(frame_captured[ch])ot_frame_snapshot_complete(false);" in render
 assert "frame_submitted[ch]=false;" in render
 assert "ot_arbitrate(combined," in render
 assert "ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms)" in render
+# The BLE radio link cannot own/cancel already-admitted local FX. Preview
+# lifetimes are independently capped; a saved standalone scene has no TTL.
+disconnect=core.split("void ot_ble_disconnect_show(void){",1)[1].split(
+    "static esp_err_t status_get(",1)[0]
+assert "ot_fx_bank_stop_temporary(" not in disconnect
+assert "ot_fx_bank_stop_all(" not in disconnect
+assert "native_show.mode=OT_SHOW_OFF" not in disconnect
+assert "slot->refreshed_ms" in core
+assert "const uint32_t elapsed=ms-slot->refreshed_ms" in core
+assert "ble_owns_show=false; /* expired on CORE; not a radio event */" in core
 print("PASS: corrected #49 Effects frame ownership, palette -> FX -> overlays -> OEM override -> logical RGB -> wire; physical colors bypass gamma, show/STOP and zone guards (source contract)")
