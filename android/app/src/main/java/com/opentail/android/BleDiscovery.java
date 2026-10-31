@@ -234,6 +234,7 @@ final class BleDiscovery {
     private int triggerMapBaseRevision;
     private Consumer<NativeTriggerMappingCodec.Snapshot> triggerMapListener;
     private volatile boolean mtuNegotiating=false;
+    private volatile boolean infoReadPending=false;
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
     void setTriggerMapListener(Consumer<NativeTriggerMappingCodec.Snapshot> listener){
@@ -549,6 +550,7 @@ final class BleDiscovery {
     }
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
     void onAdapterDisabled() {
+        autoReconnectLease++;autoReconnectBudget=1;infoReadPending=false;
         stopScan();
         frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
@@ -561,7 +563,10 @@ final class BleDiscovery {
         if (gatt != null) { try { gatt.close(); } catch (Exception ignored) {} gatt = null; }
         notifyStatus("Bluetooth off · connection closed");
     }
-    void onAdapterEnabled() { notifyStatus("Bluetooth on · ready to scan or reconnect"); }
+    void onAdapterEnabled() {
+        notifyStatus("Bluetooth on · ready to scan or reconnect");
+        scheduleReconnect(activeAddress);
+    }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
     /** One UI action: use the stored owner key or enroll with physical BOOT once. */
@@ -757,13 +762,29 @@ final class BleDiscovery {
     private Consumer<String> preferredListener;
     private static final long RECONNECT_DELAY_MS = 10000L;
     private long lastReconnectAttempt = 0L;
+    // One bounded automatic reconnect per established CORE session.
+    private volatile int autoReconnectBudget=1;
+    private volatile int autoReconnectLease=0;
+    private void scheduleReconnect(String address) {
+        if(address==null || address.isEmpty())return;
+        ui.post(()->{
+            if(stopped || autoReconnectBudget<=0)return;
+            autoReconnectBudget--;
+            final int lease=++autoReconnectLease;
+            // Allow the one-shot discovery fallback to finish first.
+            ui.postDelayed(()->{
+                if(lease==autoReconnectLease && !stopped && !connected && !connecting && !scanning)
+                    tryReconnect(address);
+            },SCAN_DURATION_MS+2000L);
+        });
+    }
 
     void setPreferredListener(Consumer<String> listener) { this.preferredListener = listener; }
 
     /** One bounded background scan for the previously selected BLE address; no infinite reconnect loop. */
     void tryReconnect(String address) {
         if (stopped || connected || connecting || scanning || address == null || address.isEmpty()) return;
-        if (android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
+        if (lastReconnectAttempt!=0L && android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
         if (Build.VERSION.SDK_INT >= 31 &&
                 activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return;
         lastReconnectAttempt = android.os.SystemClock.elapsedRealtime();
@@ -937,7 +958,7 @@ final class BleDiscovery {
             boolean fallback=scanFallbackAllowed;
             scanFallbackAllowed=false;
             connectionAttempt++;
-            connected=false;connecting=false;authorized=false;mtuNegotiating=false;
+            connected=false;connecting=false;authorized=false;mtuNegotiating=false;infoReadPending=false;
             frameCapture.cancel();palette.reset();fxCaps=null;fxCapsBusy=false;
             command=null;reply=null;enroll=null;challenge=null;triggerMapping=null;
             triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
@@ -949,6 +970,7 @@ final class BleDiscovery {
             try{owner.disconnect();}catch(Exception ignored){}
             try{owner.close();}catch(Exception ignored){}
             notifyStatus(reason+(fallback?" · retrying BLE discovery":" · tap Connect to retry"));
+            scheduleReconnect(activeAddress);
             if(fallback)ui.postDelayed(()->{
                 if(!stopped && !connected && !connecting && !scanning)scanHeadless();
             },350L);
@@ -959,7 +981,7 @@ final class BleDiscovery {
     private void watchGattReady(BluetoothGatt owner,int attempt){
         ui.postDelayed(()->{
             if(stopped || attempt!=connectionAttempt || gatt!=owner)return;
-            if(!connected || command==null || reply==null)
+            if(!connected || command==null || reply==null || infoReadPending || challengePending || authPending)
                 recoverStalledGatt(owner,"CORE BLE connection/setup timed out");
         },GATT_SETUP_TIMEOUT_MS);
     }
@@ -979,7 +1001,7 @@ final class BleDiscovery {
         }
         scanFallbackAllowed=knownDevice;
         final int attempt=++connectionAttempt;
-        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;infoReadPending=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
@@ -1014,12 +1036,14 @@ final class BleDiscovery {
                 boolean fallback=scanFallbackAllowed;
                 scanFallbackAllowed=false;
                 connectionAttempt++;
+                infoReadPending=false;
                 connecting = false;
                 connected = false;
                 frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
+                scheduleReconnect(activeAddress);
                 if(fallback)ui.postDelayed(()->{
                     if(!stopped && !connected && !connecting && !scanning)scanHeadless();
                 },350L);
@@ -1085,14 +1109,22 @@ final class BleDiscovery {
             paletteCapabilities=service.getCharacteristic(PALETTE_CAP_UUID);
             palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities);
             authorized = false;
+            autoReconnectBudget=1;autoReconnectLease++;
             scanFallbackAllowed=false; // service discovery succeeded; clear one-shot fallback
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             // The info read is optional discovery metadata. If Android rejects
             // its ATT start, do not strand owner auto-authorization indefinitely.
+            // Stored owner-key authentication must not block on optional INFO.
+            if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null) {
+                ui.post(thisAutoAuth(connection));
+                return;
+            }
             boolean infoStarted=false;
+            infoReadPending=true;
             try { infoStarted=connection.readCharacteristic(info); }
             catch (SecurityException ex) { notifyStatus("Bluetooth permission missing for CORE information read"); }
             if (!infoStarted) {
+                infoReadPending=false;
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
                 if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
                     ui.post(thisAutoAuth(connection));
@@ -1165,6 +1197,7 @@ final class BleDiscovery {
     // Both API-level GATT read callbacks must continue the same auth flow,
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
+        infoReadPending=false;
         if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
             notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
         else notifyStatus("BLE connected; information read failed: " + status);
@@ -1213,6 +1246,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void shutdown() {
         stopped = true;
+        autoReconnectLease++;infoReadPending=false;
         frameCapture.cancel();palette.reset();
         connected = false;
         connecting = false;
