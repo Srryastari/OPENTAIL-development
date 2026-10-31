@@ -116,4 +116,33 @@ public class NativePresetRestoreTest {
         assertEquals(before,project.exportJson());
         assertTrue(fxStore.values.isEmpty());
     }
+    @Test public void legacyPresetClearsOnlyLoadedEffectStaleKeys() throws Exception {
+        MemoryStore projectStore=new MemoryStore(),fxStore=new MemoryStore();
+        NativeProject project=new NativeProject(projectStore.prefs);
+        JSONObject legacy=preset(project,9);
+        legacy.remove("effectEditorSettings");
+        fxStore.values.put("wled.9.speed",200);
+        fxStore.values.put("wled.9.palette",15);
+        fxStore.values.put("wled.8.speed",55);
+        assertTrue(NativePresetRestore.load(project,fxStore.prefs,legacy));
+        assertFalse(fxStore.prefs.contains("wled.9.speed"));
+        assertFalse(fxStore.prefs.contains("wled.9.palette"));
+        assertEquals(55,fxStore.prefs.getInt("wled.8.speed",0));
+        assertEquals(208,fxStore.prefs.getInt("brightness",0));
+    }
+
+    @Test public void failedScopedProjectLoadRollsBackDeletedKeys() throws Exception {
+        MemoryStore projectStore=new MemoryStore(),fxStore=new MemoryStore();
+        NativeProject project=new NativeProject(projectStore.prefs);
+        JSONObject legacy=preset(project,9);
+        legacy.remove("effectEditorSettings");
+        fxStore.values.put("wled.9.speed",200);
+        fxStore.values.put("effectId",1);
+        projectStore.fail=true;
+        assertFalse(NativePresetRestore.load(project,fxStore.prefs,legacy));
+        assertEquals(200,fxStore.prefs.getInt("wled.9.speed",0));
+        assertEquals(1,fxStore.prefs.getInt("effectId",0));
+        assertFalse(fxStore.prefs.contains("brightness"));
+    }
+
 }
