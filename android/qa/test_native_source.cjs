@@ -311,7 +311,7 @@ for(const required of ['approved-prototype.fragment.html SHA256 37DB62A26E1622A7
   assert(approved.includes(required),'Owner WLED+ design/interaction regression: '+required);
 }
 // Single approved WLED+ editor across three independent model stores.
-assert((compose.match(/ApprovedWledEffectsEditor\\(/g)||[]).length === 3 &&
+assert((compose.split('ApprovedWledEffectsEditor(').length - 1 === 3 &&
        modes.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
        triggers.includes('scopeKey = "triggers:"') &&
        events.includes('scopeKey="auto-event:"+key') &&
