@@ -5,7 +5,7 @@ void ot_fx_bank_reset(ot_fx_zone_bank_t *bank){
 }
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms){
     return slot&&slot->configured&&
-        (slot->standalone|| (uint32_t)(now_ms-slot->started_ms) <
+        (slot->standalone|| (uint32_t)(now_ms-slot->refreshed_ms) <
                                  (uint32_t)slot->request.ttl_sec*1000u);
 }
 bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
@@ -17,11 +17,22 @@ bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
         if(!(request->chain_mask&(1u<<output)))continue;
         for(unsigned z=0;z<OT_OM_ZONES;z++){
             if(!(request->zone_mask&(1u<<z)))continue;
+            ot_fx_zone_slot_t *slot=&bank->zones[output][z];
+            /* Editing a running effect is not replacement: preserve source
+             * state, phase, spark/flare overlays and zone generation. Renew
+             * the bounded preview TTL independently of animation time. */
+            if(ot_fx_slot_active(slot,now_ms) &&
+               slot->request.effect_id==request->effect_id){
+                slot->request=*request;
+                slot->standalone=standalone;
+                slot->refreshed_ms=now_ms;
+                continue;
+            }
             uint32_t gen=++bank->next_generation;
             if(gen==0)gen=++bank->next_generation;
-            bank->zones[output][z]=(ot_fx_zone_slot_t){
+            *slot=(ot_fx_zone_slot_t){
               .configured=true,.standalone=standalone,.request=*request,
-              .started_ms=now_ms,.generation=gen
+              .started_ms=now_ms,.refreshed_ms=now_ms,.generation=gen
             };
         }
     }
