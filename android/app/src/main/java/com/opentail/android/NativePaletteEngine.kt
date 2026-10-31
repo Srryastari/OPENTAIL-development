@@ -22,7 +22,8 @@ internal object NativePaletteEngine {
     )
 
     fun lookup(project: JSONObject, requested: Int, foreground: Int? = null,
-               background: Int? = null, verifiedCustomStops: String? = null): NativePalette {
+               background: Int? = null, verifiedCustomStops: String? = null,
+               accent: Int? = null): NativePalette {
         val id = requested.coerceIn(0, MAX_ID)
         val optionalNames = project.optJSONArray("paletteNames")
         val suppliedName = optionalNames?.optString(id)?.trim().orEmpty()
@@ -33,6 +34,25 @@ internal object NativePaletteEngine {
         if (id in 73..200 && verifiedCustomStops != null) {
             parseVerifiedCustom(verifiedCustomStops)?.let { return NativePalette(id, name, it) }
         }
+        // Built-in palettes have immutable, source-authentic gradients.
+        // Do not let a saved project preview or Main/Set Color recolor them.
+        // IDs 2..5 are explicitly defined in terms of user color slots.
+        val fixedPalette = id == 0 || id in 2..72
+        val colorsAvailable = id == 0 || id >= 6 ||
+            (foreground != null && (id == 2 || background != null))
+        if (fixedPalette && colorsAvailable) {
+            val fixed = runCatching {
+                OfflineCoreRenderer.fixedPalette(id,
+                    foreground ?: -1, background ?: 0xff000000.toInt(),
+                    accent ?: 0xff000000.toInt())
+            }.getOrNull()
+            if (fixed != null && fixed.size == 16)
+                return NativePalette(id, name, fixed.mapIndexed { index, rgb ->
+                    (index.toFloat() / 15f) to Color(rgb)
+                })
+        }
+        // A bundled/local JVM test may have no Android native library;
+        // retain the previously verified color-slot fallbacks there.
         val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
             ?: return NativePalette(id, name, coreFixedStops(id, foreground, background))
         if (raw.length() !in 1..64) return NativePalette(id, name, null)

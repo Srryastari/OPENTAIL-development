@@ -16,6 +16,10 @@ final class OfflineCoreRenderer implements AutoCloseable {
             palette,foreground,background,custom,peakHz,magnitude,audioPresent,out);
     }
     @Override public synchronized void close(){if(handle!=0){destroy(handle);handle=0;}}
+    /** Authoritative fixed WLED palette colors for editor swatches.
+     * Null for dynamic/custom/unsupported palette IDs; no invented gradients.
+     * Uses the same immutable native source as the offline FX renderer. */
+    static native int[] fixedPalette(int id,int foreground,int background,int accent);
     private static native long create(int effect,int pixels);
     private static native void destroy(long handle);
     private static native boolean frame(long handle,long ms,int frameMs,int speed,

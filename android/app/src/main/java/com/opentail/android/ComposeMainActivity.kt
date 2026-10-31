@@ -1097,7 +1097,10 @@ class ComposeMainActivity : ComponentActivity() {
                         NativePaletteEngine.lookup(project.raw(), id,
                             if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
                             if (prefs.contains("background")) prefs.getInt("background",0) else null,
-                            verified)
+                            verified,
+                            if (prefs.contains("wled.${chosen}.color2"))
+                                prefs.getInt("wled.${chosen}.color2",0)
+                            else if (prefs.contains("accent")) prefs.getInt("accent",0) else null)
                     },
                     onSelected = { id ->
                         if(id == null) {
