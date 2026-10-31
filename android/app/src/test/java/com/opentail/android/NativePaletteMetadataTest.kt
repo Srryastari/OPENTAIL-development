@@ -84,4 +84,18 @@ class NativePaletteMetadataTest {
         assertNull(NativePaletteEngine.lookup(project, 199).stops)
     }
 
+    @Test fun opaqueArgbAsSignedIntIsARealColorNotMissingMetadata() {
+        val project=JSONObject()
+        val white=NativePaletteEngine.lookup(project,2,0xffffffff.toInt(),0xff000000.toInt())
+        assertEquals(2,white.stops!!.size)
+        assertEquals(1f,white.stops!![0].second.red,0.000001f)
+        val redBlue=NativePaletteEngine.lookup(project,4,
+            0xffee0000.toInt(),0xff0000ee.toInt())
+        assertEquals(2,redBlue.stops!!.size)
+        assertEquals(0xee/255f,redBlue.stops!![0].second.red,0.000001f)
+        assertEquals(0xee/255f,redBlue.stops!![1].second.blue,0.000001f)
+        assertNull(NativePaletteEngine.lookup(project,2).stops)
+        assertNull(NativePaletteEngine.lookup(project,4,0xffffffff.toInt()).stops)
+    }
+
 }
