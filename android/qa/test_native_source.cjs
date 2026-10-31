@@ -10,6 +10,7 @@ const path=require('node:path');
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
 const palettes=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
+const approved=fs.readFileSync('android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
@@ -207,7 +208,8 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('firmwareVersion.value ?: "Unavailable"') &&
        compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
-       compose.includes('NativeEffectCatalog.generalEffects().filter {') &&
+       compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
+       approved.includes('it.name.contains(effectSearch.trim(),true)') &&
        compose.includes('NativeEffectCatalog.generalEffects().forEach { effect ->'),
        'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
 // Owner Test 86: never truncate the transition picker to the first fifteen,
@@ -292,9 +294,19 @@ assert(model.includes('.put("zones", new JSONArray())') &&
        'Universal trigger defaults must remain unassigned and undeletable');
 assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not write NVS');
 for(const required of ['EffectsPreview(t, effect)', 'listOf("Effects", "Presets", "Sequences")',
-  'PaletteEditor("Color"', 'PaletteEditor("Background"',
-  'previewCurrentEffect(item.id)', 'NativeEffectParameters.forId(effect)']) {
-  assert(modes.includes(required),'Compose effects regression: '+required);
+  'ApprovedWledEffectsEditor(', 'effectOptions = NativeEffectCatalog.generalEffects()',
+  'onSelected = { id ->', 'onColor = { id,slot,rgb ->',
+  'onPalette = { id,selected ->', 'onLiveToggle = {',
+  'if(liveArmed.value) previewCurrentEffect(id)']) {
+  assert(modes.includes(required),'Approved Effects binding regression: '+required);
+}
+for(const required of ['approved-prototype.fragment.html SHA256 37DB62A26E1622A7058B503EEB3A10B731C327269FB755E6289802AACE273D9D',
+  'selectedId: Int?', 'if(picked)null else item.id',
+  'Dialog(onDismissRequest=onClose,',
+  'dismissOnBackPress=true', 'ColorWheel(', 'role=r.slot',
+  'Modifier.fillMaxWidth().height(4.dp)', 'onParam(currentId,key,value)',
+  'onColor(currentId,slot,rgb)', 'onPalette(currentId,id)']) {
+  assert(approved.includes(required),'Owner WLED+ design/interaction regression: '+required);
 }
 assert(events.includes('listOf("Startup", "Shutdown")') &&
        events.includes('eventUiEnabled') &&
@@ -765,7 +777,7 @@ assert(compose.includes('if(project.assignMany(selections,zoneId,!checked)) refr
 // gradient preview or unadvertised CORE palette commands are allowed.
 for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.lookup(project.raw(),',
   'Field(search, "Search palette name or ID"', 'PaletteSwatch(chosen, t)',
-  'PalettePicker("Palette",paletteId,t)', 'putInt("paletteId",it)',
+  'ApprovedWledEffectsEditor(', 'putInt("paletteId",selected)',
   'PalettePicker("Shared sequence palette"', 'project.updateSequenceOption("sharedPaletteId", id)',
   'PalettePicker("Step " + (i + 1) + " palette"',
   'settings.put("pal", id)', '.put("settings", JSONObject()',
