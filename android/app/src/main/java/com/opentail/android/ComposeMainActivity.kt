@@ -810,9 +810,30 @@ class ComposeMainActivity : ComponentActivity() {
         // display density. Never substitute design colors for CORE telemetry.
         val connection = bleMessage.value
         val localRevision = revision.intValue
-        val frame = coreFrame.value ?: if(offlinePreview.value)
-            remember(localRevision) { runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull() }
-            else null
+        // Separate honest CORE telemetry from the saved design / read-only
+        // CORE output profile. A fresh installation has an empty local project;
+        // an idle renderer is black even when all hardware zones are configured.
+        // The approved 30 capsules must not silently become colorless in either
+        // case. Static configured roles are NOT presented as live FX frames.
+        val projectPaint = remember(localRevision) {
+            runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
+        }
+        val actualFrame = coreFrame.value
+        val hasLiveColors = actualFrame != null &&
+            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 }
+        val hasProjectColors = projectPaint != null &&
+            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 }
+        val frame = when {
+            offlinePreview.value -> projectPaint
+            hasLiveColors -> actualFrame
+            hasProjectColors -> projectPaint
+            else -> null
+        }
+        val readback = outputs[captureOutput.intValue]
+        val configuredZones = readback?.optJSONArray("zones")
+        val configuredPixels = readback?.optInt("pixels",0)?.coerceAtLeast(0) ?: 0
+        val useConfiguredColors = frame == null && configuredPixels > 0 &&
+            configuredZones != null && configuredZones.length() > 0
         LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
             // Frame-paced admission (~60 Hz), NOT a fixed 500ms fetch timer.
             // A full CORE RGB888 snapshot can require many serialized BLE ATT
@@ -839,8 +860,24 @@ class ComposeMainActivity : ComponentActivity() {
                 for (col in 0 until columns) {
                     val sample = if (frame != null && frame.size() > 0)
                         col * (frame.size() - 1) / (columns - 1) else -1
+                    // Physical output configuration is a *static authoring*
+                    // preview, never invented LED telemetry or renderer RGB.
+                    val configuredSample = if (useConfiguredColors)
+                        col * (configuredPixels - 1) / (columns - 1) else -1
+                    var configuredColor = t.raised
+                    if (configuredSample >= 0 && configuredZones != null) {
+                        var cursor = 0
+                        for (i in 0 until configuredZones.length()) {
+                            val zone = configuredZones.optJSONObject(i) ?: continue
+                            cursor += zone.optInt("pixels",0).coerceAtLeast(0)
+                            if (configuredSample < cursor) {
+                                configuredColor = rolePixelColor(zone.optString("role","off"))
+                                break
+                            }
+                        }
+                    }
                     val color = if (sample >= 0) Color(frame!!.colorAt(sample))
-                        else t.raised
+                        else configuredColor
                     drawRoundRect(color,
                         topLeft = Offset(col * pitch, 0f),
                         size = androidx.compose.ui.geometry.Size(capsuleWidth, capsuleHeight),
@@ -848,8 +885,12 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                Text(if(frame==null) "Awaiting CORE frame" else NativeEffectCatalog.byId(effect).name,
-                    Modifier.weight(1f),color=t.muted,fontSize=14.sp)
+                Text(when {
+                    hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
+                    useConfiguredColors -> "Configured zone colors"
+                    hasProjectColors -> "Project pixel colors"
+                    else -> "Awaiting CORE frame"
+                }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
                 Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
                     .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
                 Box(Modifier.size(24.dp).semantics { contentDescription=if(previewPaused.value) "Resume LED preview" else "Pause LED preview" }
@@ -2086,6 +2127,28 @@ class ComposeMainActivity : ComponentActivity() {
                 adjustOutput(newCount.coerceAtLeast(1))
                 outputCountText = newCount.coerceAtLeast(1).toString()
             }
+            // Restore the approved pixel +/- controls beside the draft
+            // slider. These change only RAM; Save still requires confirmation.
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(46.dp).clickable {
+                    val n=(pixelCount-1).coerceAtLeast(1)
+                    adjustOutput(n);outputCountText=n.toString()
+                },contentAlignment=Alignment.Center) {
+                    Pill("−",t) {
+                        val n=(pixelCount-1).coerceAtLeast(1)
+                        adjustOutput(n);outputCountText=n.toString()
+                    }
+                }
+                Box(Modifier.size(46.dp).clickable {
+                    val n=(pixelCount+1).coerceAtMost(outputLimit)
+                    adjustOutput(n);outputCountText=n.toString()
+                },contentAlignment=Alignment.Center) {
+                    Pill("+",t) {
+                        val n=(pixelCount+1).coerceAtMost(outputLimit)
+                        adjustOutput(n);outputCountText=n.toString()
+                    }
+                }
+            }
             Caption("Color order · set this for the actual connected LED strips", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2124,6 +2187,34 @@ class ComposeMainActivity : ComponentActivity() {
                     adjustZone(i, n)
                     zoneCountText = n.toString()
                     outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
+                }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(46.dp).clickable {
+                        val n=(count-1).coerceAtLeast(0)
+                        adjustZone(i,n)
+                        zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    },contentAlignment=Alignment.Center) {
+                        Pill("−",t) {
+                            val n=(count-1).coerceAtLeast(0)
+                            adjustZone(i,n)
+                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                        }
+                    }
+                    Box(Modifier.size(46.dp).clickable {
+                        val n=(count+1).coerceAtMost(outputLimit)
+                        adjustZone(i,n)
+                        zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    },contentAlignment=Alignment.Center) {
+                        Pill("+",t) {
+                            val n=(count+1).coerceAtMost(outputLimit)
+                            adjustZone(i,n)
+                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
+                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                        }
+                    }
                 }
                 // Bidirectional association: choose a design zone here, or
                 // choose its physical output/section from the expanded design card.
