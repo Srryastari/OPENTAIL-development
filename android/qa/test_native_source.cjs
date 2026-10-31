@@ -212,8 +212,6 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
 // Owner Test 86: never truncate the transition picker to the first fifteen,
 // or leak Auto Event previews into general Show Modes effect selection.
-const catalog=fs.readFileSync(
-  'android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const autoEvents=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
   ?.split('private fun CorePaletteTransferPanel(')[0];
 const generalEffects=compose.split('private fun ShowModesPage(t: Tone) {')[1]
