@@ -415,12 +415,15 @@ private fun EditorSheet(title:String,onClose:()->Unit,content:@Composable Column
 @Composable
 private fun ColorWheel(modifier:Modifier,rgb:Int,onPick:(Float,Float)->Unit){
     val hsv=remember(rgb){FloatArray(3).also{android.graphics.Color.colorToHSV(rgb,it)}}
+    // Pointer-input lambdas are long-lived: always call the CURRENT color
+    // callback so brightness changes and role switches are not reverted.
+    val currentOnPick by rememberUpdatedState(onPick)
     fun touch(pos:Offset,w:Float,h:Float){
         val dx=pos.x-w/2f
         val dy=pos.y-h/2f
         val hue=((atan2(dy,dx)*180.0/PI+360)%360).toFloat()
         val sat=(hypot(dx,dy)/(minOf(w,h)/2f)).coerceIn(0f,1f)
-        onPick(hue,sat)
+        currentOnPick(hue,sat)
     }
     var dimensions by remember { mutableStateOf(Offset(170f,170f)) }
     Canvas(modifier.aspectRatio(1f).clip(RoundedCornerShape(13.dp))
@@ -433,8 +436,8 @@ private fun ColorWheel(modifier:Modifier,rgb:Int,onPick:(Float,Float)->Unit){
         val radius=minOf(size.width,size.height)/2f
         val center=Offset(size.width/2f,size.height/2f)
         drawCircle(brush=Brush.sweepGradient(
-            listOf(Color.Red,Color.Magenta,Color.Blue,Color.Cyan,
-                Color.Green,Color.Yellow,Color.Red)),radius=radius,center=center)
+            listOf(Color.Red,Color.Yellow,Color.Green,Color.Cyan,
+                Color.Blue,Color.Magenta,Color.Red)),radius=radius,center=center)
         drawCircle(brush=Brush.radialGradient(
             listOf(Color.White,Color.White.copy(alpha=.75f),Color.Transparent),
             center=center,radius=radius),radius=radius,center=center)
