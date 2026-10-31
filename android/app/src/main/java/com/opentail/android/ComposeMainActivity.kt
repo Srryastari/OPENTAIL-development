@@ -814,9 +814,16 @@ class ComposeMainActivity : ComponentActivity() {
             remember(localRevision) { runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull() }
             else null
         LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
+            // Frame-paced admission (~60 Hz), NOT a fixed 500ms fetch timer.
+            // A full CORE RGB888 snapshot can require many serialized BLE ATT
+            // exchanges. captureFrame() silently declines while busy, so the
+            // next request starts as soon as GATT is free without overlapping
+            // config reads, owner auth, pending STOP or other commands.
+            // The LED capsules always use verified CORE frames, never guessed
+            // intermediate pixels. Actual update rate is BLE-throughput bound.
             while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
                 capturePreviewFrame()
-                delay(500)
+                delay(16L)
             }
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
