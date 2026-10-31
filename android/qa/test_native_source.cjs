@@ -226,8 +226,13 @@ assert(catalog.includes('static List<Effect> generalEffects()') &&
        catalog.includes('choices.sort(Comparator.comparing((Effect e) -> !autoEventOnly(e.id))') &&
        catalog.includes('id==32769 || id==32770 || id==32771 || id==32773') &&
        catalog.includes('id==32787') &&
+       catalog.includes('static List<Effect> autoEventChoices(String event)') &&
+       catalog.includes('startupTransition(effect.id)') &&
+       catalog.includes('shutdownTransition(effect.id)') &&
+       catalog.includes('id==32769 || id==32770 || id==32771') &&
+       catalog.includes('id==32773 || id==32787') &&
        generalEffects.includes('NativeEffectCatalog.generalEffects()') &&
-       autoEvents.includes('NativeEffectCatalog.autoEventChoices()') &&
+       autoEvents.includes('NativeEffectCatalog.autoEventChoices(key)') &&
        !autoEvents.includes('.take(15)') &&
        autoEvents.includes('previewEffect(selected.id)') &&
        autoEvents.includes('EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=') &&
