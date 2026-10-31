@@ -337,4 +337,120 @@ public class NativeProjectCommitTest {
         assertEquals(committed, project.exportJson());
     }
 
+    /** End-to-end offline Layout workflow, including persisted inserted zone IDs. */
+    @Test public void offlineLayoutAddResizeReorderMapAndRemoveSurvivesReopen() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertEquals(0, project.zoneCount());
+        assertTrue(project.addZoneAt("Left", 8, 0));
+        assertTrue(project.addZoneAt("Right", 5, 1));
+        String left = project.zone(0).getString("id");
+        String right = project.zone(1).getString("id");
+        assertTrue(project.addZoneAt("Middle", 3, 1));
+        String middle = project.zone(1).getString("id");
+        assertEquals(right, project.zone(2).getString("id"));
+        assertEquals(8, project.zone(1).getInt("start"));
+        assertTrue(project.editZone(middle, "Turn", 7, true));
+        assertTrue(project.zone(1).getBoolean("reverse"));
+        assertEquals(15, project.zone(2).getInt("start"));
+        assertTrue(project.moveZone(2, 0));
+        assertEquals(right, project.zone(0).getString("id"));
+        assertEquals(0, project.zone(0).getInt("start"));
+        assertEquals(5, project.zone(1).getInt("start"));
+        assertEquals(13, project.zone(2).getInt("start"));
+        assertTrue(project.mapZoneToOutputSlot(middle, 0, 1));
+        assertTrue(project.mapZoneToOutputSlot(left, 1, 2));
+        assertTrue(project.assignMany(new HashSet<>(Arrays.asList("Brake", "Left Turn")), middle, true));
+        NativeProject reopened = new NativeProject(storage.prefs);
+        assertEquals(3, reopened.zoneCount());
+        assertEquals(middle, reopened.zone(2).getString("id"));
+        assertEquals(0, reopened.zone(2).getInt("physicalOutput"));
+        assertEquals(1, reopened.zone(2).getInt("physicalSection"));
+        assertEquals(1, reopened.zone(1).getInt("physicalOutput"));
+        assertEquals(2, reopened.trigger("Brake").getJSONArray("zones").length() + reopened.trigger("Left Turn").getJSONArray("zones").length());
+        assertTrue(reopened.removeZone(middle));
+        assertEquals(2, reopened.zoneCount());
+        assertEquals(0, reopened.trigger("Brake").getJSONArray("zones").length());
+        assertEquals(0, reopened.trigger("Left Turn").getJSONArray("zones").length());
+        assertEquals(5, reopened.zone(1).getInt("start"));
+        assertEquals(2, new NativeProject(storage.prefs).zoneCount());
+    }
+
+    /** Multi-select trigger edits are local-only durable transactions, never GATT writes. */
+    @Test public void offlineTriggerMultiselectCustomProfileAndAtomicStorage() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.addZoneAt("Tail", 32, 0));
+        String zone = project.zone(0).getString("id");
+        assertTrue(project.customTrigger("Aux Lights"));
+        Set<String> multi = new HashSet<>(Arrays.asList("Brake", "Aux Lights"));
+        assertTrue(project.assignMany(multi, zone, true));
+        assertTrue(project.editTriggerStyle(multi, "Wipe", null));
+        assertTrue(project.editTriggerStyle(multi, null, "#112233"));
+        NativeProject reopened = new NativeProject(storage.prefs);
+        for (String name : multi) {
+            assertEquals("Wipe", reopened.trigger(name).getString("pattern"));
+            assertEquals("#112233", reopened.trigger(name).getString("color"));
+            assertEquals(zone, reopened.trigger(name).getJSONArray("zones").getString(0));
+        }
+        String before = reopened.exportJson();
+        storage.fail = true;
+        assertFalse(reopened.assignMany(multi, zone, false));
+        assertFalse(reopened.editTriggerStyle(multi, "Blink", null));
+        assertEquals(before, reopened.exportJson());
+        assertEquals(before, new NativeProject(storage.prefs).exportJson());
+    }
+
+    @Test public void triggerLiveParametersPersistImmediatelyAndRollbackAtomically() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        Set<String> both = new HashSet<>(Arrays.asList("Brake", "Right Turn"));
+        assertTrue(project.editTriggerParameter(both,"brightness",91));
+        assertTrue(project.editTriggerParameter(both,"speed",201));
+        assertTrue(project.editTriggerParameter(both,"intensity",147));
+        for(String name:both){
+            assertEquals(91,project.trigger(name).getInt("brightness"));
+            assertEquals(201,project.trigger(name).getInt("speed"));
+            assertEquals(147,project.trigger(name).getInt("intensity"));
+        }
+        assertFalse(project.editTriggerParameter(both,"brightness",101));
+        assertFalse(project.editTriggerParameter(both,"speed",256));
+        assertFalse(project.editTriggerParameter(both,"notAField",60));
+        assertFalse(project.editTriggerParameter(new HashSet<>(Arrays.asList("Brake","Bad")), "speed",50));
+        NativeProject reopened=new NativeProject(storage.prefs);
+        assertEquals(201,reopened.trigger("Brake").getInt("speed"));
+        assertEquals(147,reopened.trigger("Right Turn").getInt("intensity"));
+        String committed=reopened.exportJson();
+        storage.fail=true;
+        assertFalse(reopened.editTriggerParameter(both,"speed",18));
+        assertEquals(committed,reopened.exportJson());
+        assertEquals(committed,new NativeProject(storage.prefs).exportJson());
+    }
+
+    @Test public void offlineEventFadeAndDurationPersistAcrossReopen() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.setAutoEvent("Startup","eventUiEnabled",true));
+        assertTrue(project.setAutoEvent("Startup","eventUiFadeMs",2300));
+        assertTrue(project.setAutoEvent("Startup","eventDuration",3.3));
+        assertTrue(project.setAutoEvent("Shutdown","eventUiFadeMs",500));
+        NativeProject reopened=new NativeProject(storage.prefs);
+        assertTrue(reopened.trigger("Startup").getBoolean("eventUiEnabled"));
+        assertEquals(2300,reopened.trigger("Startup").getInt("eventUiFadeMs"));
+        assertEquals(3.3,reopened.trigger("Startup").getDouble("eventDuration"),0.0001);
+        assertEquals(500,reopened.trigger("Shutdown").getInt("eventUiFadeMs"));
+    }
+
+    @Test public void presetRenameCommitsImmediatelyAndReopenSeesSameText() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        org.json.JSONArray first = new org.json.JSONArray().put(new JSONObject().put("name","Old"));
+        assertTrue(project.setPresets(first));
+        org.json.JSONArray rename=new org.json.JSONArray(project.presets().toString());
+        rename.getJSONObject(0).put("name","New preset");
+        assertTrue(project.setPresets(rename));
+        assertEquals("New preset",project.presets().getJSONObject(0).getString("name"));
+        assertEquals("New preset",new NativeProject(storage.prefs).presets().getJSONObject(0).getString("name"));
+    }
+
 }

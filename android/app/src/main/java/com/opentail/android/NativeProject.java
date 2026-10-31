@@ -529,6 +529,25 @@ final class NativeProject {
         } catch (JSONException ex) { return false; }
     }
 
+    /**
+     * Persist one numeric field across a multi-selected trigger group.
+     * Pure v4 authoring: never sends BLE traffic or changes physical safety.
+     */
+    synchronized boolean editTriggerParameter(Set<String> triggers,String field,int value) {
+        if(triggers==null||triggers.isEmpty()||
+           !("speed".equals(field)||"intensity".equals(field)||"brightness".equals(field))||
+           value<0||value>("brightness".equals(field)?100:255))return false;
+        for(String name:triggers)
+            if(name==null||profiles().optJSONObject(name)==null)return false;
+        try{
+            JSONObject draft=new JSONObject(data.toString());
+            JSONObject all=draft.getJSONObject("profiles");
+            for(String name:triggers)all.getJSONObject(name).put(field,value);
+            data=draft;
+            return save();
+        }catch(JSONException ex){return false;}
+    }
+
     /** Startup/shutdown authoring only; physical ignition is CORE-owned. */
     synchronized boolean setAutoEvent(String event, String key, Object value) {
         if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;

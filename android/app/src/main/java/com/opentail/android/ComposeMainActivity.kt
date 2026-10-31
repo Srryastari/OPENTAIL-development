@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
+import java.math.BigDecimal
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -249,6 +250,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPreferredListener { address ->
+            runOnUiThread { prefs.edit().putString("preferred_ble_address", address).apply() }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -301,6 +305,11 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         foregroundActivity.value = true
+        if (!ble.isConnected()) {
+            prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
+        } else if (!ble.canControl()) {
+            ble.authorizeOrPair()
+        }
     }
     override fun onStop() {
         foregroundActivity.value = false
@@ -528,10 +537,22 @@ class ComposeMainActivity : ComponentActivity() {
     private fun CapsuleSlider(value: Int, min: Int, max: Int, t: Tone,
                               change: (Int) -> Unit, finished: (() -> Unit)? = null) {
         val upper = max.coerceAtLeast(min + 1)
+        val committed = value.coerceIn(min, upper).toFloat()
+        // Keep the thumb responsive during every gesture, even while an
+        // immediate SharedPreferences commit and JSON snapshot are in flight.
+        var dragging by remember { mutableStateOf(false) }
+        var dragValue by remember { mutableFloatStateOf(committed) }
+        LaunchedEffect(committed, dragging) {
+            if (!dragging) dragValue = committed
+        }
         Slider(
-            value = value.coerceIn(min, upper).toFloat(),
-            onValueChange = { change(it.toInt().coerceIn(min, upper)) },
-            onValueChangeFinished = finished,
+            value = if (dragging) dragValue else committed,
+            onValueChange = {
+                dragging = true
+                dragValue = it.coerceIn(min.toFloat(), upper.toFloat())
+                change(dragValue.toInt().coerceIn(min, upper))
+            },
+            onValueChangeFinished = { dragging = false; finished?.invoke() },
             valueRange = min.toFloat()..upper.toFloat(),
             colors = SliderDefaults.colors(
                 thumbColor = t.accent, activeTrackColor = t.accent,
@@ -598,7 +619,17 @@ class ComposeMainActivity : ComponentActivity() {
     private fun PalettePicker(label: String, value: Int, t: Tone, onSelect: (Int) -> Unit) {
         var browsing by rememberSaveable(label) { mutableStateOf(false) }
         var search by rememberSaveable(label) { mutableStateOf("") }
-        val chosen = NativePaletteEngine.lookup(project.raw(), value)
+        fun sourcePalette(id: Int): NativePalette {
+            val authoritative = if (paletteLoadedPresent.value &&
+                paletteLoadedSlot.intValue in 0..127 &&
+                id == 200 - paletteLoadedSlot.intValue &&
+                paletteLoadedRevision.longValue >= 0L) paletteLoadedStops.value else null
+            return NativePaletteEngine.lookup(project.raw(), id,
+                prefs.getInt("foreground", -1),
+                prefs.getInt("background", 0xff000000.toInt()),
+                authoritative)
+        }
+        val chosen = sourcePalette(value)
         Caption(label + " · " + chosen.name + " (#" + chosen.id + ")", t)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -619,7 +650,7 @@ class ComposeMainActivity : ComponentActivity() {
             LazyColumn(Modifier.fillMaxWidth().height(228.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 items(matching, key = { it }) { id ->
-                    val palette = NativePaletteEngine.lookup(project.raw(), id)
+                    val palette = sourcePalette(id)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(palette.name + " · " + id, color = t.fg, fontSize = 13.sp,
@@ -955,7 +986,7 @@ class ComposeMainActivity : ComponentActivity() {
                 val effectivePalette = NativePaletteEngine.effectiveStepPalette(
                     storedPalette, opts.optBoolean("sharedPaletteEnabled", false),
                     opts.optInt("sharedPaletteId", 0))
-                Text(item.optString("fx") + " · " + item.optInt("ms", 1500) + " ms", color = t.fg)
+                Text(item.optString("fx") + " · " + formatDurationSeconds(item.optInt("ms", 1500)), color = t.fg)
                 Caption("Palette preference · " +
                     NativePaletteEngine.lookup(project.raw(), effectivePalette).name +
                     " (#" + effectivePalette + ") · applies to palette-compatible effects", t)
@@ -973,7 +1004,7 @@ class ComposeMainActivity : ComponentActivity() {
                     Pill("Edit time", t) {
                         editingPaletteStep = -1
                         editingStep = i
-                        editedDuration = item.optInt("ms", 1500).toString()
+                        editedDuration = BigDecimal.valueOf(item.optInt("ms", 1500).toLong(), 3).stripTrailingZeros().toPlainString()
                     }
                     Pill("Palette", t) {
                         editingStep = -1
@@ -1004,14 +1035,16 @@ class ComposeMainActivity : ComponentActivity() {
                 title = { Text("Edit sequence duration") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Caption("50–600,000 milliseconds. Editable before saving to the design.", t)
-                        Field(editedDuration, "Duration in milliseconds", t) {
-                            editedDuration = it.filter(Char::isDigit).take(6)
+                        Caption("0.05–600 seconds. Editable before saving to the design.", t)
+                        Field(editedDuration, "Duration in seconds", t) {
+                            editedDuration = it.filter { c -> c.isDigit() || c == '.' }.take(10)
                         }
                     }
                 },
                 confirmButton = { Pill("Save", t, true) {
-                    val ms = editedDuration.toIntOrNull()
+                    val ms = runCatching {
+                        BigDecimal(editedDuration).movePointRight(3).intValueExact()
+                    }.getOrNull()
                     if (ms != null && ms in 50..600000) {
                         val updated = sequenceList()
                         updated[editingStep].put("ms", ms)
@@ -1021,6 +1054,9 @@ class ComposeMainActivity : ComponentActivity() {
                 dismissButton = { Pill("Cancel", t) { editingStep = -1 } })
         }
     }
+    private fun formatDurationSeconds(ms: Int): String =
+        BigDecimal.valueOf(ms.toLong(), 3).stripTrailingZeros().toPlainString() + " seconds"
+
     private fun sequenceList(): MutableList<JSONObject> =
         (0 until project.sequence().length()).mapNotNull {
             project.sequence().optJSONObject(it)?.let { entry -> JSONObject(entry.toString()) }
@@ -1053,7 +1089,10 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun PresetsPage(t: Tone) {
-        val presets = project.presets()
+        // Plain JSONObject/JSONArray is not observable Compose state.
+        // Always consume the committed revision here, not only in the shell.
+        val modelRevision = revision.intValue
+        val presets = remember(modelRevision) { JSONArray(project.presets().toString()) }
         var pendingLoad by remember { mutableIntStateOf(-1) }
         var presetStatus by remember { mutableStateOf("") }
         var renamePreset by remember { mutableIntStateOf(-1) }
@@ -1145,6 +1184,8 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun LayoutPage(t: Tone) {
+        val modelRevision = revision.intValue
+        val zoneCount = remember(modelRevision) { project.zoneCount() }
         Title("Layout", t)
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
@@ -1167,7 +1208,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
-            for(i in 0 until project.zoneCount()) {
+            for(i in 0 until zoneCount) {
                 val z=project.zone(i) ?: continue
                 val id=z.optString("id")
                 val linkedOutput=z.optInt("physicalOutput",-1)
@@ -1238,8 +1279,16 @@ class ComposeMainActivity : ComponentActivity() {
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
-                            Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
+                            Box(Modifier.size(42.dp).clickable {
+                                count=(n-1).coerceAtLeast(1).toString();applyLiveZone()
+                            }, contentAlignment=Alignment.Center) {
+                                Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            }
+                            Box(Modifier.size(42.dp).clickable {
+                                count=(n+1).coerceAtMost(10000).toString();applyLiveZone()
+                            }, contentAlignment=Alignment.Center) {
+                                Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
+                            }
                             Spacer(Modifier.weight(1f))
                             Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
                                 verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -1251,7 +1300,11 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Pill("+ Add",t) { addZoneAfter(i) }
+                            Pill("+ Add",t) {
+                                val created = addZoneAfter(i)
+                                if (created != null) { editingId=created; layoutMessage="" }
+                                else layoutMessage="Could not add zone"
+                            }
                             Pill("Remove",t) { deleteId=id }
                         }
                         // Prior exact-pixel authoring remains available in the deeper editor.
@@ -1275,7 +1328,11 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
             }
-            if(project.zoneCount()==0) Pill("+ Add",t) { addZoneAfter(-1) }
+            if(zoneCount==0) Pill("+ Add",t) {
+                val created=addZoneAfter(-1)
+                if (created!=null) { editingId=created; layoutMessage="" }
+                else layoutMessage="Could not add zone"
+            }
         }
         // Actual hardware output/section assignment belongs beside Layout.
         // Saving to CORE still requires an explicit authenticated confirmation.
@@ -1308,18 +1365,25 @@ class ComposeMainActivity : ComponentActivity() {
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
-    private fun addZoneAfter(index: Int) {
-        if (project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1))
-            refresh()
+    private fun addZoneAfter(index: Int): String? {
+        val position = index + 1
+        if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position))
+            return null
+        val id=project.zone(position)?.optString("id")?.takeIf { it.isNotEmpty() }
+        refresh()
+        return id
     }
     @Composable
     private fun TriggersPage(t: Tone) {
+        val modelRevision = revision.intValue
+        // Snapshots refresh after each committed edit, including while the
+        // existing multi-select editor stays open.
+        val profiles = remember(modelRevision) { JSONObject(project.profiles().toString()) }
         var selections by remember { mutableStateOf(setOf<String>()) }
         var editing by remember { mutableStateOf(false) }
         var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
         var triggerMessage by remember { mutableStateOf("") }
-        val profiles = project.profiles()
         val names = profiles.names()
         val keys = (0 until (names?.length() ?: 0))
             .mapNotNull { names?.optString(it) }
@@ -1338,7 +1402,7 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("+ Add",t) { adding=true }
         }
         keys.forEach { name ->
-            val profile = project.trigger(name)
+            val profile = profiles.optJSONObject(name) ?: project.trigger(name)
             val selected = name in selections
             val assigned = profile.optJSONArray("zones")?.length() ?: 0
             Row(Modifier.fillMaxWidth().heightIn(min=44.dp)
@@ -1391,7 +1455,7 @@ class ComposeMainActivity : ComponentActivity() {
             text = {
                 Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                    val first=selections.firstOrNull()?.let { project.trigger(it) }
+                    val first=selections.firstOrNull()?.let { profiles.optJSONObject(it) }
                     var editingFx by remember(selections) { mutableStateOf(first?.optString("pattern","Solid") ?: "Solid") }
                     var effectMenu by remember(selections) { mutableStateOf(false) }
                     val colorText=first?.optString("color","#ffffff") ?: "#ffffff"
@@ -1404,18 +1468,35 @@ class ComposeMainActivity : ComponentActivity() {
                             else triggerMessage="Could not save trigger effect"
                         }
                     }
-                    if(NativeEffectParameters.forId(NativeEffectCatalog.byName(editingFx).id)?.foreground==true)
+                    val styleCapabilities = NativeEffectParameters.forId(NativeEffectCatalog.byName(editingFx).id)
+                    if(styleCapabilities?.foreground==true)
                         PaletteEditor("Color",android.graphics.Color.parseColor(colorText),t) { color ->
                             val hex=String.format("#%06X",color and 0xffffff)
                             if(project.editTriggerStyle(selections,null,hex)) refresh()
                             else triggerMessage="Could not save trigger color"
                         }
+                    if (first != null) {
+                        ValueSlider("Brightness", first.optInt("brightness", 85), 100, t) { value ->
+                            if (project.editTriggerParameter(selections, "brightness", value)) refresh()
+                            else triggerMessage="Could not save trigger brightness"
+                        }
+                        if (styleCapabilities?.speed == true)
+                            ValueSlider("Speed", first.optInt("speed", 60), 255, t) { value ->
+                                if (project.editTriggerParameter(selections, "speed", value)) refresh()
+                                else triggerMessage="Could not save trigger speed"
+                            }
+                        if (styleCapabilities?.intensity == true)
+                            ValueSlider("Intensity", first.optInt("intensity", 60), 255, t) { value ->
+                                if (project.editTriggerParameter(selections, "intensity", value)) refresh()
+                                else triggerMessage="Could not save trigger intensity"
+                            }
+                    }
                     if(project.zoneCount()==0) Caption("Add zones in Layout first.",t)
                     for(i in 0 until project.zoneCount()) {
                         val zone=project.zone(i) ?: continue
                         val zoneId=zone.optString("id")
                         val checked=selections.all { name ->
-                            val assigned=project.trigger(name).optJSONArray("zones")
+                            val assigned=profiles.optJSONObject(name)?.optJSONArray("zones")
                             (0 until (assigned?.length() ?: 0))
                                 .any { assigned?.optString(it)==zoneId }
                         }
@@ -1480,6 +1561,10 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {
+        val modelRevision = revision.intValue
+        val eventProfiles = remember(modelRevision) {
+            listOf("Startup", "Shutdown").associateWith { JSONObject(project.trigger(it).toString()) }
+        }
         Title("Auto Events", t)
         EffectsPreview(t, selectedEffect.intValue)
         var eventEditing by remember { mutableStateOf<String?>(null) }
@@ -1495,11 +1580,14 @@ class ComposeMainActivity : ComponentActivity() {
             return saved
         }
         listOf("Startup", "Shutdown").forEach { key ->
-            val event = project.trigger(key)
+            val event = eventProfiles.getValue(key)
             Panel(t,minHeight=70.dp,fill=if(selectedEvent==key) (if(t.bg==Color.Black) Color(0xFF272727) else t.raised) else t.surface) {
                 val enabled = event.optBoolean("eventUiEnabled", false)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { selectedEvent=key }) {
+                    Column(Modifier.weight(1f).clickable {
+                        selectedEvent=key
+                        eventEditing=if(eventEditing==key) null else key
+                    }) {
                         Text(key, color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
@@ -1807,7 +1895,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {
                     foundDevices.clear()
-                    ble.scanHeadless()
+                    ble.connectFromApp(prefs.getString("preferred_ble_address", null))
                 }
                 Pill("Preview Offline", t) {
                     enterOfflinePreview()
