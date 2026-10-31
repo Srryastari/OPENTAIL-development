@@ -10,6 +10,7 @@ const path=require('node:path');
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
 const palettes=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
+const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePresetRestore.java','utf8');
 const approved=fs.readFileSync('android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
@@ -408,7 +409,6 @@ assert(stopTest.includes('pinnedCoreFixedColorPalettesUseActualForegroundAndBack
        stopTest.includes('onlyVerifiedCustomReadbackCanRenderDevicePalette'),
        'Source-verified gradient tests missing');
 
-const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePresetRestore.java','utf8');
 const offlineSketch=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineFxSketch.kt','utf8');
 assert(compose.includes('var backStack by remember') &&
        compose.includes('backStack = backStack + page') &&
