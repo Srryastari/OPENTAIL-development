@@ -125,7 +125,7 @@ int main(void){
   cfg.intensity=40u;
   assert(ot_effects_1d_render(&cfg,&st,1001u,frame,257u));
   assert(st.original_phase_q32==phase_after);
-  printf("golden continuous original %u: 0x%08x\n",(unsigned)id,(unsigned)hash);
+  fprintf(stderr,"golden continuous original %u: 0x%08x\n",(unsigned)id,(unsigned)hash);
   if(hash!=goldens[k])golden_mismatches++;
  }
  /* Seven deliberate one-shots stay clamped after their terminal frame.
