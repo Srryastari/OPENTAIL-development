@@ -1,0 +1,120 @@
+name: CORE Effects 80 integration exact-head (bench software only)
+on:
+  pull_request:
+    branches: [firmware/fix-nimble-read-blob-offset-20261031]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  renderer-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Verify unchanged approved Effects #80 CORE tree and release gate
+        run: python3 scripts/check_effects80_firmware_integration.py
+      - name: Validate no changed UI or unrelated source files
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          paths=subprocess.check_output(
+            ["git","diff","--name-only",
+             "7c0fcc450a7619a57603aabf833dea855a18bcd8","HEAD"],
+             text=True).splitlines()
+          assert not any(p.startswith(("android/","web-studio/","core-firmware/main/"))
+                         for p in paths), paths
+          print("PASS: renderer and approved UI untouched after Effects #80")
+          PY
+  core-host-regressions:
+    needs: renderer-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact integration SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: All 140 effects, proprietary loops, source goldens, STOP, NVS, BLE, triggers, outputs and backup software contracts
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Regression impact audit, not vehicle release proof
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+  android-renderer-source-contract:
+    needs: renderer-provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: 3f7d7dc0b3d3248bb5b04ec6a2eb4a425adb6e13
+          path: pinned-android
+          persist-credentials: false
+      - name: Verify all 13 immutable JNI renderer sources match approved Effects #80
+        run: python3 scripts/check_effects80_firmware_integration.py --android-root pinned-android
+      - name: Check 140 CORE effect metadata and Android protocol source contract
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
+      # Android's independent JNI 140-frame golden test in PR #79 is currently
+      # RED because its manifest pins old Effects #50 checksums. Firmware must
+      # not edit Android-owned files or claim complete offline-frame parity.
+  esp-idf-555:
+    needs: [core-host-regressions, android-renderer-source-contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact tested SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF 5.5.5 ESP32-S3 build (NO FLASH)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify bootloader, application, partition and flash manifest
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          b=Path("core-firmware/build")
+          for filename in ("opentail_core_alpha.bin",
+                           "bootloader/bootloader.bin",
+                           "partition_table/partition-table.bin",
+                           "flasher_args.json"):
+              assert (b/filename).is_file() and (b/filename).stat().st_size>0, filename
+          data=json.loads((b/"flasher_args.json").read_text())
+          assert len(data["flash_files"])>=3
+          assert all((b/p).is_file() for p in data["flash_files"].values())
+          print("PASS: exact-SHA bench image manifest, no hardware flashed")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-effects80-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+          if-no-files-found: error
+          retention-days: 14
+# This workflow is software only. Existing 22-check physical gate is unchanged.
