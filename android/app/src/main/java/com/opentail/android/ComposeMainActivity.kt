@@ -112,7 +112,7 @@ class ComposeMainActivity : ComponentActivity() {
     // A verified snapshot is valid only for the UI state and output at the
     // time its capture began. Old asynchronous GATT replies cannot resurrect
     // pixels after an edit, disconnect, or switch into offline preview.
-    private var frameRevision = 0L
+    private var frameRevision by mutableLongStateOf(0L)
     private var pendingFrameRevision = -1L
     private var pendingFrameOutput = -1
 
@@ -854,18 +854,32 @@ class ComposeMainActivity : ComponentActivity() {
     private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {
         // Reference dimensions are logical UI pixels (dp), independent of
         // display density. Never substitute design colors for CORE telemetry.
-        val connection = bleMessage.value
+        val connection = bleMessage.value.let { ble.canCaptureFrame() }
         val localRevision = revision.intValue
-        // Local sketches are explicitly distinct from CORE frames and run
-        // only inside the approved Show Modes preview, with zero BLE traffic.
+        // Read authoring parameters once per edit, never per LED/draw. The
+        // revision is independent of project geometry and the animation clock.
+        val settings = remember(effect, frameRevision) {
+            intArrayOf(prefs.getInt("foreground",0xffffffff.toInt()),
+                prefs.getInt("background",0xff000000.toInt()),
+                prefs.getInt("speed",128),prefs.getInt("intensity",128),
+                prefs.getInt("brightness",160),prefs.getInt("paletteId",0))
+        }
         val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
-            OfflineFxSketch.supports(effect)
-        var localTick by remember(effect) { mutableLongStateOf(0L) }
+            OfflineFxSketch.supports(effect,settings[5])
+        val renderer = remember(effect) { OfflineFxSketch() }
+        val localColors = remember { IntArray(30) }
+        // Observe time only in Canvas's draw phase: no per-frame composition
+        // or layout. Preserve phase across edits, pause/background and reconnect.
+        val localTimeNanos = remember(effect) { mutableLongStateOf(0L) }
         LaunchedEffect(localSketch, effect, foregroundActivity.value, previewPaused.value) {
-            if (!localSketch || !foregroundActivity.value || previewPaused.value) return@LaunchedEffect
+            if (!localSketch || effect == 0 || !foregroundActivity.value || previewPaused.value)
+                return@LaunchedEffect
+            var previous = -1L
             while (true) {
-                delay(33L)
-                localTick++
+                withFrameNanos { now ->
+                    if (previous >= 0L) localTimeNanos.longValue += now - previous
+                    previous = now
+                }
             }
         }
         // Separate honest CORE telemetry from the saved design / read-only
@@ -877,10 +891,10 @@ class ComposeMainActivity : ComponentActivity() {
             runCatching { ExactLedFrame.fromProjectModel(project) }.getOrNull()
         }
         val actualFrame = coreFrame.value
-        val hasLiveColors = actualFrame != null &&
-            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 }
-        val hasProjectColors = projectPaint != null &&
-            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 }
+        val hasLiveColors = remember(actualFrame) { actualFrame != null &&
+            (0 until actualFrame.size()).any { actualFrame.colorAt(it) and 0xffffff != 0 } }
+        val hasProjectColors = remember(projectPaint) { projectPaint != null &&
+            (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 } }
         val frame = when {
             offlinePreview.value && hasProjectColors -> projectPaint
             offlinePreview.value -> null
@@ -894,7 +908,7 @@ class ComposeMainActivity : ComponentActivity() {
         val useConfiguredColors = frame == null && configuredPixels > 0 &&
             configuredZones != null && configuredZones.length() > 0
         LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
-            // Frame-paced admission (~60 Hz), NOT a fixed 500ms fetch timer.
+            // Display-paced admission; capture completion remains BLE-bound.
             // A full CORE RGB888 snapshot can require many serialized BLE ATT
             // exchanges. captureFrame() silently declines while busy, so the
             // next request starts as soon as GATT is free without overlapping
@@ -903,7 +917,7 @@ class ComposeMainActivity : ComponentActivity() {
             // intermediate pixels. Actual update rate is BLE-throughput bound.
             while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
                 capturePreviewFrame()
-                delay(16L)
+                withFrameNanos { }
             }
         }
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
@@ -916,6 +930,9 @@ class ComposeMainActivity : ComponentActivity() {
                 val capsuleWidth=(size.width-gap*(columns-1))/columns
                 val pitch=capsuleWidth+gap
                 val capsuleHeight = 24.dp.toPx()
+                if (localSketch) renderer.render(effect,settings[5],
+                    localTimeNanos.longValue / 1_000_000L,settings[0],settings[1],
+                    settings[2],settings[3],settings[4],localColors)
                 for (col in 0 until columns) {
                     val sample = if (frame != null && frame.size() > 0)
                         col * (frame.size() - 1) / (columns - 1) else -1
@@ -936,10 +953,7 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                     val color = if (localSketch) {
-                        Color(OfflineFxSketch.colorAt(effect,col,columns,localTick,
-                            prefs.getInt("foreground",0xffffffff.toInt()),
-                            prefs.getInt("background",0xff000000.toInt()))
-                            ?: 0xff000000.toInt())
+                        Color(localColors[col])
                     } else if (sample >= 0) Color(frame!!.colorAt(sample))
                         else configuredColor
                     drawRoundRect(color,

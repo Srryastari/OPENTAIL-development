@@ -10,25 +10,34 @@ class OfflineFxSketchTest {
         for(id in listOf(0,1,3,9,12)) assertTrue(OfflineFxSketch.supports(id))
         for(id in listOf(-1,32769,23,120)) {
             assertFalse(OfflineFxSketch.supports(id))
-            assertNull(OfflineFxSketch.colorAt(id,0,30,10,red,black))
+            assertFalse(OfflineFxSketch().render(id,0,10,red,black,128,128,255,IntArray(30)))
         }
     }
-    @Test fun blinkAndWipeActuallyAnimateWithoutCORE() {
-        assertEquals(red,OfflineFxSketch.colorAt(1,5,30,0,red,black))
-        assertEquals(black,OfflineFxSketch.colorAt(1,5,30,16,red,black))
-        assertEquals(black,OfflineFxSketch.colorAt(3,12,30,0,red,black))
-        assertEquals(red,OfflineFxSketch.colorAt(3,12,30,24,red,black))
+    private fun color(id:Int,time:Long,brightness:Int=255):Int {
+        val colors=IntArray(30)
+        assertTrue(OfflineFxSketch().render(id,0,time,red,black,128,128,brightness,colors))
+        return colors[5]
+    }
+    @Test fun blinkUsesCoreDutyCycle() {
+        assertEquals(red,color(1,0))
+        assertEquals(black,color(1,2000))
     }
     @Test fun fadeFrameChangesAndNeverDropsOpaqueAlpha() {
-        val first=OfflineFxSketch.colorAt(12,5,30,0,red,black)!!
-        val second=OfflineFxSketch.colorAt(12,5,30,16,red,black)!!
+        val first=color(12,0)
+        val second=color(12,500)
         assertNotEquals(first,second)
         assertEquals(0xff,first ushr 24)
         assertEquals(0xff,second ushr 24)
     }
-    @Test fun indexesAreStrictAndNeverAliasRealCoreFrames() {
-        assertNull(OfflineFxSketch.colorAt(1,-1,30,0,red,black))
-        assertNull(OfflineFxSketch.colorAt(1,30,30,0,red,black))
-        assertNull(OfflineFxSketch.colorAt(1,0,0,0,red,black))
+    @Test fun buffersPalettesAndBrightnessAreStrict() {
+        val renderer=OfflineFxSketch()
+        assertFalse(renderer.render(1,0,0,red,black,128,128,255,IntArray(0)))
+        assertFalse(renderer.render(1,0,-1,red,black,128,128,255,IntArray(30)))
+        for(id in listOf(0,1,3,9,12)) {
+            assertFalse(OfflineFxSketch.supports(id,1))
+            assertFalse(OfflineFxSketch.supports(id,73))
+            assertEquals(black,color(id,500,0))
+        }
+        assertEquals(0xff180000.toInt(),color(0,0,24))
     }
 }

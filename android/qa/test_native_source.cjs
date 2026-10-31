@@ -82,7 +82,7 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('3 -> { // Triggers: lightning') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
-assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
+assert(bleSource.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        bleSource.includes('infoReadPending') && bleSource.includes('frameCapture.busy()') &&
         bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
         bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
@@ -156,7 +156,7 @@ const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: I
   ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
 const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
   ?.split('private final ArrayAdapter<String> entries;')[0];
-assert(captureLoop && captureLoop.includes('delay(16L)') &&
+assert(captureLoop && captureLoop.includes('withFrameNanos { }') &&
        !captureLoop.includes('delay(500)') &&
        captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
        captureStart &&
@@ -180,7 +180,7 @@ const previewSrc=compose.split('private fun EffectsPreview(t: Tone, effect: Int,
 const hardwareOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 assert(previewSrc &&
        previewSrc.includes('val actualFrame = coreFrame.value') &&
-       previewSrc.includes('val hasLiveColors = actualFrame != null') &&
+       previewSrc.includes('val hasLiveColors = remember(actualFrame)') &&
        previewSrc.includes('val readback = outputs[captureOutput.intValue]') &&
        previewSrc.includes('configuredZones.optJSONObject(i)') &&
        previewSrc.includes('rolePixelColor(zone.optString("role","off"))') &&
@@ -409,7 +409,7 @@ assert(stopTest.includes('pinnedCoreFixedColorPalettesUseActualForegroundAndBack
        stopTest.includes('onlyVerifiedCustomReadbackCanRenderDevicePalette'),
        'Source-verified gradient tests missing');
 
-const offlineSketch=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineFxSketch.kt','utf8');
+const offlineSketch=fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflineFxSketch.java','utf8');
 assert(compose.includes('var backStack by remember') &&
        compose.includes('backStack = backStack + page') &&
        compose.includes('backStack.lastOrNull() ?: 0') &&
@@ -429,9 +429,9 @@ assert(presetRestore.includes('if(!editor.commit())return false;') &&
          .includes('effectCommitFailureMustNotImportNewDesignOrChangeSelection'),
        'Preset project import must never precede an effect preference commit');
 assert(compose.includes('val localSketch = animateOffline') &&
-       compose.includes('OfflineFxSketch.colorAt(') &&
+       compose.includes('renderer.render(') &&
        compose.includes('Offline effect preview · local') &&
-       offlineSketch.includes('if (!supports(id) || pixels <= 0'),
+       offlineSketch.includes('if(!supports(id,palette)||destination==null'),
        'Local-only preview must animate known effects without fabricating CORE frames');
 
 // Codex PR #76 P2: ensure old wheel callbacks cannot overwrite new
@@ -505,7 +505,7 @@ assert(outputRead &&
        queuedReadPump.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        queuedReadPump.includes('beginOutputRead(index);') &&
        bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
-       bleSource.includes('CORE snapshot ATT timed out during output reload') &&
+       bleSource.includes('CORE snapshot ATT timed out; reconnect required') &&
        bleSource.includes('clearQueuedOutputRead();') &&
        bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
@@ -1000,3 +1000,17 @@ for(const exercise of ['capabilityNegotiationFailsClosed',
 }
 
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
+
+assert(captureLoop.includes('val localTimeNanos = remember(effect)') &&
+       captureLoop.includes('withFrameNanos { now ->') &&
+       !captureLoop.includes('delay(33L)') && !captureLoop.includes('localTick++'),
+       'Local animation must use display timestamps and preserve phase across edits');
+const drawPreview=previewSrc.split('Canvas(Modifier.fillMaxWidth().height(24.dp))')[1].split('Row(Modifier.fillMaxWidth()')[0];
+assert(!drawPreview.includes('prefs.getInt(') && drawPreview.includes('renderer.render('),
+       'Preview draw must use one frame-stable parameter snapshot');
+for(const call of ['this::authorizeStored','this::pairWithBoot','this::readTriggerMap',
+                  '()->saveTriggerMap(expectedRevision,requested)','()->saveOutput(index,json)',
+                  '()->fxPreset(action,slot)','()->authorize(tokenHex)'])
+    assert(bleSource.includes('deferBehindFrame('+call+')'),'Capture must yield for '+call);
+assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOperation();') &&
+       frameClient.includes('byte[] complete=pixels;'), 'Bound snapshot timers and hand off owned RGB');
