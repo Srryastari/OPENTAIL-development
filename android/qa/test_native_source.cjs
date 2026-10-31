@@ -431,6 +431,48 @@ assert(connectUi?.includes('ble.connectFromApp(prefs.getString("preferred_ble_ad
        !manifest.includes('android.permission.INTERNET'),
        'BLE Connect must reuse OS bonding, recover stale GATT and remain Wi-Fi-free');
 
+// A real BLE session can drop without the user leaving the app. A bounded
+// reconnect may use the saved GATT address, but must never unpair the device
+// or enter an unlimited scanning/retry loop.
+const retryCode=bleSource.split('private void scheduleReconnect(String address) {')[1]
+  ?.split('void setPreferredListener(')[0];
+assert(retryCode &&
+       retryCode.includes('autoReconnectBudget--;') &&
+       retryCode.includes('lease==autoReconnectLease') &&
+       retryCode.includes('!connected && !connecting && !scanning') &&
+       retryCode.includes('tryReconnect(address);') &&
+       bleSource.includes('scheduleReconnect(activeAddress);') &&
+       bleSource.includes('autoReconnectBudget=1;autoReconnectLease++;') &&
+       bleSource.includes('lastReconnectAttempt!=0L') &&
+       !/removeBond\\s*\\(/.test(bleSource),
+       'Unexpected disconnect and Bluetooth-toggle recovery must be bounded and preserve OS bonding');
+
+// CORE info is optional: a known secure owner should not wait behind an INFO
+// ATT read before the HMAC challenge, and a hung metadata read must time out.
+const authFirst=servicesBlock.indexOf('ui.post(thisAutoAuth(connection));');
+const optionalInfo=servicesBlock.indexOf('infoStarted=connection.readCharacteristic(info);');
+assert(authFirst>=0 && optionalInfo>authFirst &&
+       servicesBlock.includes('infoReadPending=true;') &&
+       servicesBlock.includes('infoReadPending=false;') &&
+       bleSource.includes('infoReadPending || challengePending || authPending') &&
+       bleSource.includes('private static final long OWNER_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       bleSource.includes('watchOwnerTransaction(gatt);') &&
+       bleSource.includes('(pairPending || challengePending || authPending)'),
+       'Stored HMAC key must authenticate first; BLE owner and metadata cannot stall indefinitely');
+
+// A successful connect must not make old CORE snapshots visible or allow an
+// explicit preset save to be silently coalesced away by continuous FX edits.
+const frameDelivery=bleSource.split('private final CoreFrameCapture frameCapture=')[1]
+  ?.split('void setFrameListener(')[0];
+const presetBlock=bleSource.split('void fxPreset(int action,int slot) {')[1]
+  ?.split('void stopShow()')[0];
+assert(frameDelivery?.includes('owner==gatt && canCaptureFrame()') &&
+       presetBlock?.includes('BLE busy; retry preset action') &&
+       bleSource.includes('private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       bleSource.includes('watchCommandTransaction(gatt);') &&
+       bleSource.includes('(writePending || readReplyPending)'),
+       'Stale frame callbacks, lost presets and missing GATT command acknowledgements must not silently succeed');
+
 // A retired scan's delayed timeout must not cancel a new scan. A queued
 // scan result must never reopen GATT after scan stop or Activity shutdown.
 assert(bleSource.includes('private volatile int scanGeneration=0;') &&
