@@ -8,9 +8,9 @@ def section(start: str, end: str) -> str:
     assert src.count(start) == 1, f"Missing/duplicate marker: {start}"
     return src.split(start, 1)[1].split(end, 1)[0]
 
-reset = section("static void on_reset(int reason){", "static void on_sync(void){")
-sync = section("static void on_sync(void){", "static void host_task(")
-gap = section("static int gap_event(struct ble_gap_event *ev,void *arg){", "static void on_reset(int reason){")
+reset = section("static void on_reset(int reason){", "static void host_task(")
+sync = section("static void on_sync(void){", "static void on_reset(int reason){")
+gap = section("static int gap_event(struct ble_gap_event *ev,void *arg){", "static void on_sync(void){")
 advertise = section("static void advertise(void){", "static int gap_event(struct ble_gap_event *ev,void *arg){")
 init = src.split("bool ot_ble_start(void){", 1)[1].split("#else", 1)[0]
 
