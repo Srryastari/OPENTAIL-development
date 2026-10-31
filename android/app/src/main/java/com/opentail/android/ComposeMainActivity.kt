@@ -1402,7 +1402,7 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("+ Add",t) { adding=true }
         }
         keys.forEach { name ->
-            val profile = profiles.optJSONObject(name) ?: continue
+            val profile = profiles.optJSONObject(name) ?: project.trigger(name)
             val selected = name in selections
             val assigned = profile.optJSONArray("zones")?.length() ?: 0
             Row(Modifier.fillMaxWidth().heightIn(min=44.dp)
