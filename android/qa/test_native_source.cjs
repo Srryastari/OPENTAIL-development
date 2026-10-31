@@ -427,10 +427,10 @@ assert(outputRead &&
        queuedReadPump.indexOf('if(nextPacket!=null)') < queuedReadPump.indexOf('if(queuedOutputRead>=0)') &&
        queuedReadPump.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        queuedReadPump.includes('beginOutputRead(index);') &&
-       bleSource.includes('cfgBusy || queuedOutputRead>=0 || writePending') &&
+       bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
        bleSource.includes('CORE snapshot ATT timed out during output reload') &&
        bleSource.includes('clearQueuedOutputRead();') &&
-       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||triggerMapBusy||'),
+       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
