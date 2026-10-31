@@ -74,7 +74,8 @@ assert(approvedPreview.includes('val columns = 30') &&
        approvedPreview.includes('val actualFrame = coreFrame.value') &&
        approvedPreview.includes('hasLiveColors -> actualFrame') &&
        approvedPreview.includes('Color(frame!!.colorAt(sample))') &&
-       approvedPreview.includes('offlinePreview.value -> projectPaint') &&
+       approvedPreview.includes('offlinePreview.value && hasProjectColors -> projectPaint') &&
+       approvedPreview.includes('offlinePreview.value -> null') &&
        approvedPreview.includes('val readback = outputs[captureOutput.intValue]') &&
        approvedPreview.includes('Configured zone colors'),
    'Final preview must preserve 30 capsules and distinguish genuine CORE live frames from configured role colors.');
@@ -135,7 +136,7 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
  'Persistent hardware mapping requires explicit validated commit and readback.');
 assert(ble.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
-       ble.includes('||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
+       ble.includes('||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
        'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
  'Preview must reuse authenticated CORE FX/STOP commands.');

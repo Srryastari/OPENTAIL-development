@@ -163,6 +163,14 @@ final class NativeEffectCatalog {
         SORTED = Collections.unmodifiableList(effects);
     }
     static List<Effect> all(){return SORTED;}
+    /** These are OpenTail-specific transition animations, authored ONLY in
+     * Auto Events (Startup/Shutdown). Standard WLED Strobe #23 remains a
+     * general 1D effect and is also available to Auto Events. */
+    static boolean autoEventOnly(int id) {
+        return id==32769 || id==32770 || id==32771 || id==32773 ||
+               id==32787;
+    }
+
     static Effect byId(int id) {
         for (Effect effect : ALL) if (effect.id == id) return effect;
         return ALL[0];

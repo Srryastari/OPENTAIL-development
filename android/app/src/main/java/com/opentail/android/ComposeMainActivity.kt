@@ -77,6 +77,7 @@ class ComposeMainActivity : ComponentActivity() {
     // must not reset in-progress TextField values (including typed spaces).
     private val projectLoadRevision = mutableIntStateOf(0)
     private val bleMessage = mutableStateOf("Disconnected")
+    private val firmwareVersion = mutableStateOf<String?>(null)
     private val supportedIds = mutableStateOf(setOf<Int>())
     private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
     private val foundDevices = mutableStateMapOf<String, String>()
@@ -207,6 +208,7 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilitiesAfterAuth()
+            if (!ble.isConnected()) firmwareVersion.value = null
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
@@ -223,6 +225,9 @@ class ComposeMainActivity : ComponentActivity() {
                 liveArmed.value = false
             }
         } }
+        ble.setInfoListener { version ->
+            runOnUiThread { firmwareVersion.value = version }
+        }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
@@ -378,7 +383,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
-                        if (i != 1) offlinePreview.value = false
+                        // Preview Offline remains active across tabs (Test 79).
                         page = i
                     }
                 }
@@ -424,10 +429,22 @@ class ComposeMainActivity : ComponentActivity() {
     }
     // Native vector glyphs preserve the approved icon meanings without
     // emoji, downloaded fonts, WebView or an additional icon dependency.
+    // Preserve the approved pill styling, but make the actual VISIBLE
+    // +/- button 56x48dp. A large invisible wrapper around a tiny Pill
+    // does not satisfy the physical phone accessibility requirement.
+    @Composable
+    private fun PixelStepPill(symbol: String, t: Tone, onClick: () -> Unit) {
+        Box(Modifier.size(width=56.dp,height=48.dp)
+            .clip(RoundedCornerShape(99.dp)).background(t.raised)
+            .semantics { contentDescription=if(symbol=="+") "Add one pixel" else "Remove one pixel" }
+            .clickable(onClick=onClick),contentAlignment=Alignment.Center) {
+            Text(symbol,color=t.fg,fontSize=22.sp,fontWeight=FontWeight.Bold)
+        }
+    }
     @Composable
     private fun NavigationPill(index: Int, label: String, t: Tone,
                                selected: Boolean, action: () -> Unit) {
-        val fill = if (selected) Color(0xFF303030) else t.raised
+        val fill = if (selected) (if(t.bg == Color.Black) Color(0xFF303030) else Color(0xFFDEDEDE)) else t.raised
         Box(Modifier.height(36.dp).clip(RoundedCornerShape(99.dp))
             .background(fill).clickable(onClick = action)
             .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
@@ -786,7 +803,7 @@ class ComposeMainActivity : ComponentActivity() {
             Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             listOf("Connection" to connectionPhase,
                 "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
-                "Firmware" to "—").forEachIndexed { index, (label, value) ->
+                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
                 if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween) {
@@ -824,7 +841,8 @@ class ComposeMainActivity : ComponentActivity() {
         val hasProjectColors = projectPaint != null &&
             (0 until projectPaint.size()).any { projectPaint.colorAt(it) and 0xffffff != 0 }
         val frame = when {
-            offlinePreview.value -> projectPaint
+            offlinePreview.value && hasProjectColors -> projectPaint
+            offlinePreview.value -> null
             hasLiveColors -> actualFrame
             hasProjectColors -> projectPaint
             else -> null
@@ -888,6 +906,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Text(when {
                     hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
                     useConfiguredColors -> "Configured zone colors"
+                    offlinePreview.value -> "Offline design preview"
                     hasProjectColors -> "Project pixel colors"
                     else -> "Awaiting CORE frame"
                 }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
@@ -907,13 +926,13 @@ class ComposeMainActivity : ComponentActivity() {
         var view by rememberSaveable { mutableStateOf("Effects") }
         var query by rememberSaveable { mutableStateOf("") }
         val effect = selectedEffect.intValue
-        var speed by rememberSaveable { mutableIntStateOf(prefs.getInt("speed", 128)) }
-        var intensity by rememberSaveable { mutableIntStateOf(prefs.getInt("intensity", 128)) }
-        var brightness by rememberSaveable { mutableIntStateOf(prefs.getInt("brightness", 160)) }
-        var foreground by rememberSaveable { mutableIntStateOf(prefs.getInt("foreground", -1)) }
-        var background by rememberSaveable { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
-        var accent by rememberSaveable { mutableIntStateOf(prefs.getInt("accent", -1)) }
-        var paletteId by rememberSaveable {
+        var speed by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("speed", 128)) }
+        var intensity by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("intensity", 128)) }
+        var brightness by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("brightness", 160)) }
+        var foreground by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("foreground", -1)) }
+        var background by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("background", 0xff000000.toInt())) }
+        var accent by rememberSaveable(projectLoadRevision.intValue) { mutableIntStateOf(prefs.getInt("accent", -1)) }
+        var paletteId by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
         EffectsPreview(t, effect)
@@ -928,7 +947,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 val matches=remember(query) {
                     val preferred=listOf(9,32769,32770,32771,32772)
-                    NativeEffectCatalog.all().filter { it.name.contains(query,ignoreCase=true) }
+                    NativeEffectCatalog.all().filter { !NativeEffectCatalog.autoEventOnly(it.id) &&
+                        it.name.contains(query,ignoreCase=true) }
                         .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
                 }
                 LazyColumn(Modifier.fillMaxWidth().height(236.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -1156,9 +1176,23 @@ class ComposeMainActivity : ComponentActivity() {
                     val snapshot = JSONObject(project.exportJson())
                     snapshot.put("savedPresets", JSONArray())
                     val updated = JSONArray(presets.toString())
+                    // Effects editor values live in SharedPreferences, not the
+                    // Studio v4 document. Store them alongside the document.
+                    val effectSettings=JSONObject()
+                    for(key in listOf("speed","intensity","brightness","foreground","background","accent","paletteId")) {
+                        val fallback=when(key) {
+                            "speed","intensity" -> 128
+                            "brightness" -> 160
+                            "foreground","accent" -> -1
+                            "background" -> 0xff000000.toInt()
+                            else -> 0
+                        }
+                        effectSettings.put(key,prefs.getInt(key,fallback))
+                    }
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
                         .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
-                        .put("effectName",effectLabel(selectedEffect.intValue)))
+                        .put("effectName",effectLabel(selectedEffect.intValue))
+                        .put("effectSettings",effectSettings))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
@@ -1220,11 +1254,29 @@ class ComposeMainActivity : ComponentActivity() {
                     presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
                     if (restored) {
                         val selected=presets.optJSONObject(pendingLoad)
+                        val editor=prefs.edit()
                         if(selected?.has("fxId")==true) {
                             selectedEffect.intValue=selected.optInt("fxId",0)
-                            prefs.edit().putInt("effectId",selectedEffect.intValue).apply()
+                            editor.putInt("effectId",selectedEffect.intValue)
                         }
-                        refreshLoadedProject()
+                        // Backward compatible: old presets may have no FX
+                        // settings. Never clobber the user's current controls.
+                        selected?.optJSONObject("effectSettings")?.let {savedFx ->
+                            for(key in listOf("speed","intensity","brightness",
+                                "foreground","background","accent","paletteId")) {
+                                if(savedFx.has(key) && savedFx.opt(key) is Number) {
+                                    val raw=savedFx.optInt(key)
+                                    val safe=when(key) {
+                                        "speed","intensity","brightness" -> raw.coerceIn(0,255)
+                                        "paletteId" -> raw.coerceIn(0,NativePaletteEngine.MAX_ID)
+                                        else -> raw
+                                    }
+                                    editor.putInt(key,safe)
+                                }
+                            }
+                        }
+                        if(editor.commit()) refreshLoadedProject()
+                        else presetStatus="Design loaded; effect preferences could not be saved"
                     }
                     pendingLoad = -1
                 } },
@@ -1239,7 +1291,7 @@ class ComposeMainActivity : ComponentActivity() {
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember(projectLoadRevision.intValue) {
-            mutableStateOf(project.zone(0)?.optString("id"))
+            mutableStateOf<String?>(null) // collapse cards on Layout page entry
         }
         var deleteId by remember { mutableStateOf<String?>(null) }
         var choosingDelete by remember { mutableStateOf(false) }
@@ -1328,16 +1380,8 @@ class ComposeMainActivity : ComponentActivity() {
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(46.dp).clickable {
-                                count=(n-1).coerceAtLeast(1).toString();applyLiveZone()
-                            }, contentAlignment=Alignment.Center) {
-                                Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
-                            }
-                            Box(Modifier.size(46.dp).clickable {
-                                count=(n+1).coerceAtMost(10000).toString();applyLiveZone()
-                            }, contentAlignment=Alignment.Center) {
-                                Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
-                            }
+                            PixelStepPill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            PixelStepPill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
                             Spacer(Modifier.weight(1f))
                             Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
                                 verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -1926,7 +1970,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
         Panel(t) {
             Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
-            SettingsRow("Firmware", "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
+            SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             // No reset command exists in the pinned CORE interface. Do not
             // present a local document clear as a successful controller reset.
@@ -2130,23 +2174,15 @@ class ComposeMainActivity : ComponentActivity() {
             // Restore the approved pixel +/- controls beside the draft
             // slider. These change only RAM; Save still requires confirmation.
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(46.dp).clickable {
+                PixelStepPill("−",t) {
                     val n=(pixelCount-1).coerceAtLeast(1)
-                    adjustOutput(n);outputCountText=n.toString()
-                },contentAlignment=Alignment.Center) {
-                    Pill("−",t) {
-                        val n=(pixelCount-1).coerceAtLeast(1)
-                        adjustOutput(n);outputCountText=n.toString()
-                    }
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
-                Box(Modifier.size(46.dp).clickable {
+                PixelStepPill("+",t) {
                     val n=(pixelCount+1).coerceAtMost(outputLimit)
-                    adjustOutput(n);outputCountText=n.toString()
-                },contentAlignment=Alignment.Center) {
-                    Pill("+",t) {
-                        val n=(pixelCount+1).coerceAtMost(outputLimit)
-                        adjustOutput(n);outputCountText=n.toString()
-                    }
+                    adjustOutput(n)
+                    outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
             }
             Caption("Color order · set this for the actual connected LED strips", t)
@@ -2189,31 +2225,17 @@ class ComposeMainActivity : ComponentActivity() {
                     outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(46.dp).clickable {
+                    PixelStepPill("−",t) {
                         val n=(count-1).coerceAtLeast(0)
                         adjustZone(i,n)
                         zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                    },contentAlignment=Alignment.Center) {
-                        Pill("−",t) {
-                            val n=(count-1).coerceAtLeast(0)
-                            adjustZone(i,n)
-                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
-                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                        }
                     }
-                    Box(Modifier.size(46.dp).clickable {
+                    PixelStepPill("+",t) {
                         val n=(count+1).coerceAtMost(outputLimit)
                         adjustZone(i,n)
                         zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                    },contentAlignment=Alignment.Center) {
-                        Pill("+",t) {
-                            val n=(count+1).coerceAtMost(outputLimit)
-                            adjustZone(i,n)
-                            zoneCountText=JSONObject(draftText).getJSONArray("zones").getJSONObject(i).getInt("pixels").toString()
-                            outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
-                        }
                     }
                 }
                 // Bidirectional association: choose a design zone here, or

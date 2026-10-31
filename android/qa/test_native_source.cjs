@@ -71,7 +71,7 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('Developer · Trigger Testing') &&
         compose.includes('project.assignMany(selections,zoneId,!checked)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
-assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && compose.includes('if (i != 1) offlinePreview.value = false'),
+assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && !compose.includes('if (i != 1) offlinePreview.value = false') && compose.includes('offlinePreview.value && hasProjectColors'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
 assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('private fun NavigationGlyph(index: Int, color: Color)') &&
@@ -81,7 +81,9 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
 assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=2 &&
+       bleSource.includes('infoReadPending') && bleSource.includes('frameCapture.busy()') &&
+        bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
+        bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
        bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
@@ -187,12 +189,30 @@ assert(previewSrc &&
        hardwareOutput &&
        hardwareOutput.includes('ValueSlider("Total output pixels"') &&
        hardwareOutput.includes('ValueSlider("Next start · zero-based"') &&
-       (hardwareOutput.match(/Pill\("−",t\)/g)||[]).length >= 2 &&
-       (hardwareOutput.match(/Pill\("\+",t\)/g)||[]).length >= 2 &&
+       (hardwareOutput.match(/PixelStepPill\("−",t\)/g)||[]).length >= 2 &&
+       (hardwareOutput.match(/PixelStepPill\("\+",t\)/g)||[]).length >= 2 &&
+       compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
        hardwareOutput.includes('adjustZone(i,n)') &&
        hardwareOutput.includes('adjustOutput(n)') &&
        hardwareOutput.includes('Physical boundaries change only after confirmed NVS Save'),
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
+// Owner's full Test 1-80 regression gates (Android-only source contracts).
+assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
+       compose.includes('selected?.optJSONObject("effectSettings")') &&
+       compose.includes('if(editor.commit()) refreshLoadedProject()') &&
+       compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
+       compose.includes('offlinePreview.value -> "Offline design preview"') &&
+       compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
+       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
+       compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
+       compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
+       compose.includes('!NativeEffectCatalog.autoEventOnly(it.id)'),
+       'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
+assert(bleSource.includes('setInfoListener(') &&
+       bleSource.includes('infoReadQueued=true;pumpQueue()') &&
+       bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
+       bleSource.includes('infoReadPending'),
+       'Actual firmware INFO metadata must remain safely serialized after owner authorization');
 assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
@@ -333,7 +353,8 @@ assert(compose.includes('var dragValue by remember { mutableFloatStateOf(committ
        events.includes('eventEditing=if(eventEditing==key) null else key') &&
        compose.includes('formatDurationSeconds(item.optInt("ms", 1500))') &&
        compose.includes('BigDecimal(editedDuration).movePointRight(3).intValueExact()') &&
-       layout.includes('Modifier.size(46.dp).clickable'),
+       layout.includes('PixelStepPill("−",t)') &&
+       layout.includes('PixelStepPill("+",t)'),
        'Requested live sliders, card toggle, decimal seconds and pixel hit areas regressed');
 assert(palettes.includes('parseVerifiedCustom(verifiedCustomStops)') &&
        palettes.includes('coreFixedStops(id, foreground, background)') &&
@@ -379,7 +400,7 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
 
 // STOP queued behind a GATT transaction must drain before any new capture,
 // owner/auth, effect-capability, or output-config GATT operation starts.
-assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || writePending || nextPacket!=null ||') &&
+assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending || nextPacket!=null ||') &&
        (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 3 &&
        (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
        bleSource.includes('private boolean cfgSend(byte[] packet)') &&
@@ -406,10 +427,10 @@ assert(outputRead &&
        queuedReadPump.indexOf('if(nextPacket!=null)') < queuedReadPump.indexOf('if(queuedOutputRead>=0)') &&
        queuedReadPump.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        queuedReadPump.includes('beginOutputRead(index);') &&
-       bleSource.includes('cfgBusy || queuedOutputRead>=0 || writePending') &&
+       bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
        bleSource.includes('CORE snapshot ATT timed out during output reload') &&
        bleSource.includes('clearQueuedOutputRead();') &&
-       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||triggerMapBusy||'),
+       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
@@ -460,7 +481,7 @@ assert(replyPath && replyPath.includes('if("ERR AUTH".equals(response)) revokeOw
 const combinedAuth=bleSource.split('void authorizeOrPair() {')[1]?.split('void pairWithBoot()')[0];
 const tokenAuth=bleSource.split('void authorize(String tokenHex) {')[1]?.split('void show(')[0];
 assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("BLE already authorized"); return; }') &&
-       tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || triggerMapBusy ||') &&
+       tokenAuth && tokenAuth.includes('if (cfgBusy || writePending || readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy ||') &&
        tokenAuth.includes('frameCapture.busy() || palette.busy() || nextPacket != null || pairPending ||') &&
        tokenAuth.includes('challengePending || authPending) {') &&
        tokenAuth.indexOf('BLE busy; retry authorization') < tokenAuth.indexOf('authPending=true;'),
@@ -492,7 +513,7 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        servicesBlock.includes('ui.post(thisAutoAuth(connection));') &&
        servicesBlock.includes('catch (SecurityException ex)') &&
        bleSource.includes('if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)') &&
-       bleSource.includes('if (status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
+       bleSource.includes('if(status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
        bleSource.includes('finishInfoRead(connection,value,status);') &&
        bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
        bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();'),
