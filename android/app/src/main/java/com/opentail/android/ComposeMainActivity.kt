@@ -840,11 +840,23 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
-    private fun EffectsPreview(t: Tone, effect: Int) {
+    private fun EffectsPreview(t: Tone, effect: Int, animateOffline: Boolean = false) {
         // Reference dimensions are logical UI pixels (dp), independent of
         // display density. Never substitute design colors for CORE telemetry.
         val connection = bleMessage.value
         val localRevision = revision.intValue
+        // Local sketches are explicitly distinct from CORE frames and run
+        // only inside the approved Show Modes preview, with zero BLE traffic.
+        val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
+            OfflineFxSketch.supports(effect)
+        var localTick by remember(effect) { mutableLongStateOf(0L) }
+        LaunchedEffect(localSketch, effect, foregroundActivity.value, previewPaused.value) {
+            if (!localSketch || !foregroundActivity.value || previewPaused.value) return@LaunchedEffect
+            while (true) {
+                delay(33L)
+                localTick++
+            }
+        }
         // Separate honest CORE telemetry from the saved design / read-only
         // CORE output profile. A fresh installation has an empty local project;
         // an idle renderer is black even when all hardware zones are configured.
@@ -912,7 +924,12 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    val color = if (sample >= 0) Color(frame!!.colorAt(sample))
+                    val color = if (localSketch) {
+                        Color(OfflineFxSketch.colorAt(effect,col,columns,localTick,
+                            prefs.getInt("foreground",0xffffffff.toInt()),
+                            prefs.getInt("background",0xff000000.toInt()))
+                            ?: 0xff000000.toInt())
+                    } else if (sample >= 0) Color(frame!!.colorAt(sample))
                         else configuredColor
                     drawRoundRect(color,
                         topLeft = Offset(col * pitch, 0f),
@@ -922,6 +939,10 @@ class ComposeMainActivity : ComponentActivity() {
             }
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(when {
+                    effect < 0 && animateOffline -> "No effect selected"
+                    localSketch -> "Offline effect preview · local"
+                    animateOffline && (offlinePreview.value || !ble.canControl()) ->
+                        "Offline animation unavailable"
                     hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
                     useConfiguredColors -> "Configured zone colors"
                     offlinePreview.value -> "Offline design preview"
@@ -955,7 +976,10 @@ class ComposeMainActivity : ComponentActivity() {
         var paletteId by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(prefs.getInt("paletteId", 0).coerceIn(0, NativePaletteEngine.MAX_ID))
         }
-        EffectsPreview(t, effect)
+        var chosen by rememberSaveable(projectLoadRevision.intValue) {
+            mutableIntStateOf(effect)
+        }
+        EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             listOf("Effects", "Presets", "Sequences").forEach { tab ->
                 Box(Modifier.weight(1f)) { Pill(tab,t,view==tab) { view=tab } }
@@ -965,9 +989,6 @@ class ComposeMainActivity : ComponentActivity() {
             "Effects" -> {
                 // Owner-approved standalone native editor. Do not reintroduce
                 // generic search/list controls or replace the six-screen shell.
-                var chosen by rememberSaveable(projectLoadRevision.intValue) {
-                    mutableIntStateOf(effect)
-                }
                 LaunchedEffect(effect) {
                     // Explicit preset import/selection updates the editor only
                     // when the authoritative selected effect actually changes.
