@@ -19,6 +19,8 @@ public class CoreBenchEvidenceTest {
     @Test public void captureFailuresAndLocalPaintCannotMasqueradeAsCore() {
         assertEquals("CORE did not complete the requested frame",CorePreviewEvidence.label(null,
             "CORE did not complete the requested frame",false));
+        assertEquals("CORE did not complete the requested frame · design colors",
+            CorePreviewEvidence.label(null,"CORE did not complete the requested frame",true));
         assertEquals("CORE frame not captured",CorePreviewEvidence.label(
             ExactLedFrame.fromProject(new int[]{0xffff0000}),"CORE frame not captured",false));
     }

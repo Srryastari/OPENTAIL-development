@@ -112,6 +112,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val liveZoneMask = mutableIntStateOf(255)
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
+    private val captureError = mutableStateOf<String?>(null)
     private val sequenceMessage = mutableStateOf("")
     private val captureOutput = mutableIntStateOf(0)
     private val previewPaused = mutableStateOf(false)
@@ -130,6 +131,7 @@ class ComposeMainActivity : ComponentActivity() {
         pendingFrameOutput = -1
         coreFrame.value = null
         captureMessage.value = "CORE frame not captured"
+        captureError.value = null
     }
 
     private fun enterOfflinePreview() {
@@ -256,16 +258,19 @@ class ComposeMainActivity : ComponentActivity() {
                 if (error != null || rgb == null) {
                     coreFrame.value = null
                     captureMessage.value = error ?: "No CORE frame returned"
+                    captureError.value = captureMessage.value
                 } else {
                     runCatching { ExactLedFrame.fromCoreRgb888(output, sequence, rgb) }
                         .onSuccess {
                             coreFrame.value = it
+                            captureError.value = null
                             captureMessage.value = "Verified CORE RGB888 snapshot · output " +
                                 (output + 1) + " · frame " + sequence + " · " + it.size() + " LEDs"
                         }
                         .onFailure {
                             coreFrame.value = null
                             captureMessage.value = "Invalid CORE RGB888 frame"
+                            captureError.value = captureMessage.value
                         }
                 }
             }
@@ -1041,6 +1046,9 @@ class ComposeMainActivity : ComponentActivity() {
                     localSketch -> "Offline animation unavailable"
                     animateOffline && (offlinePreview.value || !ble.canControl()) ->
                         "Offline animation unavailable"
+                    captureError.value != null && !offlinePreview.value ->
+                        CorePreviewEvidence.label(null,captureError.value,
+                            useConfiguredColors || frame?.origin == ExactLedFrame.Origin.PROJECT)
                     actualFrame != null && !offlinePreview.value -> CorePreviewEvidence.label(
                         actualFrame,captureMessage.value,useConfiguredColors || frame?.origin == ExactLedFrame.Origin.PROJECT)
                     useConfiguredColors -> "Configured zone colors"

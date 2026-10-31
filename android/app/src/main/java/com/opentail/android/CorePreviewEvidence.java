@@ -12,7 +12,8 @@ final class CorePreviewEvidence {
                 "CORE frame · "+frame.size()+" LEDs · all black";
             return "CORE frame · "+frame.size()+" LEDs";
         }
-        return captureStatus == null || captureStatus.isEmpty() ?
+        String status=captureStatus == null || captureStatus.isEmpty() ?
             "Awaiting CORE frame" : captureStatus;
+        return showingFallback ? status+" · design colors" : status;
     }
 }
