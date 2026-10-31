@@ -114,8 +114,25 @@ bool ot_fo_profiles_match(const ot_fo_profile_t *a,const ot_fo_profile_t *b){
     if(!ot_fo_profile_valid(a)||!ot_fo_profile_valid(b))return false;
     if(a->digest!=b->digest||a->generation!=b->generation||
        a->trigger_revision!=b->trigger_revision)return false;
-    for(unsigned i=0;i<OT_OM_OUTPUTS;i++)
+    /* A digest is an error check, not collision-resistant identity. Compare
+     * every effective field before accepting a two-controller profile pair. */
+    if(memcmp(a->trigger.function,b->trigger.function,OT_IN_COUNT)!=0)return false;
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
         if(a->output_revision[i]!=b->output_revision[i])return false;
+        const ot_om_output_t *x=&a->output[i],*y=&b->output[i];
+        if(strcmp(x->name,y->name)!=0||
+           x->active_pixels!=y->active_pixels||
+           x->color_order!=y->color_order||
+           x->zone_count!=y->zone_count||
+           x->gamma_enabled!=y->gamma_enabled||
+           memcmp(x->rgb_gain,y->rgb_gain,3)!=0||
+           memcmp(x->white_gain,y->white_gain,3)!=0)return false;
+        for(unsigned z=0;z<x->zone_count;z++){
+            if(strcmp(x->zones[z].name,y->zones[z].name)!=0||
+               x->zones[z].pixels!=y->zones[z].pixels||
+               x->zones[z].role!=y->zones[z].role)return false;
+        }
+    }
     return true;
 }
 bool ot_fo_can_activate_profile(const ot_fo_profile_t *primary_new,
