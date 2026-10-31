@@ -71,7 +71,7 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('Developer · Trigger Testing') &&
         compose.includes('project.assignMany(selections,zoneId,!checked)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
-assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && compose.includes('if (i != 1) offlinePreview.value = false'),
+assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && !compose.includes('if (i != 1) offlinePreview.value = false') && compose.includes('offlinePreview.value && hasProjectColors'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
 assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('private fun NavigationGlyph(index: Int, color: Color)') &&
@@ -81,7 +81,9 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
 assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=2 &&
+       bleSource.includes('infoReadPending') && bleSource.includes('frameCapture.busy()') &&
+        bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
+        bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
        bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
@@ -187,12 +189,30 @@ assert(previewSrc &&
        hardwareOutput &&
        hardwareOutput.includes('ValueSlider("Total output pixels"') &&
        hardwareOutput.includes('ValueSlider("Next start · zero-based"') &&
-       (hardwareOutput.match(/Pill\("−",t\)/g)||[]).length >= 2 &&
-       (hardwareOutput.match(/Pill\("\+",t\)/g)||[]).length >= 2 &&
+       (hardwareOutput.match(/PixelStepPill\("−",t\)/g)||[]).length >= 2 &&
+       (hardwareOutput.match(/PixelStepPill\("\+",t\)/g)||[]).length >= 2 &&
+       compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
        hardwareOutput.includes('adjustZone(i,n)') &&
        hardwareOutput.includes('adjustOutput(n)') &&
        hardwareOutput.includes('Physical boundaries change only after confirmed NVS Save'),
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
+// Owner's full Test 1-80 regression gates (Android-only source contracts).
+assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
+       compose.includes('selected?.optJSONObject("effectSettings")') &&
+       compose.includes('if(editor.commit()) refreshLoadedProject()') &&
+       compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
+       compose.includes('offlinePreview.value -> "Offline design preview"') &&
+       compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
+       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
+       compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
+       compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
+       compose.includes('!NativeEffectCatalog.autoEventOnly(it.id)'),
+       'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
+assert(bleSource.includes('setInfoListener(') &&
+       bleSource.includes('infoReadQueued=true;pumpQueue()') &&
+       bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
+       bleSource.includes('infoReadPending'),
+       'Actual firmware INFO metadata must remain safely serialized after owner authorization');
 assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
