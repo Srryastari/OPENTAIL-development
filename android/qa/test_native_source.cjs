@@ -212,7 +212,7 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
        compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
        approved.includes('it.name.contains(effectSearch.trim(),true)') &&
-       compose.includes('NativeEffectCatalog.generalEffects().forEach { effect ->'),
+       compose.includes('effectOptions = NativeEffectCatalog.generalEffects()'),
        'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
 // Owner Test 86: never truncate the transition picker to the first fifteen,
 // or leak Auto Event previews into general Show Modes effect selection.
@@ -234,7 +234,7 @@ assert(catalog.includes('static List<Effect> generalEffects()') &&
        compose.includes('autoEventPreviewEffect.intValue = effectId') &&
        !compose.includes('selectedEffect.intValue = effectId') &&
        !compose.includes('enterOfflinePreview()\\n                        page = 1') &&
-       compose.includes('NativeEffectCatalog.generalEffects().forEach { effect ->'),
+       compose.includes('effectOptions = NativeEffectCatalog.generalEffects()'),
        'Test 86: full Auto Events picker and exclusive transitions across shows, triggers and preview');
 assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('infoReadQueued=true;pumpQueue()') &&
@@ -278,7 +278,7 @@ assert(triggers.includes('IconAction("Edit " + name, "edit", t)') &&
        triggers.includes('IconAction("Delete " + name, "delete", t)') &&
        triggers.includes('title = { Text("Delete custom trigger?") }') &&
        triggers.includes('project.deleteTrigger(target)') &&
-       triggers.includes('remember(selections, modelRevision)') &&
+       triggers.includes('scopeKey = "triggers:" + selections.sorted().joinToString("|")') &&
        triggers.includes('disabled()'),
        'Builtins cannot be deleted; custom trigger confirmation and bulk editing refresh required');
 const settings=compose.split('private fun SettingsPage(')[1]
@@ -298,7 +298,7 @@ assert(!triggers.includes('ble.saveOutput('),'Offline trigger design must not wr
 for(const required of ['EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)', 'listOf("Effects", "Presets", "Sequences")',
   'ApprovedWledEffectsEditor(', 'effectOptions = NativeEffectCatalog.generalEffects()',
   'onSelected = { id ->', 'onColor = { id,slot,rgb ->',
-  'onPalette = { id,selected ->', 'onLiveToggle = {',
+  'onPalette = { id,selected ->',
   'if(liveArmed.value) previewCurrentEffect(id)']) {
   assert(modes.includes(required),'Approved Effects binding regression: '+required);
 }
@@ -310,6 +310,26 @@ for(const required of ['approved-prototype.fragment.html SHA256 37DB62A26E1622A7
   'onColor(currentId,slot,rgb)', 'onPalette(currentId,id)']) {
   assert(approved.includes(required),'Owner WLED+ design/interaction regression: '+required);
 }
+// Single approved WLED+ editor across three independent model stores.
+assert((compose.match(/ApprovedWledEffectsEditor\\(/g)||[]).length === 3 &&
+       modes.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
+       triggers.includes('scopeKey = "triggers:"') &&
+       events.includes('scopeKey="auto-event:"+key') &&
+       triggers.includes('project.editTriggerEditorField(selections,"paletteId",id)') &&
+       events.includes('applyAutoEvent(key,"paletteId",id)') &&
+       model.includes('synchronized boolean editTriggerEditorField(') &&
+       model.includes('private static boolean editorFieldValid(') &&
+       !approved.includes('All Segments') &&
+       !approved.includes('effects-live-toggle') &&
+       !approved.includes('Text(if(liveEnabled)'),
+       'Approved Effects interface must have three independently persisted editor contexts and no unapproved control header');
+assert(palettes.includes('fun usesEditableColorSlots(id: Int): Boolean = id in 2..5') &&
+       palettes.includes('fun isImmutableFixedGradient(id: Int): Boolean') &&
+       palettes.includes('if (isImmutableFixedGradient(id))') &&
+       approved.includes('val allowColorSlots = def != null') &&
+       approved.includes('takeIf { allowColorSlots }'),
+       'Immutable WLED source gradient must never inherit Main/Set Color');
+
 assert(events.includes('listOf("Startup", "Shutdown")') &&
        events.includes('eventUiEnabled') &&
        events.includes('eventUiFadeMs') &&
