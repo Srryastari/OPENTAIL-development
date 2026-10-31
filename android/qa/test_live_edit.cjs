@@ -46,11 +46,16 @@ assert(!triggerBlock.includes('ble.saveOutput('),
 
 for(const required of [
   'EffectsPreview(', 'ApprovedWledEffectsEditor(',
-  'onLiveToggle = {', 'onParam = { id,key,value ->',
+  'onParam = { id,key,value ->',
   'onColor = { id,slot,rgb ->', 'onPalette = { id,selected ->',
   'if(liveArmed.value) previewCurrentEffect(id)',
-  'livePreview.stop()', 'ble.stopShow()'
+  'livePreview.stop()'
 ]) assert(effectBlock.includes(required), 'Approved Live FX regression: '+required);
+assert(!effectBlock.includes('onLiveToggle = {') &&
+       !compose.includes('effects-live-toggle') &&
+       compose.includes('ble.stopShow()') &&
+       preview.includes('ble.stopShow()'),
+       'Owner removed editor playback controls; authorized STOP contract must remain intact');
 
 assert(triggerBlock.includes('project.assignMany(selections,zoneId,!checked)') &&
        !triggerBlock.includes('selections.forEach { project.assign('),
