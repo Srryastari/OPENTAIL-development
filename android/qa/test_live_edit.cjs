@@ -109,15 +109,15 @@ assert(previewGate &&
          previewGate.indexOf('livePreview.arm()') &&
        previewGate.includes('livePreview.stop()') &&
        previewGate.includes('liveArmed.value = false') &&
-       effectBlock.includes('previewCurrentEffect(effect)') &&
+       effectBlock.includes('if(liveArmed.value) previewCurrentEffect(id)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
-  'All Effects edits must reject unsupported palettes before arming BLE without silent fallback');
+  'Owner-triggered Effects preview must reject unsupported palettes before arming BLE without silent fallback');
 assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
        'Disconnect must clear stale effect capability ownership');
 
 assert(compose.includes('if (!livePreview.isArmed())') &&
        compose.includes('if (!ble.canControl() || supportedIds.value.isEmpty()) return'),
-  'Authorized hardware preview must start automatically on gesture, with no Live Edit Mode.');
+  'Owner-authorized live preview must retain secure gated arming; editor selection alone never starts live Show Mode.');
 assert(!compose.includes('Preview live on CORE bench') &&
        compose.includes('Every editor is live.'),
   'No optional Live Edit Mode toggle permitted in Android.');
