@@ -112,7 +112,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
            "ble.showFx(", "BleConfigCodec.encode(JSONObject(draftText))",
            "ble.saveOutput(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
-           "project.previewZoneOffsets(", "AlertDialog(onDismissRequest"))
+           "project.previewZoneOffsets(", "AlertDialog(containerColor=t.surface, onDismissRequest"))
       and 'android:name=".MainActivity"' not in manifest_xml)
 check("Compose has full two-output draft editing without unsaved hardware mutation",
       all(word in compose for word in (
