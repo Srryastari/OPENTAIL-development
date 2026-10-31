@@ -441,7 +441,8 @@ assert(retryCode &&
        retryCode.includes('lease==autoReconnectLease') &&
        retryCode.includes('!connected && !connecting && !scanning') &&
        retryCode.includes('tryReconnect(address);') &&
-       bleSource.includes('scheduleReconnect(activeAddress,fallback);') &&
+       bleSource.includes('scheduleReconnect(connectingAddress,fallback);') &&
+       bleSource.includes('connectingAddress=device.getAddress();') &&
        bleSource.includes('scheduleReconnect(activeAddress,false);') &&
        retryCode.includes('afterScan?SCAN_DURATION_MS+2000L:1800L') &&
        bleSource.includes('autoReconnectBudget=1;autoReconnectLease++;') &&
