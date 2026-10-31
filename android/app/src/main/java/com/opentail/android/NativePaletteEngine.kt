@@ -21,8 +21,8 @@ internal object NativePaletteEngine {
         "Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"
     )
 
-    fun lookup(project: JSONObject, requested: Int, foreground: Int = -1,
-               background: Int = -1, verifiedCustomStops: String? = null): NativePalette {
+    fun lookup(project: JSONObject, requested: Int, foreground: Int? = null,
+               background: Int? = null, verifiedCustomStops: String? = null): NativePalette {
         val id = requested.coerceIn(0, MAX_ID)
         val optionalNames = project.optJSONArray("paletteNames")
         val suppliedName = optionalNames?.optString(id)?.trim().orEmpty()
@@ -65,11 +65,13 @@ internal object NativePaletteEngine {
 
     // This mapping comes from pinned CORE #49 palette_1d.c, not guessed
     // WLED gradient artwork. Random Cycle and other dynamic IDs stay unknown.
-    private fun coreFixedStops(id: Int, fg: Int, bg: Int): List<Pair<Float, Color>>? {
-        if (fg < 0) return null // unset auto-color cannot be represented accurately
+    private fun coreFixedStops(id: Int, fg: Int?, bg: Int?): List<Pair<Float, Color>>? {
+        // Opaque ARGB colors are negative signed Ints. Never use fg < 0 or
+        // bg < 0 as an absence test: 0xFFFFFFFF (white) is a valid color.
+        if (fg == null) return null
         val foreground = Color(0xff000000.toInt() or (fg and 0xffffff))
         if (id == 2) return listOf(0f to foreground, 1f to foreground)
-        if (bg < 0) return null
+        if (bg == null) return null
         val background = Color(0xff000000.toInt() or (bg and 0xffffff))
         return when (id) {
             3 -> listOf(0f to foreground, (127f / 255f) to foreground,
