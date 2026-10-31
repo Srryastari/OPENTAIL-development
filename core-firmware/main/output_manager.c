@@ -43,33 +43,29 @@ static bool name_ok(const char *s){
     }
     return false;
 }
-/* Fresh device: a single inert placeholder per physical output.
- * Never infer a vehicle's lighting zones, trigger roles or pixel geometry.
- * Saved v1/v2 profiles are restored by om_load(), NOT replaced with defaults.
- * An installation must explicitly configure and validate its lighting zones.
+/* First boot is truly unconfigured: zero active pixels, zero zones, and
+ * no RMT output. Stored v1/v2 profiles are restored unchanged by om_load().
+ * No vehicle layout, lighting function or LED count may be inferred here.
  */
 void ot_om_defaults(ot_om_output_t outputs[OT_OM_OUTPUTS]){
     if(!outputs)return;
-    /* Universal, inert first-boot profile. Vehicle names, pixel counts and trigger
-     * assignments belong to the user's saved profile, never firmware defaults.
-     * Existing persisted profiles are loaded/migrated unchanged by om_load(). */
     memset(outputs,0,sizeof(ot_om_output_t)*OT_OM_OUTPUTS);
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
         ot_om_output_t *c=&outputs[o];
         snprintf(c->name,OT_OM_NAME_LEN,"Pixel OUT %u",o+1u);
-        c->active_pixels=1;
         c->color_order=OT_OM_GRB;
-        c->zone_count=1;
         c->rgb_gain[0]=c->rgb_gain[1]=c->rgb_gain[2]=255;
         c->white_gain[0]=c->white_gain[1]=c->white_gain[2]=255;
-        snprintf(c->zones[0].name,OT_OM_NAME_LEN,"Zone 1");
-        c->zones[0].pixels=1;
-        c->zones[0].role=OT_OM_OFF;
     }
 }
 
 bool ot_om_valid(const ot_om_output_t *o){
-    if(!o||!name_ok(o->name)||o->active_pixels<1||o->active_pixels>OT_OM_MAX_PIXELS_PER_OUTPUT||o->zone_count<1||o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
+    if(!o||!name_ok(o->name)||o->active_pixels>OT_OM_MAX_PIXELS_PER_OUTPUT||
+       o->zone_count>OT_OM_ZONES||o->color_order>OT_OM_BGR)return false;
+    /* Only 0/0 is an inert configuration. Reject 0/N and N/0 so a malformed
+     * profile cannot silently become a live lighting output. */
+    if(o->active_pixels==0||o->zone_count==0)
+        return o->active_pixels==0 && o->zone_count==0;
     unsigned sum=0;
     for(int z=0;z<o->zone_count;z++){
         const ot_om_zone_t *a=&o->zones[z];
@@ -85,7 +81,7 @@ int ot_om_section(const ot_om_output_t *o,unsigned pixel){
     return -1;
 }
 bool ot_om_layout(const ot_om_output_t *o,ot_layout_t *layout){
-    if(!ot_om_valid(o)||!layout)return false;
+    if(!ot_om_valid(o)||!layout||o->active_pixels==0)return false;
     *layout=(ot_layout_t){.chain_pixels=o->active_pixels,.brightness_cap=OT_MAX_BRIGHTNESS};
     for(int i=0;i<o->zone_count;i++)layout->sections[i]=o->zones[i].pixels;
     return ot_layout_valid(layout);
