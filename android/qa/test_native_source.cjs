@@ -81,7 +81,8 @@ assert(compose.includes('NavigationPill(i, title, t, page == i)') &&
          compose.includes('4 -> { // Auto Events: sun'),
          'Native navigation icons must preserve locked meanings without emoji or WebView');
 assert(bleSource.includes('frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=3 &&
+       (bleSource.match(/cfgBusy\|\|writePending\|\|readReplyPending\|\|fxCapsBusy\|\|triggerMapBusy\|\|frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending\|\|pairPending\|\|challengePending/g)||[]).length>=2 &&
+       bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
        'Clear stale CORE output UI and prevent conflicting GATT operations');
@@ -329,14 +330,38 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
 
 // STOP queued behind a GATT transaction must drain before any new capture,
 // owner/auth, effect-capability, or output-config GATT operation starts.
-assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || writePending || nextPacket!=null ||') &&
-       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 4 &&
+assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || writePending || nextPacket!=null ||') &&
+       (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|authPending/g)||[]).length >= 3 &&
        (bleSource.match(/frameCapture\.busy\(\)\|\|palette\.busy\(\)\|\|nextPacket!=null\|\|pairPending/g)||[]).length === 2 &&
        bleSource.includes('private boolean cfgSend(byte[] packet)') &&
        bleSource.includes('return cfgSend(new byte[]{2,3,(byte)index') &&
        bleSource.includes('if(!ok){cfgFail("BLE configuration write did not start");return false;}') &&
        bleSource.includes('fxCaps=null;fxCapsBusy=false;triggerMapping=null;'),
   'Queued STOP must have priority and an immediate BLE write refusal must not be acknowledged as sent');
+
+// Physical phone Test 38: 140 effects read successfully over BLE but
+// Layout Reload Output1 was repeatedly blocked by the 500ms frame-preview
+// capture loop. Explicit READ must win without changing locked visual UI.
+const outputRead = bleSource.split('void readOutput(int index){')[1]
+  ?.split('boolean saveOutput(int index,String json)')[0];
+const queuedReadPump = bleSource.split('private void pumpQueue(){')[1]
+  ?.split('private String preferredPending')[0];
+assert(outputRead &&
+       outputRead.includes('if(frameCapture.busy()){') &&
+       outputRead.includes('queuedOutputRead=index;') &&
+       outputRead.includes('queuedOutputOwner=gatt;') &&
+       outputRead.includes('frameCapture.abortForStop();') &&
+       outputRead.includes('CORE snapshot still busy; GATT recovery required') &&
+       outputRead.includes('beginOutputRead(index);') &&
+       queuedReadPump &&
+       queuedReadPump.indexOf('if(nextPacket!=null)') < queuedReadPump.indexOf('if(queuedOutputRead>=0)') &&
+       queuedReadPump.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
+       queuedReadPump.includes('beginOutputRead(index);') &&
+       bleSource.includes('cfgBusy || queuedOutputRead>=0 || writePending') &&
+       bleSource.includes('CORE snapshot ATT timed out during output reload') &&
+       bleSource.includes('clearQueuedOutputRead();') &&
+       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||triggerMapBusy||'),
+       'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
 // fresh revision from CORE, never reuse the possibly stale revision.
