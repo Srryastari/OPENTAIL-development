@@ -588,7 +588,7 @@ final class BleDiscovery {
     }
     void onAdapterEnabled() {
         notifyStatus("Bluetooth on · ready to scan or reconnect");
-        scheduleReconnect(activeAddress);
+        scheduleReconnect(activeAddress,false);
     }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
@@ -797,23 +797,25 @@ final class BleDiscovery {
     // One bounded automatic reconnect per established CORE session.
     private volatile int autoReconnectBudget=1;
     private volatile int autoReconnectLease=0;
-    private void scheduleReconnect(String address) {
+    private void scheduleReconnect(String address, boolean afterScan) {
         if(address==null || address.isEmpty())return;
         ui.post(()->{
             if(stopped || autoReconnectBudget<=0)return;
             autoReconnectBudget--;
             final int lease=++autoReconnectLease;
-            // Allow the one-shot discovery fallback to finish first.
+            // Retry promptly after a ready-session drop; allow the one-shot
+            // discovery fallback its full window after an initial failure.
+            final long delay=afterScan?SCAN_DURATION_MS+2000L:1800L;
             ui.postDelayed(()->{
                 if(lease==autoReconnectLease && !stopped && !connected && !connecting && !scanning)
                     tryReconnect(address);
-            },SCAN_DURATION_MS+2000L);
+            },delay);
         });
     }
 
     void setPreferredListener(Consumer<String> listener) { this.preferredListener = listener; }
 
-    /** One bounded background scan for the previously selected BLE address; no infinite reconnect loop. */
+    /** One bounded direct GATT reconnect for the previously selected CORE address. */
     void tryReconnect(String address) {
         if (stopped || connected || connecting || scanning || address == null || address.isEmpty()) return;
         if (lastReconnectAttempt!=0L && android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
@@ -1002,7 +1004,7 @@ final class BleDiscovery {
             try{owner.disconnect();}catch(Exception ignored){}
             try{owner.close();}catch(Exception ignored){}
             notifyStatus(reason+(fallback?" · retrying BLE discovery":" · tap Connect to retry"));
-            scheduleReconnect(activeAddress);
+            scheduleReconnect(activeAddress,fallback);
             if(fallback)ui.postDelayed(()->{
                 if(!stopped && !connected && !connecting && !scanning)scanHeadless();
             },350L);
@@ -1075,7 +1077,7 @@ final class BleDiscovery {
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
-                scheduleReconnect(activeAddress);
+                scheduleReconnect(activeAddress,fallback);
                 if(fallback)ui.postDelayed(()->{
                     if(!stopped && !connected && !connecting && !scanning)scanHeadless();
                 },350L);
@@ -1141,7 +1143,7 @@ final class BleDiscovery {
             paletteCapabilities=service.getCharacteristic(PALETTE_CAP_UUID);
             palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities);
             authorized = false;
-            autoReconnectBudget=1;autoReconnectLease++;
+            autoReconnectBudget=1;autoReconnectLease++;lastReconnectAttempt=0L;
             scanFallbackAllowed=false; // service discovery succeeded; clear one-shot fallback
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             // The info read is optional discovery metadata. If Android rejects
