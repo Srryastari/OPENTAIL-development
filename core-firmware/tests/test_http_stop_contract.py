@@ -31,11 +31,12 @@ for required in (
 assert stop.index("portENTER_CRITICAL(&state_lock)") < stop.index("ot_fx_bank_stop_all(&fx_bank)") < stop.index("portEXIT_CRITICAL(&state_lock)")
 
 # Diagnostic countdown is derived from each live CORE FX zone, not the
-# last temporary show deadline. Standalone NVS scenes have no TTL.
+# last temporary show deadline. Live parameter edits renew TTL without
+# resetting running animation phase. Standalone NVS scenes have no TTL.
 show_get = section("static esp_err_t show_get(httpd_req_t *r){", "static esp_err_t show_start(")
 assert 'ot_fx_slot_active(slot,ms)' in show_get
 assert 'if(slot->standalone){persistent=true;continue;}' in show_get
-assert 'const uint32_t elapsed=ms-slot->started_ms;' in show_get
+assert 'const uint32_t elapsed=ms-slot->refreshed_ms;' in show_get
 assert 'if(duration-elapsed>remaining)remaining=duration-elapsed;' in show_get
 assert 'if(persistent)remaining=0;' in show_get
 assert r'\"persistent\":%s' in show_get
@@ -62,6 +63,7 @@ render = section("static void led_task(void *p) {", "void app_main(void) {")
 assert "if(!native_rendering && full_frame)" in render
 assert "stop_render_generation=local_stop_generation;" in render
 assert "ulTaskNotifyTake(pdTRUE,timeout)" in render
+assert "uint32_t zone_elapsed=frame_ms-slot->started_ms;" in render
 
 # Display control changes should schedule an immediate render as Stop does.
 # Do not wake for a rejected request or hold the state spinlock while doing it.
