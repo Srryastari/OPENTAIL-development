@@ -326,6 +326,14 @@ static void test_mapping_save_deferred_until_release(void){
 static void test_output_zone_save_deferred_until_release(void){
     ot_om_output_t previous[OT_OM_OUTPUTS],candidate[OT_OM_OUTPUTS];
     ot_om_defaults(previous);
+    /* New CORE defaults are truly 0/0; exercise trigger handover with
+     * explicitly configured geometry, never inactive placeholder zones. */
+    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        previous[i].active_pixels=1;
+        previous[i].zone_count=1;
+        strcpy(previous[i].zones[0].name,"Safety Zone");
+        previous[i].zones[0].pixels=1;
+    }
     memcpy(candidate,previous,sizeof(candidate));
     assert(OT_OM_OUTPUTS>=2u);
     previous[0].zones[0].role=OT_OM_BRAKE;

@@ -526,9 +526,9 @@ static esp_err_t om_post(httpd_req_t *r){
     cJSON *zones=cJSON_GetObjectItemCaseSensitive(obj,"zones");
     ot_om_output_t next={0};
     bool valid=om_number(obj,"index",&index,0,OT_OM_OUTPUTS-1)&&
-      om_number(obj,"pixels",&pixels,1,OT_CHAIN_PIXELS)&&
+      om_number(obj,"pixels",&pixels,0,OT_CHAIN_PIXELS)&&
       om_string(obj,"name",next.name)&&order_id>=0&&cJSON_IsArray(zones)&&
-      cJSON_GetArraySize(zones)>=1&&cJSON_GetArraySize(zones)<=OT_OM_ZONES;
+      cJSON_GetArraySize(zones)<=OT_OM_ZONES;
     if(valid){
         next.active_pixels=(uint16_t)pixels;next.color_order=(uint8_t)order_id;
         next.zone_count=(uint8_t)cJSON_GetArraySize(zones);
@@ -1673,7 +1673,10 @@ static bool input_init(void) {
  * memory safety budget. Resizing is render-task-owned; old pixels are cleared
  * before releasing the old bus so a shorter replacement cannot leave ghosts. */
 static bool strip_configure_channel(unsigned ch,unsigned pixels){
-    if(ch>=OT_CHAIN_COUNT||pixels<1u||pixels>OT_CHAIN_PIXELS)return false;
+    /* A genuinely empty output owns no RMT handle. Drive its data GPIO low
+     * once after startup or teardown; never allocate a fake 1-pixel strip. */
+    static bool disabled_gpio_low[OT_CHAIN_COUNT]={false};
+    if(ch>=OT_CHAIN_COUNT||pixels>OT_CHAIN_PIXELS)return false;
     if(strip[ch]&&strip_capacity[ch]==pixels)return true;
     if(strip[ch]){
         /* Never replace a running output unless its old pixels were
@@ -1690,6 +1693,20 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
         }
         strip[ch]=NULL;strip_capacity[ch]=0;
     }
+    if(pixels==0u){
+        if(!disabled_gpio_low[ch]){
+            esp_err_t e=gpio_reset_pin(out_pin[ch]);
+            if(e==ESP_OK)e=gpio_set_direction(out_pin[ch],GPIO_MODE_OUTPUT);
+            if(e==ESP_OK)e=gpio_set_level(out_pin[ch],0);
+            if(e!=ESP_OK){
+                ESP_LOGE(TAG,"RMT disabled output %u GPIO low failed: %s",ch,esp_err_to_name(e));
+                ot_st_set_fault("disabled pixel output GPIO low failed");return false;
+            }
+            disabled_gpio_low[ch]=true;
+        }
+        return true;
+    }
+    disabled_gpio_low[ch]=false;
     const led_strip_config_t cfg={
         .strip_gpio_num=out_pin[ch],.max_leds=pixels,
         .led_model=LED_MODEL_WS2812, // WS2815-compatible nominal 800 kHz; physical timing remains unverified.
@@ -2032,6 +2049,13 @@ static void led_task(void *p) {
            for(int ch=0;ch<OT_CHAIN_COUNT;++ch){
                if(!frame_ready[ch])continue; /* failed channel is disabled; never write past old capacity */
                const ot_om_output_t *output=&local_outputs[ch];
+               if(output->active_pixels==0u){
+                   /* Zero zones/pixels: no color buffer, no RMT transfer, no
+                    * frame snapshot, and nothing to override with triggers. */
+                   ot_frame_snapshot_unavailable((uint8_t)ch);
+                   frame_submitted[ch]=true;
+                   continue;
+               }
                ot_layout_t zone_layout;
                if(!ot_om_layout(output,&zone_layout)){
                    ot_st_set_fault("invalid output mapping");
@@ -2181,7 +2205,7 @@ static void led_task(void *p) {
            /* Start both output transfers before waiting, so RMT lanes overlap.
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
-               if(!frame_submitted[ch])continue;
+               if(!frame_submitted[ch]||local_outputs[ch].active_pixels==0u)continue;
                esp_err_t e=led_strip_refresh_async_done(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer completion",e);

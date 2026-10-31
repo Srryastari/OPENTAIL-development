@@ -29,10 +29,12 @@ static void roundtrip(const ot_om_output_t *saved){
 }
 int main(void){
     ot_om_output_t configured[OT_OM_OUTPUTS];ot_om_defaults(configured);
-    /* Blank universal units never auto-assign parking or brake roles. */
+    /* Blank universal units are genuinely disabled and never infer a
+     * parking/brake role or allocate a fictitious 1-pixel output. */
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-        assert(configured[o].zone_count==1 && configured[o].active_pixels==1);
-        assert(configured[o].zones[0].role==OT_OM_OFF);
+        assert(configured[o].zone_count==0 && configured[o].active_pixels==0);
+        assert(ot_om_valid(&configured[o]));
+        assert(ot_om_section(&configured[o],0)==-1);
     }
     /* Historical GPIO16 bench configuration, supplied as a saved user profile.
      * It must remain valid when factory defaults change. It is not auto-loaded

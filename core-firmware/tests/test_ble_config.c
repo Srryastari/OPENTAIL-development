@@ -6,10 +6,14 @@ int main(void){
     ot_om_output_t a[OT_OM_OUTPUTS],out={0};ot_om_defaults(a);
     uint8_t frame[OT_CFG_WIRE_BYTES];
     ot_cfg_encode(&a[0],frame);
-    assert(frame[0]==1 && frame[1]==1 && frame[2]==0);
+    assert(frame[0]==1 && frame[1]==0 && frame[2]==0 && frame[4]==0);
     assert(ot_cfg_decode(frame,&out));
     /* Fresh universal profile uses the GRB default; BRG remains a valid user selection. */
-    assert(out.active_pixels==1 && out.color_order==OT_OM_GRB);
+    assert(out.active_pixels==0 && out.zone_count==0 && out.color_order==OT_OM_GRB);
+    /* An empty output is an explicit safe state, never a fake 1px LED. */
+    frame[1]=1;assert(!ot_cfg_decode(frame,&out));
+    frame[1]=0;frame[4]=1;assert(!ot_cfg_decode(frame,&out));
+    frame[4]=0;assert(ot_cfg_decode(frame,&out));
     assert(!strcmp(out.name,a[0].name));
     assert(out.zone_count==a[0].zone_count);
     for(int z=0;z<out.zone_count;z++){
