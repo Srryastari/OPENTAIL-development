@@ -15,4 +15,7 @@ names=("core_logic.h","effects_1d.c","effects_1d.h","ot_auto_effects.c","ot_auto
 for name in names:
     assert git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)==git("rev-parse","HEAD:core-firmware/main/"+name),name
 assert m["release_approval"] is False and m["hardware_failover_certified"] is False
-print("PASS: exact Android #87 and CORE #84 trees; locked UI/palettes; 13 renderer files; physical gate unchanged")
+correction=m["bench_correction"]
+changed=set(git("diff","--name-only",correction["base_sha"],"HEAD","--","android").splitlines())
+assert changed==set(correction["allowed_android_changes"]),changed
+print("PASS: scoped Android bench diagnostics; CORE/renderer/palettes unchanged; physical gate unchanged")

@@ -67,7 +67,10 @@ check("Previously implemented BLE owner authentication and encryption retained",
 check("Active Compose bench test requires BLE auth, capability and confirmation",
       'Text("Test CORE LEDs on isolated bench?")' in compose and
       'if (ble.canControl() && id in supportedIds.value)' in compose and
-      'ble.showFx(id, 3, 255' in compose and
+      'CoreBenchTargets.enabledMask(' in compose and
+      'arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)' in compose and
+      'if (benchMask == 0)' in compose and
+      'else ble.showFx(id, benchMask, liveZoneMask.intValue, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)' in compose and
       'confirm = false' in compose)
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)

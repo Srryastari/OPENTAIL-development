@@ -48,7 +48,7 @@ for(const required of [
   'EffectsPreview(', 'ApprovedWledEffectsEditor(',
   'onParam = { id,key,value ->',
   'onColor = { id,slot,rgb ->', 'onPalette = { id,selected ->',
-  'if(liveArmed.value) previewCurrentEffect(id)',
+  'previewCurrentEffect(id)',
   'livePreview.stop()'
 ]) assert(effectBlock.includes(required), 'Approved Live FX regression: '+required);
 assert(!effectBlock.includes('onLiveToggle = {') &&
@@ -114,7 +114,7 @@ assert(previewGate &&
          previewGate.indexOf('livePreview.arm()') &&
        previewGate.includes('livePreview.stop()') &&
        previewGate.includes('liveArmed.value = false') &&
-       effectBlock.includes('if(liveArmed.value) previewCurrentEffect(id)') &&
+       effectBlock.includes('previewCurrentEffect(id)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
   'Owner-triggered Effects preview must reject unsupported palettes before arming BLE without silent fallback');
 assert(compose.includes('supportedIds.value = emptySet() // never reuse another CORE\'s FX capability list'),
@@ -172,3 +172,17 @@ assert(ble.includes('pendingPacket = null; nextPacket = null; afterStopPacket = 
   'Post-STOP queue must reset on adapter off, reconnect and disconnect');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
 console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary authenticated bounded BLE FX; no NVS writes on edit.');
+
+ // PR90 bench regression: the existing physical controls and authenticated
+ // editor gestures must actually reach CORE, including after Preview Offline.
+ const controllerEditor = compose.split('private fun ShowModesPage(')[1].split('private fun effectLabel(')[0];
+ assert(!controllerEditor.includes('if(liveArmed.value) previewCurrentEffect(id)') &&
+        !controllerEditor.includes('if(liveArmed.value && key in') &&
+        !controllerEditor.includes('if(liveArmed.value && slot < 2)') &&
+        controllerEditor.includes('if(key in setOf("speed","intensity","brightness"))') &&
+        controllerEditor.includes('if(slot < 2) previewCurrentEffect(id)'),
+        'Authenticated effect edits must not require an already-armed preview');
+ assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
+        compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&
+        compose.includes('if (ble.canControl() && id in supportedIds.value) {\n                    offlinePreview.value = false'),
+        'Explicit existing physical bench controls must leave Preview Offline');

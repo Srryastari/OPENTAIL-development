@@ -112,6 +112,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val liveZoneMask = mutableIntStateOf(255)
     private val coreFrame = mutableStateOf<ExactLedFrame?>(null)
     private val captureMessage = mutableStateOf("CORE render snapshot not captured")
+    private val captureError = mutableStateOf<String?>(null)
     private val sequenceMessage = mutableStateOf("")
     private val captureOutput = mutableIntStateOf(0)
     private val previewPaused = mutableStateOf(false)
@@ -130,6 +131,7 @@ class ComposeMainActivity : ComponentActivity() {
         pendingFrameOutput = -1
         coreFrame.value = null
         captureMessage.value = "CORE frame not captured"
+        captureError.value = null
     }
 
     private fun enterOfflinePreview() {
@@ -256,16 +258,19 @@ class ComposeMainActivity : ComponentActivity() {
                 if (error != null || rgb == null) {
                     coreFrame.value = null
                     captureMessage.value = error ?: "No CORE frame returned"
+                    captureError.value = captureMessage.value
                 } else {
                     runCatching { ExactLedFrame.fromCoreRgb888(output, sequence, rgb) }
                         .onSuccess {
                             coreFrame.value = it
+                            captureError.value = null
                             captureMessage.value = "Verified CORE RGB888 snapshot · output " +
                                 (output + 1) + " · frame " + sequence + " · " + it.size() + " LEDs"
                         }
                         .onFailure {
                             coreFrame.value = null
                             captureMessage.value = "Invalid CORE RGB888 frame"
+                            captureError.value = captureMessage.value
                         }
                 }
             }
@@ -859,7 +864,10 @@ class ComposeMainActivity : ComponentActivity() {
         if(ble.captureFrame(captureOutput.intValue)) {
             pendingFrameRevision=frameRevision
             pendingFrameOutput=captureOutput.intValue
-            captureMessage.value="Capturing CORE frame"
+            // Keep the last failure visible while an opportunistic retry is in flight.
+            if (captureMessage.value == "CORE frame not captured" ||
+                captureMessage.value == "CORE render snapshot not captured")
+                captureMessage.value="Capturing CORE frame"
         }
     }
     @Composable
@@ -1038,11 +1046,15 @@ class ComposeMainActivity : ComponentActivity() {
                     localSketch -> "Offline animation unavailable"
                     animateOffline && (offlinePreview.value || !ble.canControl()) ->
                         "Offline animation unavailable"
-                    hasLiveColors && !offlinePreview.value -> NativeEffectCatalog.byId(effect).name
+                    captureError.value != null && !offlinePreview.value ->
+                        CorePreviewEvidence.label(null,captureError.value,
+                            useConfiguredColors || frame?.origin == ExactLedFrame.Origin.PROJECT)
+                    actualFrame != null && !offlinePreview.value -> CorePreviewEvidence.label(
+                        actualFrame,captureMessage.value,useConfiguredColors || frame?.origin == ExactLedFrame.Origin.PROJECT)
                     useConfiguredColors -> "Configured zone colors"
                     offlinePreview.value -> "Offline design preview"
                     hasProjectColors -> "Project pixel colors"
-                    else -> "Awaiting CORE frame"
+                    else -> CorePreviewEvidence.label(null,captureMessage.value,false)
                 }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
                 Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
                     .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
@@ -1130,8 +1142,7 @@ class ComposeMainActivity : ComponentActivity() {
                                     editor.putInt(key,prefs.getInt(scoped,0))
                             }
                             editor.apply()
-                            if(liveArmed.value) previewCurrentEffect(id)
-                            else invalidateCoreFrame()
+                            previewCurrentEffect(id)
                         }
                     },
                     onParam = { id,key,value ->
@@ -1139,7 +1150,7 @@ class ComposeMainActivity : ComponentActivity() {
                         if(key in setOf("speed","intensity","brightness"))
                             edit.putInt(key,value)
                         edit.apply()
-                        if(liveArmed.value && key in setOf("speed","intensity","brightness"))
+                        if(key in setOf("speed","intensity","brightness"))
                             previewCurrentEffect(id)
                         else invalidateCoreFrame()
                     },
@@ -1150,14 +1161,13 @@ class ComposeMainActivity : ComponentActivity() {
                             .putInt(key,rgb).apply()
                         // Slot 3 is saved correctly but the CORE BLE preview
                         // Frame contract has only foreground/background slots.
-                        if(liveArmed.value && slot < 2) previewCurrentEffect(id)
+                        if(slot < 2) previewCurrentEffect(id)
                         else invalidateCoreFrame()
                     },
                     onPalette = { id,selected ->
                         prefs.edit().putInt("wled.${id}.palette",selected)
                             .putInt("paletteId",selected).apply()
-                        if(liveArmed.value) previewCurrentEffect(id)
-                        else invalidateCoreFrame()
+                        previewCurrentEffect(id)
                     }
                 )
             }
@@ -2262,6 +2272,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .forEach { (label, mask) ->
                             Pill(label, t, liveChainMask.intValue == mask) {
                                 liveChainMask.intValue = mask
+                                offlinePreview.value = false
                                 previewCurrentEffect()
                             }
                         }
@@ -2270,12 +2281,14 @@ class ComposeMainActivity : ComponentActivity() {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Pill("All zones", t, liveZoneMask.intValue == 255) {
                         liveZoneMask.intValue = 255
+                        offlinePreview.value = false
                         previewCurrentEffect()
                     }
                     (0 until 8).forEach { zone ->
                         val mask = 1 shl zone
                         Pill("Zone " + (zone + 1), t, liveZoneMask.intValue == mask) {
                             liveZoneMask.intValue = mask
+                            offlinePreview.value = false
                             previewCurrentEffect()
                         }
                     }
@@ -2300,8 +2313,13 @@ class ComposeMainActivity : ComponentActivity() {
             confirmButton = { Pill("Start bench test", t, true) {
                 val id = prefs.getInt("effectId", 0)
                 if (ble.canControl() && id in supportedIds.value) {
+                    offlinePreview.value = false
                     invalidateCoreFrame()
-                    ble.showFx(id, 3, 255, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
+                    val benchMask = CoreBenchTargets.enabledMask(
+                        arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)
+                    if (benchMask == 0)
+                        bleMessage.value = "No enabled CORE zone read back. Reload CORE Output Manager; local Layout zones are not hardware settings."
+                    else ble.showFx(id, benchMask, liveZoneMask.intValue, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
                 } else bleMessage.value = "Not authorized or effect unsupported by installed firmware"
                 confirm = false
             } }, dismissButton = { Pill("Cancel", t) { confirm = false } })
