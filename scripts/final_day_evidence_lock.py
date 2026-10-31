@@ -146,8 +146,10 @@ def evaluate_target(name, actual_pr_sha, runs):
         correct_pr
         and newest.get("workflow_id") == workflow_id
         and newest.get("path") == workflow_path
-        and newest.get("repository", {}).get("full_name") == REPO
-        and newest.get("head_repository", {}).get("full_name") == REPO
+        and isinstance(newest.get("repository"), dict)
+        and newest["repository"].get("full_name") == REPO
+        and isinstance(newest.get("head_repository"), dict)
+        and newest["head_repository"].get("full_name") == REPO
         and type(run_id) is int and run_id > 0
         and newest.get("html_url") == expected_url
         and type(newest.get("run_attempt")) is int
@@ -237,7 +239,7 @@ def write_json_atomic(path, data):
                                           delete=False) as handle:
             temp_name = handle.name
             json.dump(data, handle, indent=2, sort_keys=True)
-            handle.write("\\n")
+            handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
