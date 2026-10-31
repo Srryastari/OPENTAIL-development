@@ -230,6 +230,13 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic reply;
     private volatile BluetoothGattCharacteristic fxCaps;
     private volatile boolean fxCapsBusy=false;
+    // A long ATT Read Blob may fail to complete without an Android callback.
+    // Never strand the shared GATT transaction queue indefinitely.
+    private volatile int fxCapsWatchLease=0;
+    private static final long FX_CAPABILITIES_TIMEOUT_MS=12000L;
+    // After a catalog timeout, allow other commands on the recovered link.
+    // The owner can explicitly retry, but auto-auth must not loop on the same stalled read.
+    private volatile boolean fxCapsAutoReadSuppressed=false;
     private BluetoothGattCharacteristic triggerMapping;
     private volatile boolean triggerMapBusy=false;
     private boolean triggerMapSavePending=false;
@@ -345,20 +352,58 @@ final class BleDiscovery {
         notifyStatus("CORE trigger mapping readback could not start");pumpQueue();
     }
 
+    /** Initial capability discovery is optional, never allowed to block authorized controls. */
+    void readFxCapabilitiesAfterAuth() {
+        if (fxCapsAutoReadSuppressed) {
+            notifyStatus("BLE effects catalog auto-read paused after timeout; use manual retry");
+            return;
+        }
+        readFxCapabilitiesInternal();
+    }
+    /** Manual read explicitly retries a catalog previously timed out. */
+    void readFxCapabilities() {
+        readFxCapabilitiesInternal();
+    }
     @SuppressWarnings("MissingPermission")
-    void readFxCapabilities(){
-        if(!connected||gatt==null||fxCaps==null){fxNotify("[]");return;}
+    private void readFxCapabilitiesInternal() {
+        final BluetoothGatt owner=gatt;
+        if(!connected||owner==null){
+            notifyStatus("BLE effects catalog unavailable: CORE disconnected");
+            fxNotify("[]");
+            return;
+        }
+        if(fxCaps==null){
+            notifyStatus("BLE effects catalog characteristic 0x29 missing on connected CORE");
+            fxNotify("[]");
+            return;
+        }
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry supported effects");return;
         }
         fxCapsBusy=true;
+        final int lease=++fxCapsWatchLease;
         try {
-            if(!gatt.readCharacteristic(fxCaps)){
-                fxCapsBusy=false;fxNotify("[]");pumpQueue();
+            if(!owner.readCharacteristic(fxCaps)){
+                fxCapsBusy=false;
+                ++fxCapsWatchLease;
+                notifyStatus("BLE effects catalog ATT read could not start");
+                fxNotify("[]");pumpQueue();
+                return;
             }
         } catch(SecurityException ex){
-            fxCapsBusy=false;fxNotify("[]");pumpQueue();
+            fxCapsBusy=false;
+            ++fxCapsWatchLease;
+            notifyStatus("Bluetooth permission denied for BLE effects catalog");
+            fxNotify("[]");pumpQueue();
+            return;
         }
+        ui.postDelayed(()->{
+            if(stopped || owner!=gatt || lease!=fxCapsWatchLease || !fxCapsBusy)return;
+            fxCapsAutoReadSuppressed=true;
+            // The outstanding GATT operation may still own ATT. Do not just
+            // clear fxCapsBusy and start other reads on a wedged connection.
+            recoverStalledGatt(owner,"CORE effects catalog ATT read timed out");
+        },FX_CAPABILITIES_TIMEOUT_MS);
     }
     private void fxNotify(String json){
         // A capability reply may already be posted when disconnect or a
@@ -371,12 +416,24 @@ final class BleDiscovery {
         });
     }
     private void fxRead(byte[] raw,int status){
+        if(!fxCapsBusy)return; // ignore unsolicited/late callback
         fxCapsBusy=false;
-        if(status!=BluetoothGatt.GATT_SUCCESS||raw==null||raw.length<2||raw[0]!=1){fxNotify("[]");pumpQueue();return;}
-        int n=raw[1]&255;
-        try {fxNotify(BleFxCapabilities.decode(raw));}
-        catch(IllegalArgumentException ex){
-            notifyStatus("CORE effect catalog invalid: "+ex.getMessage());
+        ++fxCapsWatchLease;
+        if(status!=BluetoothGatt.GATT_SUCCESS){
+            notifyStatus("CORE effects catalog ATT read failed (GATT "+status+")");
+            fxNotify("[]");pumpQueue();return;
+        }
+        if(raw==null||raw.length<2){
+            notifyStatus("CORE effects catalog was missing or truncated");
+            fxNotify("[]");pumpQueue();return;
+        }
+        try {
+            String ids=BleFxCapabilities.decode(raw);
+            fxCapsAutoReadSuppressed=false;
+            notifyStatus("CORE effects catalog read: "+(raw[1]&255)+" effects");
+            fxNotify(ids);
+        } catch(IllegalArgumentException ex){
+            notifyStatus("CORE effect catalog invalid ("+raw.length+" bytes): "+ex.getMessage());
             fxNotify("[]");
         }
         pumpQueue();
