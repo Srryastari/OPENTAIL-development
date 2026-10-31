@@ -947,7 +947,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Text("Effects",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 val matches=remember(query) {
                     val preferred=listOf(9,32769,32770,32771,32772)
-                    NativeEffectCatalog.all().filter { it.name.contains(query,ignoreCase=true) }
+                    NativeEffectCatalog.all().filter { !NativeEffectCatalog.autoEventOnly(it.id) &&
+                        it.name.contains(query,ignoreCase=true) }
                         .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
                 }
                 LazyColumn(Modifier.fillMaxWidth().height(236.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
