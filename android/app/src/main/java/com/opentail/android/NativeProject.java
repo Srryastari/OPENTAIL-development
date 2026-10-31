@@ -611,7 +611,9 @@ final class NativeProject {
                 break;
             case "eventFx":
                 if (!(value instanceof String) || ((String)value).isEmpty()
-                        || ((String)value).length() > 64) return false;
+                        || ((String)value).length() > 64 ||
+                        !NativeEffectCatalog.isAllowedForAutoEvent(event,(String)value))
+                    return false;
                 break;
             default:
                 return false;
