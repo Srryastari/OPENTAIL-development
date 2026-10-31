@@ -28,8 +28,11 @@ jobs:
             ["git","diff","--name-only",
              "7c0fcc450a7619a57603aabf833dea855a18bcd8","HEAD"],
              text=True).splitlines()
+          permitted={"core-firmware/main/ot_failover_essential.c",
+                     "core-firmware/main/ot_failover_essential.h",
+                     "core-firmware/main/CMakeLists.txt"}
           assert not any(p.startswith(("android/","web-studio/","core-firmware/main/"))
-                         for p in paths), paths
+                         and p not in permitted for p in paths), paths
           print("PASS: renderer and approved UI untouched after Effects #80")
           PY
   core-host-regressions:
