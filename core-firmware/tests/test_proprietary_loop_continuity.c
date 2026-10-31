@@ -52,6 +52,7 @@ int main(void){
   const uint16_t id=continuous[k];
   assert(ot_auto_fx_continuous(id));
   cfg.effect_id=id;
+  cfg.intensity=213u;
   uint32_t hash=2166136261u;
   unsigned animated=0,speed_sensitive=0,intensity_sensitive=0;
   for(unsigned speed_idx=0;speed_idx<3;speed_idx++){
