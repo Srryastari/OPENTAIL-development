@@ -401,6 +401,27 @@ public class NativeProjectCommitTest {
         assertEquals(before, new NativeProject(storage.prefs).exportJson());
     }
 
+    @Test public void onlyCustomTriggerDeletionIsConfirmableAndDurable() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.customTrigger("Test AUX 2"));
+        assertFalse(project.deleteTrigger("Brake"));
+        assertFalse(project.deleteTrigger("Park"));
+        assertFalse(project.deleteTrigger("Startup"));
+        assertFalse(project.deleteTrigger("Shutdown"));
+        assertFalse(project.deleteTrigger("Missing"));
+        assertTrue(project.deleteTrigger("Test AUX 2"));
+        assertNull(project.profiles().optJSONObject("Test AUX 2"));
+        assertNull(new NativeProject(storage.prefs).profiles().optJSONObject("Test AUX 2"));
+        assertTrue(project.customTrigger("Transient AUX"));
+        String committed = project.exportJson();
+        storage.fail = true;
+        assertFalse(project.deleteTrigger("Transient AUX"));
+        assertEquals(committed, project.exportJson());
+        assertNotNull(project.profiles().optJSONObject("Transient AUX"));
+        assertEquals(committed, new NativeProject(storage.prefs).exportJson());
+    }
+
     @Test public void triggerLiveParametersPersistImmediatelyAndRollbackAtomically() throws Exception {
         Storage storage = new Storage();
         NativeProject project = new NativeProject(storage.prefs);
