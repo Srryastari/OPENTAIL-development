@@ -21,9 +21,8 @@
 #define OT_OM_MAX_PIXELS_PER_OUTPUT ((unsigned)CONFIG_OPENTAIL_BUFFER_PIXELS_PER_OUTPUT)
 #define OT_OM_MAX_TOTAL_PIXELS (OT_OM_OUTPUTS * OT_OM_MAX_PIXELS_PER_OUTPUT)
 
-/* Inert one-pixel placeholder until an installer explicitly configures output.
- * This is not a vehicle layout nor the capacity of the hardware. */
-#define OT_OM_UNCONFIGURED_PIXELS 1u
+/* A fresh output is disabled: zero addressable pixels and zero zones. */
+#define OT_OM_UNCONFIGURED_PIXELS 0u
 #define OT_OM_ZONES 8
 #define OT_OM_NAME_LEN 25
 #define OT_OM_VERSION 2
@@ -41,9 +40,9 @@ typedef struct {
 } ot_om_zone_t;
 typedef struct {
     char name[OT_OM_NAME_LEN];
-    uint16_t active_pixels; /* 1..OT_OM_MAX_PIXELS_PER_OUTPUT; saved profiles preserved */
+    uint16_t active_pixels; /* 0 when unconfigured, else 1..MAX; saved profiles preserved */
     uint8_t color_order;
-    uint8_t zone_count; /* 1..8 configured zones; newly initialized device has one neutral zone */
+    uint8_t zone_count; /* 0 when unconfigured, else 1..8 configured zones */
     uint8_t rgb_gain[3]; /* per-output decorative RGB calibration, 0..255 */
     uint8_t white_gain[3]; /* additional tint correction for neutral whites */
     bool gamma_enabled; /* optional soft gamma; OFF by default to preserve colors */
