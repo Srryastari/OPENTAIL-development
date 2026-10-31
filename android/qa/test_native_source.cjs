@@ -283,7 +283,7 @@ assert(compose.includes('var dragValue by remember { mutableFloatStateOf(committ
        events.includes('eventEditing=if(eventEditing==key) null else key') &&
        compose.includes('formatDurationSeconds(item.optInt("ms", 1500))') &&
        compose.includes('BigDecimal(editedDuration).movePointRight(3).intValueExact()') &&
-       layout.includes('Modifier.size(42.dp).clickable'),
+       layout.includes('Modifier.size(46.dp).clickable'),
        'Requested live sliders, card toggle, decimal seconds and pixel hit areas regressed');
 assert(palettes.includes('parseVerifiedCustom(verifiedCustomStops)') &&
        palettes.includes('coreFixedStops(id, foreground, background)') &&
