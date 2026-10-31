@@ -206,7 +206,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
-                ble.readFxCapabilities()
+                ble.readFxCapabilitiesAfterAuth()
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
