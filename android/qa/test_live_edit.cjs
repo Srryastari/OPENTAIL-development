@@ -74,7 +74,8 @@ assert(approvedPreview.includes('val columns = 30') &&
        approvedPreview.includes('val actualFrame = coreFrame.value') &&
        approvedPreview.includes('hasLiveColors -> actualFrame') &&
        approvedPreview.includes('Color(frame!!.colorAt(sample))') &&
-       approvedPreview.includes('offlinePreview.value -> projectPaint') &&
+       approvedPreview.includes('offlinePreview.value && hasProjectColors -> projectPaint') &&
+       approvedPreview.includes('offlinePreview.value -> null') &&
        approvedPreview.includes('val readback = outputs[captureOutput.intValue]') &&
        approvedPreview.includes('Configured zone colors'),
    'Final preview must preserve 30 capsules and distinguish genuine CORE live frames from configured role colors.');
