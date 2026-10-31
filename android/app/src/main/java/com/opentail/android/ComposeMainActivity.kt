@@ -1873,7 +1873,12 @@ class ComposeMainActivity : ComponentActivity() {
         fun applyAutoEvent(event: String, field: String, value: Any): Boolean {
             val saved = project.setAutoEvent(event, field, value)
             eventMessage = if (saved) "" else "Could not save " + event + " settings"
-            if (saved) refresh()
+            if (saved) {
+                refresh()
+                // One-shot events replay their own source frames from t=0
+                // after a locally saved edit, never restart a physical Show.
+                if (offlinePreview.value && selectedEvent == event) offlineReplay.intValue++
+            }
             return saved
         }
         listOf("Startup", "Shutdown").forEach { key ->
@@ -1882,7 +1887,10 @@ class ComposeMainActivity : ComponentActivity() {
                 val enabled = event.optBoolean("eventUiEnabled", false)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable {
-                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value) offlineReplay.intValue++
+                        }
                         selectedEvent=key
                         eventEditing=if(eventEditing==key) null else key
                     }) {
@@ -1890,7 +1898,10 @@ class ComposeMainActivity : ComponentActivity() {
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
                     IconAction("Edit " + key, "edit", t) {
-                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value) offlineReplay.intValue++
+                        }
                         selectedEvent=key
                         eventEditing = if (eventEditing == key) null else key
                     }
@@ -1910,7 +1921,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .getOrDefault(0xffffffff.toInt())
                 ApprovedWledEffectsEditor(
                     selectedId=eventEffect.id,
-                    effectOptions=NativeEffectCatalog.autoEventChoices(),
+                    effectOptions=NativeEffectCatalog.autoEventChoices(key),
                     scopeKey="auto-event:"+key,
                     prefs=prefs,
                     paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
@@ -1923,7 +1934,8 @@ class ComposeMainActivity : ComponentActivity() {
                     readPalette={ event.optInt("paletteId",0) },
                     onSelected={ id ->
                         val fx=NativeEffectCatalog.byId(id ?: 0)
-                        if(applyAutoEvent(key,"eventFx",fx.name))
+                        if(NativeEffectCatalog.isAllowedForAutoEvent(key,fx.id) &&
+                           applyAutoEvent(key,"eventFx",fx.name))
                             autoEventPreviewEffect.intValue=-1
                     },
                     onParam={ _,field,value ->
@@ -1956,7 +1968,7 @@ class ComposeMainActivity : ComponentActivity() {
                     val selected = NativeEffectCatalog.byName(event.optString("eventFx", "Solid"))
                     previewEffect(selected.id)
                 }
-                Caption("Offline preview inspects exact design pixels; CORE provides animation.", t)
+                Caption("Offline preview renders local CORE-equivalent effect frames; CORE drives the vehicle LEDs.", t)
                 }
             }
         }
@@ -1970,7 +1982,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // Show all matching choices; the old 15-item
                         // alphabetic cap hid Materialize, Random Materialize,
                         // Smooth Fade and Strobe (owner Test 86).
-                        NativeEffectCatalog.autoEventChoices()
+                        NativeEffectCatalog.autoEventChoices(key)
                             .filter { it.name.contains(search, ignoreCase = true) }
                             .forEach { item ->
                                 Pill(item.name, t) {
