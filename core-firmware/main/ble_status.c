@@ -55,8 +55,6 @@ void ot_ble_session_hex(char out[33]){
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
-#include "host/ble_att.h"
-#include "host/ble_att.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "os/os_mbuf.h"
@@ -497,6 +495,8 @@ static void advertise(void){
     int rc=ble_gap_adv_set_fields(&fields);
     if(rc){ESP_LOGE(TAG,"Advertising fields failed: %d",rc);return;}
     struct ble_gap_adv_params p={0};p.conn_mode=BLE_GAP_CONN_MODE_UND;p.disc_mode=BLE_GAP_DISC_MODE_GEN;
+    /* Fast but bounded discovery after disconnect; units are 0.625 ms. */
+    p.itvl_min=48;p.itvl_max=96; /* 30-60 ms */
     rc=ble_gap_adv_start(addr_type,NULL,BLE_HS_FOREVER,&p,gap_event,NULL);
     if(rc)ESP_LOGE(TAG,"Advertising failed: %d",rc);
     else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
@@ -513,6 +513,13 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
             active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
             challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
             cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+            /* Request responsive live controls; Android may choose other parameters.
+             * A central rejection is never a reason to terminate this link. */
+            const struct ble_gap_upd_params fast={
+                .itvl_min=12,.itvl_max=24,.latency=0,.supervision_timeout=400
+            }; /* 15-30 ms, 4 s supervision */
+            const int rc=ble_gap_update_params(active_conn,&fast);
+            if(rc)ESP_LOGW(TAG,"BLE connection interval request declined: %d",rc);
         }else advertise();
     }else if(ev->type==BLE_GAP_EVENT_DISCONNECT){
         /* A rejected secondary connection can still deliver DISCONNECT. */
@@ -522,7 +529,22 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         ot_st_ble_connected(false);ot_ble_disconnect_show();
         cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
+    else if(ev->type==BLE_GAP_EVENT_MTU && ev->mtu.conn_handle==active_conn)
+        ESP_LOGI(TAG,"BLE negotiated ATT MTU: %u",(unsigned)ev->mtu.value);
     return 0;
+}
+/* A NimBLE host/controller reset does not promise a GAP DISCONNECT callback.
+ * Clearing the old connection handle is essential: advertise() otherwise
+ * refuses to restart on the next host sync, stranding a previously paired app.
+ * Preserve the durable owner key, trigger state and NVS profiles. */
+static void on_reset(int reason){
+    const bool had_link=active_conn!=BLE_HS_CONN_HANDLE_NONE;
+    active_conn=BLE_HS_CONN_HANDLE_NONE;
+    authorized=false;last_result=OT_BLE_ERR_AUTH;
+    challenge_ready=false;memset(owner_challenge,0,sizeof(owner_challenge));pair_failures=0;
+    if(had_link){ot_st_ble_connected(false);ot_ble_disconnect_show();}
+    cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+    ESP_LOGW(TAG,"BLE host reset (%d); advertising resumes after sync",reason);
 }
 static void on_sync(void){
     int rc=ble_hs_util_ensure_addr(0);
@@ -551,6 +573,7 @@ bool ot_ble_start(void){
     if(!rc)rc=ble_gatts_count_cfg(services);
     if(!rc)rc=ble_gatts_add_svcs(services);
     if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}
+    ble_hs_cfg.reset_cb=on_reset;
     ble_hs_cfg.sync_cb=on_sync;
     nimble_port_freertos_init(host_task);
     ESP_LOGI(TAG,"BLE output manager started; BOOT enrollment %s; no production pairing security.",
