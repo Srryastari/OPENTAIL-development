@@ -1366,6 +1366,13 @@ void ot_ble_disconnect_show(void){
  /* CORE owns already-authorized effect playback, not the BLE connection.
   * Temporary effects honor their own TTL; loaded standalone scenes remain
   * active until explicit STOP/replacement/fault. No radio-event auto-STOP. */
+ bool owned_before;
+ portENTER_CRITICAL(&state_lock);
+ owned_before=ble_owns_show;
+ portEXIT_CRITICAL(&state_lock);
+ /* Preserve the Trigger contract: a link transition wakes the single render
+  * owner after lock release, without clearing physical inputs or active FX. */
+ if(owned_before)request_render_refresh();
  ESP_LOGI(TAG,"BLE disconnected; locally running effects retain CORE lifetime");
 }
 
