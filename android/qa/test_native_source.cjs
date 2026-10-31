@@ -103,7 +103,8 @@ assert(settingsSection.includes('Pill("Preview Offline", t)') &&
        compose.includes('livePreview.stop()'),
        'Locked Settings Connect and offline preview regression');
 assert(compose.includes('4 -> AutoEventsPage(t) { effectId ->') &&
-       compose.includes('enterOfflinePreview()\n                        page = 1') &&
+       compose.includes('autoEventPreviewEffect.intValue = effectId\n                        enterOfflinePreview()') &&
+       !compose.includes('selectedEffect.intValue = effectId') &&
        compose.includes('Offline preview inspects exact design pixels; CORE provides animation.'),
        'Auto Events offline preview must use the same BLE-isolated session as Settings');
 const presetBlock=compose.split('private fun PresetsPage(t: Tone) {')[1]
@@ -206,8 +207,33 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('firmwareVersion.value ?: "Unavailable"') &&
        compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
-       compose.includes('!NativeEffectCatalog.autoEventOnly(it.id)'),
+       compose.includes('NativeEffectCatalog.generalEffects().filter {') &&
+       compose.includes('NativeEffectCatalog.generalEffects().forEach { effect ->'),
        'Owner Tests 49/79/80, firmware version, +/-, event exclusivity and collapsed Layout cards regressed');
+// Owner Test 86: never truncate the transition picker to the first fifteen,
+// or leak Auto Event previews into general Show Modes effect selection.
+const catalog=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
+const autoEvents=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
+  ?.split('private fun CorePaletteTransferPanel(')[0];
+const generalEffects=compose.split('private fun ShowModesPage(t: Tone) {')[1]
+  ?.split('private fun SequencePage(')[0];
+assert(catalog.includes('static List<Effect> generalEffects()') &&
+       catalog.includes('if (!autoEventOnly(effect.id)) general.add(effect)') &&
+       catalog.includes('static List<Effect> autoEventChoices()') &&
+       catalog.includes('choices.sort(Comparator.comparing((Effect e) -> !autoEventOnly(e.id))') &&
+       catalog.includes('id==32769 || id==32770 || id==32771 || id==32773') &&
+       catalog.includes('id==32787') &&
+       generalEffects.includes('NativeEffectCatalog.generalEffects()') &&
+       autoEvents.includes('NativeEffectCatalog.autoEventChoices()') &&
+       !autoEvents.includes('.take(15)') &&
+       autoEvents.includes('previewEffect(selected.id)') &&
+       autoEvents.includes('EffectsPreview(t, eventPreviewId)') &&
+       compose.includes('autoEventPreviewEffect.intValue = effectId') &&
+       !compose.includes('selectedEffect.intValue = effectId') &&
+       !compose.includes('enterOfflinePreview()\\n                        page = 1') &&
+       compose.includes('NativeEffectCatalog.generalEffects().forEach { effect ->'),
+       'Test 86: full Auto Events picker and exclusive transitions across shows, triggers and preview');
 assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('infoReadQueued=true;pumpQueue()') &&
        bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
