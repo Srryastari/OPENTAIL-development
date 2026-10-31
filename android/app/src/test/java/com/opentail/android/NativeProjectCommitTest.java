@@ -146,6 +146,18 @@ public class NativeProjectCommitTest {
         assertEquals(commits, store.commits);
         assertTrue(project.setAutoEvent("Startup", "eventFx", "Solid"));
         assertEquals(commits + 1, store.commits);
+        // Startup/Shutdown have independent dedicated transitions, while
+        // standard WLED Strobe remains available for either event.
+        assertFalse(project.setAutoEvent("Startup","eventFx","Singularity Shutdown"));
+        assertFalse(project.setAutoEvent("Shutdown","eventFx","Materialize Sparks"));
+        assertFalse(project.setAutoEvent("Startup","eventFx","Crystal Growth"));
+        assertFalse(project.setAutoEvent("Shutdown","eventFx","Plasma Sweep"));
+        assertFalse(project.setAutoEvent("Startup","eventFx","Unknown Effect"));
+        assertEquals(commits + 1, store.commits);
+        assertTrue(project.setAutoEvent("Startup","eventFx","Materialize Sparks"));
+        assertTrue(project.setAutoEvent("Shutdown","eventFx","Singularity Shutdown"));
+        assertTrue(project.setAutoEvent("Shutdown","eventFx","Strobe"));
+        assertEquals(commits + 4, store.commits);
         String previous = project.exportJson();
         store.fail = true;
         assertFalse(project.setAutoEvent("Startup", "eventUiEnabled", true));

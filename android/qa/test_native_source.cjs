@@ -227,7 +227,7 @@ assert(catalog.includes('static List<Effect> generalEffects()') &&
        catalog.includes('id==32769 || id==32770 || id==32771 || id==32773') &&
        catalog.includes('id==32787') &&
        generalEffects.includes('NativeEffectCatalog.generalEffects()') &&
-       autoEvents.includes('NativeEffectCatalog.autoEventChoices()') &&
+       autoEvents.includes('NativeEffectCatalog.autoEventChoices(key)') &&
        !autoEvents.includes('.take(15)') &&
        autoEvents.includes('previewEffect(selected.id)') &&
        autoEvents.includes('EffectsPreview(t, eventPreviewId, animateOffline=true, settingsOverride=') &&
@@ -1044,8 +1044,11 @@ assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d'
 assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
        compose.includes('registerOnSharedPreferenceChangeListener(observer)') &&
        compose.includes('unregisterOnSharedPreferenceChangeListener(observer)') &&
-       compose.includes('settings[2],settings[3],settings[4],settings[5]'),
-       'Scoped parameter edits must update native preview without a CORE capture dependency');
+       compose.includes('settings[2],settings[3],settings[4],rendererPalette') &&
+       compose.includes('OfflinePreviewPalettePolicy.rendererId(effect,settings[5])') &&
+       fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt','utf8')
+           .includes('NativeEffectParameters.forId(effectId)?.palette == true'),
+       'Scoped parameter edits must update native preview and reject stale palettes for non-palette effects');
 assert(manifest.includes('android.permission.RECORD_AUDIO') &&
        compose.includes('val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value') &&
        compose.includes('override fun onStop() {\n        localMicrophone.stop()') &&

@@ -154,6 +154,26 @@ def main():
         lib.drop.argtypes=[C.c_void_p]
         lib.frame.argtypes=[C.c_void_p,C.c_uint32,*[C.c_int]*4,C.c_uint32,C.c_uint32,C.c_float,C.c_float,C.POINTER(C.c_uint32)]
         lib.frame.restype=C.c_int
+        # Dedicated Startup/Shutdown animations are true one-shots: they
+        # advance through different frames and hold their final image.
+        # A loop-seam assertion would be wrong for these intentional events.
+        # Use the independent pinned CORE oracle, not a substituted UI demo.
+        one_shots=(32769,32770,32771,32773,32787)
+        event_duration=350+(255-128)*14
+        assert len(one_shots)==5
+        for fx in one_shots:
+            h=lib.make(fx);samples=[]
+            for ms in (0,event_duration//2,event_duration,
+                       event_duration+300,event_duration+1200):
+                rgb=(C.c_uint32*30)()
+                assert lib.frame(h,ms,128,255,160,0,
+                                 0xffd735f4,0xff174a03,440,2048,rgb),(fx,ms)
+                samples.append(tuple(rgb))
+            lib.drop(h)
+            assert samples[0]!=samples[1] and samples[1]!=samples[2], \
+                ('event did not animate through its one-shot',fx)
+            assert samples[2]==samples[3]==samples[4], \
+                ('one-shot terminal frame changed after completion',fx)
         expected=bytearray();plan=[];rows=[];count=0
         frame=(C.c_uint32*30)()
         for effect,name in catalog:
@@ -166,9 +186,12 @@ def main():
                 if lib.palette_ok(effect,pal):profiles.append((128,128,160,pal,0xffd735f4,0xff174a03))
             if flags&16:profiles.append((128,128,160,200,0xffd735f4,0xff174a03))
             hashes=[];start_count=count
+            named_phone_dynamic=(1,26,38,91)
             for profile_index,profile in enumerate(profiles):
                 speed,intensity,bri,pal,fg,bg=profile
                 handle=lib.make(effect);h=hashlib.sha256()
+                distinct_frames=set() if profile_index==1 and (
+                    effect>=32768 or effect in named_phone_dynamic) else None
                 frames=420 if pal==1 else 180 if profile_index<4 else 12
                 for step in range(frames):
                     # Change all authoring parameters without resetting native state.
@@ -177,10 +200,15 @@ def main():
                     ms=step*16
                     assert lib.frame(handle,ms,speed,intensity,bri,pal,fg,bg,440,2048,frame),(effect,profile,step)
                     data=b''.join(int(x).to_bytes(4,'big') for x in frame)
+                    if distinct_frames is not None:
+                        distinct_frames.add(hashlib.sha256(data).digest())
                     if bri==0:assert all(x==0xff000000 for x in frame),(effect,'zero brightness')
                     expected.extend(data);h.update(data)
                     plan.append(','.join(map(str,[int(step==0),effect,ms,speed,intensity,bri,pal,fg,bg])))
                     count+=1
+                if distinct_frames is not None:
+                    assert len(distinct_frames)>1, (
+                        effect,name,'does not animate across 180 offline frames')
                 hashes.append(h.hexdigest());lib.drop(handle)
             rows.append({'id':effect,'name':name,'source_adapter':bool(flags&32),
                          'speed_supported':bool(flags&1),'intensity_supported':bool(flags&2),

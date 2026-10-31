@@ -989,8 +989,14 @@ class ComposeMainActivity : ComponentActivity() {
                 val pitch=capsuleWidth+gap
                 val capsuleHeight = 24.dp.toPx()
                 val audio = if(effect==185) localMicrophone.latest() else null
+                // Keep an effect's saved palette, but do not send it to
+                // CORE when that effect's metadata declares no palette.
+                // A previous Rainbow/Palette selection otherwise makes
+                // Blink, Bouncing Balls and proprietary originals fail render.
+                // Preview-only: the locked palette engine is unchanged.
+                val rendererPalette = OfflinePreviewPalettePolicy.rendererId(effect,settings[5])
                 val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
-                    localFrameMs.intValue,settings[2],settings[3],settings[4],settings[5],
+                    localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
                     settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
                     audio?.get(1) ?: 0f,audio!=null,localColors)
                 if(localSketch) localRenderAvailable.value=localRendered
@@ -1874,6 +1880,10 @@ class ComposeMainActivity : ComponentActivity() {
             val saved = project.setAutoEvent(event, field, value)
             eventMessage = if (saved) "" else "Could not save " + event + " settings"
             if (saved) refresh()
+            // One-shot events replay their own source frames from t=0
+            // after a locally saved edit, never restart a physical Show.
+            if (saved && offlinePreview.value && selectedEvent == event)
+                offlineReplay.intValue++
             return saved
         }
         listOf("Startup", "Shutdown").forEach { key ->
@@ -1882,7 +1892,10 @@ class ComposeMainActivity : ComponentActivity() {
                 val enabled = event.optBoolean("eventUiEnabled", false)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).clickable {
-                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value) offlineReplay.intValue++
+                        }
                         selectedEvent=key
                         eventEditing=if(eventEditing==key) null else key
                     }) {
@@ -1890,7 +1903,10 @@ class ComposeMainActivity : ComponentActivity() {
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
                     IconAction("Edit " + key, "edit", t) {
-                        if(selectedEvent!=key) autoEventPreviewEffect.intValue=-1
+                        if(selectedEvent!=key) {
+                            autoEventPreviewEffect.intValue=-1
+                            if (offlinePreview.value) offlineReplay.intValue++
+                        }
                         selectedEvent=key
                         eventEditing = if (eventEditing == key) null else key
                     }
@@ -1910,7 +1926,7 @@ class ComposeMainActivity : ComponentActivity() {
                         .getOrDefault(0xffffffff.toInt())
                 ApprovedWledEffectsEditor(
                     selectedId=eventEffect.id,
-                    effectOptions=NativeEffectCatalog.autoEventChoices(),
+                    effectOptions=NativeEffectCatalog.autoEventChoices(key),
                     scopeKey="auto-event:"+key,
                     prefs=prefs,
                     paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
@@ -1923,7 +1939,8 @@ class ComposeMainActivity : ComponentActivity() {
                     readPalette={ event.optInt("paletteId",0) },
                     onSelected={ id ->
                         val fx=NativeEffectCatalog.byId(id ?: 0)
-                        if(applyAutoEvent(key,"eventFx",fx.name))
+                        if(NativeEffectCatalog.isAllowedForAutoEvent(key,fx.id) &&
+                           applyAutoEvent(key,"eventFx",fx.name))
                             autoEventPreviewEffect.intValue=-1
                     },
                     onParam={ _,field,value ->
@@ -1970,7 +1987,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // Show all matching choices; the old 15-item
                         // alphabetic cap hid Materialize, Random Materialize,
                         // Smooth Fade and Strobe (owner Test 86).
-                        NativeEffectCatalog.autoEventChoices()
+                        NativeEffectCatalog.autoEventChoices(key)
                             .filter { it.name.contains(search, ignoreCase = true) }
                             .forEach { item ->
                                 Pill(item.name, t) {
