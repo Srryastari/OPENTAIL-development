@@ -434,6 +434,20 @@ assert(compose.includes('val localSketch = animateOffline') &&
        offlineSketch.includes('if (!supports(id) || pixels <= 0'),
        'Local-only preview must animate known effects without fabricating CORE frames');
 
+// Codex PR #76 P2: ensure old wheel callbacks cannot overwrite new
+// brightness/role, and preset load cannot resurrect stale scoped values.
+assert(approved.includes('val currentOnPick by rememberUpdatedState(onPick)') &&
+       approved.includes('currentOnPick(hue,sat)') &&
+       approved.includes('listOf(Color.Red,Color.Yellow,Color.Green,Color.Cyan,') &&
+       approved.includes('Color.Blue,Color.Magenta,Color.Red)'),
+       'Native color wheel must track current brightness and HSV direction');
+assert(presetRestore.includes('final List<String> staleScoped=new ArrayList<>();') &&
+       presetRestore.includes('for(String key:staleScoped) editor.remove(key);') &&
+       presetRestore.includes('touched.addAll(staleScoped)') &&
+       fs.readFileSync('android/app/src/test/java/com/opentail/android/NativePresetRestoreTest.java','utf8')
+          .includes('legacyPresetClearsOnlyLoadedEffectStaleKeys'),
+       'Loading a legacy preset must atomically remove stale per-effect editor values');
+
 // The storage rollback invariant must be exercised with real JSON and
 // deterministic failed SharedPreferences.commit(), not only static source text.
 const storageTest=fs.readFileSync(
