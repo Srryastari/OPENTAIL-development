@@ -72,7 +72,12 @@ final class BleConfigCodec {
     static JSONObject decode(byte[] bytes,int index) throws Exception {
         if(bytes.length!=LENGTH||bytes[0]!=1)throw new Exception("Unsupported BLE output format");
         int pixels=(bytes[1]&255)|((bytes[2]&255)<<8),order=bytes[3]&255,count=bytes[4]&255;
-        if(pixels<1||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
+        // A never-configured CORE output has no addressable pixels or zones.
+        // Keep 0/0 read-only until the owner explicitly adds a real zone and
+        // saves >=1 pixel; existing configured outputs retain their strict rules.
+        if(pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count>8||
+                (pixels==0 ? count!=0 : count<1))
+            throw new Exception("Invalid BLE output configuration");
         JSONObject result=new JSONObject();
         result.put("index",index); // Physical pin is board-owned, not encoded in v1.
         result.put("pixels",pixels);result.put("name",readName(bytes,5));
