@@ -1,0 +1,215 @@
+{
+  "schema": 1,
+  "origin": "docs/CI-REGRESSION-BASELINE.json physical_cases — exactly 22",
+  "rule": "All physical results UNVERIFIED until exact flashed SHA, observer, calibrated measurement, proof and independent release-gate acceptance.",
+  "sessions": [
+    {
+      "id": "S1",
+      "title": "Independent inputs and OEM arbitration",
+      "case_ids": [
+        "inputs_gpio_mask",
+        "brake_park_priority",
+        "hazards_turn_priority",
+        "reverse_overlay",
+        "show_resume_phase",
+        "strobe_edges"
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Outputs, geometry, frame timing and power",
+      "case_ids": [
+        "pixel_chain_independence",
+        "full_1246_dual_lane",
+        "universal_zones",
+        "color_order_brightness",
+        "render_fps_low_brightness"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Status, STOP and effect optical observations",
+      "case_ids": [
+        "status_led_patterns",
+        "stop_restore",
+        "event_horizon_shutdown",
+        "effect_source_parity"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "BLE, Android and Studio operator acceptance",
+      "case_ids": [
+        "ble_auth_reconnect",
+        "studio_interactive_ui",
+        "android_native_ui"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "NVS, OTA, rollback and negative security tests",
+      "case_ids": [
+        "nvs_v1_v2_persistence",
+        "ota_usb_partition_migration",
+        "ota_success_rollback",
+        "ota_authorization"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "inputs_gpio_mask",
+      "session": "S1",
+      "operator_cue": "With LED +12V off, use only a previously electrically qualified isolated PC817 stimulus; step 0,1,2,3,12,14,15,31,224,255 and single bits",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "external electrically isolated/rated stimulus board for automatic masks; scope for edge proof"
+    },
+    {
+      "id": "brake_park_priority",
+      "session": "S1",
+      "operator_cue": "Cue Park, then Brake+Park, then release; record normalized GPIO, debounced mask and physical red",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "qualified isolated opto stimulus; camera for emitted color"
+    },
+    {
+      "id": "hazards_turn_priority",
+      "session": "S1",
+      "operator_cue": "Cue left+right hazards (12), then brake+hazards (14); record both physical sides",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "qualified isolated opto stimulus; video or light sensor"
+    },
+    {
+      "id": "reverse_overlay",
+      "session": "S1",
+      "operator_cue": "Start an authorized Show, then apply real Reverse; capture both assigned and unaffected zones",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "qualified isolated input and optical frame capture"
+    },
+    {
+      "id": "show_resume_phase",
+      "session": "S1",
+      "operator_cue": "Keep Show running, hold real trigger in one zone and release; verify other zone never resets",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "synchronized pixel/video captures for actual optical confirmation"
+    },
+    {
+      "id": "strobe_edges",
+      "session": "S1",
+      "operator_cue": "Stimulate externally isolated physical edge while capturing GPIO input and LED DI on calibrated scope",
+      "automation_tier": "ADDITIONAL_INSTRUMENT_REQUIRED",
+      "additional_dependency": "logic analyzer/oscilloscope with shared timebase and appropriate safe probes"
+    },
+    {
+      "id": "pixel_chain_independence",
+      "session": "S2",
+      "operator_cue": "Record live configured pixel counts and watch two unequal physical strips independently",
+      "automation_tier": "OWNED_MANUAL_IF_POWER_QUALIFIED",
+      "additional_dependency": "scope/logic analyzer recommended for electrical lane isolation"
+    },
+    {
+      "id": "full_1246_dual_lane",
+      "session": "S2",
+      "operator_cue": "After rated fuse/conductor/supply review, instrument real 623+623 pixels and record all pixels",
+      "automation_tier": "QUALIFIED_POWER_AND_INSTRUMENT_REQUIRED",
+      "additional_dependency": "rated 12V branch harness/injection, calibrated current measurement, scope/logic analyzer; do not assume 20 A sufficient"
+    },
+    {
+      "id": "universal_zones",
+      "session": "S2",
+      "operator_cue": "Read existing outputs; only with an authorized backed-up config, manually try arbitrary 40/17 lengths",
+      "automation_tier": "OWNED_MANUAL_CONFIG",
+      "additional_dependency": "software capture now; actual LED boundary optical video; must not overwrite saved profile"
+    },
+    {
+      "id": "color_order_brightness",
+      "session": "S2",
+      "operator_cue": "Record GRB red/amber/white at safe current-limited brightness; measure actual current",
+      "automation_tier": "CURRENT_MEASUREMENT_REQUIRED",
+      "additional_dependency": "rated meter or qualified technician; verified rated supply/termination and optical capture"
+    },
+    {
+      "id": "render_fps_low_brightness",
+      "session": "S2",
+      "operator_cue": "Read frame counters and measured_fps repeatedly at two approved profile loads",
+      "automation_tier": "PARTIAL_TELEMETRY_NOW",
+      "additional_dependency": "scope for actual DI timing/jitter; qualified power and thermometer for physical throughput"
+    },
+    {
+      "id": "status_led_patterns",
+      "session": "S3",
+      "operator_cue": "Record startup, Wi-Fi, connected, disconnected, Show and true fault using phone video",
+      "automation_tier": "OWNED_PHONE_VIDEO",
+      "additional_dependency": "calibrated light sensor/timer if numeric timing/color acceptance is required"
+    },
+    {
+      "id": "stop_restore",
+      "session": "S3",
+      "operator_cue": "With authorized bench Show and real inputs, trigger STOP and observe fresh output + input restoration",
+      "automation_tier": "OWNED_MANUAL_IF_INPUT_QUALIFIED",
+      "additional_dependency": "camera for photons; true physical STOP needs qualified LED wiring"
+    },
+    {
+      "id": "event_horizon_shutdown",
+      "session": "S3",
+      "operator_cue": "Capture Event Horizon last color and Singularity Shutdown terminal black on physical pixels",
+      "automation_tier": "OWNED_PHONE_VIDEO_IF_POWER_QUALIFIED",
+      "additional_dependency": "camera / optical measurement and separate trigger observation"
+    },
+    {
+      "id": "effect_source_parity",
+      "session": "S3",
+      "operator_cue": "Record physical capture and compare exported CORE logical RGB snapshot with source oracle",
+      "automation_tier": "PARTIAL_HOST_GOLDENS_ONLY",
+      "additional_dependency": "Android authenticated BLE export or protocol-controlled capture, synchronized optical capture; no true parity from a status counter"
+    },
+    {
+      "id": "ble_auth_reconnect",
+      "session": "S4",
+      "operator_cue": "Phone reconnect using stored owner key; record GATT behavior and readback; do not unpair unnecessarily",
+      "automation_tier": "OWNED_PHONE_MANUAL",
+      "additional_dependency": "phone GATT logging / optional BLE sniffer for packet timing and RF diagnostics"
+    },
+    {
+      "id": "studio_interactive_ui",
+      "session": "S4",
+      "operator_cue": "Compare locked reference and Studio browser screens; capture Layout, Triggers, Effects, Sequences",
+      "automation_tier": "OWNED_DESKTOP_MANUAL",
+      "additional_dependency": "browser automation/screenshot comparison only after approved reference and Chrome test environment"
+    },
+    {
+      "id": "android_native_ui",
+      "session": "S4",
+      "operator_cue": "Compare all six native screens against exact user-approved reference and exercise authorized BLE STOP",
+      "automation_tier": "OWNED_PHONE_MANUAL",
+      "additional_dependency": "phone screenshot/recording tool; physical LED observation separate"
+    },
+    {
+      "id": "nvs_v1_v2_persistence",
+      "session": "S5",
+      "operator_cue": "Back up NVS and identify old revisions; reboot only with isolated bench safety before comparing active/staged readback",
+      "automation_tier": "QUALIFIED_FLASH_BACKUP_REQUIRED",
+      "additional_dependency": "esptool read_flash setup, reversible saved-profile fixtures and controlled power interruption"
+    },
+    {
+      "id": "ota_usb_partition_migration",
+      "session": "S5",
+      "operator_cue": "With NVS backed up and independent lamps retained, compare pre/post migration partitions and profiles",
+      "automation_tier": "QUALIFIED_FLASH_BACKUP_REQUIRED",
+      "additional_dependency": "known-good legacy image + migration images and recovery-safe flash procedure"
+    },
+    {
+      "id": "ota_success_rollback",
+      "session": "S5",
+      "operator_cue": "On isolated bench only, prove valid OTA and verified rejected/rolled-back image without loss of safety path",
+      "automation_tier": "QUALIFIED_FLASH_BACKUP_REQUIRED",
+      "additional_dependency": "two verified firmware images, power-cycle/test jig and independent safety lamps"
+    },
+    {
+      "id": "ota_authorization",
+      "session": "S5",
+      "operator_cue": "Use non-destructive invalid request/auth fixtures first; log rejection and unchanged NVS",
+      "automation_tier": "PARTIAL_HTTP_NOW",
+      "additional_dependency": "isolated AP/test client; controlled invalid image/negative flash test only after backup"
+    }
+  ]
+}
