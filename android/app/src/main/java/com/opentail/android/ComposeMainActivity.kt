@@ -765,7 +765,8 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 Pill("Connect", t, strong=true) { foundDevices.clear(); ble.scanHeadless() }
             }
-            foundDevices.forEach { (address, label) ->
+            // Discovered choices disappear while a controller is connected.
+            if (!ble.isConnected()) foundDevices.forEach { (address, label) ->
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
@@ -882,7 +883,7 @@ class ComposeMainActivity : ComponentActivity() {
                     NativeEffectCatalog.all().filter { it.name.contains(query,ignoreCase=true) }
                         .sortedWith(compareBy({ val i=preferred.indexOf(it.id);if(i<0) 100 else i },{it.name}))
                 }
-                LazyColumn(Modifier.fillMaxWidth().height(280.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                LazyColumn(Modifier.fillMaxWidth().height(236.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     items(matches,key={it.id}) { item ->
                         Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(15.dp))
                             .background(if(item.id==effect) (if(t.bg==Color.Black) Color(0xFF292929) else Color(0xFFDEDEDE)) else t.raised)
@@ -1031,7 +1032,7 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         if (editingStep in 0 until steps.length()) {
-            AlertDialog(onDismissRequest = { editingStep = -1 },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { editingStep = -1 },
                 title = { Text("Edit sequence duration") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1145,7 +1146,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
-        if(deletePreset in 0 until presets.length()) AlertDialog(
+        if(deletePreset in 0 until presets.length()) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { deletePreset = -1 },
             title = { Text("Delete preset?") },
             text = { Text(presets.optJSONObject(deletePreset)?.optString("name").orEmpty()) },
@@ -1156,7 +1157,7 @@ class ComposeMainActivity : ComponentActivity() {
                 else presetStatus = "Could not remove preset"
             } }, dismissButton = { Pill("Cancel", t) { deletePreset = -1 } })
         if (pendingLoad in 0 until presets.length()) {
-            AlertDialog(onDismissRequest = { pendingLoad = -1 },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { pendingLoad = -1 },
                 title = { Text("Replace current design?") },
                 text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
                 confirmButton = { Pill("Load preset", t, true) {
@@ -1279,12 +1280,12 @@ class ComposeMainActivity : ComponentActivity() {
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Box(Modifier.size(42.dp).clickable {
+                            Box(Modifier.size(46.dp).clickable {
                                 count=(n-1).coerceAtLeast(1).toString();applyLiveZone()
                             }, contentAlignment=Alignment.Center) {
                                 Pill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
                             }
-                            Box(Modifier.size(42.dp).clickable {
+                            Box(Modifier.size(46.dp).clickable {
                                 count=(n+1).coerceAtMost(10000).toString();applyLiveZone()
                             }, contentAlignment=Alignment.Center) {
                                 Pill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
@@ -1337,7 +1338,7 @@ class ComposeMainActivity : ComponentActivity() {
         // Actual hardware output/section assignment belongs beside Layout.
         // Saving to CORE still requires an explicit authenticated confirmation.
         HardwareOutputEditor(t)
-        if (choosingDelete) AlertDialog(
+        if (choosingDelete) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { choosingDelete = false },
             title = { Text("Choose zone to delete") },
             text = {
@@ -1355,7 +1356,7 @@ class ComposeMainActivity : ComponentActivity() {
             },
             confirmButton = { Pill("Cancel", t) { choosingDelete = false } })
         deleteId?.let { id ->
-            AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { deleteId = null }, title = { Text("Remove this zone?") },
                 text = { Text("Only assignments to this zone will be removed.") },
                 confirmButton = { Pill("Remove", t, true) {
                     if (project.removeZone(id)) {
@@ -1384,6 +1385,7 @@ class ComposeMainActivity : ComponentActivity() {
         var adding by remember { mutableStateOf(false) }
         var newTrigger by remember { mutableStateOf("") }
         var triggerMessage by remember { mutableStateOf("") }
+        var triggerToDelete by remember { mutableStateOf<String?>(null) }
         val names = profiles.names()
         val keys = (0 until (names?.length() ?: 0))
             .mapNotNull { names?.optString(it) }
@@ -1413,6 +1415,14 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 Canvas(Modifier.size(16.dp)) {
                     drawCircle(if(selected) t.fg else t.muted)
+                    if (selected) {
+                        // Check remains inside the original 16dp circle.
+                        val unit = size.minDimension / 16f
+                        drawLine(t.bg, Offset(4f*unit, 8f*unit),
+                            Offset(7f*unit, 11f*unit), strokeWidth = 2f*unit)
+                        drawLine(t.bg, Offset(7f*unit, 11f*unit),
+                            Offset(12.5f*unit, 5.5f*unit), strokeWidth = 2f*unit)
+                    }
                 }
                 Column(Modifier.weight(1f)) {
                     Text(name,color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
@@ -1422,6 +1432,9 @@ class ComposeMainActivity : ComponentActivity() {
                 IconAction("Edit " + name, "edit", t) {
                     selections = setOf(name); editing = true
                 }
+                // Only user-created triggers may be deleted.
+                if (profile.optString("kind") == "trigger-custom")
+                    IconAction("Delete " + name, "delete", t) { triggerToDelete = name }
                 // The current protocol has no universal profile-test command.
                 // Preserve a disabled play target rather than target wrong zones.
                 Box(Modifier.size(width=44.dp,height=28.dp)
@@ -1436,7 +1449,7 @@ class ComposeMainActivity : ComponentActivity() {
             if(selections.isNotEmpty()) editing = true
         }
         }
-        if(adding) AlertDialog(
+        if(adding) AlertDialog(containerColor=t.surface, 
             onDismissRequest={ adding=false },
             title={ Text("Add trigger") },
             text={ Field(newTrigger,"Custom trigger name",t){ newTrigger=it.take(32) } },
@@ -1449,14 +1462,30 @@ class ComposeMainActivity : ComponentActivity() {
                 }else triggerMessage="Could not add trigger"
             } },
             dismissButton={ Pill("Cancel",t){ adding=false } })
-        if (editing) AlertDialog(
+        if (triggerToDelete != null) AlertDialog(containerColor=t.surface, 
+            onDismissRequest = { triggerToDelete = null },
+            title = { Text("Delete custom trigger?") },
+            text = { Text("Remove " + triggerToDelete + " from this project?") },
+            confirmButton = { Pill("Delete", t, true) {
+                val target = triggerToDelete
+                if(target != null && project.deleteTrigger(target)) {
+                    selections = selections - target
+                    editing = false
+                    triggerToDelete = null
+                    refresh()
+                } else triggerMessage = "Could not delete custom trigger"
+            } },
+            dismissButton = { Pill("Cancel", t) { triggerToDelete = null } })
+        if (editing) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { editing = false },
             title = { Text("Assign zones to " + selections.size + " triggers") },
             text = {
                 Column(Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(8.dp)) {
                     val first=selections.firstOrNull()?.let { profiles.optJSONObject(it) }
-                    var editingFx by remember(selections) { mutableStateOf(first?.optString("pattern","Solid") ?: "Solid") }
+                    var editingFx by remember(selections, modelRevision) {
+                        mutableStateOf(first?.optString("pattern","Solid") ?: "Solid")
+                    }
                     var effectMenu by remember(selections) { mutableStateOf(false) }
                     val colorText=first?.optString("color","#ffffff") ?: "#ffffff"
                     Pill(effectLabel(NativeEffectCatalog.byName(editingFx).id),t) { effectMenu=!effectMenu }
@@ -1549,7 +1578,7 @@ class ComposeMainActivity : ComponentActivity() {
             } else Caption("Read the authenticated CORE map before editing; no writes on selection.", t)
         }
         if (confirm && snapshot != null && snapshot.persisted &&
-            snapshot.revision in 1..65534) AlertDialog(
+            snapshot.revision in 1..65534) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { confirm = false },
             title = { Text("Save physical input mapping?") },
             text = { Text("CORE will reject active triggers or stale revisions. Readback must confirm the saved mapping. Offline trigger styles are separate.") },
@@ -1639,7 +1668,7 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         choosing?.let { key ->
-            AlertDialog(onDismissRequest = { choosing = null },
+            AlertDialog(containerColor=t.surface, onDismissRequest = { choosing = null },
                 title = { Text("Select " + key + " animation") },
                 text = {
                     Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
@@ -1722,7 +1751,7 @@ class ComposeMainActivity : ComponentActivity() {
                 "Unsupported effect/palette combinations stay local until CORE advertises them; " +
                 "only CORE frame snapshots can verify logical RGB output.", t)
         }
-        if (deleteConfirm) AlertDialog(
+        if (deleteConfirm) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { deleteConfirm = false },
             title = { Text("Delete stored CORE palette?") },
             text = { Text("This writes a revision tombstone to CORE flash. The palette must not be active or referenced.") },
@@ -1948,7 +1977,7 @@ class ComposeMainActivity : ComponentActivity() {
                 liveArmed.value = false
             }
         }
-        if (confirm) AlertDialog(onDismissRequest = { confirm = false },
+        if (confirm) AlertDialog(containerColor=t.surface, onDismissRequest = { confirm = false },
             title = { Text("Test CORE LEDs on isolated bench?") },
             text = { Text("Requires BLE authorization and reported effect support. 15-second TTL, brightness 24/255. Vehicle inputs retain priority.") },
             confirmButton = { Pill("Start bench test", t, true) {
@@ -2212,7 +2241,7 @@ class ComposeMainActivity : ComponentActivity() {
                 "Cannot save: " + validationError, t)
             if (valid) Pill("Save to CORE · verify readback", t, true) { confirm = true }
         }
-        if (confirm) AlertDialog(
+        if (confirm) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { confirm = false },
             title = { Text("Apply saved hardware output settings?") },
             text = { Text("Stop all shows and release physical inputs before applying. Changes affect only output " +
