@@ -7,4 +7,7 @@ package com.opentail.android
 internal object OfflinePreviewPalettePolicy {
     fun rendererId(effectId: Int, savedPaletteId: Int): Int =
         if (NativeEffectParameters.forId(effectId)?.palette == true) savedPaletteId else 0
+    // Admission only: never modify the saved selection or palette data.
+    fun availableRendererId(candidate: Int, hasCustomStops: Boolean): Int =
+        if (candidate in 0..72 || (candidate in 73..200 && hasCustomStops)) candidate else 0
 }

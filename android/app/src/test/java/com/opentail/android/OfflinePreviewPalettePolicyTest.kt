@@ -27,4 +27,13 @@ class OfflinePreviewPalettePolicyTest {
         for (id in listOf(1, 26, 38, 91, 32777, 32781))
             assertEquals(0,OfflinePreviewPalettePolicy.rendererId(id,0))
     }
+    @Test fun missingOrUnsupportedCustomPaletteDoesNotBlockPlayback() {
+        for (id in listOf(73, 128, 200, 201, 255, -1, 256))
+            assertEquals(0,OfflinePreviewPalettePolicy.availableRendererId(id,false))
+        for (id in 0..72)
+            assertEquals(id,OfflinePreviewPalettePolicy.availableRendererId(id,false))
+        for (id in 73..200)
+            assertEquals(id,OfflinePreviewPalettePolicy.availableRendererId(id,true))
+        assertEquals(0,OfflinePreviewPalettePolicy.availableRendererId(255,true))
+    }
 }
