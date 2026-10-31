@@ -185,12 +185,34 @@ final class NativeEffectCatalog {
     private static boolean showModesOnly(int id) {
         return id == 97 || (id >= 32768 && id <= 32787 && !autoEventOnly(id));
     }
-    /** Keep eligible transitions first, without leaking general proprietary
-     * animations into the Startup/Shutdown chooser. */
+    /** Dedicated one-shot entry transitions. Never offer exit-only
+     * effects as Startup authoring choices or vice versa. */
+    private static boolean startupTransition(int id) {
+        return id==32769 || id==32770 || id==32771;
+    }
+    private static boolean shutdownTransition(int id) {
+        return id==32773 || id==32787;
+    }
+    /** Legacy union for existing saved event data and regression consumers.
+     * Startup/Shutdown editors must call the context-specific overload.
+     * Both events retain standard WLED choices and distinct approved one-shots.
+     */
     static List<Effect> autoEventChoices() {
+        return autoEventChoices(null);
+    }
+    static List<Effect> autoEventChoices(String event) {
+        final boolean startup="Startup".equals(event);
+        final boolean shutdown="Shutdown".equals(event);
+        if (event!=null && !startup && !shutdown)
+            throw new IllegalArgumentException("Unknown Auto Event: "+event);
         ArrayList<Effect> choices = new ArrayList<>();
-        for (Effect effect : SORTED)
-            if (!showModesOnly(effect.id)) choices.add(effect);
+        for (Effect effect : SORTED) {
+            if (showModesOnly(effect.id)) continue;
+            if (autoEventOnly(effect.id) && event!=null &&
+                !(startup && startupTransition(effect.id)) &&
+                !(shutdown && shutdownTransition(effect.id))) continue;
+            choices.add(effect);
+        }
         choices.sort(Comparator.comparing((Effect e) -> !autoEventOnly(e.id))
             .thenComparing(e -> e.name.toLowerCase(java.util.Locale.ROOT)));
         return Collections.unmodifiableList(choices);
