@@ -359,9 +359,19 @@ class ComposeMainActivity : ComponentActivity() {
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
         var page by rememberSaveable { mutableIntStateOf(0) }
-        // System Back returns from each non-Home screen without exiting the app.
-        // Compose Dialog has its own dismissOnBackPress and handles popup Back first.
-        BackHandler(enabled = page != 0) { page = 0 }
+        var backStack by remember { mutableStateOf(listOf<Int>()) }
+        fun navigate(destination: Int) {
+            if (destination !in pages.indices || destination == page) return
+            backStack = backStack + page
+            page = destination
+        }
+        // All six screens share one navigation stack. Native Compose dialogs
+        // consume Back first, IME closes through Android, then Back returns to
+        // the previous actual screen (not always Home).
+        BackHandler(enabled = page != 0 || backStack.isNotEmpty()) {
+            page = backStack.lastOrNull() ?: 0
+            backStack = backStack.dropLast(1)
+        }
         val pageScroll = remember(page) { ScrollState(0) } // new destination always starts at its header
         var light by remember { mutableStateOf(prefs.getBoolean("whiteMode", false)) }
         val t = remember(light) { tone(light) }
@@ -394,7 +404,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // returning to Auto Events, which defaults to Startup.
                         if(page==4 && i!=4) autoEventPreviewEffect.intValue=-1
                         // Preview Offline remains active across tabs (Test 79).
-                        page = i
+                        navigate(i)
                     }
                 }
             }
@@ -402,7 +412,7 @@ class ComposeMainActivity : ComponentActivity() {
                 .padding(horizontal = 28.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when (page) {
-                    0 -> HomePage(t, { page = it })
+                    0 -> HomePage(t, { navigate(it) })
                     1 -> ShowModesPage(t)
                     2 -> LayoutPage(t)
                     3 -> TriggersPage(t)
@@ -410,7 +420,7 @@ class ComposeMainActivity : ComponentActivity() {
                         autoEventPreviewEffect.intValue = effectId
                         enterOfflinePreview()
                     }
-                    5 -> SettingsPage(t, { page = it }, light) {
+                    5 -> SettingsPage(t, { navigate(it) }, light) {
                         light = !light
                         prefs.edit().putBoolean("whiteMode", light).apply()
                     }
@@ -650,8 +660,8 @@ class ComposeMainActivity : ComponentActivity() {
                 id == 200 - paletteLoadedSlot.intValue &&
                 paletteLoadedRevision.longValue >= 0L) paletteLoadedStops.value else null
             return NativePaletteEngine.lookup(project.raw(), id,
-                prefs.getInt("foreground", -1),
-                prefs.getInt("background", 0xff000000.toInt()),
+                if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                if (prefs.contains("background")) prefs.getInt("background",0) else null,
                 authoritative)
         }
         val chosen = sourcePalette(value)
@@ -977,8 +987,9 @@ class ComposeMainActivity : ComponentActivity() {
                             paletteLoadedRevision.longValue >= 0L)
                             paletteLoadedStops.value else null
                         NativePaletteEngine.lookup(project.raw(), id,
-                            prefs.getInt("foreground",-1),
-                            prefs.getInt("background",0xff000000.toInt()), verified)
+                            if (prefs.contains("foreground")) prefs.getInt("foreground",0) else null,
+                            if (prefs.contains("background")) prefs.getInt("background",0) else null,
+                            verified)
                     },
                     onSelected = { id ->
                         if(id == null) {
@@ -1246,10 +1257,16 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                         effectSettings.put(key,prefs.getInt(key,fallback))
                     }
+                    val editorSettings=JSONObject()
+                    val prefix="wled.${selectedEffect.intValue}."
+                    for((key,value) in prefs.all) {
+                        if(key.startsWith(prefix) && value is Int) editorSettings.put(key,value)
+                    }
                     updated.put(JSONObject().put("name", "Preset " + (presets.length() + 1))
                         .put("studio", snapshot.toString()).put("fxId",selectedEffect.intValue)
                         .put("effectName",effectLabel(selectedEffect.intValue))
-                        .put("effectSettings",effectSettings))
+                        .put("effectSettings",effectSettings)
+                        .put("effectEditorSettings",editorSettings))
                     if (project.setPresets(updated)) {
                         presetStatus = "Preset saved locally"
                         refresh()
@@ -1300,40 +1317,14 @@ class ComposeMainActivity : ComponentActivity() {
                 title = { Text("Replace current design?") },
                 text = { Text("Loading this preset replaces the current local project. Export a backup first if needed.") },
                 confirmButton = { Pill("Load preset", t, true) {
-                    val saved = presets.optJSONObject(pendingLoad)?.optString("studio", "").orEmpty()
-                    val restored = runCatching {
-                        val design = JSONObject(saved)
-                        // Loading one design never deletes or rolls back the
-                        // user's independently saved preset collection.
-                        design.put("savedPresets", JSONArray(project.presets().toString()))
-                        project.importJson(design.toString())
-                    }.getOrDefault(false)
-                    presetStatus = if (restored) "Preset loaded" else "Preset is invalid or could not be loaded"
+                    val preset=presets.optJSONObject(pendingLoad)
+                    val restored = NativePresetRestore.load(project,prefs,preset)
+                    presetStatus = if (restored) "Preset loaded"
+                        else "Preset restore failed; previous design retained"
                     if (restored) {
-                        val selected=presets.optJSONObject(pendingLoad)
-                        val editor=prefs.edit()
-                        if(selected?.has("fxId")==true) {
-                            selectedEffect.intValue=selected.optInt("fxId",0)
-                            editor.putInt("effectId",selectedEffect.intValue)
-                        }
-                        // Backward compatible: old presets may have no FX
-                        // settings. Never clobber the user's current controls.
-                        selected?.optJSONObject("effectSettings")?.let {savedFx ->
-                            for(key in listOf("speed","intensity","brightness",
-                                "foreground","background","accent","paletteId")) {
-                                if(savedFx.has(key) && savedFx.opt(key) is Number) {
-                                    val raw=savedFx.optInt(key)
-                                    val safe=when(key) {
-                                        "speed","intensity","brightness" -> raw.coerceIn(0,255)
-                                        "paletteId" -> raw.coerceIn(0,NativePaletteEngine.MAX_ID)
-                                        else -> raw
-                                    }
-                                    editor.putInt(key,safe)
-                                }
-                            }
-                        }
-                        if(editor.commit()) refreshLoadedProject()
-                        else presetStatus="Design loaded; effect preferences could not be saved"
+                        if(preset?.has("fxId")==true)
+                            selectedEffect.intValue=preset.optInt("fxId",selectedEffect.intValue)
+                        refreshLoadedProject()
                     }
                     pendingLoad = -1
                 } },
