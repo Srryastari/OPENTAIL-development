@@ -154,11 +154,10 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    /* 120 compatibility IDs plus original OpenTail effects fit in a long GATT value.
-     * Honor Read Blob offsets so Android can retrieve the complete list even
-     * when the negotiated ATT MTU is the default 23 bytes. */
-    /* v1 format allows a one-byte count and long GATT Read Blob chunks.
-     * 254 IDs fit in the BLE attribute maximum of 512 bytes. */
+    /* NimBLE's ble_gatts_val_access() applies Read Blob offsets AFTER this
+     * callback returns the COMPLETE value. Do not slice by ctx->offset or ATT
+     * MTU here: that double-applies the offset and returns GATT 7 on Android.
+     * v1 format: up to 254 IDs, 510 bytes, within the 512-byte ATT limit. */
     uint16_t ids[254]={0};
     size_t total=ot_effects_1d_supported_ids(ids,254u);
     if(total>254u)total=254u;
@@ -168,13 +167,7 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
         payload[3u+i*2u]=(uint8_t)(ids[i]>>8);
     }
     const size_t payload_len=2u+total*2u;
-    const size_t offset=ctx->offset;
-    if(offset>payload_len)return BLE_ATT_ERR_INVALID_OFFSET;
-    size_t chunk=payload_len-offset;
-    uint16_t mtu=ble_att_mtu(conn);
-    size_t max_chunk=mtu>1u?(size_t)mtu-1u:20u;
-    if(chunk>max_chunk)chunk=max_chunk;
-    return os_mbuf_append(ctx->om,payload+offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    return os_mbuf_append(ctx->om,payload,payload_len)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 /* Revoked owner sessions discard cached output, frame and trigger replies. */
 static void cfg_reset(void);
@@ -394,12 +387,8 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
         p[10]=frame_reply_count;
         size=11u+3u*frame_reply_count;
     }else return BLE_ATT_ERR_UNLIKELY;
-    if(ctx->offset>size)return BLE_ATT_ERR_INVALID_OFFSET;
-    size_t chunk=size-ctx->offset;
-    const uint16_t mtu=ble_att_mtu(conn);
-    const size_t maximum=mtu>1u?(size_t)mtu-1u:20u;
-    if(chunk>maximum)chunk=maximum;
-    return os_mbuf_append(ctx->om,p+ctx->offset,chunk)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    /* NimBLE performs ATT long-read offset and MTU slicing after callback. */
+    return os_mbuf_append(ctx->om,p,size)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
@@ -450,8 +439,7 @@ static int palette_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctx
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR||conn!=active_conn||!authorized)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
     uint8_t reply[OT_PALETTE_REPLY_BYTES];ot_palette_ble_reply(reply);
-    if(ctx->offset>sizeof(reply))return BLE_ATT_ERR_INVALID_OFFSET;
-    return os_mbuf_append(ctx->om,reply+ctx->offset,sizeof(reply)-ctx->offset)==0?
+    return os_mbuf_append(ctx->om,reply,sizeof(reply))==0?
            0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int palette_caps(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -460,8 +448,7 @@ static int palette_caps(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctx
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
     const uint8_t caps[]={OT_PALETTE_WIRE_VERSION,OT_PALETTE_SLOTS,
          OT_PALETTE_STOPS_MAX,OT_PALETTE_CHUNK_MAX,200u,73u};
-    if(ctx->offset>sizeof(caps))return BLE_ATT_ERR_INVALID_OFFSET;
-    return os_mbuf_append(ctx->om,caps+ctx->offset,sizeof(caps)-ctx->offset)==0?
+    return os_mbuf_append(ctx->om,caps,sizeof(caps))==0?
            0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static const struct ble_gatt_chr_def characteristics[]={
