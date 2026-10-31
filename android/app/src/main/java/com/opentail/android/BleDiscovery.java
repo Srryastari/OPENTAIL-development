@@ -76,6 +76,75 @@ final class BleDiscovery {
     private boolean headlessScan=false;
     void setScanResultListener(ScanResultListener listener) { composeScanResults=listener; }
     void scanHeadless() { headlessScan=true; scanImpl(); }
+
+    /**
+     * The white Connect action must never require Android Settings > Unpair.
+     * Prefer the last connected CORE address, then an existing Android bond,
+     * then the regular BLE discovery picker. Bonding and HMAC ownership remain
+     * separate; this method never removes a bond or bypasses authorization.
+     */
+    @SuppressWarnings("MissingPermission")
+    void connectFromApp(String preferredAddress) {
+        if(stopped)return;
+        if(connected) {
+            if(canControl())notifyStatus("OpenTail CORE already connected and authorized");
+            else {
+                notifyStatus("OpenTail CORE connected; owner authorization required");
+                if(BleOwnerVault.load(activity,activeAddress)!=null)authorizeStored();
+            }
+            return;
+        }
+        if(connecting) {
+            // A second explicit Connect tap is a user-requested retry, not an
+            // instruction to unpair in Android Settings. Retire this pending
+            // app-owned GATT registration and immediately try again.
+            BluetoothGatt pending=gatt;
+            if(pending!=null){
+                scanFallbackAllowed=false;
+                recoverStalledGatt(pending,"Retrying OpenTail CORE connection");
+                ui.postDelayed(()->{
+                    if(!stopped && !connecting && !connected)
+                        connectFromApp(preferredAddress);
+                },500L);
+            }else {
+                connecting=false;
+                ui.post(()->connectFromApp(preferredAddress));
+            }
+            return;
+        }
+        BluetoothManager manager=(BluetoothManager)activity.getSystemService(Activity.BLUETOOTH_SERVICE);
+        BluetoothAdapter adapter=manager==null?null:manager.getAdapter();
+        if(adapter==null||!adapter.isEnabled()){notifyStatus("Enable Bluetooth, then tap Connect");return;}
+        if(Build.VERSION.SDK_INT>=31 &&
+           activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED) {
+            scanHeadless();return; // regular Nearby Devices permission request
+        }
+        if(scanning)stopScan();
+        if(preferredAddress!=null && BluetoothAdapter.checkBluetoothAddress(preferredAddress)){
+            try {
+                connectReadOnly(adapter.getRemoteDevice(preferredAddress),true);
+                return;
+            }catch(IllegalArgumentException | SecurityException ex){
+                notifyStatus("Saved CORE address unavailable; searching for controller");
+            }
+        }
+        try {
+            BluetoothDevice match=null;
+            boolean multiple=false;
+            for(BluetoothDevice device:adapter.getBondedDevices()) {
+                String name=device.getName();
+                if(name!=null && name.startsWith("OpenTail CORE")) {
+                    if(match!=null){multiple=true;break;}
+                    match=device;
+                }
+            }
+            if(match!=null && !multiple){
+                connectReadOnly(match,true);
+                return;
+            }
+        }catch(SecurityException ex){notifyStatus("Bluetooth permission needed for remembered controllers");}
+        scanHeadless();
+    }
     @SuppressWarnings("MissingPermission")
     void connectFoundDevice(String address) {
         BluetoothDevice device=found.get(address);
@@ -125,11 +194,14 @@ final class BleDiscovery {
     }
     private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
         CoreFrameCapture.Listener cb=frameListener;
+        final BluetoothGatt owner=gatt;
         if(cb!=null) {
             frameCallbackPending=true;
             ui.post(()->{
-                try {cb.done(output,sequence,rgb,error);}
-                finally {frameCallbackPending=false;}
+                try {
+                    if(!stopped && owner!=null && owner==gatt && canCaptureFrame())
+                        cb.done(output,sequence,rgb,error);
+                } finally {frameCallbackPending=false;}
             });
         }
         pumpQueue();
@@ -165,6 +237,7 @@ final class BleDiscovery {
     private int triggerMapBaseRevision;
     private Consumer<NativeTriggerMappingCodec.Snapshot> triggerMapListener;
     private volatile boolean mtuNegotiating=false;
+    private volatile boolean infoReadPending=false;
     private Consumer<String> fxCapabilitiesListener;
     void setFxCapabilitiesListener(Consumer<String> listener){fxCapabilitiesListener=listener;}
     void setTriggerMapListener(Consumer<NativeTriggerMappingCodec.Snapshot> listener){
@@ -311,6 +384,7 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
     private String activeAddress="";
+    private String connectingAddress="";
     private volatile boolean authorized = false;
     private volatile BluetoothGattCharacteristic cfgCommand,cfgReply;
     private java.util.function.Consumer<String> configListener;
@@ -459,6 +533,26 @@ final class BleDiscovery {
     }
 
     private volatile boolean authPending = false;
+    private volatile int ownerWatchLease=0;
+    private static final long OWNER_TRANSACTION_TIMEOUT_MS=8000L;
+    private void watchOwnerTransaction(BluetoothGatt owner) {
+        final int lease=++ownerWatchLease;
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && lease==ownerWatchLease &&
+                (pairPending || challengePending || authPending))
+                recoverStalledGatt(owner,"CORE owner authorization timed out");
+        },OWNER_TRANSACTION_TIMEOUT_MS);
+    }
+    private volatile int commandWatchLease=0;
+    private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;
+    private void watchCommandTransaction(BluetoothGatt owner) {
+        final int lease=++commandWatchLease;
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && lease==commandWatchLease &&
+                (writePending || readReplyPending))
+                recoverStalledGatt(owner,"CORE command acknowledgement timed out");
+        },COMMAND_TRANSACTION_TIMEOUT_MS);
+    }
     private boolean writePending = false;
     private boolean readReplyPending = false;
     private byte[] pendingPacket;
@@ -480,6 +574,7 @@ final class BleDiscovery {
     }
     /** Called when Android disables Bluetooth; clears stale GATT/auth/config UI immediately. */
     void onAdapterDisabled() {
+        autoReconnectLease++;autoReconnectBudget=1;infoReadPending=false;
         stopScan();
         frameCapture.cancel();palette.reset(); // GATT close may never produce a disconnect callback
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
@@ -492,7 +587,10 @@ final class BleDiscovery {
         if (gatt != null) { try { gatt.close(); } catch (Exception ignored) {} gatt = null; }
         notifyStatus("Bluetooth off · connection closed");
     }
-    void onAdapterEnabled() { notifyStatus("Bluetooth on · ready to scan or reconnect"); }
+    void onAdapterEnabled() {
+        notifyStatus("Bluetooth on · ready to scan or reconnect");
+        scheduleReconnect(activeAddress,false);
+    }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
     /** One UI action: use the stored owner key or enroll with physical BOOT once. */
@@ -511,7 +609,8 @@ final class BleDiscovery {
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
-        try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
+        try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}
+            else watchOwnerTransaction(gatt);}
         catch(SecurityException e){pairPending=false;notifyStatus("Bluetooth permission missing");}
     }
     /** Prefer owner-key authentication, with Wi-Fi token retained only as manual fallback. */
@@ -521,7 +620,8 @@ final class BleDiscovery {
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
-        try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
+        try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}
+            else watchOwnerTransaction(gatt);}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
     }
     private void ownerRead(BluetoothGatt connection,byte[] value,int status){
@@ -589,7 +689,7 @@ final class BleDiscovery {
         if (!canControl()) {notifyStatus("BLE FX control not authorized");return;}
         if (effectId<0||effectId>65535||chainMask<1||chainMask>3||
             zoneMask<1||zoneMask>255||brightness<0||brightness>32||
-            speed<0||speed>255||intensity<0||intensity>255||!(paletteId==0||(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4)))||
+            speed<0||speed>255||intensity<0||intensity>255||!BleFxPalettePolicy.isWireCandidate(effectId,paletteId)||
             ttl<1||ttl>60||r<0||r>255||g<0||g>255||b<0||b>255||
             bgR<0||bgR>255||bgG<0||bgG>255||bgB<0||bgB>255) {
             notifyStatus("Unsupported or invalid BLE FX settings");return;
@@ -604,6 +704,12 @@ final class BleDiscovery {
         if (!canControl()) {notifyStatus("Authorize BLE before preset changes");return;}
         if (action<6||action>8||slot<0||slot>=8){
             notifyStatus("Invalid CORE preset action or slot");return;
+        }
+        // Explicit preset NVS actions cannot be overwritten by live FX coalescing.
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry preset action");return;
         }
         enqueueWrite(new byte[]{1,(byte)action,(byte)slot});
     }
@@ -674,6 +780,7 @@ final class BleDiscovery {
                 ok=gatt.writeCharacteristic(command);
             }
             if(!ok)commandWriteStartFailed("BLE write could not start");
+            else watchCommandTransaction(gatt);
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
@@ -688,19 +795,37 @@ final class BleDiscovery {
     private Consumer<String> preferredListener;
     private static final long RECONNECT_DELAY_MS = 10000L;
     private long lastReconnectAttempt = 0L;
+    // One bounded automatic reconnect per established CORE session.
+    private volatile int autoReconnectBudget=1;
+    private volatile int autoReconnectLease=0;
+    private void scheduleReconnect(String address, boolean afterScan) {
+        if(address==null || address.isEmpty())return;
+        ui.post(()->{
+            if(stopped || connecting || connected || autoReconnectBudget<=0)return;
+            autoReconnectBudget--;
+            final int lease=++autoReconnectLease;
+            // Retry promptly after a ready-session drop; allow the one-shot
+            // discovery fallback its full window after an initial failure.
+            final long delay=afterScan?SCAN_DURATION_MS+2000L:1800L;
+            ui.postDelayed(()->{
+                if(lease==autoReconnectLease && !stopped && !connected && !connecting && !scanning)
+                    tryReconnect(address);
+            },delay);
+        });
+    }
 
     void setPreferredListener(Consumer<String> listener) { this.preferredListener = listener; }
 
-    /** One bounded background scan for the previously selected BLE address; no infinite reconnect loop. */
+    /** One bounded direct GATT reconnect for the previously selected CORE address. */
     void tryReconnect(String address) {
         if (stopped || connected || connecting || scanning || address == null || address.isEmpty()) return;
-        if (android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
-        if (Build.VERSION.SDK_INT >= 31 && (activity.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED
-                || activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)) return;
-        if (Build.VERSION.SDK_INT < 31 && activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+        if (lastReconnectAttempt!=0L && android.os.SystemClock.elapsedRealtime() - lastReconnectAttempt < RECONNECT_DELAY_MS) return;
+        if (Build.VERSION.SDK_INT >= 31 &&
+                activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) return;
         lastReconnectAttempt = android.os.SystemClock.elapsedRealtime();
-        preferredPending = address;
-        beginScan(true);
+        // A known device does not need advertising or a scan permission to
+        // establish a GATT connection; Android OS bonding is retained.
+        connectFromApp(address);
     }
 
     BleDiscovery(Activity activity, StatusListener listener) {
@@ -854,22 +979,80 @@ final class BleDiscovery {
     };
 
     @SuppressWarnings("MissingPermission")
-    private void connectReadOnly(BluetoothDevice device) {
+    private void connectReadOnly(BluetoothDevice device) {connectReadOnly(device,false);}
+
+    private volatile int connectionAttempt=0;
+    private volatile boolean scanFallbackAllowed=false;
+    private static final long GATT_SETUP_TIMEOUT_MS=18000L;
+
+    /** In-app recovery for a GATT client that never calls back or never discovers CORE. */
+    @SuppressWarnings("MissingPermission")
+    private void recoverStalledGatt(BluetoothGatt owner, String reason) {
+        ui.post(()->{
+            if(stopped || owner!=gatt)return;
+            boolean fallback=scanFallbackAllowed;
+            scanFallbackAllowed=false;
+            connectionAttempt++;
+            connected=false;connecting=false;authorized=false;mtuNegotiating=false;infoReadPending=false;
+            frameCapture.cancel();palette.reset();fxCaps=null;fxCapsBusy=false;
+            command=null;reply=null;enroll=null;challenge=null;triggerMapping=null;
+            triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
+            cfgCommand=null;cfgReply=null;cfgBusy=false;cfgSaving=false;cfgWatchdog++;
+            pairPending=false;challengePending=false;authPending=false;
+            writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+            Arrays.fill(cfgKnownRevision,-1);Arrays.fill(cfgLatest,null);
+            if(gatt==owner)gatt=null;
+            try{owner.disconnect();}catch(Exception ignored){}
+            try{owner.close();}catch(Exception ignored){}
+            notifyStatus(reason+(fallback?" · retrying BLE discovery":" · tap Connect to retry"));
+            scheduleReconnect(connectingAddress,fallback);
+            if(fallback)ui.postDelayed(()->{
+                if(!stopped && !connected && !connecting && !scanning)scanHeadless();
+            },350L);
+        });
+    }
+
+    /** The GATT registration, MTU and service discovery each may fail silently. */
+    private void watchGattReady(BluetoothGatt owner,int attempt){
+        ui.postDelayed(()->{
+            if(stopped || attempt!=connectionAttempt || gatt!=owner)return;
+            if(!connected || command==null || reply==null || infoReadPending || challengePending || authPending)
+                recoverStalledGatt(owner,"CORE BLE connection/setup timed out");
+        },GATT_SETUP_TIMEOUT_MS);
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void connectReadOnly(BluetoothDevice device,boolean knownDevice) {
         if (Build.VERSION.SDK_INT >= 31
                 && activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             notifyStatus("Nearby-device permission required");
             return;
         }
-        if (gatt != null) { gatt.close(); gatt = null; }
-        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+        // Never overlap a stale client registration with a new GATT connection.
+        if (gatt != null) {
+            BluetoothGatt previous=gatt;gatt=null;
+            try{previous.disconnect();}catch(Exception ignored){}
+            try{previous.close();}catch(Exception ignored){}
+        }
+        scanFallbackAllowed=knownDevice;
+        // A failed switch must never silently reconnect the previous vehicle.
+        connectingAddress=device.getAddress();
+        autoReconnectLease++;
+        final int attempt=++connectionAttempt;
+        frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;infoReadPending=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
         connected = false;
         notifyStatus("Connecting to OpenTail BLE…");
         try {
             gatt = device.connectGatt(activity, false, callback, BluetoothDevice.TRANSPORT_LE);
-            if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}
+            if(gatt==null){
+                connecting=false;
+                scanFallbackAllowed=false;
+                notifyStatus("BLE connection could not start; rescan and retry");
+                if(knownDevice)ui.post(this::scanHeadless);
+            }else watchGattReady(gatt,attempt);
         } catch (SecurityException ex) {
-            connecting=false;notifyStatus("BLE connection permission denied");
+            connecting=false;scanFallbackAllowed=false;notifyStatus("BLE connection permission denied");
         }
     }
 
@@ -888,12 +1071,20 @@ final class BleDiscovery {
                 catch (SecurityException ex) { mtuNegotiating=false; }
                 if(!mtuNegotiating) discoverCoreServices(connection);
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
+                boolean fallback=scanFallbackAllowed;
+                scanFallbackAllowed=false;
+                connectionAttempt++;
+                infoReadPending=false;
                 connecting = false;
                 connected = false;
                 frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
+                scheduleReconnect(connectingAddress,fallback);
+                if(fallback)ui.postDelayed(()->{
+                    if(!stopped && !connected && !connecting && !scanning)scanHeadless();
+                },350L);
             }
         }
 
@@ -915,10 +1106,13 @@ final class BleDiscovery {
         private void discoverCoreServices(BluetoothGatt connection) {
             if(stopped || connection!=gatt)return;
             try {
-                if(!connection.discoverServices())
+                if(!connection.discoverServices()){
                     notifyStatus("BLE service discovery could not start; reconnect CORE");
+                    recoverStalledGatt(connection,"CORE service discovery rejected by Android");
+                }
             } catch(SecurityException ex) {
                 notifyStatus("Bluetooth permission missing for BLE service discovery");
+                recoverStalledGatt(connection,"CORE service discovery permission lost");
             }
         }
 
@@ -927,12 +1121,14 @@ final class BleDiscovery {
             if(stopped || connection!=gatt)return;
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 notifyStatus("BLE service discovery failed: " + status);
+                recoverStalledGatt(connection,"CORE BLE service discovery failed");
                 return;
             }
             BluetoothGattService service = connection.getService(SERVICE_UUID);
             BluetoothGattCharacteristic info = service == null ? null : service.getCharacteristic(INFO_UUID);
             if (info == null) {
                 notifyStatus("BLE connected; no supported OpenTail info characteristic");
+                recoverStalledGatt(connection,"CORE GATT service missing or outdated");
                 return;
             }
             // Existing read-only connection remains compatible with older CORE firmware.
@@ -951,13 +1147,22 @@ final class BleDiscovery {
             paletteCapabilities=service.getCharacteristic(PALETTE_CAP_UUID);
             palette.configure(connection,paletteCommand,paletteReply,paletteCapabilities);
             authorized = false;
+            autoReconnectBudget=1;autoReconnectLease++;lastReconnectAttempt=0L;
+            scanFallbackAllowed=false; // service discovery succeeded; clear one-shot fallback
             if (preferredListener != null) preferredListener.accept(connection.getDevice().getAddress());
             // The info read is optional discovery metadata. If Android rejects
             // its ATT start, do not strand owner auto-authorization indefinitely.
+            // Stored owner-key authentication must not block on optional INFO.
+            if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null) {
+                ui.post(thisAutoAuth(connection));
+                return;
+            }
             boolean infoStarted=false;
+            infoReadPending=true;
             try { infoStarted=connection.readCharacteristic(info); }
             catch (SecurityException ex) { notifyStatus("Bluetooth permission missing for CORE information read"); }
             if (!infoStarted) {
+                infoReadPending=false;
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
                 if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
                     ui.post(thisAutoAuth(connection));
@@ -1030,6 +1235,7 @@ final class BleDiscovery {
     // Both API-level GATT read callbacks must continue the same auth flow,
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
+        infoReadPending=false;
         if (status==BluetoothGatt.GATT_SUCCESS && value!=null)
             notifyStatus("BLE connected · " + new String(value,StandardCharsets.UTF_8));
         else notifyStatus("BLE connected; information read failed: " + status);
@@ -1078,6 +1284,7 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void shutdown() {
         stopped = true;
+        autoReconnectLease++;infoReadPending=false;
         frameCapture.cancel();palette.reset();
         connected = false;
         connecting = false;

@@ -173,7 +173,7 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.busy()') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
-assert(gradle.includes("versionName '0.2.0-alpha3'"));
+assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
@@ -401,12 +401,80 @@ assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(con
 
 // Android connectGatt can reject without a callback or exception. Never
 // leave the app in a phantom connecting state on a null GATT handle.
-const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device) {')[1]
+const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device,boolean knownDevice) {')[1]
   ?.split('private final BluetoothGattCallback callback')[0];
 assert(connectBlock &&
-       connectBlock.includes('if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}') &&
-       connectBlock.includes('connecting=false;notifyStatus("BLE connection permission denied");'),
-       'Rejected GATT connection start must clear the connecting state');
+       connectBlock.includes('if(gatt==null){') &&
+       connectBlock.includes('connecting=false;scanFallbackAllowed=false;') &&
+       connectBlock.includes('connecting=false;scanFallbackAllowed=false;notifyStatus("BLE connection permission denied");') &&
+       connectBlock.includes('watchGattReady(gatt,attempt)'),
+       'Rejected or stalled GATT connection start must clear connecting state');
+
+// Existing OS pairing must never be deleted/recreated to use the white
+// Connect control. Saved addresses and bonded COREs get a direct GATT attempt
+// with bounded stale-client recovery and a one-shot BLE discovery fallback.
+const connectUi=compose.split('private fun SettingsPage(t: Tone, changePage: (Int) -> Unit) {')[1]?.split('private fun HardwareOutputEditor(')[0];
+const connectFlow=bleSource.split('void connectFromApp(String preferredAddress) {')[1]?.split('void connectFoundDevice(')[0];
+assert(connectUi?.includes('ble.connectFromApp(prefs.getString("preferred_ble_address", null))') &&
+       connectFlow?.includes('if(connected) {') &&
+       connectFlow.includes('recoverStalledGatt(pending,"Retrying OpenTail CORE connection")') &&
+       connectFlow.includes('ui.postDelayed(()->{') &&
+       connectFlow.includes('getBondedDevices()') &&
+       connectFlow.includes('BluetoothAdapter.checkBluetoothAddress(preferredAddress)') &&
+       connectFlow.includes('adapter.getRemoteDevice(preferredAddress)') &&
+       connectFlow.includes('connectReadOnly(match,true)') &&
+       bleSource.includes('connectFromApp(address);') &&
+       bleSource.includes('private void recoverStalledGatt(BluetoothGatt owner, String reason)') &&
+       bleSource.includes('if(stopped || attempt!=connectionAttempt || gatt!=owner)return;') &&
+       bleSource.includes('private static final long GATT_SETUP_TIMEOUT_MS=18000L;') &&
+       !/removeBond\s*\(/.test(bleSource) &&
+       !manifest.includes('android.permission.INTERNET'),
+       'BLE Connect must reuse OS bonding, recover stale GATT and remain Wi-Fi-free');
+
+// A real BLE session can drop without the user leaving the app. A bounded
+// reconnect may use the saved GATT address, but must never unpair the device
+// or enter an unlimited scanning/retry loop.
+const retryCode=bleSource.split('private void scheduleReconnect(String address, boolean afterScan) {')[1]
+  ?.split('void setPreferredListener(')[0];
+assert(retryCode &&
+       retryCode.includes('autoReconnectBudget--;') &&
+       retryCode.includes('lease==autoReconnectLease') &&
+       retryCode.includes('!connected && !connecting && !scanning') &&
+       retryCode.includes('tryReconnect(address);') &&
+       bleSource.includes('scheduleReconnect(connectingAddress,fallback);') &&
+       bleSource.includes('connectingAddress=device.getAddress();') &&
+       bleSource.includes('scheduleReconnect(activeAddress,false);') &&
+       retryCode.includes('afterScan?SCAN_DURATION_MS+2000L:1800L') &&
+       bleSource.includes('autoReconnectBudget=1;autoReconnectLease++;') &&
+       bleSource.includes('lastReconnectAttempt!=0L') &&
+       !/removeBond\s*\(/.test(bleSource),
+       'Unexpected disconnect and Bluetooth-toggle recovery must be bounded and preserve OS bonding');
+
+// CORE info is optional: a known secure owner should not wait behind an INFO
+// ATT read before the HMAC challenge, and a hung metadata read must time out.
+const authFirst=servicesBlock.indexOf('ui.post(thisAutoAuth(connection));');
+const optionalInfo=servicesBlock.indexOf('infoStarted=connection.readCharacteristic(info);');
+assert(authFirst>=0 && optionalInfo>authFirst &&
+       servicesBlock.includes('infoReadPending=true;') &&
+       servicesBlock.includes('infoReadPending=false;') &&
+       bleSource.includes('infoReadPending || challengePending || authPending') &&
+       bleSource.includes('private static final long OWNER_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       bleSource.includes('watchOwnerTransaction(gatt);') &&
+       bleSource.includes('(pairPending || challengePending || authPending)'),
+       'Stored HMAC key must authenticate first; BLE owner and metadata cannot stall indefinitely');
+
+// A successful connect must not make old CORE snapshots visible or allow an
+// explicit preset save to be silently coalesced away by continuous FX edits.
+const frameDelivery=bleSource.split('private final CoreFrameCapture frameCapture=')[1]
+  ?.split('void setFrameListener(')[0];
+const presetSafetyBlock=bleSource.split('void fxPreset(int action,int slot) {')[1]
+  ?.split('void stopShow()')[0];
+assert(frameDelivery?.includes('owner==gatt && canCaptureFrame()') &&
+       presetSafetyBlock?.includes('BLE busy; retry preset action') &&
+       bleSource.includes('private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       bleSource.includes('watchCommandTransaction(gatt);') &&
+       bleSource.includes('(writePending || readReplyPending)'),
+       'Stale frame callbacks, lost presets and missing GATT command acknowledgements must not silently succeed');
 
 // A retired scan's delayed timeout must not cancel a new scan. A queued
 // scan result must never reopen GATT after scan stop or Activity shutdown.
@@ -601,9 +669,12 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
-// Firmware has a narrow existing palette BLE byte. This must not be
-// generalized to WLED palette parity or new wire operations.
-assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+// CORE #49 advertises 16 source-derived palette modes plus Embers; only
+// these combinations pass BLE admission. No UI visual changes are required.
+const palettePolicy=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/BleFxPalettePolicy.java','utf8');
+assert(palettes.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId)') &&
+       palettePolicy.includes('case 179: case 185: case 218: case 219:') &&
        palettes.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(') &&
        compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
@@ -611,9 +682,8 @@ assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2
        compose.includes('livePreview.stop()') &&
        compose.includes('supportedIds.value = emptySet() // never reuse another CORE') &&
        compose.includes('previewCurrentEffect(effect) // one safety gate for every edit gesture') &&
-       compose.includes('CORE accepts default palette 0 and Embers palettes 2–4') &&
-       bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))'),
-       'Only the verified existing CORE palette subset may be previewed over BLE');
+       bleSource.includes('!BleFxPalettePolicy.isWireCandidate(effectId,paletteId)'),
+       'Only the verified CORE palette-capable FX may be previewed over BLE');
 const preview=fs.readFileSync(
   'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
 assert(preview.includes('frame.paletteId, 5') &&
@@ -622,8 +692,9 @@ assert(preview.includes('frame.paletteId, 5') &&
 const corePaletteTest=fs.readFileSync(
   'android/app/src/test/java/com/opentail/android/NativePaletteCoreContractTest.kt','utf8');
 assert(corePaletteTest.includes('corePreviewPalette(32768, palette)') &&
-       corePaletteTest.includes('otherEffectsNeverClaimEmbersPaletteSupport'),
-       'Executable narrow-palette contract tests missing');
+       corePaletteTest.includes('sourcePaletteEffectIdsMirrorPinnedCoreMetadata') &&
+       corePaletteTest.includes('nonPaletteEffectsAreNotAdvertised'),
+       'Executable pinned CORE palette contract tests missing');
 
 // Native sequence/palette import boundaries are strict unsigned bytes;
 // source-backed RGB stop gradients must not round fractional samples.
