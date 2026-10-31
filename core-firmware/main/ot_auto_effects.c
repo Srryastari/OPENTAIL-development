@@ -16,6 +16,9 @@ static const uint16_t ids[] = {
     OT_FX_EVENT_HORIZON, OT_FX_SINGULARITY_SHUTDOWN
 };
 
+bool ot_auto_fx_continuous(uint16_t id){
+    return id>=OT_FX_DIMENSIONAL_RIFT&&id<=OT_FX_REALITY_BREAK;
+}
 bool ot_auto_fx_id(uint16_t id) {
     for(size_t i=0;i<sizeof(ids)/sizeof(ids[0]);i++)
         if(ids[i]==id)return true;
