@@ -1026,6 +1026,8 @@ class ComposeMainActivity : ComponentActivity() {
                     onSelected = { id ->
                         if(id == null) {
                             chosen = -1
+                            selectedEffect.intValue = -1
+                            prefs.edit().putInt("effectId",-1).apply()
                             if(liveArmed.value) {
                                 livePreview.stop()
                                 liveArmed.value = false
@@ -1090,6 +1092,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     private fun effectLabel(id: Int): String = when(id) {
+        -1 -> "No effect selected"
         9 -> "Rainbow Show"
         32769 -> "Materialize"
         else -> NativeEffectCatalog.byId(id).name
