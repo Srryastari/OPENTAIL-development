@@ -48,6 +48,7 @@ int main(void){
  ot_wled_fx_config_t cfg={.speed=180,.intensity=213,.brightness=32,
      .frame_time_ms=16,.palette_id=0,
      .foreground={200,52,154},.background={7,15,29}};
+ unsigned golden_mismatches=0u;
  for(size_t k=0;k<12;k++){
   const uint16_t id=continuous[k];
   assert(ot_auto_fx_continuous(id));
@@ -117,7 +118,7 @@ int main(void){
   assert(ot_effects_1d_render(&cfg,&st,1001u,frame,257u));
   assert(st.original_phase_q32==phase_after);
   printf("golden continuous original %u: 0x%08x\n",(unsigned)id,(unsigned)hash);
-  assert(hash==goldens[k] && "proprietary CORE golden frame changed");
+  if(hash!=goldens[k])golden_mismatches++;
  }
  /* Seven deliberate one-shots stay clamped after their terminal frame.
   * Event Horizon holds FG; Singularity Shutdown remains exact black. */
@@ -137,6 +138,7 @@ int main(void){
  }
  assert(!ot_auto_fx_continuous(0u));
  assert(!ot_auto_fx_continuous(OT_FX_EMBERS));
+ assert(golden_mismatches==0u && "proprietary source RGB goldens differ");
  puts("PASS: proprietary loop continuity, smooth speed edits, 7 one-shot endpoints and pinned RGB goldens");
  return 0;
 }
