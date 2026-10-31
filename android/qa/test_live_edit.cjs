@@ -59,7 +59,7 @@ for(const required of [
 ]) assert(project.includes(required), 'v4 pixel-edit regression: '+required);
 
 for(const required of [
-  'class LiveBlePreview', 'private val intervalMs = 120L', 'handler.postDelayed(drain',
+  'class LiveBlePreview', 'private val intervalMs = 60L', 'handler.postDelayed(drain',
   'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
   'frame.brightness.coerceIn(0, 24)', 'frame.paletteId, 5', 'ble.showFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
@@ -84,7 +84,7 @@ assert(compose.includes('if (offlinePreview.value) return') &&
 // Selecting a local-only palette must stop any stale physical palette demo.
 const palette=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePaletteEngine.kt','utf8');
 assert(palette.includes('fun coreSupports(effectId: Int, paletteId: Int): Boolean') &&
-       palette.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') &&
+       palette.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId)') &&
        palette.includes('fun corePreviewPalette(effectId: Int, selectedId: Int)'),
   'CORE palette support must remain a narrowly scoped protocol gate');
 assert(preview.includes('val paletteId: Int,') &&

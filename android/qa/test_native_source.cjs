@@ -153,7 +153,7 @@ const events=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (
 const hardware=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
 // Locked Layout: Add Zone and Delete Zone stay side-by-side, never a
 // destructive one-tap action. Target selection precedes confirmation.
-assert(layout.includes('Pill("+ Add",t) { addZoneAfter(i) }') && layout.includes('Pill("Remove",t) { deleteId=id }') && layout.includes('title = { Text("Remove this zone?") }') && layout.includes('if (project.removeZone(id)) {'),
+assert(layout.includes('Pill("+ Add",t) {') && layout.includes('val created = addZoneAfter(i)') && layout.includes('Pill("Remove",t) { deleteId=id }') && layout.includes('title = { Text("Remove this zone?") }') && layout.includes('if (project.removeZone(id)) {'),
        'Layout Add/Delete placement and two-stage safe zone removal regressed');
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
@@ -354,7 +354,7 @@ assert(combinedAuth && combinedAuth.includes('if (canControl()) { notifyStatus("
 const capsStart=bleSource.split('void readFxCapabilities(){')[1]?.split('private void fxNotify')[0];
 assert(capsStart && capsStart.includes('fxCapsBusy=false;fxNotify("[]");pumpQueue();') &&
        capsStart.includes('catch(SecurityException ex){') &&
-       bleSource.includes('fxNotify(ids.append(\']\').toString());pumpQueue();'),
+       bleSource.includes('fxNotify(BleFxCapabilities.decode(raw));'),
        'Failed capability-read admission must not strand a queued STOP');
 
 // A rejected optional CORE info read must not strand auto-auth. Normal
@@ -384,12 +384,28 @@ assert(mtuFlow && mtuFlow.includes('if(!mtuNegotiating) discoverCoreServices(con
 
 // Android connectGatt can reject without a callback or exception. Never
 // leave the app in a phantom connecting state on a null GATT handle.
-const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device) {')[1]
+const connectBlock=bleSource.split('private void connectReadOnly(BluetoothDevice device,boolean knownDevice) {')[1]
   ?.split('private final BluetoothGattCallback callback')[0];
 assert(connectBlock &&
-       connectBlock.includes('if(gatt==null){connecting=false;notifyStatus("BLE connection could not start; rescan and retry");}') &&
-       connectBlock.includes('connecting=false;notifyStatus("BLE connection permission denied");'),
+       connectBlock.includes('if(gatt==null){') && connectBlock.includes('watchGattReady(gatt,attempt)') &&
+       connectBlock.includes('connecting=false;scanFallbackAllowed=false;notifyStatus("BLE connection permission denied");'),
        'Rejected GATT connection start must clear the connecting state');
+
+// Final approved Compose controls retain their styling while using #58 BLE.
+assert(compose.includes('ble.connectFromApp(prefs.getString("preferred_ble_address", null))') &&
+       compose.includes('ble.setPreferredListener { address ->') &&
+       compose.includes('ble.tryReconnect(it)') &&
+       bleSource.includes('private void scheduleReconnect(String address, boolean afterScan)') &&
+       bleSource.includes('scheduleReconnect(connectingAddress,fallback);') &&
+       bleSource.includes('private static final long OWNER_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       bleSource.includes('private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;') &&
+       !/removeBond\s*\(/.test(bleSource),
+       'Approved UI must use BLE #58 known CORE reconnect and secure bounded recovery');
+assert(layout.includes('if (created != null) { editingId=created; layoutMessage="" }') &&
+       layout.includes('else layoutMessage="Could not add zone"') &&
+       compose.includes('private fun addZoneAfter(index: Int): String?') &&
+       compose.includes('val id=project.zone(position)?.optString("id")'),
+       'Add Zone must select its committed ID or show persistence failure');
 
 // A retired scan's delayed timeout must not cancel a new scan. A queued
 // scan result must never reopen GATT after scan stop or Activity shutdown.
@@ -567,7 +583,7 @@ assert(model.includes('return addZoneAt(label, length, zoneCount());') &&
        model.includes('synchronized boolean addZoneAt(String label, int length, int insertAt)') &&
        model.includes('if (i == insertAt) layout.put(z);') &&
        model.includes('if (i < zoneCount()) layout.put(zone(i));') &&
-       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1)') &&
+       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position)') && compose.includes('editingId=created') && compose.includes('val id=project.zone(position)?.optString("id")') &&
        !compose.includes('project.moveZone(project.zoneCount() - 1, index + 1)'),
        'Add next zone must insert and reindex with one persisted transaction');
 assert(compose.includes('if(project.assignMany(selections,zoneId,!checked)) refresh()') && compose.includes('if (project.name(it)) refresh()') && compose.includes('else name = project.name() // restore last committed value') && compose.includes('if(project.setPresets(next))') && compose.includes('Could not remove preset'),
@@ -592,10 +608,10 @@ for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Co
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
 }
-function previewCurrentGate(){return bleSource.includes('(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4))') && compose.includes('livePreview.stop()');}
+function previewCurrentGate(){return bleSource.includes('!BleFxPalettePolicy.isWireCandidate(effectId,paletteId)') && compose.includes('livePreview.stop()');}
 // Firmware has a narrow existing palette BLE byte. This must not be
 // generalized to WLED palette parity or new wire operations.
-assert(palettes.includes('paletteId == 0 || (effectId == 32768 && paletteId in 2..4)') && compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') && compose.includes('NativePaletteEngine.corePreviewPalette(') && previewCurrentGate(),
+assert(palettes.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId)') && compose.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') && compose.includes('NativePaletteEngine.corePreviewPalette(') && previewCurrentGate(),
        'Only the verified existing CORE palette subset may be previewed over BLE');
 const preview=fs.readFileSync(
   'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
@@ -605,7 +621,7 @@ assert(preview.includes('frame.paletteId, 5') &&
 const corePaletteTest=fs.readFileSync(
   'android/app/src/test/java/com/opentail/android/NativePaletteCoreContractTest.kt','utf8');
 assert(corePaletteTest.includes('corePreviewPalette(32768, palette)') &&
-       corePaletteTest.includes('otherEffectsNeverClaimEmbersPaletteSupport'),
+       corePaletteTest.includes('sourcePaletteEffectIdsMirrorPinnedCoreMetadata'),
        'Executable narrow-palette contract tests missing');
 
 // Native sequence/palette import boundaries are strict unsigned bytes;

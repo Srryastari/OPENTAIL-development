@@ -249,6 +249,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPreferredListener { address ->
+            runOnUiThread { prefs.edit().putString("preferred_ble_address", address).apply() }
+        }
         ble.setScanResultListener { address, label ->
             runOnUiThread { foundDevices[address] = label }
         }
@@ -301,6 +304,11 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         foregroundActivity.value = true
+        if (!ble.isConnected()) {
+            prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
+        } else if (!ble.canControl()) {
+            ble.authorizeOrPair()
+        }
     }
     override fun onStop() {
         foregroundActivity.value = false
@@ -1251,7 +1259,11 @@ class ComposeMainActivity : ComponentActivity() {
                             }
                         }
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Pill("+ Add",t) { addZoneAfter(i) }
+                            Pill("+ Add",t) {
+                                val created = addZoneAfter(i)
+                                if (created != null) { editingId=created; layoutMessage="" }
+                                else layoutMessage="Could not add zone"
+                            }
                             Pill("Remove",t) { deleteId=id }
                         }
                         // Prior exact-pixel authoring remains available in the deeper editor.
@@ -1275,7 +1287,11 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
             }
-            if(project.zoneCount()==0) Pill("+ Add",t) { addZoneAfter(-1) }
+            if(project.zoneCount()==0) Pill("+ Add",t) {
+                val created=addZoneAfter(-1)
+                if (created!=null) { editingId=created; layoutMessage="" }
+                else layoutMessage="Could not add zone"
+            }
         }
         // Actual hardware output/section assignment belongs beside Layout.
         // Saving to CORE still requires an explicit authenticated confirmation.
@@ -1308,9 +1324,13 @@ class ComposeMainActivity : ComponentActivity() {
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
-    private fun addZoneAfter(index: Int) {
-        if (project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, index + 1))
-            refresh()
+    private fun addZoneAfter(index: Int): String? {
+        val position = index + 1
+        if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position))
+            return null
+        val id=project.zone(position)?.optString("id")?.takeIf { it.isNotEmpty() }
+        refresh()
+        return id
     }
     @Composable
     private fun TriggersPage(t: Tone) {
@@ -1807,7 +1827,7 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {
                     foundDevices.clear()
-                    ble.scanHeadless()
+                    ble.connectFromApp(prefs.getString("preferred_ble_address", null))
                 }
                 Pill("Preview Offline", t) {
                     enterOfflinePreview()

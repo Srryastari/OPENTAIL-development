@@ -34,7 +34,8 @@ internal class LiveBlePreview(
     )
 
     private val handler = Handler(Looper.getMainLooper())
-    private val intervalMs = 120L
+    // Low-latency, last-frame-wins BLE preview; GATT remains serial and bounded.
+    private val intervalMs = 60L
     private var lastSentAt = -intervalMs
     private var scheduled = false
     private var latest: Frame? = null
