@@ -182,9 +182,13 @@ def run_simulation(args, folder, telemetry, events):
             write_line(events, {"utc": utc(), "event": "synthetic_input",
                                 "mask": mask, "signals": signal_names,
                                 "physical_proof": False})
+            # Bound the request to the capture window so the simulated input
+            # does not expire before the last status poll. Never exceed the
+            # firmware's 15-second synthetic input maximum.
+            ttl_ms = max(1500, min(15000, int(args.seconds * 1000) + 1500))
+            armed = True  # even a timed-out request might have been applied
             request_json(args.base_url, "/api/v1/simulate",
-                         {"signals": signal_names, "ttl_ms": 1500})
-            armed = True
+                         {"signals": signal_names, "ttl_ms": ttl_ms})
             capture_window(args, folder, "SIM_%03d" % mask, telemetry, events)
     finally:
         if armed:
@@ -246,6 +250,8 @@ def cli(argv=None):
         parser.error("--simulate requires all three explicit isolation acknowledgements")
     if args.simulate and args.session != "S1":
         parser.error("--simulate is permitted for S1 only")
+    if args.simulate and args.seconds > 13:
+        parser.error("Synthetic capture windows must not exceed 13 seconds (15-second CORE TTL maximum)")
     if not (args.http or args.serial or args.camera is not None):
         parser.error("Select at least one capture source: --http, --serial or --camera")
     args.base_url = validate_url(args.base_url)
