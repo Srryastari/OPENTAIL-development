@@ -1968,7 +1968,7 @@ class ComposeMainActivity : ComponentActivity() {
                     val selected = NativeEffectCatalog.byName(event.optString("eventFx", "Solid"))
                     previewEffect(selected.id)
                 }
-                Caption("Offline preview renders local CORE-equivalent effect frames; CORE drives the vehicle LEDs.", t)
+                Caption("Offline preview inspects exact design pixels; CORE provides animation.", t)
                 }
             }
         }
