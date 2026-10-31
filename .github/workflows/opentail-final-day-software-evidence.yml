@@ -1,0 +1,37 @@
+name: OpenTail final-day exact-SHA software evidence freeze (not physical release)
+on:
+  pull_request:
+    branches: [firmware/failover-essential-policy-20261031]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  software-contract-freeze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested orchestrator HEAD
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - name: Self-test software and physical fail-closed gates
+        run: python3 scripts/final_day_evidence_lock.py --self-test
+      - name: Verify all four team's pinned workflow results using GitHub API
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/final_day_evidence_lock.py --output software-evidence-lock.json
+      - name: Archive reviewable software evidence receipt (NOT a release permit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-final-day-software-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: software-evidence-lock.json
+          if-no-files-found: warn
+          retention-days: 30
+# No main/master writes, no device flashing, no physical PASS fabrication,
+# no vehicle-release approval, no bypass of 22 real-device checks.
