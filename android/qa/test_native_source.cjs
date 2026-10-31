@@ -144,6 +144,27 @@ assert(bleSource.includes('FRAME_CMD_UUID') &&
        bleSource.includes('frameCapture.busy()') &&
        bleSource.includes('frameCapture.abortForStop()'),
   'BLE CORE snapshot must be capability-gated and serialize GATT requests');
+// Owner physical Test 38: read-only Output 1 reload now PASS. Restore
+// responsive preview between explicit reads without turning BLE BUSY into a
+// 60Hz status flood or inventing/smoothing unverified frame pixels.
+const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: Int) {')[1]
+  ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
+const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
+  ?.split('private final ArrayAdapter<String> entries;')[0];
+assert(captureLoop && captureLoop.includes('delay(16L)') &&
+       !captureLoop.includes('delay(500)') &&
+       captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
+       captureStart &&
+       captureStart.includes('if(!canCaptureFrame())return false;') &&
+       captureStart.includes('queuedOutputRead>=0') &&
+       captureStart.includes('frameCallbackPending') &&
+       captureStart.includes('nextPacket!=null') &&
+       captureStart.includes('palette.busy()') &&
+       !captureStart.includes('notifyStatus(') &&
+       captureStart.includes('frameCapture.request(output)') &&
+       compose.includes('Color(frame!!.colorAt(sample))'),
+       'Fast live preview must be GATT-paced, silently backpressured, STOP-safe and CORE-authoritative');
+
 assert(gradle.includes("versionName '0.2.0-alpha4'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];

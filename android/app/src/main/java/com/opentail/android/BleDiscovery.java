@@ -227,11 +227,13 @@ final class BleDiscovery {
     boolean canCaptureFrame() {return canControl() && frameCapture.supported();}
     void cancelFrameCapture() { frameCapture.abortForStop(); }
     boolean captureFrame(int output) {
-        if(!canCaptureFrame()){notifyStatus("CORE frame snapshots unavailable or unauthorized");return false;}
+        if(!canCaptureFrame())return false;
+        // UI preview probes at display cadence. A refused opportunistic capture
+        // is normal backpressure, not a connection failure or user-facing BLE
+        // error. Do not publish status on every busy tick (or restart Compose's
+        // effect coroutine). Crucially, never overlap any pending ATT action.
         if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || writePending || nextPacket!=null ||
-           readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending) {
-            notifyStatus("BLE busy; retry frame capture");return false;
-        }
+           readReplyPending || fxCapsBusy || triggerMapBusy || authPending || pairPending || challengePending)return false;
         frameCapture.request(output);
         return true;
     }
