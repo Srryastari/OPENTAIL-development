@@ -106,7 +106,7 @@ jobs:
         with:
           name: opentail-failover-software-bench-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/*.bin
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
