@@ -7,6 +7,12 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/te
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
 python3 tests/test_main_stack_boot_contract.py
+# Pure failover model only: no backup GPIO, supervisor or auto-takeover.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \\
+  main/ot_failover_essential.c main/output_manager.c main/trigger_manager.c \\
+  main/core_logic.c main/arbitration_logic.c tests/test_failover_essential.c \\
+  -o /tmp/ot-failover-essential-tests && /tmp/ot-failover-essential-tests
+python3 tests/test_failover_runtime_isolation.py
 python3 tests/test_ble_gap_recovery_contract.py
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
