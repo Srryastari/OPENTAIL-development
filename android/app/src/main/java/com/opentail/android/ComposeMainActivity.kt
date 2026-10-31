@@ -1779,7 +1779,7 @@ class ComposeMainActivity : ComponentActivity() {
                     Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Field(search, "Search effects", t) { search = it }
-                        // Show all matching choices; the old .take(15)
+                        // Show all matching choices; the old 15-item
                         // alphabetic cap hid Materialize, Random Materialize,
                         // Smooth Fade and Strobe (owner Test 86).
                         NativeEffectCatalog.autoEventChoices()
