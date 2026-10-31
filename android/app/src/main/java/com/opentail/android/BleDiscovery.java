@@ -384,6 +384,7 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic enroll,challenge;
     private volatile boolean pairPending=false,challengePending=false;
     private String activeAddress="";
+    private String connectingAddress="";
     private volatile boolean authorized = false;
     private volatile BluetoothGattCharacteristic cfgCommand,cfgReply;
     private java.util.function.Consumer<String> configListener;
@@ -800,7 +801,7 @@ final class BleDiscovery {
     private void scheduleReconnect(String address, boolean afterScan) {
         if(address==null || address.isEmpty())return;
         ui.post(()->{
-            if(stopped || autoReconnectBudget<=0)return;
+            if(stopped || connecting || connected || autoReconnectBudget<=0)return;
             autoReconnectBudget--;
             final int lease=++autoReconnectLease;
             // Retry promptly after a ready-session drop; allow the one-shot
@@ -1004,7 +1005,7 @@ final class BleDiscovery {
             try{owner.disconnect();}catch(Exception ignored){}
             try{owner.close();}catch(Exception ignored){}
             notifyStatus(reason+(fallback?" · retrying BLE discovery":" · tap Connect to retry"));
-            scheduleReconnect(activeAddress,fallback);
+            scheduleReconnect(connectingAddress,fallback);
             if(fallback)ui.postDelayed(()->{
                 if(!stopped && !connected && !connecting && !scanning)scanHeadless();
             },350L);
@@ -1034,6 +1035,9 @@ final class BleDiscovery {
             try{previous.close();}catch(Exception ignored){}
         }
         scanFallbackAllowed=knownDevice;
+        // A failed switch must never silently reconnect the previous vehicle.
+        connectingAddress=device.getAddress();
+        autoReconnectLease++;
         final int attempt=++connectionAttempt;
         frameCapture.cancel();palette.reset();Arrays.fill(cfgKnownRevision,-1);authorized=false;infoReadPending=false;command=null;reply=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;fxCaps=null;fxCapsBusy=false;triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
         connecting = true;
@@ -1077,7 +1081,7 @@ final class BleDiscovery {
                 notifyStatus("BLE disconnected (GATT status " + status + ")");
                 connection.close();
                 if (gatt == connection) gatt = null;
-                scheduleReconnect(activeAddress,fallback);
+                scheduleReconnect(connectingAddress,fallback);
                 if(fallback)ui.postDelayed(()->{
                     if(!stopped && !connected && !connecting && !scanning)scanHeadless();
                 },350L);
