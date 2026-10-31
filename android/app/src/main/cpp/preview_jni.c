@@ -2,6 +2,32 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "preview.h"
+#include "core/wled_fx_compat.h"
+
+/* Read-only fixed palette source lookup; no effect state or BLE calls.
+ * Dynamic/custom palette IDs require their actual resolved frame snapshot. */
+JNIEXPORT jintArray JNICALL Java_com_opentail_android_OfflineCoreRenderer_fixedPalette(
+    JNIEnv *env,jclass cls,jint id,jint foreground,jint background,jint accent) {
+    (void)cls;
+    if(id<0||id>72||id==1)return NULL;
+    const ot_wled_rgb_t fg={(uint8_t)(foreground>>16),
+        (uint8_t)(foreground>>8),(uint8_t)foreground};
+    const ot_wled_rgb_t bg={(uint8_t)(background>>16),
+        (uint8_t)(background>>8),(uint8_t)background};
+    const ot_wled_rgb_t third={(uint8_t)(accent>>16),
+        (uint8_t)(accent>>8),(uint8_t)accent};
+    ot_wled_palette16_t pal={0};
+    if(!ot_wled_palette_build((uint8_t)id,fg,bg,third,&pal))return NULL;
+    jint values[16];
+    for(int i=0;i<16;i++)
+        values[i]=(jint)(0xff000000u|((uint32_t)pal.entries[i].r<<16)|
+            ((uint32_t)pal.entries[i].g<<8)|pal.entries[i].b);
+    jintArray result=(*env)->NewIntArray(env,16);
+    if(!result)return NULL;
+    (*env)->SetIntArrayRegion(env,result,0,16,values);
+    if((*env)->ExceptionCheck(env))return NULL;
+    return result;
+}
 // Handle and buffers belong to one Java instance, accessed under its monitor.
 typedef struct {ot_preview *preview;jsize count;uint32_t colors[];} binding;
 JNIEXPORT jlong JNICALL Java_com_opentail_android_OfflineCoreRenderer_create(
