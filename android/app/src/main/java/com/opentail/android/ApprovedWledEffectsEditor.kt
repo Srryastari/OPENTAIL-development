@@ -113,32 +113,39 @@ private val ink=Color(0xFFEDEDED)
 internal fun ApprovedWledEffectsEditor(
     selectedId: Int?,
     effectOptions: List<NativeEffectCatalog.Effect>,
-    segments: Int,
-    liveEnabled: Boolean,
     prefs: SharedPreferences,
     paletteFor: (Int)->NativePalette,
     onSelected: (Int?)->Unit,
-    onLiveToggle: ()->Unit,
     onParam: (Int,String,Int)->Unit,
     onColor: (Int,Int,Int)->Unit,
-    onPalette: (Int,Int)->Unit
+    onPalette: (Int,Int)->Unit,
+    scopeKey: String = "show-modes",
+    readSetting: ((String,Int)->Int)? = null,
+    readColor: ((Int)->Int)? = null,
+    readPalette: (() -> Int)? = null
 ) {
     val effect=selectedId?.let { NativeEffectCatalog.byId(it) }
     val def=effect?.let { ApprovedEditorMetadata.definition(it.name,NativeEffectParameters.forId(it.id)) }
-    var sheet by remember { mutableStateOf("") }
-    var role by remember { mutableIntStateOf(0) }
-    var paletteSearch by rememberSaveable { mutableStateOf("") }
-    var effectSearch by rememberSaveable { mutableStateOf("") }
-    var stateRevision by remember { mutableIntStateOf(0) }
+    var sheet by remember(scopeKey) { mutableStateOf("") }
+    var role by remember(scopeKey) { mutableIntStateOf(0) }
+    var paletteSearch by rememberSaveable(scopeKey) { mutableStateOf("") }
+    var effectSearch by rememberSaveable(scopeKey) { mutableStateOf("") }
+    var stateRevision by remember(scopeKey) { mutableIntStateOf(0) }
     val currentId=selectedId ?: 0
-    val paletteId=prefs.getInt("wled.${currentId}.palette",prefs.getInt("paletteId",0))
+    val paletteId=readPalette?.invoke() ?: prefs.getInt("wled.${currentId}.palette",prefs.getInt("paletteId",0))
     val stops=paletteFor(paletteId).stops
+    // CORE source palette_1d defines editable user colors ONLY for 2..5.
+    // An immutable fixed WLED palette (0, 6..72), random or custom preset
+    // must never receive Main/Set Color recoloring through this editor.
+    val allowColorSlots = def != null && (!def.palette || NativePaletteEngine.usesEditableColorSlots(paletteId))
     fun intSetting(key:String,default:Int):Int {
         @Suppress("UNUSED_VARIABLE") val observe = stateRevision
-        return prefs.getInt("wled.${currentId}.${key}",prefs.getInt(key,default))
+        return readSetting?.invoke(key,default)
+            ?: prefs.getInt("wled.${currentId}.${key}",prefs.getInt(key,default))
     }
     fun colorSetting(slot:Int):Int {
         @Suppress("UNUSED_VARIABLE") val observe = stateRevision
+        readColor?.invoke(slot)?.let { return it }
         return prefs.getInt("wled.${currentId}.color${slot}", when(slot){
             0->prefs.getInt("foreground",0xffd735f4.toInt())
             1->prefs.getInt("background",0xff000000.toInt())
@@ -161,23 +168,6 @@ internal fun ApprovedWledEffectsEditor(
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
         .background(panel).padding(12.dp).testTag("approved-effects-main"),
         verticalArrangement=Arrangement.spacedBy(7.dp)) {
-        Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment=Alignment.CenterVertically) {
-            Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(Color(0xFFDDDDDD)),
-                contentAlignment=Alignment.Center){Text("A",fontSize=15.sp,color=Color(0xFF222222))}
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)){
-                Text("All Segments",fontSize=13.sp,fontWeight=FontWeight.Medium,color=ink)
-                Text("${segments} Segments",fontSize=11.sp,color=subtle)
-            }
-            Text(if(liveEnabled)"Ⅱ" else "▶",fontSize=20.sp,color=subtle)
-            Spacer(Modifier.width(10.dp))
-            Switch(checked=liveEnabled,onCheckedChange={onLiveToggle()},
-                modifier=Modifier.height(24.dp).testTag("effects-live-toggle"),
-                colors=SwitchDefaults.colors(checkedThumbColor=Color(0xFF181818),
-                    checkedTrackColor=Color(0xFFD6D6D6),
-                    uncheckedThumbColor=Color(0xFFAAAAAA),
-                    uncheckedTrackColor=Color(0xFF333333)))
-        }
         Row(Modifier.fillMaxWidth().height(58.dp).clip(RoundedCornerShape(10.dp))
             .background(surface).clickable{sheet="effects"}.padding(start=12.dp,end=8.dp),
             verticalAlignment=Alignment.CenterVertically){
@@ -198,7 +188,7 @@ internal fun ApprovedWledEffectsEditor(
                     Text(if(def?.palette==true)"Palette" else "Effect colors",
                         fontSize=11.sp,color=subtle)
                 }
-                def?.roles?.forEach { r ->
+                def?.roles?.takeIf { allowColorSlots }?.forEach { r ->
                     ColorChip(r.label,colorSetting(r.slot)) {
                         role=r.slot
                         sheet="colors"
@@ -262,7 +252,7 @@ internal fun ApprovedWledEffectsEditor(
         }
         "palettes" -> EditorSheet(title="Select palette",onClose={sheet=""}){
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End){
-                def?.roles?.forEach { r ->
+                def?.roles?.takeIf { allowColorSlots }?.forEach { r ->
                     ColorChip(r.label,colorSetting(r.slot)){role=r.slot;sheet="colors"}
                     Spacer(Modifier.width(4.dp))
                 }
@@ -300,9 +290,9 @@ internal fun ApprovedWledEffectsEditor(
                     inner()
                 }})
         }
-        "colors" -> EditorSheet(title="Select colors",onClose={sheet=""}){
+        "colors" -> if (allowColorSlots) EditorSheet(title="Select colors",onClose={sheet=""}){
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End){
-                def?.roles?.forEach { r ->
+                def?.roles?.takeIf { allowColorSlots }?.forEach { r ->
                     ColorChip(r.label,colorSetting(r.slot)){role=r.slot}
                     Spacer(Modifier.width(4.dp))
                 }
