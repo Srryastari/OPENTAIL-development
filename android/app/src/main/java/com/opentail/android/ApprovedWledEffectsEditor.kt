@@ -98,7 +98,8 @@ internal object ApprovedEditorMetadata {
                 else -> label
             })
         }
-        return Definition(params,roles,sections.getOrElse(2){""}.isNotEmpty())
+        // CORE capability can supersede the 16-example UI reference catalog.
+        return Definition(params,roles,sections.getOrElse(2){""}.isNotEmpty() || flags?.palette == true)
     }
     fun parameterKey(position:Int):String=when(position){0->"speed";1->"intensity";else->"param${position}"}
 }
