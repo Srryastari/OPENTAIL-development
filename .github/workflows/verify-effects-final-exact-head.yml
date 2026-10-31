@@ -1,0 +1,78 @@
+name: Effects final phase/lifetime exact HEAD (software only)
+on:
+  pull_request:
+    branches: [firmware/fix-esp32s3-main-stack-bootloop-20261030]
+    paths:
+      - 'core-firmware/main/fx_zone_bank.c'
+      - 'core-firmware/main/fx_zone_bank.h'
+      - 'core-firmware/main/opentail_core.c'
+      - 'core-firmware/tests/test_fx_zone_bank.c'
+      - 'core-firmware/tests/test_effects_render_safety_contract.py'
+      - '.github/workflows/verify-effects-final-exact-head.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+# Supplement only: never replace physical release or GPIO/failover evidence.
+jobs:
+  full-effects-core-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact PR HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Complete 120-mode RGB goldens, 140 capabilities, overlays, BLE and CORE regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Source impact and no physical-release waiver
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  esp32s3-exact-firmware:
+    needs: full-effects-core-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert same SHA as host
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Build with ESP-IDF v5.5.5 for ESP32-S3
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify image manifest without flashing
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+
+  android-core-contract:
+    needs: full-effects-core-host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact source
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Verify CORE authoritative effect manifest and Android compatibility
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          node android/qa/test_unified_ble_fx.cjs
+          node android/qa/test_ble_output_pending.cjs
