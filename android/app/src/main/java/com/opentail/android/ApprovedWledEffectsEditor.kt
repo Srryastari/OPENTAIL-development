@@ -1,7 +1,6 @@
 package com.opentail.android
 
 import android.content.SharedPreferences
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -212,7 +211,7 @@ internal fun ApprovedWledEffectsEditor(
             if(def?.palette==true && stops != null)
                 Canvas(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(4.dp)){
                     drawRect(brush=Brush.horizontalGradient(
-                        colorStops=stops.map{it.first to it.second}.toTypedArray()))
+                        *stops.map{it.first to it.second}.toTypedArray()))
                 }
         }
         if(effect != null) {
@@ -284,7 +283,7 @@ internal fun ApprovedWledEffectsEditor(
                         if(palette.stops!=null)
                             Canvas(Modifier.fillMaxWidth().height(5.dp)){
                                 drawRect(brush=Brush.horizontalGradient(
-                                    colorStops=palette.stops.map{it.first to it.second}.toTypedArray()))
+                                    *palette.stops.map{it.first to it.second}.toTypedArray()))
                             }
                     }
                 }
