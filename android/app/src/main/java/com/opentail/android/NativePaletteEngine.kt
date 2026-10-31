@@ -22,7 +22,8 @@ internal object NativePaletteEngine {
     )
 
     fun lookup(project: JSONObject, requested: Int, foreground: Int? = null,
-               background: Int? = null, verifiedCustomStops: String? = null): NativePalette {
+               background: Int? = null, verifiedCustomStops: String? = null,
+               accent: Int? = null): NativePalette {
         val id = requested.coerceIn(0, MAX_ID)
         val optionalNames = project.optJSONArray("paletteNames")
         val suppliedName = optionalNames?.optString(id)?.trim().orEmpty()
@@ -33,31 +34,27 @@ internal object NativePaletteEngine {
         if (id in 73..200 && verifiedCustomStops != null) {
             parseVerifiedCustom(verifiedCustomStops)?.let { return NativePalette(id, name, it) }
         }
-        val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
-        if (raw == null) {
-            // Native WLED source defines palette 0 and fixed IDs 2..72.
-            // IDs 0 and 6..72 never inherit Main/Set Color: their preset RGB
-            // gradients are independent of user-defined effect color slots.
-            // Color-slot palettes 2..5 may derive colors ONLY from their
-            // actual source-defined color roles. Dynamic IDs remain unknown
-            // without verified snapshots.
-            val colorSlotsPresent = id == 0 || id >= 6 ||
-                (foreground != null && (id == 2 || background != null))
-            if (id in 0..72 && id != 1 && colorSlotsPresent) {
-                val fixed = runCatching {
-                    OfflineCoreRenderer.fixedPalette(id,
-                        foreground ?: -1, background ?: 0xff000000.toInt(),
-                        0xff000000.toInt())
-                }.getOrNull()
-                if (fixed != null && fixed.size == 16) {
-                    val stops = fixed.mapIndexed { index, rgb ->
-                        (index.toFloat() / 15f) to Color(rgb)
-                    }
-                    return NativePalette(id, name, stops)
-                }
-            }
-            return NativePalette(id, name, coreFixedStops(id, foreground, background))
+        // Built-in palettes have immutable, source-authentic gradients.
+        // Do not let a saved project preview or Main/Set Color recolor them.
+        // IDs 2..5 are explicitly defined in terms of user color slots.
+        val fixedPalette = id == 0 || id in 2..72
+        val colorsAvailable = id == 0 || id >= 6 ||
+            (foreground != null && (id == 2 || background != null))
+        if (fixedPalette && colorsAvailable) {
+            val fixed = runCatching {
+                OfflineCoreRenderer.fixedPalette(id,
+                    foreground ?: -1, background ?: 0xff000000.toInt(),
+                    accent ?: 0xff000000.toInt())
+            }.getOrNull()
+            if (fixed != null && fixed.size == 16)
+                return NativePalette(id, name, fixed.mapIndexed { index, rgb ->
+                    (index.toFloat() / 15f) to Color(rgb)
+                })
         }
+        // A bundled/local JVM test may have no Android native library;
+        // retain the previously verified color-slot fallbacks there.
+        val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
+            ?: return NativePalette(id, name, coreFixedStops(id, foreground, background))
         if (raw.length() !in 1..64) return NativePalette(id, name, null)
         val stops = ArrayList<Pair<Float, Color>>(raw.length())
         for (i in 0 until raw.length()) {
