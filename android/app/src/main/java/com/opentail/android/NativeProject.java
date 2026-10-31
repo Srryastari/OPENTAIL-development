@@ -586,8 +586,17 @@ final class NativeProject {
 
     synchronized boolean deleteTrigger(String name) {
         JSONObject p = profiles().optJSONObject(name);
+        // Safety inputs, Startup and Shutdown cannot be removed.
         if (p == null || !"trigger-custom".equals(p.optString("kind"))) return false;
-        profiles().remove(name);return save();
+        try {
+            JSONObject previous = data;
+            JSONObject draft = new JSONObject(previous.toString());
+            draft.getJSONObject("profiles").remove(name);
+            data = draft;
+            if (save()) return true;
+            data = previous; // unsuccessful persistence must not hide a trigger
+            return false;
+        } catch (JSONException ex) { return false; }
     }
 
     synchronized JSONArray sequence() { return data.optJSONArray("sequence"); }
