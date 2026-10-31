@@ -386,6 +386,9 @@ class ComposeMainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 pages.forEachIndexed { i, title ->
                     NavigationPill(i, title, t, page == i) {
+                        // Avoid showing the previous event's preview when
+                        // returning to Auto Events, which defaults to Startup.
+                        if(page==4 && i!=4) autoEventPreviewEffect.intValue=-1
                         // Preview Offline remains active across tabs (Test 79).
                         page = i
                     }
