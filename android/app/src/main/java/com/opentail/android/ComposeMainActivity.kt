@@ -994,8 +994,7 @@ class ComposeMainActivity : ComponentActivity() {
                 // A previous Rainbow/Palette selection otherwise makes
                 // Blink, Bouncing Balls and proprietary originals fail render.
                 // Preview-only: the locked palette engine is unchanged.
-                val rendererPalette = if (NativeEffectParameters.forId(effect)?.palette == true)
-                    settings[5] else 0
+                val rendererPalette = OfflinePreviewPalettePolicy.rendererId(effect,settings[5])
                 val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
                     localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
                     settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
