@@ -989,8 +989,15 @@ class ComposeMainActivity : ComponentActivity() {
                 val pitch=capsuleWidth+gap
                 val capsuleHeight = 24.dp.toPx()
                 val audio = if(effect==185) localMicrophone.latest() else null
+                // Keep an effect's saved palette, but do not send it to
+                // CORE when that effect's metadata declares no palette.
+                // A previous Rainbow/Palette selection otherwise makes
+                // Blink, Bouncing Balls and proprietary originals fail render.
+                // Preview-only: the locked palette engine is unchanged.
+                val rendererPalette = if (NativeEffectParameters.forId(effect)?.palette == true)
+                    settings[5] else 0
                 val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
-                    localFrameMs.intValue,settings[2],settings[3],settings[4],settings[5],
+                    localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
                     settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
                     audio?.get(1) ?: 0f,audio!=null,localColors)
                 if(localSketch) localRenderAvailable.value=localRendered
