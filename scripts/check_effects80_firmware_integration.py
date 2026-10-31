@@ -77,6 +77,7 @@ def main():
         "core-firmware/tests/run-host-tests.sh",
         "core-firmware/tests/test_failover_essential.c",
         "core-firmware/tests/test_failover_runtime_isolation.py",
+        "core-firmware/tests/test_failover_release_evidence.py",
         "docs/FAILOVER-SOFTWARE-BOUNDARY-2026-10-31.md",
         "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv",
         ".github/workflows/verify-core-failover-policy.yml",
