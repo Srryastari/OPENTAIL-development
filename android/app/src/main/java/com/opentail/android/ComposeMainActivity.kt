@@ -1085,8 +1085,6 @@ class ComposeMainActivity : ComponentActivity() {
                 ApprovedWledEffectsEditor(
                     selectedId = chosen.takeIf { it >= 0 },
                     effectOptions = NativeEffectCatalog.generalEffects(),
-                    segments = project.zoneCount(),
-                    liveEnabled = liveArmed.value,
                     prefs = prefs,
                     paletteFor = { id ->
                         val verified = if(paletteLoadedPresent.value &&
@@ -1126,17 +1124,6 @@ class ComposeMainActivity : ComponentActivity() {
                             editor.apply()
                             if(liveArmed.value) previewCurrentEffect(id)
                             else invalidateCoreFrame()
-                        }
-                    },
-                    onLiveToggle = {
-                        if(liveArmed.value) {
-                            livePreview.stop()
-                            liveArmed.value = false
-                            if(ble.canControl()) ble.stopShow()
-                        } else if(chosen >= 0) {
-                            // User-initiated live preview only: effect list
-                            // selection never activates Show Mode implicitly.
-                            previewCurrentEffect(chosen)
                         }
                     },
                     onParam = { id,key,value ->
