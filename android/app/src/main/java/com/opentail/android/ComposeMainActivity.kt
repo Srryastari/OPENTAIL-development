@@ -1884,7 +1884,7 @@ class ComposeMainActivity : ComponentActivity() {
             if (saved) refresh()
             // One-shot events replay their own source frames from t=0
             // after a locally saved edit, never restart a physical Show.
-            if (saved && offlinePreview.value && selectedEvent == event)
+            if (saved && (offlinePreview.value || !ble.canControl()) && selectedEvent == event)
                 offlineReplay.intValue++
             return saved
         }
@@ -1896,7 +1896,7 @@ class ComposeMainActivity : ComponentActivity() {
                     Column(Modifier.weight(1f).clickable {
                         if(selectedEvent!=key) {
                             autoEventPreviewEffect.intValue=-1
-                            if (offlinePreview.value) offlineReplay.intValue++
+                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
                         }
                         selectedEvent=key
                         eventEditing=if(eventEditing==key) null else key
@@ -1907,7 +1907,7 @@ class ComposeMainActivity : ComponentActivity() {
                     IconAction("Edit " + key, "edit", t) {
                         if(selectedEvent!=key) {
                             autoEventPreviewEffect.intValue=-1
-                            if (offlinePreview.value) offlineReplay.intValue++
+                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
                         }
                         selectedEvent=key
                         eventEditing = if (eventEditing == key) null else key
