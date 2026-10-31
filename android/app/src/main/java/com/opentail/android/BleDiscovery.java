@@ -688,7 +688,7 @@ final class BleDiscovery {
         if (!canControl()) {notifyStatus("BLE FX control not authorized");return;}
         if (effectId<0||effectId>65535||chainMask<1||chainMask>3||
             zoneMask<1||zoneMask>255||brightness<0||brightness>32||
-            speed<0||speed>255||intensity<0||intensity>255||!(paletteId==0||(effectId==32768&&(paletteId==2||paletteId==3||paletteId==4)))||
+            speed<0||speed>255||intensity<0||intensity>255||!BleFxPalettePolicy.isWireCandidate(effectId,paletteId)||
             ttl<1||ttl>60||r<0||r>255||g<0||g>255||b<0||b>255||
             bgR<0||bgR>255||bgG<0||bgG>255||bgB<0||bgB>255) {
             notifyStatus("Unsupported or invalid BLE FX settings");return;
