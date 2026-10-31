@@ -178,11 +178,19 @@ final class NativeEffectCatalog {
         for (Effect effect : SORTED) if (!autoEventOnly(effect.id)) general.add(effect);
         return Collections.unmodifiableList(general);
     }
-    /** Keep the full catalog searchable for Auto Events. Show the dedicated
-     * transition effects first instead of burying them after 15 alphabetic
-     * results. Standard effects, including WLED Strobe #23, remain eligible. */
+    /** General proprietary animations belong in the unified Show Modes
+     * catalog (and can be assigned to Triggers). Auto Events only hosts
+     * dedicated transitions plus eligible standard WLED effects. The owner's
+     * WLED Plasma #97 is also a general Show Modes effect. */
+    private static boolean showModesOnly(int id) {
+        return id == 97 || (id >= 32768 && id <= 32787 && !autoEventOnly(id));
+    }
+    /** Keep eligible transitions first, without leaking general proprietary
+     * animations into the Startup/Shutdown chooser. */
     static List<Effect> autoEventChoices() {
-        ArrayList<Effect> choices = new ArrayList<>(SORTED);
+        ArrayList<Effect> choices = new ArrayList<>();
+        for (Effect effect : SORTED)
+            if (!showModesOnly(effect.id)) choices.add(effect);
         choices.sort(Comparator.comparing((Effect e) -> !autoEventOnly(e.id))
             .thenComparing(e -> e.name.toLowerCase(java.util.Locale.ROOT)));
         return Collections.unmodifiableList(choices);
