@@ -159,7 +159,7 @@ final class BleDiscovery {
     // A user-requested read-only output reload outranks the continuously
     // sampled LED Preview. Never overlap an active ATT transaction.
     private volatile int queuedOutputRead=-1;
-    private BluetoothGatt queuedOutputOwner;
+    private volatile BluetoothGatt queuedOutputOwner;
     private volatile int queuedOutputLease=0;
     private void clearQueuedOutputRead(){
         queuedOutputRead=-1;queuedOutputOwner=null;queuedOutputLease++;
@@ -481,8 +481,8 @@ final class BleDiscovery {
         // read-only Output Manager reload should queue rather than fail while
         // the Layout's auto-refreshing LED Preview owns the GATT operation.
         if(frameCapture.busy()){
-            queuedOutputRead=index;
             queuedOutputOwner=gatt;
+            queuedOutputRead=index;
             final int lease=++queuedOutputLease;
             notifyStatus("Output "+(index+1)+" read queued behind LED Preview");
             ui.postDelayed(()->{
