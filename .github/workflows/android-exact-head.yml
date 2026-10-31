@@ -54,6 +54,11 @@ jobs:
           java-version: '17'
       - name: All 140 local preview effects against immutable CORE oracle
         run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50 --continuity-dir pinned-effects80 > offline-preview-140.json
+      - name: Preserve authoritative proprietary loop goldens and seven one-shot endpoints
+        working-directory: pinned-effects80/core-firmware
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_proprietary_loop_continuity.c -o /tmp/ot-preview-continuity -lm
+          /tmp/ot-preview-continuity
       - name: Upload per-effect offline parity and host rendering timings
         uses: actions/upload-artifact@v4
         with:

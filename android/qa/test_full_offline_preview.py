@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import sys
 
 ROOT=Path(__file__).resolve().parents[2]
 CPP=ROOT/'android/app/src/main/cpp'
@@ -192,6 +193,10 @@ def main():
                              'max_rgb_sum':max(energy)}
             if fx in (1,26,38,91) or fx>=32768:
                 assert len(seen)>1,('phone animation regression',fx,name)
+        print("MOTION_SCAN: "+json.dumps({'effects':len(motion),
+            'static_ids':[k for k,v in motion.items() if v['distinct_frames']==1],
+            'phone_effects':{k:motion[k] for k in ('1','26','38','91','32777','32781')},
+            'proprietary_moving':sum(motion[str(i)]['distinct_frames']>1 for i in range(32768,32788))}),file=sys.stderr)
         expected=bytearray();plan=[];rows=[];count=0
         frame=(C.c_uint32*30)()
         for effect,name in catalog:
