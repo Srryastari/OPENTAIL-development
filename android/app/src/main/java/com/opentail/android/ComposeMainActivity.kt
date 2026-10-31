@@ -1899,20 +1899,43 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 if (eventEditing == key) {
-                Pill("Choose " + key + " animation", t) {
-                    choosing = key
-                    search = ""
-                }
+                // Dedicated Startup/Shutdown authoring reuses the exact
+                // approved WLED+ interface. Local event fields never write
+                // Show Modes settings, BLE, or trigger safety mappings.
                 val eventEffect=NativeEffectCatalog.byName(event.optString("eventFx","Solid"))
-                val eventParameters=NativeEffectParameters.forId(eventEffect.id)
-                if(eventParameters?.foreground==true) PaletteEditor("Color",
-                    android.graphics.Color.parseColor(event.optString("color","#ffffff")),t) {
-                    applyAutoEvent(key,"color",String.format("#%06X",it and 0xffffff))
-                }
-                if(eventParameters?.background==true) PaletteEditor("Background",
-                    android.graphics.Color.parseColor(event.optString("secondary","#000000")),t) {
-                    applyAutoEvent(key,"secondary",String.format("#%06X",it and 0xffffff))
-                }
+                fun eventColor(slot:Int):Int =
+                    runCatching { android.graphics.Color.parseColor(
+                        event.optString(when(slot){0->"color";1->"secondary";else->"accent"},
+                            if(slot==0)"#ffffff" else "#000000")) }
+                        .getOrDefault(0xffffffff.toInt())
+                ApprovedWledEffectsEditor(
+                    selectedId=eventEffect.id,
+                    effectOptions=NativeEffectCatalog.autoEventChoices(),
+                    scopeKey="auto-event:"+key,
+                    prefs=prefs,
+                    paletteFor={ id -> NativePaletteEngine.lookup(project.raw(),id,
+                        eventColor(0),eventColor(1),null,eventColor(2)) },
+                    readSetting={ field,fallback ->
+                        if(field=="brightness")event.optInt("brightness",100)*255/100
+                        else event.optInt(field,fallback)
+                    },
+                    readColor={ slot -> eventColor(slot) },
+                    readPalette={ event.optInt("paletteId",0) },
+                    onSelected={ id ->
+                        val fx=NativeEffectCatalog.byId(id ?: 0)
+                        if(applyAutoEvent(key,"eventFx",fx.name))
+                            autoEventPreviewEffect.intValue=-1
+                    },
+                    onParam={ _,field,value ->
+                        applyAutoEvent(key,field,
+                            if(field=="brightness")value*100/255 else value)
+                    },
+                    onColor={ _,slot,rgb ->
+                        applyAutoEvent(key,when(slot){0->"color";1->"secondary";else->"accent"},
+                            String.format("#%06X",rgb and 0xffffff))
+                    },
+                    onPalette={ _,id -> applyAutoEvent(key,"paletteId",id) }
+                )
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
                         applyAutoEvent(key,"eventUiFadeMs",1200)
