@@ -7,6 +7,7 @@ import org.json.JSONException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 /**
@@ -58,14 +59,31 @@ final class NativePresetRestore {
             }
         } catch (Exception ex) { return false; }
 
+        // Legacy presets have global FX settings but may lack the new
+        // per-effect snapshot. Remove ONLY that effect's stale scoped editor
+        // values so the approved editor and BLE use the restored same state.
+        // Other saved effects remain untouched. All removals are staged in
+        // the same preference commit as new values.
+        final List<String> staleScoped=new ArrayList<>();
+        int loadedId=updates.containsKey("effectId")?updates.get("effectId"):-1;
+        if(loadedId >= 0 &&
+                (preset.optJSONObject("effectSettings")!=null ||
+                 preset.optJSONObject("effectEditorSettings")!=null)) {
+            String prefix="wled."+loadedId+".";
+            for(String key:prefs.getAll().keySet()) if(key.startsWith(prefix))
+                staleScoped.add(key);
+        }
+        final LinkedHashSet<String> touched=new LinkedHashSet<>(updates.keySet());
+        touched.addAll(staleScoped);
         // Snapshot only touched keys, preserving absent vs explicit values.
         final Map<String,Integer> previous=new LinkedHashMap<>();
         final List<String> absent=new ArrayList<>();
-        for(String key:updates.keySet()) {
+        for(String key:touched) {
             if(prefs.contains(key)) previous.put(key,prefs.getInt(key,0));
             else absent.add(key);
         }
         SharedPreferences.Editor editor=prefs.edit();
+        for(String key:staleScoped) editor.remove(key);
         for(Map.Entry<String,Integer> item:updates.entrySet())
             editor.putInt(item.getKey(),item.getValue());
         if(!editor.commit())return false;  // project is untouched
