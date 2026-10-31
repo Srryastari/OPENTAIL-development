@@ -174,6 +174,24 @@ def main():
                 ('event did not animate through its one-shot',fx)
             assert samples[2]==samples[3]==samples[4], \
                 ('one-shot terminal frame changed after completion',fx)
+        # Every catalog ID receives a 16-second animation scan, including source
+        # patterns with intentionally static frames. Report these rather than
+        # declaring every byte-identical static pattern a regression.
+        motion={}
+        for fx,name in catalog:
+            h=lib.make(fx);seen=set();energy=[]
+            for step in range(1000):
+                rgb=(C.c_uint32*30)()
+                assert lib.frame(h,step*16,128,180,160,0,
+                                 0xffd735f4,0xff174a03,440,2048,rgb),(fx,step)
+                seen.add(tuple(rgb))
+                energy.append(sum(((v>>16)&255)+((v>>8)&255)+(v&255) for v in rgb))
+            lib.drop(h)
+            motion[str(fx)]={'name':name,'distinct_frames':len(seen),
+                             'mean_rgb_sum':sum(energy)/len(energy),
+                             'max_rgb_sum':max(energy)}
+            if fx in (1,26,38,91) or fx>=32768:
+                assert len(seen)>1,('phone animation regression',fx,name)
         expected=bytearray();plan=[];rows=[];count=0
         frame=(C.c_uint32*30)()
         for effect,name in catalog:
@@ -228,7 +246,7 @@ def main():
                 'frames':count,'argb_bytes':len(expected),'parity':'byte-exact JNI vs independent pinned CORE build',
                 'timing_scope':'Linux host JNI renderer only; excludes Android display/composition/microphone acquisition/BLE. Not measured phone FPS.',
                 'audio_fixture':'test input 440 Hz, PCM magnitude 2048; app uses live Android microphone, never this fixture',
-                'per_effect':rows}
+                'motion_scan':motion,'per_effect':rows}
         print(json.dumps(report,indent=2))
 
 if __name__=='__main__':main()
