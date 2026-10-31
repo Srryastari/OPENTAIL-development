@@ -194,11 +194,14 @@ final class BleDiscovery {
     }
     private final CoreFrameCapture frameCapture=new CoreFrameCapture((output,sequence,rgb,error)->{
         CoreFrameCapture.Listener cb=frameListener;
+        final BluetoothGatt owner=gatt;
         if(cb!=null) {
             frameCallbackPending=true;
             ui.post(()->{
-                try {cb.done(output,sequence,rgb,error);}
-                finally {frameCallbackPending=false;}
+                try {
+                    if(!stopped && owner!=null && owner==gatt && canCaptureFrame())
+                        cb.done(output,sequence,rgb,error);
+                } finally {frameCallbackPending=false;}
             });
         }
         pumpQueue();
@@ -529,6 +532,26 @@ final class BleDiscovery {
     }
 
     private volatile boolean authPending = false;
+    private volatile int ownerWatchLease=0;
+    private static final long OWNER_TRANSACTION_TIMEOUT_MS=8000L;
+    private void watchOwnerTransaction(BluetoothGatt owner) {
+        final int lease=++ownerWatchLease;
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && lease==ownerWatchLease &&
+                (pairPending || challengePending || authPending))
+                recoverStalledGatt(owner,"CORE owner authorization timed out");
+        },OWNER_TRANSACTION_TIMEOUT_MS);
+    }
+    private volatile int commandWatchLease=0;
+    private static final long COMMAND_TRANSACTION_TIMEOUT_MS=8000L;
+    private void watchCommandTransaction(BluetoothGatt owner) {
+        final int lease=++commandWatchLease;
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && lease==commandWatchLease &&
+                (writePending || readReplyPending))
+                recoverStalledGatt(owner,"CORE command acknowledgement timed out");
+        },COMMAND_TRANSACTION_TIMEOUT_MS);
+    }
     private boolean writePending = false;
     private boolean readReplyPending = false;
     private byte[] pendingPacket;
@@ -585,7 +608,8 @@ final class BleDiscovery {
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
         notifyStatus("Hold CORE BOOT button while the owner key is read…");
-        try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}}
+        try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}
+            else watchOwnerTransaction(gatt);}
         catch(SecurityException e){pairPending=false;notifyStatus("Bluetooth permission missing");}
     }
     /** Prefer owner-key authentication, with Wi-Fi token retained only as manual fallback. */
@@ -595,7 +619,8 @@ final class BleDiscovery {
         if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
-        try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}}
+        try{if(!gatt.readCharacteristic(challenge)){challengePending=false;notifyStatus("Challenge read could not start");}
+            else watchOwnerTransaction(gatt);}
         catch(SecurityException e){challengePending=false;notifyStatus("Bluetooth permission missing");}
     }
     private void ownerRead(BluetoothGatt connection,byte[] value,int status){
@@ -679,6 +704,12 @@ final class BleDiscovery {
         if (action<6||action>8||slot<0||slot>=8){
             notifyStatus("Invalid CORE preset action or slot");return;
         }
+        // Explicit preset NVS actions cannot be overwritten by live FX coalescing.
+        if(cfgBusy||writePending||readReplyPending||fxCapsBusy||triggerMapBusy||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           authPending||pairPending||challengePending){
+            notifyStatus("BLE busy; retry preset action");return;
+        }
         enqueueWrite(new byte[]{1,(byte)action,(byte)slot});
     }
     void stopShow() {
@@ -748,6 +779,7 @@ final class BleDiscovery {
                 ok=gatt.writeCharacteristic(command);
             }
             if(!ok)commandWriteStartFailed("BLE write could not start");
+            else watchCommandTransaction(gatt);
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
