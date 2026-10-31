@@ -154,6 +154,26 @@ def main():
         lib.drop.argtypes=[C.c_void_p]
         lib.frame.argtypes=[C.c_void_p,C.c_uint32,*[C.c_int]*4,C.c_uint32,C.c_uint32,C.c_float,C.c_float,C.POINTER(C.c_uint32)]
         lib.frame.restype=C.c_int
+        # Dedicated Startup/Shutdown animations are true one-shots: they
+        # advance through different frames and hold their final image.
+        # A loop-seam assertion would be wrong for these intentional events.
+        # Use the independent pinned CORE oracle, not a substituted UI demo.
+        one_shots=(32769,32770,32771,32773,32787)
+        event_duration=350+(255-128)*14
+        assert len(one_shots)==5
+        for fx in one_shots:
+            h=lib.make(fx);samples=[]
+            for ms in (0,event_duration//2,event_duration,
+                       event_duration+300,event_duration+1200):
+                rgb=(C.c_uint32*30)()
+                assert lib.frame(h,ms,128,255,160,0,
+                                 0xffd735f4,0xff174a03,440,2048,rgb),(fx,ms)
+                samples.append(tuple(rgb))
+            lib.drop(h)
+            assert samples[0]!=samples[1] and samples[1]!=samples[2], \
+                ('event did not animate through its one-shot',fx)
+            assert samples[2]==samples[3]==samples[4], \
+                ('one-shot terminal frame changed after completion',fx)
         expected=bytearray();plan=[];rows=[];count=0
         frame=(C.c_uint32*30)()
         for effect,name in catalog:
