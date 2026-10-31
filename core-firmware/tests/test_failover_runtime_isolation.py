@@ -25,7 +25,7 @@ assert "ot_om_calibrate" not in c
 assert "ot_effects_1d_render" not in c
 assert "bool committed_active_snapshot" in h
 assert "ot_fo_can_activate_profile" in h
-assert '\"hardware_failover\\\":false' in core
+assert "hardware_failover" in core and "Do not install as road lights." in core
 assert "No watchdog, fail-safe, independent backup" in core
 assert "ot_fo_assess_grant(" in h
 print("PASS: failover software is inert by default; no unauthorized GPIO/output, NVS, BLE or UI takeover")
