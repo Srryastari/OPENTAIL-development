@@ -146,6 +146,18 @@ public class NativeProjectCommitTest {
         assertEquals(commits, store.commits);
         assertTrue(project.setAutoEvent("Startup", "eventFx", "Solid"));
         assertEquals(commits + 1, store.commits);
+        // Startup/Shutdown have independent dedicated transitions, while
+        // standard WLED Strobe remains available for either event.
+        assertFalse(project.setAutoEvent("Startup","eventFx","Singularity Shutdown"));
+        assertFalse(project.setAutoEvent("Shutdown","eventFx","Materialize Sparks"));
+        assertFalse(project.setAutoEvent("Startup","eventFx","Crystal Growth"));
+        assertFalse(project.setAutoEvent("Shutdown","eventFx","Plasma Sweep"));
+        assertFalse(project.setAutoEvent("Startup","eventFx","Unknown Effect"));
+        assertEquals(commits + 1, store.commits);
+        assertTrue(project.setAutoEvent("Startup","eventFx","Materialize Sparks"));
+        assertTrue(project.setAutoEvent("Shutdown","eventFx","Singularity Shutdown"));
+        assertTrue(project.setAutoEvent("Shutdown","eventFx","Strobe"));
+        assertEquals(commits + 4, store.commits);
         String previous = project.exportJson();
         store.fail = true;
         assertFalse(project.setAutoEvent("Startup", "eventUiEnabled", true));
@@ -262,4 +274,257 @@ public class NativeProjectCommitTest {
         assertEquals(before, project.exportJson());
         assertEquals(1, project.zoneCount());
     }
+
+    @Test public void physicalOutputLinksAreUniqueBidirectionalAndLocalOnly() throws Exception {
+        Storage store=new Storage();
+        NativeProject project=new NativeProject(store.prefs);
+        assertTrue(project.addZoneAt("Tail",60,0));
+        assertTrue(project.addZoneAt("Turn",32,1));
+        String tail=project.zone(0).getString("id");
+        String turn=project.zone(1).getString("id");
+
+        assertTrue(project.mapZoneToOutputSlot(tail,0,2));
+        assertEquals(0,project.zone(0).getInt("physicalOutput"));
+        assertEquals(2,project.zone(0).getInt("physicalSection"));
+        assertTrue(project.mapZoneToOutputSlot(turn,0,2));
+        assertFalse(project.zone(0).has("physicalOutput")); // unique physical owner
+        assertEquals(0,project.zone(1).getInt("physicalOutput"));
+        assertTrue(project.mapZoneToOutputSlot(tail,1,7));
+        assertTrue(project.mapZoneToOutputSlot(turn,-1,-1));
+        assertFalse(project.zone(1).has("physicalOutput"));
+
+        String committed=project.exportJson();
+        assertFalse(project.mapZoneToOutputSlot(tail,12,0));
+        assertFalse(project.mapZoneToOutputSlot(tail,0,8));
+        assertEquals(committed,project.exportJson());
+        NativeProject reopened=new NativeProject(store.prefs);
+        assertEquals(1,reopened.zone(0).getInt("physicalOutput"));
+        assertEquals(7,reopened.zone(0).getInt("physicalSection"));
+
+        String old=reopened.exportJson();
+        JSONObject malformed=new JSONObject(old);
+        malformed.getJSONArray("layout").getJSONObject(0).put("physicalSection",7.5);
+        assertFalse(reopened.importJson(malformed.toString()));
+        assertEquals(old,reopened.exportJson());
+        malformed=new JSONObject(old);
+        malformed.getJSONArray("layout").getJSONObject(1)
+                .put("physicalOutput",1).put("physicalSection",7);
+        assertFalse(reopened.importJson(malformed.toString()));
+        assertEquals(old,reopened.exportJson());
+
+        store.fail=true;
+        assertFalse(reopened.mapZoneToOutputSlot(tail,0,1));
+        assertEquals(old,reopened.exportJson());
+        assertEquals(new JSONObject(committed).toString(),new JSONObject(store.persisted).toString()); // JSON formatting is not a disk-state change
+    }
+    @Test public void bulkStyleEditsPreserveOtherColorsAndRollBackFailedSaves() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        Set<String> selected = new HashSet<>(Arrays.asList("Park", "Brake"));
+        assertTrue(project.styleTriggers(new HashSet<>(Arrays.asList("Park")), "Solid", "#123456"));
+        assertTrue(project.styleTriggers(new HashSet<>(Arrays.asList("Brake")), "Solid", "#abcdef"));
+        assertTrue(project.editTriggerStyle(selected, "Wipe", null));
+        assertEquals("#123456", project.trigger("Park").getString("color"));
+        assertEquals("#abcdef", project.trigger("Brake").getString("color"));
+        assertEquals("Wipe", project.trigger("Park").getString("pattern"));
+        String committed = project.exportJson();
+        store.fail = true;
+        assertFalse(project.editTriggerStyle(selected, null, "#ffffff"));
+        assertEquals(committed, project.exportJson());
+        assertFalse(project.editTriggerStyle(selected, null, "invalid"));
+        assertEquals(committed, project.exportJson());
+    }
+
+    @Test public void eventColorEditsValidateAndRemainTransactional() throws Exception {
+        Storage store = new Storage();
+        NativeProject project = new NativeProject(store.prefs);
+        assertTrue(project.setAutoEvent("Startup", "color", "#123456"));
+        assertTrue(project.setAutoEvent("Shutdown", "secondary", "#abcdef"));
+        assertEquals("#123456", project.trigger("Startup").getString("color"));
+        String committed = project.exportJson();
+        assertFalse(project.setAutoEvent("Startup", "color", "red"));
+        assertFalse(project.setAutoEvent("Brake", "color", "#123456"));
+        store.fail = true;
+        assertFalse(project.setAutoEvent("Startup", "color", "#ffffff"));
+        assertEquals(committed, project.exportJson());
+    }
+
+    /** End-to-end offline Layout workflow, including persisted inserted zone IDs. */
+    @Test public void offlineLayoutAddResizeReorderMapAndRemoveSurvivesReopen() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertEquals(0, project.zoneCount());
+        assertTrue(project.addZoneAt("Left", 8, 0));
+        assertTrue(project.addZoneAt("Right", 5, 1));
+        String left = project.zone(0).getString("id");
+        String right = project.zone(1).getString("id");
+        assertTrue(project.addZoneAt("Middle", 3, 1));
+        String middle = project.zone(1).getString("id");
+        assertEquals(right, project.zone(2).getString("id"));
+        assertEquals(8, project.zone(1).getInt("start"));
+        assertTrue(project.editZone(middle, "Turn", 7, true));
+        assertTrue(project.zone(1).getBoolean("reverse"));
+        assertEquals(15, project.zone(2).getInt("start"));
+        assertTrue(project.moveZone(2, 0));
+        assertEquals(right, project.zone(0).getString("id"));
+        assertEquals(0, project.zone(0).getInt("start"));
+        assertEquals(5, project.zone(1).getInt("start"));
+        assertEquals(13, project.zone(2).getInt("start"));
+        assertTrue(project.mapZoneToOutputSlot(middle, 0, 1));
+        assertTrue(project.mapZoneToOutputSlot(left, 1, 2));
+        assertTrue(project.assignMany(new HashSet<>(Arrays.asList("Brake", "Left Turn")), middle, true));
+        NativeProject reopened = new NativeProject(storage.prefs);
+        assertEquals(3, reopened.zoneCount());
+        assertEquals(middle, reopened.zone(2).getString("id"));
+        assertEquals(0, reopened.zone(2).getInt("physicalOutput"));
+        assertEquals(1, reopened.zone(2).getInt("physicalSection"));
+        assertEquals(1, reopened.zone(1).getInt("physicalOutput"));
+        assertEquals(2, reopened.trigger("Brake").getJSONArray("zones").length() + reopened.trigger("Left Turn").getJSONArray("zones").length());
+        assertTrue(reopened.removeZone(middle));
+        assertEquals(2, reopened.zoneCount());
+        assertEquals(0, reopened.trigger("Brake").getJSONArray("zones").length());
+        assertEquals(0, reopened.trigger("Left Turn").getJSONArray("zones").length());
+        assertEquals(5, reopened.zone(1).getInt("start"));
+        assertEquals(2, new NativeProject(storage.prefs).zoneCount());
+    }
+
+    /** Multi-select trigger edits are local-only durable transactions, never GATT writes. */
+    @Test public void offlineTriggerMultiselectCustomProfileAndAtomicStorage() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.addZoneAt("Tail", 32, 0));
+        String zone = project.zone(0).getString("id");
+        assertTrue(project.customTrigger("Aux Lights"));
+        Set<String> multi = new HashSet<>(Arrays.asList("Brake", "Aux Lights"));
+        assertTrue(project.assignMany(multi, zone, true));
+        assertTrue(project.editTriggerStyle(multi, "Wipe", null));
+        assertTrue(project.editTriggerStyle(multi, null, "#112233"));
+        NativeProject reopened = new NativeProject(storage.prefs);
+        for (String name : multi) {
+            assertEquals("Wipe", reopened.trigger(name).getString("pattern"));
+            assertEquals("#112233", reopened.trigger(name).getString("color"));
+            assertEquals(zone, reopened.trigger(name).getJSONArray("zones").getString(0));
+        }
+        String before = reopened.exportJson();
+        storage.fail = true;
+        assertFalse(reopened.assignMany(multi, zone, false));
+        assertFalse(reopened.editTriggerStyle(multi, "Blink", null));
+        assertEquals(before, reopened.exportJson());
+        assertEquals(before, new NativeProject(storage.prefs).exportJson());
+    }
+
+    @Test public void onlyCustomTriggerDeletionIsConfirmableAndDurable() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.customTrigger("Test AUX 2"));
+        assertFalse(project.deleteTrigger("Brake"));
+        assertFalse(project.deleteTrigger("Park"));
+        assertFalse(project.deleteTrigger("Startup"));
+        assertFalse(project.deleteTrigger("Shutdown"));
+        assertFalse(project.deleteTrigger("Missing"));
+        assertTrue(project.deleteTrigger("Test AUX 2"));
+        assertNull(project.profiles().optJSONObject("Test AUX 2"));
+        assertNull(new NativeProject(storage.prefs).profiles().optJSONObject("Test AUX 2"));
+        assertTrue(project.customTrigger("Transient AUX"));
+        String committed = project.exportJson();
+        storage.fail = true;
+        assertFalse(project.deleteTrigger("Transient AUX"));
+        assertEquals(committed, project.exportJson());
+        assertNotNull(project.profiles().optJSONObject("Transient AUX"));
+        assertEquals(committed, new NativeProject(storage.prefs).exportJson());
+    }
+
+    @Test public void triggerLiveParametersPersistImmediatelyAndRollbackAtomically() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        Set<String> both = new HashSet<>(Arrays.asList("Brake", "Right Turn"));
+        assertTrue(project.editTriggerParameter(both,"brightness",91));
+        assertTrue(project.editTriggerParameter(both,"speed",201));
+        assertTrue(project.editTriggerParameter(both,"intensity",147));
+        for(String name:both){
+            assertEquals(91,project.trigger(name).getInt("brightness"));
+            assertEquals(201,project.trigger(name).getInt("speed"));
+            assertEquals(147,project.trigger(name).getInt("intensity"));
+        }
+        assertFalse(project.editTriggerParameter(both,"brightness",101));
+        assertFalse(project.editTriggerParameter(both,"speed",256));
+        assertFalse(project.editTriggerParameter(both,"notAField",60));
+        assertFalse(project.editTriggerParameter(new HashSet<>(Arrays.asList("Brake","Bad")), "speed",50));
+        NativeProject reopened=new NativeProject(storage.prefs);
+        assertEquals(201,reopened.trigger("Brake").getInt("speed"));
+        assertEquals(147,reopened.trigger("Right Turn").getInt("intensity"));
+        String committed=reopened.exportJson();
+        storage.fail=true;
+        assertFalse(reopened.editTriggerParameter(both,"speed",18));
+        assertEquals(committed,reopened.exportJson());
+        assertEquals(committed,new NativeProject(storage.prefs).exportJson());
+    }
+
+    @Test public void offlineEventFadeAndDurationPersistAcrossReopen() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertTrue(project.setAutoEvent("Startup","eventUiEnabled",true));
+        assertTrue(project.setAutoEvent("Startup","eventUiFadeMs",2300));
+        assertTrue(project.setAutoEvent("Startup","eventDuration",3.3));
+        assertTrue(project.setAutoEvent("Shutdown","eventUiFadeMs",500));
+        NativeProject reopened=new NativeProject(storage.prefs);
+        assertTrue(reopened.trigger("Startup").getBoolean("eventUiEnabled"));
+        assertEquals(2300,reopened.trigger("Startup").getInt("eventUiFadeMs"));
+        assertEquals(3.3,reopened.trigger("Startup").getDouble("eventDuration"),0.0001);
+        assertEquals(500,reopened.trigger("Shutdown").getInt("eventUiFadeMs"));
+    }
+
+    @Test public void presetRenameCommitsImmediatelyAndReopenSeesSameText() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        org.json.JSONArray first = new org.json.JSONArray().put(new JSONObject().put("name","Old"));
+        assertTrue(project.setPresets(first));
+        org.json.JSONArray rename=new org.json.JSONArray(project.presets().toString());
+        rename.getJSONObject(0).put("name","New preset");
+        assertTrue(project.setPresets(rename));
+        assertEquals("New preset",project.presets().getJSONObject(0).getString("name"));
+        assertEquals("New preset",new NativeProject(storage.prefs).presets().getJSONObject(0).getString("name"));
+    }
+
+    @Test public void sharedWledEditorScopesKeepTriggerAndAutoEventIndependent() throws Exception {
+        Storage store = new Storage();
+        NativeProject model = new NativeProject(store.prefs);
+        Set<String> selected = new HashSet<>(Arrays.asList("Brake", "Right Turn"));
+        assertTrue(model.editTriggerEditorField(selected,"paletteId",4));
+        assertTrue(model.editTriggerEditorField(selected,"secondary","#112233"));
+        assertTrue(model.editTriggerEditorField(selected,"param5",1));
+        assertTrue(model.setAutoEvent("Startup","paletteId",12));
+        assertTrue(model.setAutoEvent("Startup","color","#ABCDEF"));
+        assertTrue(model.setAutoEvent("Startup","speed",240));
+        assertEquals(4,model.trigger("Brake").getInt("paletteId"));
+        assertEquals(4,model.trigger("Right Turn").getInt("paletteId"));
+        assertEquals("#112233",model.trigger("Brake").getString("secondary"));
+        assertEquals(1,model.trigger("Right Turn").getInt("param5"));
+        assertEquals(12,model.trigger("Startup").getInt("paletteId"));
+        assertEquals("#ABCDEF",model.trigger("Startup").getString("color"));
+        assertEquals(240,model.trigger("Startup").getInt("speed"));
+        assertEquals("Solid",model.trigger("Shutdown").getString("pattern"));
+
+        String before = model.exportJson();
+        store.fail = true;
+        assertFalse(model.editTriggerEditorField(selected,"paletteId",33));
+        assertFalse(model.setAutoEvent("Startup","speed",90));
+        assertEquals(before,model.exportJson());
+    }
+
+    @Test public void sharedWledEditorRejectsOutOfRangeAndSafetyUnscopedFields() throws Exception {
+        Storage store = new Storage();
+        NativeProject model = new NativeProject(store.prefs);
+        Set<String> brake = new HashSet<>(Arrays.asList("Brake"));
+        String before = model.exportJson();
+        assertFalse(model.editTriggerEditorField(brake,"paletteId",256));
+        assertFalse(model.editTriggerEditorField(brake,"param8",1));
+        assertFalse(model.editTriggerEditorField(brake,"color","#xyzxyz"));
+        assertFalse(model.editTriggerEditorField(brake,"hardwareOverride",1));
+        assertFalse(model.editTriggerEditorField(new HashSet<>(Arrays.asList("Startup")),"paletteId",2));
+        assertFalse(model.setAutoEvent("Startup","paletteId",-1));
+        assertFalse(model.setAutoEvent("Shutdown","param5",999));
+        assertEquals(before,model.exportJson());
+    }
+
 }

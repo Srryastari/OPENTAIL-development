@@ -1,0 +1,89 @@
+# One-time independent Trigger evidence for Firmware PR #81.
+# This workflow deliberately checks out the PINNED CORE SHA, not GitHub's
+# synthetic PR merge ref and not this verification-only PR's new tip.
+# Software/host checks are not physical acceptance or vehicle certification.
+name: Trigger CORE81 pinned-source safety evidence
+on:
+  pull_request:
+    branches: [firmware/integrate-effects-continuity-20261031]
+    paths:
+      - '.github/workflows/verify-trigger-core81-pinned.yml'
+      - '.github/workflows/verify-trigger-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core81-exact-trigger-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: core-firmware
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d3ca7d036392d7709848b143a41f6bed1a26cb7b
+          persist-credentials: false
+      - name: Assert actual commit is EXACT intended CORE #81 SHA
+        env:
+          CORE_SHA: d3ca7d036392d7709848b143a41f6bed1a26cb7b
+        run: |
+          set -eu
+          actual="$(git rev-parse HEAD)"
+          echo "CORE #81 exact candidate: $CORE_SHA"
+          echo "Actual tested commit: $actual"
+          test "$actual" = "$CORE_SHA"
+          echo "Trigger safety verified checkout: $actual" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify Trigger-owned GPIO, BLE, STOP, NVS and render source contract
+        run: |
+          set -eu
+          python3 tests/test_trigger_runtime_contract.py
+          python3 tests/test_nvs_finalization_contract.py
+          python3 tests/test_http_stop_contract.py
+          python3 tests/test_effects_render_safety_contract.py
+          python3 tests/test_ble_gap_recovery_contract.py
+      - name: Eight-input mapping, Brake Turn Hazards Reverse Park AUX and show coexistence
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c main/show_logic.c tests/test_trigger_manager.c \
+            -o /tmp/ot-pinned-trigger-manager
+          /tmp/ot-pinned-trigger-manager
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c tests/test_prior_trigger_profiles.c \
+            -o /tmp/ot-pinned-trigger-remaps
+          /tmp/ot-pinned-trigger-remaps
+      - name: Active-staged configuration journal, revisions and all held input masks
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/config_journal.c main/trigger_manager.c main/output_manager.c \
+            main/core_logic.c main/arbitration_logic.c tests/test_config_journal.c \
+            -o /tmp/ot-pinned-nvs-trigger
+          /tmp/ot-pinned-nvs-trigger
+      - name: Physical override color immune to decorative FX palettes overlays gamma
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/fx_overlay_engine.c tests/test_effects_oem_safety_matrix.c \
+            -o /tmp/ot-pinned-oem-safety
+          /tmp/ot-pinned-oem-safety
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/config_journal.c main/trigger_manager.c main/output_manager.c \
+            main/core_logic.c main/arbitration_logic.c main/fx_zone_bank.c \
+            main/fx_overlay_engine.c tests/test_effects_nvs_recovery_isolation.c \
+            -o /tmp/ot-pinned-effects-nvs
+          /tmp/ot-pinned-effects-nvs
+      - name: Preserve historical PC817 bench masks, GRB and BLE codec round-trip
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/trigger_manager.c main/ble_config.c \
+            tests/test_verified_bench_contract.c \
+            -o /tmp/ot-pinned-bench-contract
+          /tmp/ot-pinned-bench-contract
+# No firmware production changes, no flash, no main merge; release gate intact.

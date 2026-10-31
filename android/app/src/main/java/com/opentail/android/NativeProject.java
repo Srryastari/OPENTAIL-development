@@ -142,6 +142,19 @@ final class NativeProject {
                     || start + length > 1000000)
                 throw new JSONException("Invalid or overlapping zone layout");
             if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
+            // Optional local Output Manager link, never a physical NVS write.
+            // Old Studio v4 documents omit these fields and remain compatible.
+            if (z.has("physicalOutput") || z.has("physicalSection")) {
+                if (!wholeNumber(z.opt("physicalOutput"), 0, 1) ||
+                    !wholeNumber(z.opt("physicalSection"), 0, 7))
+                    throw new JSONException("Invalid physical output/section link");
+                for(int previous=0;previous<i;previous++){
+                    JSONObject other=layout.getJSONObject(previous);
+                    if(other.optInt("physicalOutput",-1)==z.optInt("physicalOutput") &&
+                       other.optInt("physicalSection",-1)==z.optInt("physicalSection"))
+                        throw new JSONException("Two design zones cannot own one physical section");
+                }
+            }
             lastEnd = start + length;
         }
         if (candidate.optString("projectName", "Untitled project").length() > 64)
@@ -375,6 +388,31 @@ final class NativeProject {
         } catch (JSONException e) { restoreCommitted(); return false; }
     }
 
+    /** Maps an offline Studio zone to exactly one physical output/section.
+     * The link is local-only until the explicitly confirmed BLE Output
+     * Manager save; never starts a hardware transaction on a tap.
+     */
+    synchronized boolean mapZoneToOutputSlot(String id,int output,int section){
+        int selected=indexOfZone(id);
+        if(selected<0||!((output==-1&&section==-1)||
+            (output>=0&&output<2&&section>=0&&section<8)))return false;
+        try{
+            for(int i=0;i<zoneCount();i++){
+                JSONObject z=zone(i);
+                if(i==selected)continue;
+                if(z.optInt("physicalOutput",-1)==output &&
+                   z.optInt("physicalSection",-1)==section) {
+                    z.remove("physicalOutput");
+                    z.remove("physicalSection");
+                }
+            }
+            JSONObject z=zone(selected);
+            if(output==-1){z.remove("physicalOutput");z.remove("physicalSection");}
+            else z.put("physicalOutput",output).put("physicalSection",section);
+            return save();
+        }catch(JSONException ex){restoreCommitted();return false;}
+    }
+
     synchronized boolean removeZone(String id) {
         int index = indexOfZone(id);
         if (index < 0) return false;
@@ -473,6 +511,73 @@ final class NativeProject {
         } catch (JSONException e) { return false; }
     }
 
+    /** Update only the selected field, preserving mixed bulk values. Local v4 only. */
+    synchronized boolean editTriggerStyle(Set<String> triggers, String effect, String color) {
+        if (triggers == null || triggers.isEmpty() || (effect == null && color == null)) return false;
+        if (effect != null && (effect.isEmpty() || effect.length() > 64)) return false;
+        if (color != null && !color.matches("#[0-9A-Fa-f]{6}")) return false;
+        for (String name : triggers) if (name == null || profiles().optJSONObject(name) == null) return false;
+        try {
+            JSONObject draft = new JSONObject(data.toString());
+            for (String name : triggers) {
+                JSONObject p = draft.getJSONObject("profiles").getJSONObject(name);
+                if (effect != null) p.put("pattern", effect);
+                if (color != null) p.put("color", color);
+            }
+            data = draft;
+            return save();
+        } catch (JSONException ex) { return false; }
+    }
+
+    /**
+     * Persist one numeric field across a multi-selected trigger group.
+     * Pure v4 authoring: never sends BLE traffic or changes physical safety.
+     */
+    synchronized boolean editTriggerParameter(Set<String> triggers,String field,int value) {
+        if(triggers==null||triggers.isEmpty()||
+           !("speed".equals(field)||"intensity".equals(field)||"brightness".equals(field))||
+           value<0||value>("brightness".equals(field)?100:255))return false;
+        for(String name:triggers)
+            if(name==null||profiles().optJSONObject(name)==null)return false;
+        try{
+            JSONObject draft=new JSONObject(data.toString());
+            JSONObject all=draft.getJSONObject("profiles");
+            for(String name:triggers)all.getJSONObject(name).put(field,value);
+            data=draft;
+            return save();
+        }catch(JSONException ex){return false;}
+    }
+
+    /** Persist WLED+ authoring controls per trigger, atomically for bulk
+     * selections. No BLE, NVS or physical trigger behavior is modified. */
+    synchronized boolean editTriggerEditorField(Set<String> triggers,String field,Object value) {
+        if(triggers==null||triggers.isEmpty()||!editorFieldValid(field,value))
+            return false;
+        for(String name:triggers)
+            if(name==null||profiles().optJSONObject(name)==null||
+                    "Startup".equals(name)||"Shutdown".equals(name))return false;
+        try {
+            JSONObject draft=new JSONObject(data.toString());
+            JSONObject all=draft.getJSONObject("profiles");
+            for(String name:triggers)all.getJSONObject(name).put(field,value);
+            data=draft;
+            return save();
+        } catch(JSONException ex){return false;}
+    }
+
+    private static boolean editorFieldValid(String field,Object value) {
+        if("color".equals(field)||"secondary".equals(field)||"accent".equals(field))
+            return value instanceof String && ((String)value).matches("#[0-9A-Fa-f]{6}");
+        if("paletteId".equals(field))return validPaletteId(value);
+        if("speed".equals(field)||"intensity".equals(field)||"brightness".equals(field)||
+                field.matches("param[2-7]")) {
+            if(!(value instanceof Integer))return false;
+            int n=(Integer)value;
+            return n>=0&&n<=("brightness".equals(field)?100:255);
+        }
+        return false;
+    }
+
     /** Startup/shutdown authoring only; physical ignition is CORE-owned. */
     synchronized boolean setAutoEvent(String event, String key, Object value) {
         if (!("Startup".equals(event) || "Shutdown".equals(event))) return false;
@@ -489,9 +594,26 @@ final class NativeProject {
                 double seconds = ((Number)value).doubleValue();
                 if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0) return false;
                 break;
+            case "color":
+            case "secondary":
+            case "accent":
+            case "paletteId":
+            case "brightness":
+            case "speed":
+            case "intensity":
+            case "param2":
+            case "param3":
+            case "param4":
+            case "param5":
+            case "param6":
+            case "param7":
+                if(!editorFieldValid(key,value))return false;
+                break;
             case "eventFx":
                 if (!(value instanceof String) || ((String)value).isEmpty()
-                        || ((String)value).length() > 64) return false;
+                        || ((String)value).length() > 64 ||
+                        !NativeEffectCatalog.isAllowedForAutoEvent(event,(String)value))
+                    return false;
                 break;
             default:
                 return false;
@@ -506,8 +628,17 @@ final class NativeProject {
 
     synchronized boolean deleteTrigger(String name) {
         JSONObject p = profiles().optJSONObject(name);
+        // Safety inputs, Startup and Shutdown cannot be removed.
         if (p == null || !"trigger-custom".equals(p.optString("kind"))) return false;
-        profiles().remove(name);return save();
+        try {
+            JSONObject previous = data;
+            JSONObject draft = new JSONObject(previous.toString());
+            draft.getJSONObject("profiles").remove(name);
+            data = draft;
+            if (save()) return true;
+            data = previous; // unsuccessful persistence must not hide a trigger
+            return false;
+        } catch (JSONException ex) { return false; }
     }
 
     synchronized JSONArray sequence() { return data.optJSONArray("sequence"); }

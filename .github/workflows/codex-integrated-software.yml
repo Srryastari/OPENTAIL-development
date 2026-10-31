@@ -1,0 +1,119 @@
+name: Codex integrated CORE exact-head software gates
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  provenance-and-hardware-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin exact tested SHA and approved Effects 80 ancestry
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor d3ca7d036392d7709848b143a41f6bed1a26cb7b HEAD
+      - name: Verify no BLE/NVS/renderer/Android UI changes and unchanged physical release gate
+        run: python3 scripts/check_integrated_candidate.py
+      - name: Independently regress all evidence-review failure paths
+        run: python3 scripts/test_final_day_evidence_lock.py
+      - name: Refresh pinned specialist evidence receipt (not release approval)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/final_day_evidence_lock.py --output software-evidence-lock.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrated-source-and-specialist-evidence
+          path: |
+            software-evidence-lock.json
+            docs/SOFTWARE-COMPATIBILITY-MATRIX.json
+      - name: No physical ownership without independently qualified hardware
+        run: |
+          python3 core-firmware/tests/test_failover_runtime_isolation.py
+          python3 core-firmware/tests/test_failover_release_evidence.py
+      - uses: actions/checkout@v4
+        with:
+          repository: Srryastari/OPENTAIL-development
+          ref: 9001c3322442268f877bf5014ed5fbcf9d610f1c
+          path: hardware-reference
+          persist-credentials: false
+      - name: Run independent Rev B 16,384-state reference arbiter (logical model only)
+        run: python3 hardware-reference/hardware/tests/test_failover_arbiter_contract.py
+  complete-core-host:
+    needs: provenance-and-hardware-boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Pin full-suite exact HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Full CORE effects, BLE, NVS, STOP, triggers, universal outputs and failover software host suite
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Diff-aware regression audit (physical release gate still fail-closed)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+  esp32s3-idf555:
+    needs: complete-core-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Pin firmware exact HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF v5.5.5 ESP32-S3 compile (NO FLASH)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify app, partition, bootloader and flasher manifest
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          build=Path("core-firmware/build")
+          for file in ("opentail_core_alpha.bin","bootloader/bootloader.bin",
+                       "partition_table/partition-table.bin","flasher_args.json"):
+              assert (build/file).is_file() and (build/file).stat().st_size>0,file
+          refs=json.loads((build/"flasher_args.json").read_text())["flash_files"]
+          assert len(refs)>=3 and all((build/path).is_file() for path in refs.values())
+          import hashlib, subprocess
+          files=list(build.rglob("*.bin"))+[build/"flasher_args.json"]
+          sums={str(p.relative_to(build)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+          (build/"SHA256SUMS.json").write_text(json.dumps(sums,indent=2))
+          (build/"SOURCE_SHA.txt").write_text(subprocess.check_output(["git","rev-parse","HEAD"],text=True))
+          print("PASS: exact-SHA bench image complete; no actual hardware takeover")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-failover-software-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+            core-firmware/build/SHA256SUMS.json
+            core-firmware/build/SOURCE_SHA.txt
+            core-firmware/sdkconfig
+          if-no-files-found: error
+          retention-days: 14
+# Software-only policy + bench build; mandatory physical release-evidence
+# gate remains unchanged and fail-closed. NO automatic takeover is certified.
