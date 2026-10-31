@@ -45,9 +45,12 @@ assert(!triggerBlock.includes('ble.saveOutput('),
  'Trigger authoring must never modify controller NVS.');
 
 for(const required of [
-  'EffectsPreview(', 'previewCurrentEffect(effect)',
-  'PaletteEditor("Color"', 'PaletteEditor("Background"',
-]) assert(effectBlock.includes(required), 'Live FX regression: '+required);
+  'EffectsPreview(', 'ApprovedWledEffectsEditor(',
+  'onLiveToggle = {', 'onParam = { id,key,value ->',
+  'onColor = { id,slot,rgb ->', 'onPalette = { id,selected ->',
+  'if(liveArmed.value) previewCurrentEffect(id)',
+  'livePreview.stop()', 'ble.stopShow()'
+]) assert(effectBlock.includes(required), 'Approved Live FX regression: '+required);
 
 assert(triggerBlock.includes('project.assignMany(selections,zoneId,!checked)') &&
        !triggerBlock.includes('selections.forEach { project.assign('),
