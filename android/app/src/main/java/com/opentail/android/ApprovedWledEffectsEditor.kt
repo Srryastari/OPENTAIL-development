@@ -56,6 +56,7 @@ internal object ApprovedEditorMetadata {
     data class Definition(val params: List<Param>, val roles: List<Role>, val palette: Boolean)
 
     private val sample = mapOf(
+        "Chase 3" to "!,!;1,2,3;",
         "Blink" to "!,Duty cycle;!,!;!",
         "Blink Rainbow" to "Frequency,Blink duration;!,!;!",
         "Twinkle" to "!,!;!,!;!",
@@ -309,7 +310,7 @@ internal fun ApprovedWledEffectsEditor(
                 }
                 val swatches=listOf(0xFFDD35F4,0xFFB735FA,0xFF932BE5,0xFF4A25D8,
                     0xFF1267DD,0xFF12A0F0,0xFF009E7B,0xFF20CC6E,0xFF9EDC2A,
-                    0xFFE2CB0B,0xFFFF961E,0xFFFF552E,0xFF0A0A0A,0xFFFFFFFF,0xFF999999)
+                    0xFFE2CB0B,0xFFFF961E,0xFFFF552E,0xFF000000,0xFFFFFFFF,0xFF999999)
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(13.dp))
                     .background(surface).padding(6.dp),
                     verticalArrangement=Arrangement.spacedBy(5.dp)){

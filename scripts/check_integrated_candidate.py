@@ -16,6 +16,11 @@ for name in names:
     assert git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)==git("rev-parse","HEAD:core-firmware/main/"+name),name
 assert m["release_approval"] is False and m["hardware_failover_certified"] is False
 correction=m["continuous_correction"]
-changed=set(git("diff","--name-only",correction["base_sha"],"HEAD","--","android","core-firmware").splitlines())
+changed=set(git("diff","--name-only",correction["base_sha"],m["issue93_correction"]["base_sha"],"--","android","core-firmware").splitlines())
 assert changed==set(correction["allowed_runtime_changes"]),changed
 print("PASS scoped continuous playback and owner-approved UI changes; all 13 renderers/palettes and physical release gate unchanged")
+
+issue=m["issue93_correction"]
+changed=set(git("diff","--name-only",issue["base_sha"],"HEAD","--","android","core-firmware").splitlines())
+assert changed==set(issue["allowed_android_changes"]),changed
+print("PASS scoped Issue93 correction; all shared renderer/palette and physical gates retained")
