@@ -107,6 +107,6 @@ internal class LiveBlePreview(
     }
     fun stop() {
         detach()
-        if (ble.canControl()) ble.stopShow()
+        ble.stopShow() // existing authorization guard reports refusal without writing
     }
 }

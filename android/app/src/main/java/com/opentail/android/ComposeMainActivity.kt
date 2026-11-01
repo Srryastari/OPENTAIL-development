@@ -102,6 +102,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
+    private val stopNotice = mutableStateOf<String?>(null)
     private val offlinePreview = mutableStateOf(false)
     private val offlineReplay = mutableIntStateOf(0)
     private val selectedEffect = mutableIntStateOf(0)
@@ -135,6 +136,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     private fun stopControllerShow() {
+        stopNotice.value = if(ble.canControl()) null else "STOP not sent: reconnect and authorize CORE"
         livePreview.stop()
         liveArmed.value = false
         invalidateCoreFrame()
@@ -816,6 +818,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
         val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Home", t)
+        stopNotice.value?.let { Caption(it,t) }
         Panel(t) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
