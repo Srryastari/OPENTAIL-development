@@ -13,7 +13,7 @@
     "firmware": {
       "pr": 84,
       "sha": "b13894c0550366a0e74ef6fd93c83cfa6dd19aa4",
-      "tree": "085c2edb7d202682c7cc8e150f7c29f44cd6e1ff"
+      "tree": "08e113dec28039e8e8b8c76dcc531ea74663602c"
     },
     "effects": {
       "pr": 80,
@@ -421,7 +421,8 @@
       "android/qa/test_native_source.cjs",
       "android/qa/test_live_edit.cjs",
       "android/qa/check_release.py",
-      "core-firmware/tests/test_http_stop_contract.py"
+      "core-firmware/tests/test_http_stop_contract.py",
+      "core-firmware/tests/test_dev_console_contract.py"
     ],
     "protocol": "v1 opcode10 reserved0; INFO continuous-fx-v1",
     "owner_ui_exceptions": [
