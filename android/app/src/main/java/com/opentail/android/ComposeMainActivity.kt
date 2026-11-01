@@ -1130,15 +1130,20 @@ class ComposeMainActivity : ComponentActivity() {
                         } else {
                             chosen = id
                             selectedEffect.intValue = id
-                            val editor = prefs.edit().putInt("effectId",id)
-                            // On effect change restore the independently saved
-                            // values to the existing BLE/preset contract.
-                            listOf("speed","intensity","brightness","foreground",
-                                "background","accent","paletteId").forEach { key ->
-                                val scoped = "wled.${id}." + (if(key=="paletteId")"palette" else key)
-                                if(prefs.contains(scoped))
-                                    editor.putInt(key,prefs.getInt(scoped,0))
+                            // Resolve the incoming effect before changing the legacy owner ID.
+                            // Missing values must not inherit the outgoing effect's colors.
+                            val incoming = OfflinePreviewSettings.read(id) { key, fallback ->
+                                prefs.getInt(key,fallback)
                             }
+                            val editor = prefs.edit().putInt("effectId",id)
+                            listOf("foreground","background","speed","intensity","brightness","paletteId")
+                                .forEachIndexed { index,key ->
+                                    val scoped = "wled.${id}." + (if(key=="paletteId")"palette" else key)
+                                    editor.putInt(key,incoming[index]).putInt(scoped,incoming[index])
+                                }
+                            val incomingAccent = prefs.getInt("wled.${id}.color2",
+                                prefs.getInt("wled.${id}.accent",0xffffffff.toInt()))
+                            editor.putInt("accent",incomingAccent)
                             editor.apply()
                             previewCurrentEffect(id)
                         }

@@ -3,6 +3,20 @@ import java.util.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class OfflinePreviewSettingsTest {
+    @Test public void anotherEffectCannotInheritActiveColorsOrParameters(){
+        Map<String,Integer> values=new HashMap<>();
+        values.put("effectId",9);
+        values.put("background",0xffff0000);
+        values.put("foreground",0xff00ff00);
+        values.put("speed",255);
+        values.put("paletteId",13);
+        OfflinePreviewSettings.Reader read=(key,fallback)->values.getOrDefault(key,fallback);
+        assertArrayEquals(new int[]{0xffffffff,0xff000000,128,128,160,0},
+            OfflinePreviewSettings.read(1,read));
+        values.put("wled.1.color1",0xff123456);
+        assertEquals(0xff123456,OfflinePreviewSettings.read(1,read)[1]);
+        assertEquals(0xffff0000,OfflinePreviewSettings.read(9,read)[1]);
+    }
     @Test public void editsReachPreviewImmediatelyWithoutChangingEffect(){
         Map<String,Integer> values=new HashMap<>();
         OfflinePreviewSettings.Reader read=(key,fallback)->values.getOrDefault(key,fallback);
