@@ -56,6 +56,7 @@ internal object ApprovedEditorMetadata {
     data class Definition(val params: List<Param>, val roles: List<Role>, val palette: Boolean)
 
     private val sample = mapOf(
+        "Chase 3" to "!,!;1,2,3;",
         "Blink" to "!,Duty cycle;!,!;!",
         "Blink Rainbow" to "Frequency,Blink duration;!,!;!",
         "Twinkle" to "!,!;!,!;!",

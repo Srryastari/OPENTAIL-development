@@ -11,6 +11,14 @@ import org.junit.Test
  * slot IDs are never compacted to match only visible color circles.
  */
 class ApprovedWledEffectsMetadataTest {
+    @Test fun chaseThreeExposesThreeNumericSlots() {
+        val d=ApprovedEditorMetadata.definition("Chase 3",null)
+        assertEquals(listOf(0,1,2),d.roles.map{it.slot})
+        assertEquals(listOf("1","2","3"),d.roles.map{it.label})
+        assertEquals(listOf("Speed","Intensity"),d.params.map{it.label})
+        assertFalse(d.palette)
+    }
+
     @Test fun glitterEditsRealThirdColorSlotNotFirst() {
         val d=ApprovedEditorMetadata.definition("Glitter",null)
         assertEquals(listOf(2),d.roles.map{it.slot})
