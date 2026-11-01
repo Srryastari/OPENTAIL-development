@@ -102,6 +102,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
+    private val stopNotice = mutableStateOf<String?>(null)
     private val offlinePreview = mutableStateOf(false)
     private val offlineReplay = mutableIntStateOf(0)
     private val selectedEffect = mutableIntStateOf(0)
@@ -134,9 +135,16 @@ class ComposeMainActivity : ComponentActivity() {
         captureError.value = null
     }
 
+    private fun stopControllerShow() {
+        stopNotice.value = if(ble.canControl()) null else "STOP not sent: reconnect and authorize CORE"
+        livePreview.stop()
+        liveArmed.value = false
+        invalidateCoreFrame()
+    }
+
     private fun enterOfflinePreview() {
         if (liveArmed.value) {
-            livePreview.stop()
+            livePreview.detach()
             liveArmed.value = false
         }
         offlinePreview.value = true
@@ -161,7 +169,7 @@ class ComposeMainActivity : ComponentActivity() {
         if (effectId !in supportedIds.value ||
             !NativePaletteEngine.coreSupports(effectId, paletteId)) {
             if (liveArmed.value) {
-                livePreview.stop()
+                livePreview.detach()
                 liveArmed.value = false
             }
             bleMessage.value = if (effectId !in supportedIds.value)
@@ -238,7 +246,7 @@ class ComposeMainActivity : ComponentActivity() {
                 paletteLoadedPresent.value = false
             }
             if (!ble.canControl() && liveArmed.value) {
-                livePreview.stop()
+                livePreview.detach()
                 liveArmed.value = false
             }
         } }
@@ -344,7 +352,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble.cancelFrameCapture()
         invalidateCoreFrame()
         if (liveArmed.value) {
-            livePreview.stop()
+            livePreview.detach()
             liveArmed.value = false
         }
         ble.stopScan()
@@ -352,7 +360,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         unregisterReceiver(adapterReceiver)
-        if (liveArmed.value) livePreview.stop()
+        if (liveArmed.value) livePreview.detach()
         localMicrophone.stop()
         ble.shutdown()
         super.onDestroy()
@@ -573,6 +581,7 @@ class ComposeMainActivity : ComponentActivity() {
             val index=pages.indexOf(text)
             if(index in 1..4) NavigationGlyph(index,t.muted)
             if(index==5) UiIcon("settings",t.muted)
+            if(text=="Home") IconAction("Stop CORE show","stop",t) { stopControllerShow() }
         }
     }
     @Composable
@@ -809,6 +818,7 @@ class ComposeMainActivity : ComponentActivity() {
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
         val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Home", t)
+        stopNotice.value?.let { Caption(it,t) }
         Panel(t) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
@@ -844,7 +854,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Pill("Authorize", t, enabled=ble.isConnected() && !ble.canControl()) { ble.authorizeOrPair() }
             }
         }
-        EffectsPreview(t, selectedEffect.intValue)
+        EffectsPreview(t, selectedEffect.intValue, animateOffline=true)
         Panel(t) {
             Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             listOf("Connection" to connectionPhase,
@@ -894,8 +904,7 @@ class ComposeMainActivity : ComponentActivity() {
         val settings = settingsOverride ?: storedSettings
         val renderer = remember(effect,offlineReplay.intValue) { OfflineCoreRenderer(effect,30) }
         DisposableEffect(renderer) { onDispose { renderer.close() } }
-        val localSketch = animateOffline && (offlinePreview.value || !ble.canControl()) &&
-            renderer.available()
+        val localSketch = animateOffline && renderer.available()
         // Read custom gradient stops exactly; no invented palette colors.
         val customStops = remember(settings[5],localRevision,paletteLoadedStops.value,
             paletteLoadedPresent.value,paletteLoadedSlot.intValue) {
@@ -973,19 +982,8 @@ class ComposeMainActivity : ComponentActivity() {
         val configuredPixels = readback?.optInt("pixels",0)?.coerceAtLeast(0) ?: 0
         val useConfiguredColors = frame == null && configuredPixels > 0 &&
             configuredZones != null && configuredZones.length() > 0
-        LaunchedEffect(connection, foregroundActivity.value, offlinePreview.value, previewPaused.value, captureOutput.intValue) {
-            // Display-paced admission; capture completion remains BLE-bound.
-            // A full CORE RGB888 snapshot can require many serialized BLE ATT
-            // exchanges. captureFrame() silently declines while busy, so the
-            // next request starts as soon as GATT is free without overlapping
-            // config reads, owner auth, pending STOP or other commands.
-            // The LED capsules always use verified CORE frames, never guessed
-            // intermediate pixels. Actual update rate is BLE-throughput bound.
-            while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value) {
-                capturePreviewFrame()
-                withFrameNanos { }
-            }
-        }
+        // Phone animation is local even while connected. Controller snapshots
+        // are optional, manual diagnostics and never an automatic BLE loop.
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
             .background(t.surface).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1042,7 +1040,7 @@ class ComposeMainActivity : ComponentActivity() {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(when {
                     effect < 0 && animateOffline -> "No effect selected"
-                    localSketch && localRenderAvailable.value -> "Offline effect preview · local"
+                    localSketch && localRenderAvailable.value -> "Local effect preview"
                     localSketch -> "Offline animation unavailable"
                     animateOffline && (offlinePreview.value || !ble.canControl()) ->
                         "Offline animation unavailable"
@@ -1057,7 +1055,7 @@ class ComposeMainActivity : ComponentActivity() {
                     else -> CorePreviewEvidence.label(null,captureMessage.value,false)
                 }, Modifier.weight(1f),color=t.muted,fontSize=14.sp)
                 Box(Modifier.size(24.dp).semantics { contentDescription="Refresh LED preview" }
-                    .clickable { capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
+                    .clickable { if(animateOffline) offlineReplay.intValue++ else capturePreviewFrame() },contentAlignment=Alignment.Center) { UiIcon("refresh",t.muted) }
                 Box(Modifier.size(24.dp).semantics { contentDescription=if(previewPaused.value) "Resume LED preview" else "Pause LED preview" }
                     .clickable { previewPaused.value=!previewPaused.value },contentAlignment=Alignment.Center) {
                     UiIcon(if(previewPaused.value) "play" else "pause",t.muted)
@@ -1125,7 +1123,7 @@ class ComposeMainActivity : ComponentActivity() {
                             chosen = -1
                             selectedEffect.intValue = -1
                             prefs.edit().putInt("effectId",-1).apply()
-                            if(liveArmed.value) {
+                            if(!offlinePreview.value && ble.canControl()) {
                                 livePreview.stop()
                                 liveArmed.value = false
                             }
@@ -1593,10 +1591,10 @@ class ComposeMainActivity : ComponentActivity() {
                 if (created!=null) { editingId=created; layoutMessage="" }
                 else layoutMessage="Could not add zone"
             }
+            // Saved controller output editing is inline in the same Layout card.
+            // Saving still requires explicit authenticated confirmation/readback.
+            HardwareOutputEditor(t)
         }
-        // Actual hardware output/section assignment belongs beside Layout.
-        // Saving to CORE still requires an explicit authenticated confirmation.
-        HardwareOutputEditor(t)
         if (choosingDelete) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { choosingDelete = false },
             title = { Text("Choose zone to delete") },
@@ -1814,7 +1812,6 @@ class ComposeMainActivity : ComponentActivity() {
             },
             confirmButton = { Pill("Done",t,true) { editing=false } },
             dismissButton = { Pill("Close",t) { editing=false } })
-        CoreTriggerMappingPage(t)
     }
     @Composable
     private fun CoreTriggerMappingPage(t: Tone) {
@@ -2137,7 +2134,9 @@ class ComposeMainActivity : ComponentActivity() {
             contentAlignment = Alignment.Center) {
             Canvas(Modifier.size(18.dp)) {
                 val u = size.width / 24f
-                if (kind == "edit") {
+                if (kind == "stop") {
+                    drawRect(t.fg,Offset(5*u,5*u),androidx.compose.ui.geometry.Size(14*u,14*u))
+                } else if (kind == "edit") {
                     val p = Path().apply {
                         moveTo(4*u, 16*u); lineTo(16*u, 4*u); lineTo(20*u, 8*u)
                         lineTo(8*u, 20*u); lineTo(3*u, 21*u); close()
@@ -2157,7 +2156,8 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SettingsRow(label: String, subtitle: String, t: Tone,
                             actionLabel: String = "›", rowHeight: Int = 59, action: () -> Unit) {
-        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = rowHeight.dp)
+            .then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             UiIcon(when(label) { "Controller" -> "bluetooth"; "Authorization" -> "shield"
@@ -2187,10 +2187,6 @@ class ComposeMainActivity : ComponentActivity() {
                 foundDevices.clear(); ble.scanHeadless(); controllers = true
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-            SettingsRow("Authorization", if(ble.canControl()) "Authorized" else "Not authorized", t, "Authorize") {
-                ble.authorizeOrPair()
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             SettingsRow("Active Controller", if(ble.canControl()) "Connected controller" else "No controller selected", t) {
                 controllers = !controllers
             }
@@ -2218,7 +2214,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun SettingsDiagnostics(t: Tone, changePage: (Int) -> Unit) {
-        Title("Settings", t)
+        Title("Firmware", t)
         // Developer testing is deliberately isolated from universal trigger
         // authoring. This is a local UI test; it does not assert GPIO or write NVS.
         var simulatedTriggers by remember { mutableStateOf(setOf<String>()) }
@@ -2243,6 +2239,7 @@ class ComposeMainActivity : ComponentActivity() {
             if(simulatedTriggers.isNotEmpty())
                 Pill("Clear test states",t) { simulatedTriggers=emptySet() }
         }
+
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
@@ -2261,12 +2258,11 @@ class ComposeMainActivity : ComponentActivity() {
             foundDevices.forEach { (address, label) ->
                 Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
             }
-            Pill("Authorize / Pair with BOOT", t) { ble.authorizeOrPair() }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
-            Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (temporary TTL, max 24/255).", t)
+            Caption("Every editor is live. When BLE is authorized, effect gestures automatically preview on existing CORE zones (until changed or stopped, max 24/255).", t)
             if (ble.canControl() && supportedIds.value.isNotEmpty()) {
-                Caption(if (liveArmed.value) "Hardware preview active" else "Hardware preview ready on next edit", t)
+                Caption(if (liveArmed.value) "CORE playback active" else "CORE playback ready on next edit", t)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     listOf("Both" to 3, "OUT 1" to 1, "OUT 2" to 2)
                         .forEach { (label, mask) ->
@@ -2296,33 +2292,26 @@ class ComposeMainActivity : ComponentActivity() {
             } else Caption("Offline design updates instantly. Connect and authorize CORE to preview supported effects on LEDs.", t)
             Caption("Changing zone boundaries and individual pixels on hardware requires a firmware volatile-preview command; Android does not flash NVS on each edit.", t)
         }
+        var mappingExpanded by remember { mutableStateOf(false) }
+        Pill("Input mapping",t) { mappingExpanded=!mappingExpanded }
+        if(mappingExpanded) CoreTriggerMappingPage(t)
         CorePaletteTransferPanel(t)
-        var confirm by remember { mutableStateOf(false) }
+        var runConfirmed by remember { mutableStateOf(false) }
         Panel(t) {
-            Caption("Bench effect demo requires confirmation. Authorized live effect edits also send bounded temporary previews automatically.", t)
-            Pill("Test a supported effect", t) { confirm = true }
-            Pill("Stop CORE show", t) {
-                invalidateCoreFrame()
-                if (liveArmed.value) livePreview.stop() else ble.stopShow()
-                liveArmed.value = false
-            }
+            Text("Developer · Controller playback",color=t.fg,fontWeight=FontWeight.Bold)
+            Caption("Uses current effect settings. Runs on CORE until changed or stopped from Home.",t)
+            Pill("Run on CORE",t) { runConfirmed=true }
         }
-        if (confirm) AlertDialog(containerColor=t.surface, onDismissRequest = { confirm = false },
-            title = { Text("Test CORE LEDs on isolated bench?") },
-            text = { Text("Requires BLE authorization and reported effect support. 15-second TTL, brightness 24/255. Vehicle inputs retain priority.") },
-            confirmButton = { Pill("Start bench test", t, true) {
-                val id = prefs.getInt("effectId", 0)
-                if (ble.canControl() && id in supportedIds.value) {
-                    offlinePreview.value = false
-                    invalidateCoreFrame()
-                    val benchMask = CoreBenchTargets.enabledMask(
-                        arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)
-                    if (benchMask == 0)
-                        bleMessage.value = "No enabled CORE zone read back. Reload CORE Output Manager; local Layout zones are not hardware settings."
-                    else ble.showFx(id, benchMask, liveZoneMask.intValue, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)
-                } else bleMessage.value = "Not authorized or effect unsupported by installed firmware"
-                confirm = false
-            } }, dismissButton = { Pill("Cancel", t) { confirm = false } })
+        if(runConfirmed) AlertDialog(containerColor=t.surface,onDismissRequest={runConfirmed=false},
+            title={Text("Run current effect on CORE?")},
+            text={Text("Continuous playback on saved zones. STOP is on Home. Physical inputs retain priority.")},
+            confirmButton={Pill("Run",t,true) {
+                offlinePreview.value=false
+                previewCurrentEffect()
+                runConfirmed=false
+            }},
+            dismissButton={Pill("Cancel",t) {runConfirmed=false}})
+
         Panel(t) {
             Title("Projects", t)
             Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
@@ -2378,9 +2367,9 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
 
-        Panel(t) {
-            Title("CORE Output Manager", t)
-            Caption("Hardware settings are separate from your Studio design. Reload each output over authorized BLE before editing.", t)
+        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("Controller output",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Caption("Load the saved output, edit its zones, then Save to CORE to apply.", t)
             Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Pill("Output 1", t, index == 0) { index = 0; captureOutput.intValue = 0; invalidateCoreFrame() }
@@ -2400,7 +2389,7 @@ class ComposeMainActivity : ComponentActivity() {
         var outputCountText by remember(index, outputs[index]) {
             mutableStateOf(outputs[index]?.optInt("pixels", 1)?.toString() ?: "1")
         }
-        Panel(t) {
+        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text("Output " + (index + 1), color = t.fg, fontWeight = FontWeight.Bold)
             Field(draft.optString("name"), "Output name", t) { value ->
                 edit { it.put("name", value) }
@@ -2447,7 +2436,7 @@ class ComposeMainActivity : ComponentActivity() {
             var zoneCountText by remember(index, i, outputs[index], structureVersion) {
                 mutableStateOf(zone.optInt("pixels", 0).toString())
             }
-            Panel(t) {
+            Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text("Zone " + (i + 1), color = t.fg, fontWeight = FontWeight.SemiBold)
                 Caption("Start " + from + " · end " + (if (count > 0) cursor - 1 else "empty") +
                     " · next " + cursor, t)
@@ -2555,7 +2544,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
-        Panel(t) {
+        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Caption("Assigned " + assigned + " of " + pixelCount + " pixels · " +
                 (pixelCount - assigned) + " remaining. Zone offsets are zero-based and automatically contiguous.", t)
             PixelStrip(t, (0 until zones.length()).map { j ->

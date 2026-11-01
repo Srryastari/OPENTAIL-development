@@ -391,7 +391,11 @@ static esp_err_t respond_err(httpd_req_t *r,int status,const char *reason) {
     return send_json(r,buf);
 }
 static bool show_window(TickType_t now){
-    if(ble_fx_enabled)return ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
+    if(ble_fx_enabled){
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        ot_fx_bank_prune_expired(&fx_bank,ms);
+        return ot_fx_bank_any_active(&fx_bank,ms);
+    }
     return native_show.mode!=OT_SHOW_OFF && before_deadline(now,native_show_deadline);
 }
 static bool om_number(const cJSON *obj,const char *key,unsigned *dest,unsigned low,unsigned high){
@@ -799,7 +803,7 @@ static esp_err_t tm_post(httpd_req_t *r){
 }
 static esp_err_t show_get(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
-    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false;
+    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false,continuous=false;
     bool fx_active=false;uint16_t fx_effect_id=0;
     portENTER_CRITICAL(&state_lock);
     cfg=native_show;active=show_window(now);
@@ -811,12 +815,14 @@ static esp_err_t show_get(httpd_req_t *r){
         for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
             const ot_fx_zone_slot_t *slot=&fx_bank.zones[o][z];
             if(!ot_fx_slot_active(slot,ms))continue;
+            if(slot->continuous){continuous=true;continue;}
             if(slot->standalone){persistent=true;continue;}
             const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
             const uint32_t elapsed=ms-slot->refreshed_ms;
             if(duration-elapsed>remaining)remaining=duration-elapsed;
         }
         if(persistent)remaining=0;
+        if(continuous)remaining=0;
     }else if(active){
         remaining=(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS);
     }
@@ -825,9 +831,9 @@ static esp_err_t show_get(httpd_req_t *r){
     ot_wled_fx_metadata_t meta;
     const char *active_name=fx_active&&ot_effects_1d_metadata(fx_effect_id,&meta)?
       meta.name:ot_show_name(cfg.mode);
-    char buf[390];
-    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",
+    char buf[430];
+    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"continuous\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
+      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",continuous?"true":"false",
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
@@ -934,7 +940,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
                                       const ot_fx_spark_style_t *spark,
-                                      const ot_fx_overlay_config_t *overlay){
+                                      const ot_fx_overlay_config_t *overlay,bool continuous){
     ot_wled_fx_metadata_t meta;
     if((overlay&&!ot_fx_overlay_valid(overlay))||
        !req||!ot_effects_1d_metadata(req->effect_id,&meta)||
@@ -951,7 +957,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ready=native_outputs_ready;
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
+        ready=continuous?ot_fx_bank_apply_continuous(&fx_bank,req,om_outputs,now_ms):
+            ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
         if(ready&&spark){
             /* Optional sparkle tuning is transient per-zone state. Preserve
              * legacy fixed-size BLE FX packets and saved NVS profile layout. */
@@ -994,7 +1001,10 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL,NULL); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL,false); /* live 60-sec bench preview */
+}
+bool ot_ble_apply_continuous_fx(const ot_ble_fx_packet_t *req){
+    return ot_ble_apply_fx_internal(req,true,NULL,NULL,true);
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -1131,7 +1141,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         request_render_refresh();
         return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
     }
-    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -1197,7 +1207,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL,false))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -1271,7 +1281,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -1906,12 +1916,19 @@ static void frame_wake_callback(void *arg){
 /* Do not panic/reboot all lighting when one RMT lane fails. The failed handle
  * stays owned by the render task and is not reused or blindly destroyed.
  * Hardware recovery and takeover require a separately verified failover path. */
+static void stop_continuous_on_fault(void){
+    portENTER_CRITICAL(&state_lock);
+    ot_fx_bank_stop_continuous(&fx_bank);
+    portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
+}
 static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     ESP_LOGE(TAG,"RMT output %u %s failed: %s",ch,step,esp_err_to_name(error));
     ot_st_set_fault("external pixel RMT runtime failure");
     portENTER_CRITICAL(&state_lock);
     native_outputs_ready=false;
     output_runtime_fault_mask|=(1u<<ch);
+    ot_fx_bank_stop_continuous(&fx_bank); /* do not restart decorative playback after a fault */
     portEXIT_CRITICAL(&state_lock);
 }
 static void led_task(void *p) {
@@ -2092,11 +2109,13 @@ static void led_task(void *p) {
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                               stop_continuous_on_fault();
                            } else if(slot->overlay.style &&
                                      !ot_fx_overlay_apply(&slot->overlay,
                                          slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
                                          zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
                                ot_st_set_fault("invalid effect overlay");
+                               stop_continuous_on_fault();
                            }
                        } else {
                            prior_fx_active[ch][z]=false;

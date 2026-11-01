@@ -53,7 +53,7 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
   'frame!!.colorAt(sample)', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
-  'ble.canControl()', 'supportedIds.value', 'ble.showFx(', 'ble.saveOutput(index, draftText)',
+  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.saveOutput(index, draftText)',
   'BleConfigCodec.encode(JSONObject(draftText))']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
@@ -122,7 +122,7 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        'Presets may not recursively embed or erase their own library');
 assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
        'Bluetooth status pill must reflect actual connection state, not transient messages');
-assert(homeSection.includes('ble.authorizeOrPair()') && settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
+assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
 
@@ -156,9 +156,9 @@ const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: I
   ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
 const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
   ?.split('private final ArrayAdapter<String> entries;')[0];
-assert(captureLoop && captureLoop.includes('withFrameNanos { }') &&
+assert(captureLoop && captureLoop.includes('withFrameNanos { now ->') &&
        !captureLoop.includes('delay(500)') &&
-       captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
+       !captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
        captureStart &&
        captureStart.includes('if(!canCaptureFrame())return false;') &&
        captureStart.includes('queuedOutputRead>=0') &&
@@ -271,7 +271,7 @@ for(const required of [
   'editing = true', 'project.customTrigger(newTrigger)',
   'project.assignMany(selections,zoneId,!checked)',
   'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())',
-  'CoreTriggerMappingPage(t)'
+  'scopeKey = "triggers:"'
 ]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
 assert(triggers.includes('IconAction("Edit " + name, "edit", t)') &&
        triggers.includes('if (profile.optString("kind") == "trigger-custom")') &&
@@ -450,7 +450,7 @@ assert(presetRestore.includes('if(!editor.commit())return false;') &&
        'Preset project import must never precede an effect preference commit');
 assert(compose.includes('val localSketch = animateOffline') &&
        compose.includes('renderer.render(') &&
-       compose.includes('Offline effect preview · local') &&
+       compose.includes('Local effect preview') &&
        offlineBinding.includes('System.loadLibrary("opentail_preview")'),
        'Local-only preview must animate known effects without fabricating CORE frames');
 
@@ -859,7 +859,7 @@ assert(palettes.includes('BleFxPalettePolicy.isWireCandidate(effectId, paletteId
        'Only the verified existing CORE palette subset may be previewed over BLE');
 const preview=fs.readFileSync(
   'android/app/src/main/java/com/opentail/android/LiveBlePreview.kt','utf8');
-assert(preview.includes('frame.paletteId, 5') &&
+assert(preview.includes('frame.paletteId') &&
        preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)'),
        'BLE preview may not send unsupported palettes');
 const corePaletteTest=fs.readFileSync(
@@ -1066,5 +1066,25 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         'Authenticated effect edits must not require an already-armed preview');
  assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
         compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&
-        compose.includes('if (ble.canControl() && id in supportedIds.value) {\n                    offlinePreview.value = false'),
+        compose.includes('previewCurrentEffect()'),
         'Explicit existing physical bench controls must leave Preview Offline');
+
+ // Owner continuous-playback and release-control contract.
+ assert(preview.includes('ble.showContinuousFx(') &&
+        preview.includes('fun detach()') && !preview.includes('frame.paletteId, 5'),
+        'Show Mode must not use TTL or a keepalive loop');
+ assert(compose.includes('if(text=="Home") IconAction("Stop CORE show","stop",t)'), 'STOP must be available on Home');
+ const lifecycle=compose.split('override fun onStop() {')[1].split('super.onDestroy()')[0];
+ assert(!lifecycle.includes('livePreview.stop()') && lifecycle.includes('livePreview.detach()'),
+        'Backgrounding must not stop CORE playback');
+ assert(compose.includes('val localSketch = animateOffline && renderer.available()') &&
+        !compose.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)'),
+        'Connected preview must render locally without automatic snapshots');
+ const releaseSettings=compose.split('private fun SettingsPage(')[1].split('private fun HardwareOutputEditor(')[0];
+ assert(!releaseSettings.includes('ble.authorizeOrPair()') &&
+        compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
+        'Authorization belongs on Home; Firmware row is tappable');
+ assert(!compose.includes('Title("CORE Output Manager"') &&
+        compose.includes('Text("Controller output"') &&
+        releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
+        'Output editing inline; developer input map only in Firmware');

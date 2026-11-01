@@ -1,0 +1,19 @@
+# Continuous controller playback and simplified release controls
+
+Base: Android/CORE PR91 exact 478780ae29ecd598ce70c6357875097bc39758a4. Frozen PR90 is untouched.
+
+Owner requirements supersede the old temporary-bench behavior: all user-facing playback, including tests, continues on CORE until changed or explicitly stopped. Disconnect/background must not stop it. Android renders the on-screen preview locally to avoid continuous BLE snapshot traffic. Owner also authorized a Home STOP icon, Home-only authorization, inline Layout output settings, developer cards under Settings → Firmware, no developer card in Triggers, and full-row Firmware tapping. All other screen structure and palette controls are preserved.
+
+Wire contract: version1 opcode10, 17 bytes matching the existing FX payload; final byte reserved0, NOT a TTL. Exact INFO token continuous-fx-v1 advertises support. New Android refuses unknown/old firmware (no silent timed fallback). Legacy opcode5 remains explicitly bounded 1..60 seconds for older clients; no user-facing new playback uses it. Marker may arrive after authentication; no implicit replay when INFO finally arrives.
+
+CORE translates opcode10 into volatile continuous zone slots. No NVS write, no repeat keepalive, no boot auto-start. Validate targets before mutation; replace old continuous targets outside a new selected mask, preserve overlapping same-effect phase and independently loaded stored scenes. Different effects replace on the next rendered frame with no STOP gap or forced entry fade. Physical role-local overlays still win. Output faults latch the lane disabled and stop continuous decorative slots; reconnect never restarts them. STOP clears all decorative slots while physical inputs retain ownership.
+
+Android lifecycle detach cancels unsent local gestures without STOP. Already accepted commands remain CORE-owned; an explicit queued gesture may complete before link teardown. Connection/authorization alone never replays saved preferences. Explicit Home STOP works without continuous capability and after reconnect. Offline preview does not send effects or stop the last accepted CORE state. The local preview is representative, not telemetry: random seeds/phase can differ from running CORE. Manual Layout refresh retains authenticated snapshot diagnostics; no automatic capture loop remains.
+
+UI: Home has authorization and a square STOP icon. Output configuration is inline in Layout's existing card, retaining explicit confirmed Save/readback. Triggers has no input-map developer card. All developer/test tools and input mapping are in Firmware details; whole Firmware row is tappable. Test playback uses current effect settings continuously; STOP is Home.
+
+Required acceptance: install the matching new firmware and APK (old v0.1.31 binaries lack the capability marker even if version labels match). Run a Show Mode past60 seconds, disconnect/close the app and confirm continued LEDs, reconnect and STOP from Home. Switch effects/targets and verify no stale old-target playback. Verify Brake/Turn/Reverse priority and no decorative reboot auto-start on the bench. Software tests do not certify physical failover, vehicle use, radio latency or optical smoothness.
+
+Independent review follow-up: volatile continuous slots are separate from stored standalone scenes; /show reports continuous:true and persistent:false for a continuous-only show. Legacy expired slots are retired under the existing state lock before show_window reports activity, preventing 49.7-day timer wrap from resurrecting old temporary effects. Host tests cover expiration followed by wrapped timestamps.
+
+Independent STOP review: Home reports a refused STOP if disconnected/unauthorized; STOP delegates to the existing stable authorization-guarded opcode even before capability detection. It never claims disconnected LEDs stopped.
