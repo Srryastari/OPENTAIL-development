@@ -127,7 +127,7 @@ check("Native effect catalog and approved sequence toggles remain accessible",
           "Repeat", "Edit time", "project.sequenceOptions()", "project.editTriggerStyle(",
           'scopeKey = "triggers:"', 'scopeKey="auto-event:"+key'))
       and 'new Effect(32787, "Singularity Shutdown")' in effect)
-check("Universal live-edit contract and bounded transient CORE FX preview",
+check("Universal live-edit contract and continuous CORE playback",
       subprocess.run(["node", str(root/"qa/test_live_edit.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
 print("Compose is the sole Android activity. Physical BLE and pixel-accurate visual parity still require hardware validation.")

@@ -8,7 +8,7 @@ int main(void){
  ot_fx_zone_bank_t bank={0},before;
  ot_ble_fx_packet_t req={.effect_id=3,.chain_mask=3,.zone_mask=1,.ttl_sec=1,.brightness=24};
  assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,100));
- assert(bank.zones[0][0].continuous&&bank.zones[0][0].standalone);
+ assert(bank.zones[0][0].continuous&&!bank.zones[0][0].standalone);
  uint32_t gen=bank.zones[0][0].generation;
  assert(ot_fx_slot_active(&bank.zones[0][0],1000000u));
  ot_fx_bank_stop_temporary(&bank); /* link loss/graceful release */
@@ -32,6 +32,12 @@ int main(void){
  assert(!ot_fx_bank_any_active(&bank,1000006u));
  assert(ot_fx_bank_apply(&bank,&req,100u,false)); /* old bench contract */
  assert(!ot_fx_slot_active(&bank.zones[0][0],1100u));
+ ot_fx_bank_prune_expired(&bank,1100u);
+ assert(!bank.zones[0][0].configured);
+ assert(!ot_fx_slot_active(&bank.zones[0][0],100u)); /* cannot reappear after full wrap */
+ req.ttl_sec=1;assert(ot_fx_bank_apply(&bank,&req,UINT32_MAX-500u,false));
+ ot_fx_bank_prune_expired(&bank,499u);
+ assert(!bank.zones[0][0].configured);
  ot_fx_bank_reset(&bank); /* reboot never auto starts */
  assert(!ot_fx_bank_any_active(&bank,0));
  puts("PASS continuous lifetime/disconnect/edits/target replacement/STOP/fault/reboot; legacy TTL bounded");

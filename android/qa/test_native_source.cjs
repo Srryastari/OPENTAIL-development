@@ -450,7 +450,7 @@ assert(presetRestore.includes('if(!editor.commit())return false;') &&
        'Preset project import must never precede an effect preference commit');
 assert(compose.includes('val localSketch = animateOffline') &&
        compose.includes('renderer.render(') &&
-       compose.includes('Offline effect preview · local') &&
+       compose.includes('Local effect preview') &&
        offlineBinding.includes('System.loadLibrary("opentail_preview")'),
        'Local-only preview must animate known effects without fabricating CORE frames');
 

@@ -7,13 +7,13 @@
     "android": {
       "pr": 87,
       "sha": "449462c72f47baac2c66e56296d1166202b6174a",
-      "tree": "e47531658b459f06b24283d7e8488b6298bee522",
+      "tree": "ed2dae9409d1de596ff27847fcabd36c182c527f",
       "baseline_tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
     },
     "firmware": {
       "pr": 84,
       "sha": "b13894c0550366a0e74ef6fd93c83cfa6dd19aa4",
-      "tree": "1e1fe69990e9bf7fe10434450dcba14ed7ab494d"
+      "tree": "085c2edb7d202682c7cc8e150f7c29f44cd6e1ff"
     },
     "effects": {
       "pr": 80,

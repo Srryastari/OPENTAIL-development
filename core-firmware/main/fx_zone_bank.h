@@ -53,3 +53,7 @@ bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
  uint32_t now_ms);
 void ot_fx_bank_stop_continuous(ot_fx_zone_bank_t *bank);
+
+/* Retire expired legacy slots during regular render housekeeping so timer
+ * wrap cannot resurrect them while a continuous show keeps the bank alive. */
+void ot_fx_bank_prune_expired(ot_fx_zone_bank_t *bank,uint32_t now_ms);

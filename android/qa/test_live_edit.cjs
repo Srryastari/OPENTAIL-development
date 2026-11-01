@@ -53,7 +53,7 @@ for(const required of [
 ]) assert(effectBlock.includes(required), 'Approved Live FX regression: '+required);
 assert(!effectBlock.includes('onLiveToggle = {') &&
        !compose.includes('effects-live-toggle') &&
-       compose.includes('ble.stopShow()') &&
+       compose.includes('stopControllerShow()') &&
        preview.includes('ble.stopShow()'),
        'Owner removed editor playback controls; authorized STOP contract must remain intact');
 
@@ -112,7 +112,7 @@ assert(previewGate &&
        previewGate.includes('!NativePaletteEngine.coreSupports(effectId, paletteId)') &&
        previewGate.indexOf('!NativePaletteEngine.coreSupports(effectId, paletteId)') <
          previewGate.indexOf('livePreview.arm()') &&
-       previewGate.includes('livePreview.stop()') &&
+       previewGate.includes('livePreview.detach()') &&
        previewGate.includes('liveArmed.value = false') &&
        effectBlock.includes('previewCurrentEffect(id)') &&
        compose.includes('NativePaletteEngine.corePreviewPalette(effectId, paletteId)'),
@@ -171,7 +171,7 @@ assert(ble.includes('pendingPacket = null; nextPacket = null; afterStopPacket = 
        ble.includes('private void recoverStalledGatt(BluetoothGatt owner, String reason)'),
   'Post-STOP queue must reset on adapter off, reconnect and disconnect');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
-console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary authenticated bounded BLE FX; no NVS writes on edit.');
+console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous authenticated CORE playback; no NVS writes on edit.');
 
  // PR90 bench regression: the existing physical controls and authenticated
  // editor gestures must actually reach CORE, including after Preview Offline.

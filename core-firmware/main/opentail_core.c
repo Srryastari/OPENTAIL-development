@@ -391,7 +391,11 @@ static esp_err_t respond_err(httpd_req_t *r,int status,const char *reason) {
     return send_json(r,buf);
 }
 static bool show_window(TickType_t now){
-    if(ble_fx_enabled)return ot_fx_bank_any_active(&fx_bank,(uint32_t)(esp_timer_get_time()/1000LL));
+    if(ble_fx_enabled){
+        const uint32_t ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        ot_fx_bank_prune_expired(&fx_bank,ms);
+        return ot_fx_bank_any_active(&fx_bank,ms);
+    }
     return native_show.mode!=OT_SHOW_OFF && before_deadline(now,native_show_deadline);
 }
 static bool om_number(const cJSON *obj,const char *key,unsigned *dest,unsigned low,unsigned high){
@@ -799,7 +803,7 @@ static esp_err_t tm_post(httpd_req_t *r){
 }
 static esp_err_t show_get(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
-    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false;
+    ot_show_t cfg;bool active;uint32_t remaining=0;bool ready,persistent=false,continuous=false;
     bool fx_active=false;uint16_t fx_effect_id=0;
     portENTER_CRITICAL(&state_lock);
     cfg=native_show;active=show_window(now);
@@ -811,12 +815,14 @@ static esp_err_t show_get(httpd_req_t *r){
         for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
             const ot_fx_zone_slot_t *slot=&fx_bank.zones[o][z];
             if(!ot_fx_slot_active(slot,ms))continue;
+            if(slot->continuous){continuous=true;continue;}
             if(slot->standalone){persistent=true;continue;}
             const uint32_t duration=(uint32_t)slot->request.ttl_sec*1000u;
             const uint32_t elapsed=ms-slot->refreshed_ms;
             if(duration-elapsed>remaining)remaining=duration-elapsed;
         }
         if(persistent)remaining=0;
+        if(continuous)remaining=0;
     }else if(active){
         remaining=(uint32_t)((uint32_t)(native_show_deadline-now)*portTICK_PERIOD_MS);
     }
@@ -825,9 +831,9 @@ static esp_err_t show_get(httpd_req_t *r){
     ot_wled_fx_metadata_t meta;
     const char *active_name=fx_active&&ot_effects_1d_metadata(fx_effect_id,&meta)?
       meta.name:ot_show_name(cfg.mode);
-    char buf[390];
-    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
-      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",
+    char buf[430];
+    snprintf(buf,sizeof(buf),"{\"active\":%s,\"effect\":\"%s\",\"remaining_ms\":%lu,\"persistent\":%s,\"continuous\":%s,\"brightness\":%u,\"speed\":%u,\"r\":%u,\"g\":%u,\"b\":%u,\"chain_mask\":%u,\"section_mask\":%u,\"bench_only\":true,\"outputs_ready\":%s}",
+      active?"true":"false",active?active_name:"off",(unsigned long)remaining,persistent?"true":"false",continuous?"true":"false",
       cfg.brightness,cfg.speed,cfg.color.r,cfg.color.g,cfg.color.b,cfg.chain_mask,cfg.section_mask,ready?"true":"false");
     return send_json(r,buf);
 }
@@ -1910,6 +1916,12 @@ static void frame_wake_callback(void *arg){
 /* Do not panic/reboot all lighting when one RMT lane fails. The failed handle
  * stays owned by the render task and is not reused or blindly destroyed.
  * Hardware recovery and takeover require a separately verified failover path. */
+static void stop_continuous_on_fault(void){
+    portENTER_CRITICAL(&state_lock);
+    ot_fx_bank_stop_continuous(&fx_bank);
+    portEXIT_CRITICAL(&state_lock);
+    request_render_refresh();
+}
 static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     ESP_LOGE(TAG,"RMT output %u %s failed: %s",ch,step,esp_err_to_name(error));
     ot_st_set_fault("external pixel RMT runtime failure");
@@ -2097,11 +2109,13 @@ static void led_task(void *p) {
                                memset(&fx_frame[ch][offset],0,
                                       (size_t)len*sizeof(fx_frame[ch][0]));
                                ot_st_set_fault("invalid BLE effect frame");
+                               stop_continuous_on_fault();
                            } else if(slot->overlay.style &&
                                      !ot_fx_overlay_apply(&slot->overlay,
                                          slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
                                          zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
                                ot_st_set_fault("invalid effect overlay");
+                               stop_continuous_on_fault();
                            }
                        } else {
                            prior_fx_active[ch][z]=false;
