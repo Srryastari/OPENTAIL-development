@@ -7,7 +7,7 @@
     "android": {
       "pr": 87,
       "sha": "449462c72f47baac2c66e56296d1166202b6174a",
-      "tree": "3375b8c4e37eaeda04c373fa698e5abff742e569",
+      "tree": "b22351238110add38191aa5e146bc9b4b2e97e88",
       "baseline_tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
     },
     "firmware": {
@@ -33,7 +33,7 @@
     "catalog_ids": 140,
     "renderer_files": 13,
     "palette": "Locked: byte-identical Android #87 and authoritative CORE #84",
-    "ui": "Android subtree byte-identical #87; owner rendered six-screen approval pending",
+    "ui": "Six-screen structure preserved; Issue93 scoped editor corrections require phone acceptance",
     "ble_nvs_stop_trigger_ota": "Exact integrated full host suite required; physical acceptance separate"
   },
   "baseline": {
@@ -433,5 +433,16 @@
       "tappable Firmware row"
     ],
     "phone_preview": "local; manual CORE snapshots only"
+  },
+  "issue93_correction": {
+    "base_sha": "8cfd6d020e4d0acc466947f7f3adc00e68a05b5f",
+    "allowed_android_changes": [
+      "android/app/src/main/java/com/opentail/android/OfflinePreviewSettings.java",
+      "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+      "android/app/src/test/java/com/opentail/android/OfflinePreviewSettingsTest.java",
+      "android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt",
+      "android/app/src/test/java/com/opentail/android/ApprovedWledEffectsMetadataTest.kt"
+    ],
+    "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   }
 }

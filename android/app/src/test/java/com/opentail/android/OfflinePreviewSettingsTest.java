@@ -3,6 +3,18 @@ import java.util.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class OfflinePreviewSettingsTest {
+    @Test public void legacySettingsSurviveSwitchAndDeselection(){
+        Map<String,Integer> values=new HashMap<>();
+        values.put("effectId",9);values.put("background",0xffff0000);
+        values.put("accent",0xff123456);
+        OfflinePreviewSettings.Reader read=(key,fallback)->values.getOrDefault(key,fallback);
+        OfflinePreviewSettings.snapshot(9,read,values::put);
+        values.put("effectId",-1);values.put("background",0xff000000);
+        values.put("accent",0xffffffff);
+        assertEquals(0xffff0000,OfflinePreviewSettings.read(9,read)[1]);
+        assertEquals(Integer.valueOf(0xff123456),values.get("wled.9.accent"));
+        assertEquals(0xff000000,OfflinePreviewSettings.read(1,read)[1]);
+    }
     @Test public void anotherEffectCannotInheritActiveColorsOrParameters(){
         Map<String,Integer> values=new HashMap<>();
         values.put("effectId",9);

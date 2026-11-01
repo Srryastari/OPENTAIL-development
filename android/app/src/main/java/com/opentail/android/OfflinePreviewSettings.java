@@ -5,6 +5,16 @@ package com.opentail.android;
  */
 final class OfflinePreviewSettings {
     interface Reader {int get(String key,int fallback);}
+    interface Writer {void put(String key,int value);}
+    static void snapshot(int effect,Reader prefs,Writer writer) {
+        if(effect<0)return;
+        int[] values=read(effect,prefs);
+        String scope="wled."+effect+".";
+        String[] keys={"foreground","background","speed","intensity","brightness","palette"};
+        for(int i=0;i<keys.length;i++)writer.put(scope+keys[i],values[i]);
+        writer.put(scope+"accent",prefs.get(scope+"color2",prefs.get(scope+"accent",
+            prefs.get("effectId",effect)==effect?prefs.get("accent",0xffffffff):0xffffffff)));
+    }
     static int[] read(int effect,Reader prefs) {
         String scope="wled."+effect+".";
         Reader source=(key,fallback)->prefs.get("effectId",effect)==effect ? prefs.get(key,fallback) : fallback;

@@ -1119,6 +1119,11 @@ class ComposeMainActivity : ComponentActivity() {
                             else if (prefs.contains("accent")) prefs.getInt("accent",0) else null)
                     },
                     onSelected = { id ->
+                        val outgoing = prefs.edit()
+                        OfflinePreviewSettings.snapshot(prefs.getInt("effectId",-1),
+                            { key,fallback -> prefs.getInt(key,fallback) },
+                            { key,value -> outgoing.putInt(key,value); Unit })
+                        outgoing.apply()
                         if(id == null) {
                             chosen = -1
                             selectedEffect.intValue = -1
