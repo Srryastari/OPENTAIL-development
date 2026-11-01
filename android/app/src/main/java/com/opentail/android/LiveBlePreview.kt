@@ -5,11 +5,11 @@ import android.os.Looper
 import android.os.SystemClock
 
 /**
- * Transient, bounded preview for the PREEXISTING authorized CORE BLE FX opcode.
+ * Continuous CORE-owned playback using the advertised volatile opcode.
  *
  * Every Android authoring control is locally live by default. A controller
  * must be explicitly authorized/armed once before edit gestures may also send
- * temporary FX frames; no edits call the persistent BLE output-config opcode.
+ * continuous FX commands; no edits call the persistent BLE output-config opcode.
  *
  * This supports rendering changes to already-saved CORE zones only. It CANNOT
  * preview new zone boundaries, pixel indices, color order or strip length on
@@ -50,10 +50,9 @@ internal class LiveBlePreview(
             return@Runnable
         }
         lastSentAt = SystemClock.uptimeMillis()
-        // Temporary show: existing configuration only; physical trigger zones
-        // continue to override as handled by CORE. TTL automatically expires
-        // even if Android dies or disconnects before STOP is acknowledged.
-        ble.showFx(
+        // One accepted edit sends one command. CORE owns lifetime and arbitration.
+        // No keepalive, timeout or NVS write.
+        ble.showContinuousFx(
             frame.effectId, frame.chainMask, frame.zoneMask,
             (frame.foreground shr 16) and 255,
             (frame.foreground shr 8) and 255,
@@ -64,19 +63,19 @@ internal class LiveBlePreview(
             frame.brightness.coerceIn(0, 24),
             frame.speed.coerceIn(0, 255),
             frame.intensity.coerceIn(0, 255),
-            frame.paletteId, 5
+            frame.paletteId
         )
     }
 
     fun isArmed(): Boolean = armed
 
     fun arm(): Boolean {
-        if (!ble.canControl() || supportedIds().isEmpty()) {
-            report("Authorize CORE and read supported effects first")
+        if (!ble.canContinuousFx() || supportedIds().isEmpty()) {
+            report("Authorize CORE and wait for continuous capability; update firmware if unavailable")
             return false
         }
         armed = true
-        report("Live hardware preview enabled: temporary FX, maximum 24/255 brightness")
+        report("Continuous CORE playback enabled · Stop on Home")
         return true
     }
 
@@ -99,11 +98,15 @@ internal class LiveBlePreview(
         }
     }
 
-    fun stop() {
+    // A lifecycle event is not an owner STOP. Drop only unsent gestures.
+    fun detach() {
         handler.removeCallbacks(drain)
         scheduled = false
         latest = null
-        if (armed && ble.canControl()) ble.stopShow()
         armed = false
+    }
+    fun stop() {
+        detach()
+        if (ble.canControl()) ble.stopShow()
     }
 }

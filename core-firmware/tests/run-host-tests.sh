@@ -139,3 +139,6 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/co
 # BLE output map serialization must roundtrip arbitrary user-owned zones,
 # without either Studio or the firmware presuming a vehicle's geometry.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/core_logic.c main/arbitration_logic.c main/ble_config.c tests/test_ble_config.c -o /tmp/ot-ble-config-tests && /tmp/ot-ble-config-tests
+
+# Explicit continuous controller command semantics; no hardware certification.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_continuous_fx.c -o /tmp/ot-continuous-fx-tests && /tmp/ot-continuous-fx-tests

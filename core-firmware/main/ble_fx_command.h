@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include "wled_fx_compat.h"
 #define OT_BLE_FX_OPCODE 5u
+/* Explicit volatile continuous playback; final wire byte reserved and zero. */
+#define OT_BLE_FX_CONTINUOUS_OPCODE 10u
 #define OT_BLE_FX_WIRE_BYTES 17u
 typedef struct {
   uint16_t effect_id;

@@ -64,14 +64,12 @@ check("Previously implemented BLE owner authentication and encryption retained",
       all(s in ble for s in ("HmacSHA256", "pairWithBoot()", "authorizeStored()",
                               "showFx(", "canControl()")) and
       "AES/GCM/NoPadding" in owner)
-check("Active Compose bench test requires BLE auth, capability and confirmation",
-      'Text("Test CORE LEDs on isolated bench?")' in compose and
-      'if (ble.canControl() && id in supportedIds.value)' in compose and
-      'CoreBenchTargets.enabledMask(' in compose and
-      'arrayOf(outputs[0],outputs[1]),liveChainMask.intValue,liveZoneMask.intValue)' in compose and
-      'if (benchMask == 0)' in compose and
-      'else ble.showFx(id, benchMask, liveZoneMask.intValue, 255, 0, 0, 0, 0, 0, 24, 128, 128, 0, 15)' in compose and
-      'confirm = false' in compose)
+check("Continuous controller playback is capability-gated with explicit Home STOP",
+      'ble.showContinuousFx(' in (source/"LiveBlePreview.kt").read_text() and
+      'canContinuousFx()' in ble and
+      'ContinuousFxCommand.encode(' in ble and
+      'IconAction("Stop CORE show","stop",t)' in compose and
+      'ble.stopShow()' in (source/"LiveBlePreview.kt").read_text())
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Active Compose output save uses authenticated BLE revision/readback path",
@@ -112,7 +110,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
           ("previewZoneOffsets(id, n)", "project.editZone(",
            "project.assignMany(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
-           "ble.showFx(", "BleConfigCodec.encode(JSONObject(draftText))",
+           "previewCurrentEffect()", "BleConfigCodec.encode(JSONObject(draftText))",
            "ble.saveOutput(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
            "project.previewZoneOffsets(", "AlertDialog(containerColor=t.surface,"))

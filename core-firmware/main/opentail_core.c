@@ -934,7 +934,7 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
                                       const ot_fx_spark_style_t *spark,
-                                      const ot_fx_overlay_config_t *overlay){
+                                      const ot_fx_overlay_config_t *overlay,bool continuous){
     ot_wled_fx_metadata_t meta;
     if((overlay&&!ot_fx_overlay_valid(overlay))||
        !req||!ot_effects_1d_metadata(req->effect_id,&meta)||
@@ -951,7 +951,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ready=native_outputs_ready;
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
+        ready=continuous?ot_fx_bank_apply_continuous(&fx_bank,req,om_outputs,now_ms):
+            ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
         if(ready&&spark){
             /* Optional sparkle tuning is transient per-zone state. Preserve
              * legacy fixed-size BLE FX packets and saved NVS profile layout. */
@@ -994,7 +995,10 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL,NULL); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL,false); /* live 60-sec bench preview */
+}
+bool ot_ble_apply_continuous_fx(const ot_ble_fx_packet_t *req){
+    return ot_ble_apply_fx_internal(req,true,NULL,NULL,true);
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -1131,7 +1135,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         request_render_refresh();
         return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
     }
-    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay))
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -1197,7 +1201,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL,false))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -1271,7 +1275,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -1912,6 +1916,7 @@ static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     portENTER_CRITICAL(&state_lock);
     native_outputs_ready=false;
     output_runtime_fault_mask|=(1u<<ch);
+    ot_fx_bank_stop_continuous(&fx_bank); /* do not restart decorative playback after a fault */
     portEXIT_CRITICAL(&state_lock);
 }
 static void led_task(void *p) {

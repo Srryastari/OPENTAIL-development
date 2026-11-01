@@ -16,6 +16,7 @@ typedef struct {
 } ot_fx_spark_style_t;
 typedef struct {
     bool configured;
+    bool continuous; /* volatile user Show Mode, not a saved preset */
     bool standalone; /* explicitly played stored preset; survives BLE disconnection */
     ot_ble_fx_packet_t request;
     ot_fx_spark_style_t spark;
@@ -46,3 +47,9 @@ bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms);
 void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank);
 void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank);
+
+/* Global user Show Mode target replacement; validates before any mutation. */
+bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ uint32_t now_ms);
+void ot_fx_bank_stop_continuous(ot_fx_zone_bank_t *bank);

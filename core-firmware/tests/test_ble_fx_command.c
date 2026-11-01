@@ -24,5 +24,14 @@ int main(void){
   assert(v.effect_id==32768u);
   cmd[15]=4;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   cmd[2]=3;cmd[3]=0;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  /* Continuous lifetime is explicit; legacy TTL zero remains invalid. */
+  cmd[2]=0;cmd[3]=0;cmd[15]=0;cmd[16]=0;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[1]=OT_BLE_FX_CONTINUOUS_OPCODE;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),false,&v)==OT_BLE_FX_UNAUTHORIZED);
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  assert(v.ttl_sec==1u && v.effect_id==0);
+  cmd[16]=5;
+  assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   return 0;
 }

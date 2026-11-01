@@ -7,13 +7,13 @@
     "android": {
       "pr": 87,
       "sha": "449462c72f47baac2c66e56296d1166202b6174a",
-      "tree": "601ba7f84fd2975330d98e22917ea3d5d2d7cb5f",
+      "tree": "e47531658b459f06b24283d7e8488b6298bee522",
       "baseline_tree": "63e54fd0e4c4c61d945d7ae4c30d73294be151c5"
     },
     "firmware": {
       "pr": 84,
       "sha": "b13894c0550366a0e74ef6fd93c83cfa6dd19aa4",
-      "tree": "b5143647c5b9f0ea6dac53a0ce58aacaf6c381ce"
+      "tree": "1e1fe69990e9bf7fe10434450dcba14ed7ab494d"
     },
     "effects": {
       "pr": 80,
@@ -400,5 +400,37 @@
     ],
     "owner_evidence": "Owner reports LEDs illuminate after suggested CORE readback/bench-test flow; original root cause not conclusively isolated",
     "physical_certification": false
+  },
+  "continuous_correction": {
+    "base_sha": "478780ae29ecd598ce70c6357875097bc39758a4",
+    "allowed_runtime_changes": [
+      "core-firmware/main/ble_fx_command.h",
+      "core-firmware/main/ble_fx_command.c",
+      "core-firmware/main/fx_zone_bank.h",
+      "core-firmware/main/fx_zone_bank.c",
+      "core-firmware/main/opentail_core.c",
+      "core-firmware/main/ble_status.c",
+      "android/app/src/main/java/com/opentail/android/ContinuousFxCommand.java",
+      "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
+      "android/app/src/main/java/com/opentail/android/LiveBlePreview.kt",
+      "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+      "android/app/src/test/java/com/opentail/android/ContinuousFxCommandTest.java",
+      "core-firmware/tests/test_ble_fx_command.c",
+      "core-firmware/tests/test_continuous_fx.c",
+      "core-firmware/tests/run-host-tests.sh",
+      "android/qa/test_native_source.cjs",
+      "android/qa/test_live_edit.cjs",
+      "android/qa/check_release.py",
+      "core-firmware/tests/test_http_stop_contract.py"
+    ],
+    "protocol": "v1 opcode10 reserved0; INFO continuous-fx-v1",
+    "owner_ui_exceptions": [
+      "Home STOP",
+      "Home-only authorization",
+      "developer tools in Settings-Firmware",
+      "inline Layout output settings",
+      "tappable Firmware row"
+    ],
+    "phone_preview": "local; manual CORE snapshots only"
   }
 }

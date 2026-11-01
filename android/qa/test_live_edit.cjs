@@ -71,7 +71,7 @@ for(const required of [
 for(const required of [
   'class LiveBlePreview', 'private val intervalMs = 60L', 'handler.postDelayed(drain',
   'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
-  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId, 5', 'ble.showFx(', 'fun stop()',
+  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId', 'ble.showContinuousFx(', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
@@ -103,7 +103,7 @@ assert(palette.includes('fun coreSupports(effectId: Int, paletteId: Int): Boolea
   'CORE palette support must remain a narrowly scoped protocol gate');
 assert(preview.includes('val paletteId: Int,') &&
        preview.includes('NativePaletteEngine.coreSupports(frame.effectId, frame.paletteId)') &&
-       preview.includes('frame.paletteId, 5'),
+       preview.includes('frame.paletteId'),
   'Unsupported palette IDs must never enter a physical BLE FX packet');
 const previewGate=compose.split('private fun previewCurrentEffect(effectOverride: Int? = null) {')[1]
   ?.split('private val importer =')[0];
@@ -184,5 +184,25 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; temporary 
         'Authenticated effect edits must not require an already-armed preview');
  assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
         compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&
-        compose.includes('if (ble.canControl() && id in supportedIds.value) {\n                    offlinePreview.value = false'),
+        compose.includes('previewCurrentEffect()'),
         'Explicit existing physical bench controls must leave Preview Offline');
+
+ // Owner continuous-playback and release-control contract.
+ assert(preview.includes('ble.showContinuousFx(') &&
+        preview.includes('fun detach()') && !preview.includes('frame.paletteId, 5'),
+        'Show Mode must not use TTL or a keepalive loop');
+ assert(compose.includes('if(text=="Home") IconAction("Stop CORE show","stop",t)'), 'STOP must be available on Home');
+ const lifecycle=compose.split('override fun onStop() {')[1].split('super.onDestroy()')[0];
+ assert(!lifecycle.includes('livePreview.stop()') && lifecycle.includes('livePreview.detach()'),
+        'Backgrounding must not stop CORE playback');
+ assert(compose.includes('val localSketch = animateOffline && renderer.available()') &&
+        !compose.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)'),
+        'Connected preview must render locally without automatic snapshots');
+ const releaseSettings=compose.split('private fun SettingsPage(')[1].split('private fun HardwareOutputEditor(')[0];
+ assert(!releaseSettings.includes('ble.authorizeOrPair()') &&
+        compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
+        'Authorization belongs on Home; Firmware row is tappable');
+ assert(!compose.includes('Title("CORE Output Manager"') &&
+        compose.includes('Text("Controller output"') &&
+        releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
+        'Output editing inline; developer input map only in Firmware');
