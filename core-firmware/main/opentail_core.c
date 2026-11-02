@@ -940,7 +940,8 @@ bool ot_ble_apply_show(const ot_ble_show_packet_t *request){
  */
 static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalone,
                                       const ot_fx_spark_style_t *spark,
-                                      const ot_fx_overlay_config_t *overlay,bool continuous){
+                                      const ot_fx_overlay_config_t *overlay,bool continuous,
+                                      const ot_ble_fx_tertiary_t *tertiary){
     ot_wled_fx_metadata_t meta;
     if((overlay&&!ot_fx_overlay_valid(overlay))||
        !req||!ot_effects_1d_metadata(req->effect_id,&meta)||
@@ -957,7 +958,8 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ready=native_outputs_ready;
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=continuous?ot_fx_bank_apply_continuous(&fx_bank,req,om_outputs,now_ms):
+        ready=continuous?ot_fx_bank_apply_continuous_tertiary(&fx_bank,req,om_outputs,
+            tertiary,now_ms):
             ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
         if(ready&&spark){
             /* Optional sparkle tuning is transient per-zone state. Preserve
@@ -1001,10 +1003,17 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     return ready;
 }
 bool ot_ble_apply_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,false,NULL,NULL,false); /* live 60-sec bench preview */
+    return ot_ble_apply_fx_internal(req,false,NULL,NULL,false,NULL); /* live 60-sec bench preview */
 }
 bool ot_ble_apply_continuous_fx(const ot_ble_fx_packet_t *req){
-    return ot_ble_apply_fx_internal(req,true,NULL,NULL,true);
+    return ot_ble_apply_fx_internal(req,true,NULL,NULL,true,NULL);
+}
+/* Additional volatile third RGB is always scoped to one authenticated
+ * continuous request and never enters preset/NVS or standalone records. */
+bool ot_ble_apply_continuous_fx_tertiary(const ot_ble_fx_packet_t *req,
+                                         const ot_ble_fx_tertiary_t *tertiary){
+    return tertiary&&tertiary->set?
+        ot_ble_apply_fx_internal(req,true,NULL,NULL,true,tertiary):false;
 }
 /* Firmware-driven effect capability catalog for the CORE developer page.
  * Only the renderer implementations compiled into this firmware are listed.
@@ -1141,7 +1150,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         request_render_refresh();
         return send_json(r,"{\"ok\":true,\"overlay_only\":true,\"phase_preserved\":true,\"bench_only\":true}");
     }
-    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false))
+    if(!ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false,NULL))
         return respond_err(r,409,"unsupported effect, palette, or no configured zones");
     char payload[152];
     snprintf(payload,sizeof(payload),
@@ -1207,7 +1216,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         }
     };
     cJSON_Delete(obj);
-    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL,false))
+    if(!ot_ble_apply_fx_internal(&req,false,&spark,NULL,false,NULL))
         return respond_err(r,409,"no configured active output zones or outputs not ready");
     char payload[185];
     snprintf(payload,sizeof(payload),
@@ -1281,7 +1290,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      e=nvs_get_blob(h,key,&legacy,&n);
      nvs_close(h);
      return e==ESP_OK&&n==sizeof(legacy)&&ot_fx_preset_valid(&legacy)&&
-         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false);
+         ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false,NULL);
  }
  if(n!=sizeof(ot_fx_scene_record_t)){nvs_close(h);return false;}
  ot_fx_scene_record_t record={0};
@@ -2092,6 +2101,8 @@ static void led_task(void *p) {
                                .palette_id=fx->palette_id,.frame_time_ms=(uint16_t)frame_delta_ms,
                                .foreground={fx->r,fx->g,fx->b},
                                .background={fx->bg_r,fx->bg_g,fx->bg_b},
+                               .tertiary={slot->tertiary.r,slot->tertiary.g,slot->tertiary.b},
+                               .tertiary_set=slot->tertiary.set,
                                .spark_style=slot->spark.style,
                                .spark_peak=slot->spark.peak,
                                .spark_color=slot->spark.color,

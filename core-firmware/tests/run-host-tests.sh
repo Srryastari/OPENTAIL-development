@@ -46,6 +46,15 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_1d.c tests/test_wle
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_command.c tests/test_ble_command.c -o /tmp/ot-ble-show-tests && /tmp/ot-ble-show-tests
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c main/wled_1d.c tests/test_ble_fx_command.c -o /tmp/ot-ble-fx-tests -lm && /tmp/ot-ble-fx-tests
+# Dedicated P0 third-color transport and per-zone phase, with existing BLE/NVS intact.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c \
+  main/palette_1d.c main/wled_fx_compat.c main/particle_system_1d.c \
+  main/wled_1d.c main/fx_zone_bank.c main/fx_overlay_engine.c \
+  main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_ble_fx_tertiary.c -o /tmp/ot-ble-fx-tertiary -lm
+/tmp/ot-ble-fx-tertiary
+python3 tests/test_ble_tertiary_wiring_contract.py
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_auto_effects.c -o /tmp/ot-auto-effects-tests -lm && /tmp/ot-auto-effects-tests
 # All named OpenTail originals, including the Event Horizon special and

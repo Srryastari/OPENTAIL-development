@@ -1,0 +1,235 @@
+name: CORE tertiary BLE exact-SHA software gate (bench only)
+on:
+  pull_request:
+    branches: [effects/issue93-shared-tertiary-roles-20261101]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-and-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact Effects 95 source, no Android/NVS/OTA/UI changes or gate weakening
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          base="984a12aeec4e348b869ba2504a2f994fc944f7f2"
+          initial="b970f92c9155ac9e2d2c9ffa54afa2d1ca3502cd"
+          allowed={
+             "core-firmware/main/ble_fx_command.c",
+             "core-firmware/main/ble_fx_command.h",
+             "core-firmware/main/ble_status.c",
+             "core-firmware/main/fx_zone_bank.c",
+             "core-firmware/main/fx_zone_bank.h",
+             "core-firmware/main/opentail_core.c",
+             "core-firmware/tests/test_ble_fx_tertiary.c",
+             "core-firmware/tests/test_http_stop_contract.py",
+             "core-firmware/tests/test_dev_console_contract.py",
+             "core-firmware/tests/test_ble_tertiary_wiring_contract.py",
+             "core-firmware/tests/run-host-tests.sh",
+             "scripts/package_core_flash.py",
+             "scripts/tests/test_core_flash_package.py",
+             "docs/CORE-FLASH-PACKAGE-RECEIPT-2026-11-01.md",
+             ".github/workflows/verify-core-tertiary-ble.yml",
+             "docs/CORE-TERTIARY-BLE-CONTRACT-2026-11-01.md",
+          }
+          def git(*args):
+              return subprocess.check_output(["git",*args],text=True).strip()
+          assert git("merge-base","--is-ancestor",initial,"HEAD")==""
+          assert git("merge-base","--is-ancestor",base,"HEAD")==""
+          paths=set(git("diff","--name-only",base,"HEAD").splitlines())
+          assert paths<=allowed, "Out-of-scope files: "+repr(paths-allowed)
+          for name in (
+              "core-firmware/main/wled_fx_compat.c",
+              "core-firmware/main/wled_fx_compat.h",
+              "core-firmware/main/effects_1d.c",
+              "core-firmware/main/effects_1d.h",
+              "core-firmware/main/fx_preset_record.h",
+              "core-firmware/main/fx_preset_record.c",
+              "core-firmware/main/output_manager.c",
+              "core-firmware/main/trigger_manager.c",
+              "core-firmware/main/ot_failover_essential.c",
+              "core-firmware/main/ot_version.h",
+              "docs/CI-REGRESSION-BASELINE.json",
+              ".github/workflows/verify-active-sources.yml",
+              "scripts/check_regressions.py",
+          ):
+              assert git("rev-parse","HEAD:"+name)==git("rev-parse",base+":"+name),name
+          assert all(not x.startswith(("android/","web-studio/")) for x in paths)
+          assert "core-firmware/main/ble_status.c" in paths
+          print("PASS: exact Effects95 renderer, old NVS and 22 physical gates unchanged")
+          PY
+      - name: Tertiary GATT/CORE/NVS static contract
+        run: python3 core-firmware/tests/test_ble_tertiary_wiring_contract.py
+      - name: Flash ZIP correctness regression including missing real OTA data
+        run: python3 -m unittest -v scripts/tests/test_core_flash_package.py
+
+  complete-core-host:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert immutable SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Full CORE and all-140 effects, tertiary, Trigger, BLE, STOP, NVS tests
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Diff-aware regression audit (physical release remains blocked)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  trigger-safety:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Pin exactly tested independent trigger SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Physical arbitration/8-input remap/trigger durable record source regression
+        run: |
+          python3 core-firmware/tests/test_trigger_runtime_contract.py
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c main/show_logic.c tests/test_trigger_manager.c \
+            -o /tmp/ot-trigger-safety && /tmp/ot-trigger-safety
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c tests/test_prior_trigger_profiles.c \
+            -o /tmp/ot-prior-trigger-safety && /tmp/ot-prior-trigger-safety
+
+  android-contract-unchanged:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Android UI unchanged and original 140-effect contract still readable
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
+
+  android-97-wire-compatibility:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: Srryastari/OPENTAIL-development
+          ref: ca758652f659e123f39f20ae3411c92c8e7b4d19
+          path: android97
+          persist-credentials: false
+      - name: Verify exact Android #97 SHA, JNI C source and BLE opcode compatibility
+        run: |
+          test "$(git -C android97 rev-parse HEAD)" = "ca758652f659e123f39f20ae3411c92c8e7b4d19"
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path(".")
+          a=root/"android97/android/app/src/main/cpp/core"
+          b=root/"core-firmware/main"
+          for name in ("effects_1d.c","effects_1d.h",
+                       "wled_fx_compat.c","wled_fx_compat.h"):
+              assert (a/name).read_bytes()==(b/name).read_bytes(),name
+          packet=(root/"android97/android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java").read_text()
+          header=(b/"ble_fx_command.h").read_text()
+          status=(b/"ble_status.c").read_text()
+          for token in ("static final int OPCODE=11","new byte[20]","out[16]=1",
+                        "out[17]","out[18]","out[19]",
+                        '"fx-tertiary-v1"'):
+              assert token in packet,token
+          assert '#define OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE 11u' in header
+          assert '#define OT_BLE_FX_TERTIARY_WIRE_BYTES 20u' in header
+          assert 'OT_BLE_FX_TERTIARY_CAPABILITY' in status
+          print("PASS Android #97: four exact Effects JNI C blobs, opcode11, 20B, presence flag, RGB and capability")
+          PY
+
+  esp-idf-555-and-bench-binaries:
+    needs: [complete-core-host, trigger-safety, android-contract-unchanged, android-97-wire-compatibility]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert same tested SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF v5.5.5 ESP32-S3 build — NO FLASH
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Build manifest-locked ZIP using four real ESP-IDF images — NO SUBSTITUTES
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build \
+            --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip" \
+            --source-sha "$PIN"
+      - name: Verify extracted ZIP CRC, flash offsets and every SHA256
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}.zip
+            core-firmware/releases/opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  downloaded-zip-integrity:
+    needs: esp-idf-555-and-bench-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Retrieve actual published artifact ZIP and checksum from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}
+          path: downloaded-bench
+      - name: Fail if downloaded flash package omits OTA or mismatches any manifest SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "downloaded-bench/opentail-core-tertiary-complete-$PIN.zip" \
+            --sha256-file "downloaded-bench/opentail-core-tertiary-complete-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# 22 physical checks, independent hardware failover, Android phone certification
+# and vehicle release remain unverified. Do not flash or merge.
