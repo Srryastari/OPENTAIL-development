@@ -20,6 +20,9 @@ typedef struct {
 } ot_effects_1d_state_t;
 size_t ot_effects_1d_supported_ids(uint16_t *dst,size_t capacity);
 bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta);
+/* Authoritative three-position color role contract for every catalog ID.
+ * Disabled intermediate slots are not compacted; no BLE/UI ABI changes. */
+bool ot_effects_1d_color_roles(uint16_t id,ot_wled_fx_color_role_t roles[3]);
 void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed);
 bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     ot_effects_1d_state_t *s,uint32_t ms,ot_wled_rgb_t *frame,size_t count);
