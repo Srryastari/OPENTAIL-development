@@ -286,6 +286,13 @@ typedef struct {
      * 73-255). Owned by the caller; never retained or modified by CORE.
      * No wire, persistence, or generation/scheduling behavior is implied. */
     const ot_wled_palette16_t *resolved_palette;
+    /* Optional third RGB slot used only by metadata-declared three-color
+     * modes. Appended: existing zero-initialized initializers and the BLE/NVS
+     * two-color contracts stay unchanged. Explicit zero is a valid color.
+     * Solid Glitter's legacy omitted slot is white; other omitted slots black.
+     * Do not serialize this field using the existing BLE v1/v3 commands. */
+    ot_wled_rgb_t tertiary;
+    bool tertiary_set;
 } ot_wled_fx_config_t;
 typedef struct {
     uint16_t pos;
@@ -316,6 +323,14 @@ typedef struct {
     bool supports_palette;    /* false until palette behavior is ported and tested */
 } ot_wled_fx_metadata_t;
 
+/* Source metadata owns color role/count. Empty/disabled slots must remain
+ * empty rather than being compacted (e.g. Solid Glitter uses slots 0 and 2).
+ * Names fit source's role tokens; no new BLE field or editor geometry. */
+typedef struct {
+    bool enabled;
+    char label[24];
+} ot_wled_fx_color_role_t;
+bool ot_wled_fx_color_roles(uint16_t id,ot_wled_fx_color_role_t roles[3]);
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out);
 /* Enumerates exactly the locally implemented FX IDs for BLE capabilities. */
 size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids);
