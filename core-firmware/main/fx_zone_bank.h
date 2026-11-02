@@ -19,6 +19,7 @@ typedef struct {
     bool continuous; /* volatile user Show Mode, not a saved preset */
     bool standalone; /* explicitly played stored preset; survives BLE disconnection */
     ot_ble_fx_packet_t request;
+    ot_ble_fx_tertiary_t tertiary; /* volatile only: NVS FX records unchanged */
     ot_fx_spark_style_t spark;
     ot_fx_overlay_config_t overlay; /* volatile per-zone compositor */
     uint32_t started_ms; /* stable animation/overlay phase anchor */
@@ -52,6 +53,9 @@ void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank);
 bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
  uint32_t now_ms);
+bool ot_fx_bank_apply_continuous_tertiary(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_ble_fx_tertiary_t *tertiary,uint32_t now_ms);
 void ot_fx_bank_stop_continuous(ot_fx_zone_bank_t *bank);
 
 /* Retire expired legacy slots during regular render housekeeping so timer
