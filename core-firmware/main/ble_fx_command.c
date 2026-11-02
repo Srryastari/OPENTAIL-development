@@ -23,3 +23,38 @@ ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
   };
   return OT_BLE_FX_OK;
 }
+
+/* Only Effects #95's eleven independently exercised authored consumers
+ * accept the optional third color. Eight further advertised source grammar
+ * roles remain NOT VERIFIED and must not be falsely admitted over BLE. */
+static bool third_color_source_verified(uint16_t id){
+    switch(id){
+        case 28u:case 29u:case 34u:case 50u:case 52u:
+        case 54u:case 55u:case 56u:case 84u:case 87u:case 103u:
+            return true;
+        default:return false;
+    }
+}
+ot_ble_fx_result_t ot_ble_fx_parse_tertiary(const uint8_t *p,size_t n,
+    bool authorized,ot_ble_fx_packet_t *out,ot_ble_fx_tertiary_t *third){
+    if(!p||!out||!third||n!=OT_BLE_FX_TERTIARY_WIRE_BYTES||
+       p[0]!=1u||p[1]!=OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE||
+       p[16]!=1u)return OT_BLE_FX_BAD_WIRE;
+    if(!authorized)return OT_BLE_FX_UNAUTHORIZED;
+    /* Reuse the established 17-byte admission, including palette,
+     * output-zone masks, brightness and continuous lifetime rules.
+     * Failed parsing never mutates either caller-owned output. */
+    uint8_t legacy[OT_BLE_FX_WIRE_BYTES]={0};
+    for(unsigned i=0;i<16u;i++)legacy[i]=p[i];
+    legacy[1]=OT_BLE_FX_CONTINUOUS_OPCODE;legacy[16]=0u;
+    ot_ble_fx_packet_t candidate={0};
+    const ot_ble_fx_result_t rc=ot_ble_fx_parse(legacy,sizeof(legacy),true,&candidate);
+    if(rc!=OT_BLE_FX_OK)return rc;
+    ot_wled_fx_color_role_t roles[3]={0};
+    if(!third_color_source_verified(candidate.effect_id)||
+       !ot_effects_1d_color_roles(candidate.effect_id,roles)||
+       !roles[2].enabled)return OT_BLE_FX_UNSUPPORTED;
+    *out=candidate;
+    *third=(ot_ble_fx_tertiary_t){.r=p[17],.g=p[18],.b=p[19],.set=true};
+    return OT_BLE_FX_OK;
+}
