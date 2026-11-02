@@ -28,6 +28,8 @@
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
 extern bool ot_ble_apply_fx(const ot_ble_fx_packet_t *request);
 extern bool ot_ble_apply_continuous_fx(const ot_ble_fx_packet_t *request);
+extern bool ot_ble_apply_continuous_fx_tertiary(const ot_ble_fx_packet_t *request,
+                                                const ot_ble_fx_tertiary_t *tertiary);
 extern void ot_ble_stop_show(void);
 extern void ot_ble_disconnect_show(void);
 extern bool ot_ble_save_fx_preset(uint8_t slot);
@@ -138,7 +140,7 @@ static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0x
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1";
+    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY;
     return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -199,11 +201,19 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
     } else if(n==2 && buf[0]==OT_BLE_WIRE_V1 && buf[1]==OT_BLE_RELEASE_TEMPORARY){
         if(!authorized)last_result=OT_BLE_ERR_AUTH;
         else {ot_ble_disconnect_show();last_result=OT_BLE_OK_RELEASED;}
-    } else if(n>=2 && buf[0]==1 && (buf[1]==OT_BLE_FX_OPCODE || buf[1]==OT_BLE_FX_CONTINUOUS_OPCODE)) {
+    } else if(n>=2 && buf[0]==1 && (buf[1]==OT_BLE_FX_OPCODE ||
+                     buf[1]==OT_BLE_FX_CONTINUOUS_OPCODE ||
+                     buf[1]==OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE)) {
         ot_ble_fx_packet_t fx={0};
-        ot_ble_fx_result_t result=ot_ble_fx_parse(buf,n,authorized,&fx);
+        ot_ble_fx_tertiary_t tertiary={0};
+        const bool extended=buf[1]==OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE;
+        ot_ble_fx_result_t result=extended?
+            ot_ble_fx_parse_tertiary(buf,n,authorized,&fx,&tertiary):
+            ot_ble_fx_parse(buf,n,authorized,&fx);
         if(result==OT_BLE_FX_OK)
-            last_result=(buf[1]==OT_BLE_FX_CONTINUOUS_OPCODE?ot_ble_apply_continuous_fx(&fx):ot_ble_apply_fx(&fx))?OT_BLE_OK_FX:OT_BLE_ERR_BUSY;
+            last_result=(extended?ot_ble_apply_continuous_fx_tertiary(&fx,&tertiary):
+                         buf[1]==OT_BLE_FX_CONTINUOUS_OPCODE?ot_ble_apply_continuous_fx(&fx):
+                         ot_ble_apply_fx(&fx))?OT_BLE_OK_FX:OT_BLE_ERR_BUSY;
         else if(result==OT_BLE_FX_UNAUTHORIZED)last_result=OT_BLE_ERR_AUTH;
         else if(result==OT_BLE_FX_RANGE || result==OT_BLE_FX_UNSUPPORTED)last_result=OT_BLE_ERR_RANGE;
         else last_result=OT_BLE_ERR_WIRE;
