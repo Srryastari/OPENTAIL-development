@@ -132,6 +132,44 @@ int main(void){
     ot_effects_1d_reset(&zone,41u);
     cfg.palette_id=0u;cfg.resolved_palette=NULL;
 
+    /* A 140-mode metadata audit also found additional source-owned third
+     * roles. Honor those only when tertiary_set is explicit; preserve all
+     * legacy 2-color WLED RGB source parity at tertiary_set=false. */
+    expect_roles(OT_WLED_TWO_DOTS,"1","2","BG");
+    expect_roles(OT_WLED_CHASE_COLOR,"1","2","3");
+    expect_roles(OT_WLED_CHASE_RANDOM,"1",NULL,"3");
+    expect_roles(OT_WLED_RUNNING_DUAL,"L","2","R");
+    expect_roles(OT_WLED_GLITTER,NULL,NULL,"GL");
+    cfg.tertiary=yellow;cfg.tertiary_set=true;
+    cfg.palette_id=0u;cfg.resolved_palette=NULL;
+    cfg.brightness=255u;cfg.intensity=255u;cfg.speed=128u;
+    const uint16_t extra_three[]={
+        OT_WLED_CHASE_COLOR,OT_WLED_CHASE_RANDOM,OT_WLED_TWO_DOTS
+    };
+    for(size_t k=0;k<3u;k++){
+        cfg.effect_id=extra_three[k];
+        ot_wled_fx_reset(&st);
+        assert(ot_wled_fx_render(&cfg,&st,33u,pixels,97u));
+        assert(found(pixels,97u,yellow));
+    }
+    cfg.effect_id=OT_WLED_RUNNING_DUAL;
+    ot_wled_fx_reset(&st);
+    cfg.tertiary_set=false;
+    assert(ot_wled_fx_render(&cfg,&st,137u,pixels,97u));
+    memcpy(old_frame,pixels,sizeof(old_frame));
+    cfg.tertiary_set=true;
+    assert(ot_wled_fx_render(&cfg,&st,137u,pixels,97u));
+    assert(memcmp(old_frame,pixels,sizeof(old_frame))!=0);
+    ot_wled_fx_reset(&st);
+    cfg.effect_id=OT_WLED_GLITTER;
+    int found_custom_gl=0;
+    for(unsigned k=0;k<32u;k++){
+        assert(ot_wled_fx_render(&cfg,&st,k*16u,pixels,97u));
+        found_custom_gl|=found(pixels,97u,yellow);
+    }
+    assert(found_custom_gl);
+    ot_wled_fx_reset(&st);
+
     uint16_t ids[160]={0};
     const size_t total=ot_effects_1d_supported_ids(ids,160u);
     assert(total==140u);
