@@ -135,6 +135,7 @@ int main(void){
      * cadence/seed traces, not invented in-between-frame interpolation. */
     c.effect_id=90u;c.speed=128u;c.intensity=255u;c.background=black;
     ot_wled_fx_state_t fw1={0},fw2={0};
+    memset(p,0,97u*sizeof(*p));memset(other,0,97u*sizeof(*other));
     for(uint32_t t=0u;t<2000u;t+=23u){
         p[97]=guard;other[97]=guard;
         assert(ot_wled_fx_render(&c,&fw1,t,p,97u));
