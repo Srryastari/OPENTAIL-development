@@ -20,6 +20,8 @@ assert 'p[16]!=1u' in parser
 assert 'ot_ble_fx_parse(legacy,sizeof(legacy),true,&candidate)' in parser
 assert 'if(!authorized)return OT_BLE_FX_UNAUTHORIZED' in parser
 assert 'third_color_source_verified' in parser
+assert 'ot_wled_fx_tertiary_supported(id)' in parser
+assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in parser
 assert 'ot_effects_1d_color_roles' in parser
 assert 'ot_ble_fx_parse_tertiary(buf,n,authorized,&fx,&tertiary)' in ble
 assert 'ot_ble_apply_continuous_fx_tertiary' in ble
