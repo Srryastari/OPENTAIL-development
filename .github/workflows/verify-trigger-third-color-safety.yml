@@ -1,0 +1,71 @@
+# Independent software-only Trigger sign-off of the stacked Issue93 candidate.
+# The PR under review contains only Trigger-owned tests/CI, and this job
+# explicitly checks out the integrated candidate (not refs/pull/N/merge).
+name: OpenTail third-color Trigger exact-head safety (no hardware)
+on:
+  pull_request:
+    branches: [android/issue93-jni-tertiary-metadata-20261101]
+    paths:
+      - 'core-firmware/tests/test_trigger_tertiary_safety.c'
+      - '.github/workflows/verify-trigger-third-color-safety.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated-third-color-trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ca758652f659e123f39f20ae3411c92c8e7b4d19
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact integrated candidate and unchanged CORE relative to Firmware 96
+        env:
+          PIN: ca758652f659e123f39f20ae3411c92c8e7b4d19
+          FIRMWARE96: 2b312f163e6c98ede35ee98e1db0c22c00f122ab
+        run: |
+          set -eu
+          actual="$(git rev-parse HEAD)"
+          echo "Actual CORE test checkout: $actual"
+          test "$actual" = "$PIN"
+          test -z "$(git diff --name-only "$FIRMWARE96" "$PIN" -- core-firmware)"
+          echo "PASS: exact source SHA and unchanged Firmware96 CORE tree" >> "$GITHUB_STEP_SUMMARY"
+      - name: All combined CORE/Trigger/Effects/BLE/STOP/NVS host regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Independent third-color physical-override and resume regression
+        run: |
+          set -eu
+          # Compile the Trigger test from this review PR against the pinned,
+          # unmodified integration source. No runtime files are changed.
+          mkdir -p /tmp/ot-trigger-third-review
+          git show ${{ github.event.pull_request.head.sha }}:core-firmware/tests/test_trigger_tertiary_safety.c > /tmp/ot-trigger-third-review/test_trigger_tertiary_safety.c
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
+            core-firmware/main/ble_fx_command.c \
+            core-firmware/main/effects_1d.c \
+            core-firmware/main/ot_auto_effects.c \
+            core-firmware/main/palette_1d.c \
+            core-firmware/main/wled_fx_compat.c \
+            core-firmware/main/particle_system_1d.c \
+            core-firmware/main/wled_1d.c \
+            core-firmware/main/fx_zone_bank.c \
+            core-firmware/main/fx_overlay_engine.c \
+            core-firmware/main/trigger_manager.c \
+            core-firmware/main/output_manager.c \
+            core-firmware/main/core_logic.c \
+            core-firmware/main/arbitration_logic.c \
+            core-firmware/main/show_logic.c \
+            /tmp/ot-trigger-third-review/test_trigger_tertiary_safety.c \
+            -o /tmp/ot-trigger-third-review/check -lm
+          /tmp/ot-trigger-third-review/check
+      - name: Provenance: no physical release or safety arbitration files changed
+        env:
+          REVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          changed="$(git diff --name-only ca758652f659e123f39f20ae3411c92c8e7b4d19 "$REVIEW_SHA")"
+          test "$changed" = "$(printf '.github/workflows/verify-trigger-third-color-safety.yml\ncore-firmware/tests/test_trigger_tertiary_safety.c')"
+          echo "PASS: Trigger-only independent test files; physical NOT RUN" >> "$GITHUB_STEP_SUMMARY"
+# The full CORE code tested is ca758652f659e123f39f20ae3411c92c8e7b4d19, NOT this test PR's head.
+# Real inputs, GPIO/RMT/WS2815/optical measurement and failover remain NOT RUN.
