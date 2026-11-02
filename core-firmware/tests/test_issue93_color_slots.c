@@ -92,6 +92,46 @@ int main(void){
     assert(saw_glitter);
     ot_wled_fx_reset(&st);
 
+    /* Same-instance live color updates must change only their authored role,
+     * with identical absolute time. No effect switch/reselection is needed. */
+    cfg.effect_id=OT_WLED_TRICOLOR_CHASE;cfg.palette_id=0u;
+    cfg.tertiary=blue;cfg.tertiary_set=true;
+    cfg.speed=128u;cfg.intensity=255u;cfg.brightness=255u;
+    assert(ot_wled_fx_render(&cfg,&st,137u,pixels,97u));
+    ot_wled_rgb_t old_frame[97];
+    memcpy(old_frame,pixels,sizeof(old_frame));
+    const ot_wled_rgb_t yellow={255,255,0};
+    cfg.tertiary=yellow;
+    assert(ot_wled_fx_render(&cfg,&st,137u,pixels,97u));
+    int updated=0;
+    for(size_t k=0;k<97u;k++){
+        if(same(old_frame[k],blue)){
+            assert(same(pixels[k],yellow));updated++;
+        }else assert(same(old_frame[k],pixels[k]));
+    }
+    assert(updated>0);
+    ot_wled_fx_reset(&st);
+
+    /* An already-resolved, eligible palette can be replaced live while the
+     * effect ID/time remain fixed. This does not imply arbitrary unverified
+     * palette IDs have a fabricated local fallback. */
+    ot_wled_palette16_t pal_a={0},pal_b={0};
+    for(unsigned k=0;k<16u;k++){
+        pal_a.entries[k]=red;
+        pal_b.entries[k]=blue;
+    }
+    cfg.effect_id=OT_WLED_PALETTE;cfg.palette_id=73u;
+    cfg.resolved_palette=&pal_a;
+    ot_effects_1d_state_t zone={0};
+    ot_effects_1d_reset(&zone,41u);
+    assert(ot_effects_1d_render(&cfg,&zone,137u,pixels,97u));
+    memcpy(old_frame,pixels,sizeof(old_frame));
+    cfg.resolved_palette=&pal_b;
+    assert(ot_effects_1d_render(&cfg,&zone,137u,pixels,97u));
+    assert(memcmp(old_frame,pixels,sizeof(old_frame))!=0);
+    ot_effects_1d_reset(&zone,41u);
+    cfg.palette_id=0u;cfg.resolved_palette=NULL;
+
     uint16_t ids[160]={0};
     const size_t total=ot_effects_1d_supported_ids(ids,160u);
     assert(total==140u);
