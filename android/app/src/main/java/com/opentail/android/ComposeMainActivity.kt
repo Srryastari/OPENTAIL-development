@@ -970,6 +970,11 @@ class ComposeMainActivity : ComponentActivity() {
         val rendererPalette = OfflinePreviewPalettePolicy.availableRendererId(
             selectedRendererPalette, customStops != null)
         val currentPalette by rememberUpdatedState(rendererPalette)
+        val selectedOutput = outputs[outputId]
+        val actualOutputPixels by rememberUpdatedState(
+            selectedOutput?.optInt("pixels",0)?.coerceAtLeast(0) ?: 0)
+        val actualOutputZones by rememberUpdatedState(
+            selectedOutput?.optJSONArray("zones")?.length() ?: 0)
         val hasMicPermission = microphonePermissionRevision.let {
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -1003,16 +1008,27 @@ class ComposeMainActivity : ComponentActivity() {
                 val palette=currentPalette
                 val audio=if(effect==185)localMicrophone.latest() else null
                 val pixels=IntArray(30)
-                val rendered=withContext(Dispatchers.Default) {
-                    renderer.render(sample.elapsedMs,sample.frameMs,
+                val nativeStep=withContext(Dispatchers.Default) {
+                    val started=System.nanoTime()
+                    val ok=renderer.render(sample.elapsedMs,sample.frameMs,
                         params[2],params[3],params[4],palette,params[0],params[1],
                         third ?: 0xff000000.toInt(),third != null,
                         stops,audio?.get(0) ?: 0f,audio?.get(1) ?: 0f,
                         audio!=null,pixels)
+                    ok to ((System.nanoTime()-started)/1_000L)
                 }
                 if(!currentCoroutineContext().isActive)return@LaunchedEffect
-                localRenderAvailable.value=rendered
-                localColors.value=if(rendered)pixels else null
+                localRenderAvailable.value=nativeStep.first
+                localColors.value=if(nativeStep.first)pixels else null
+                // Debug-only diagnostic cadence; no UI, BLE, NVS or GPIO effects.
+                // O1 and O2 report independently, including variable zone sizes.
+                if(localClock.acceptedFrames()%120==0)
+                    android.util.Log.d("OpenTailPreview",
+                        "output=${outputId+1} zones=$actualOutputZones " +
+                        "configuredPixels=$actualOutputPixels samplePixels=30 " +
+                        "frames=${localClock.acceptedFrames()} " +
+                        "missedVsync=${localClock.skippedFrames()} " +
+                        "frameMs=${sample.frameMs} nativeUs=${nativeStep.second}")
             }
         }
         // Separate honest CORE telemetry from the saved design / read-only
