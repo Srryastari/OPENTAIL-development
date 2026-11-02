@@ -1,7 +1,7 @@
 name: Effects Issue93 authoritative renderer exact SHA
 on:
   pull_request:
-    branches: [codex/issue93-android-effects-preview]
+    branches: [codex/issue93-android-effects-preview, effects/issue93-shared-tertiary-roles-20261101, effects/issue99-motion-cadence-source-20261102]
     paths:
       - 'core-firmware/main/wled_fx_compat.*'
       - 'core-firmware/main/effects_1d.*'
