@@ -79,7 +79,11 @@ public class FullPreviewHarness {
   byte[] custom={0,12,50,100,(byte)255,(byte)200,3,22};String line;
   try{while((line=in.readLine())!=null){
    String[] f=line.split(",");int reset=Integer.parseInt(f[0]),id=Integer.parseInt(f[1]);
-   if(reset!=0){if(r!=null)r.close();r=new OfflineCoreRenderer(id,30);if(!r.available())throw new AssertionError("missing "+id);}
+   if(reset!=0){if(r!=null)r.close();r=new OfflineCoreRenderer(id,30);
+    if(!r.available())throw new AssertionError("missing "+id);
+    String[] roles=OfflineCoreRenderer.colorRoles(id);
+    if(roles==null||roles.length!=3)throw new AssertionError("missing source roles "+id);
+   }
    long ms=Long.parseLong(f[2]);int speed=Integer.parseInt(f[3]),intensity=Integer.parseInt(f[4]),bri=Integer.parseInt(f[5]),pal=Integer.parseInt(f[6]);
    int fg=(int)Long.parseLong(f[7]),bg=(int)Long.parseLong(f[8]);
    long start=System.nanoTime();
