@@ -35,6 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -922,7 +926,12 @@ class ComposeMainActivity : ComponentActivity() {
         val thirdSnapshot = if(settingsOverride != null)
             settingsOverride.getOrNull(6)?.takeUnless { it == Int.MIN_VALUE }
             else showThird
-        val renderer = remember(effect,offlineReplay.intValue) { OfflineCoreRenderer(effect,30) }
+        // The selected O1/O2 preview has a distinct renderer and phase clock.
+        // These are phone-only visual frames, never physical GPIO telemetry.
+        val outputId = captureOutput.intValue
+        val renderer = remember(effect,offlineReplay.intValue,outputId) {
+            OfflineCoreRenderer(effect,30)
+        }
         DisposableEffect(renderer) { onDispose { renderer.close() } }
         val localSketch = animateOffline && renderer.available()
         // Read custom gradient stops exactly; no invented palette colors.
@@ -945,10 +954,27 @@ class ComposeMainActivity : ComponentActivity() {
                 }.getOrNull()
             }
         }
-        val localColors = remember { IntArray(30) }
-        val localTimeNanos = remember(effect,offlineReplay.intValue) { mutableLongStateOf(0L) }
-        val localRenderAvailable = remember(effect) { mutableStateOf(true) }
-        val localFrameMs = remember(effect) { mutableIntStateOf(16) }
+        val localColors = remember(effect,offlineReplay.intValue,outputId) {
+            mutableStateOf<IntArray?>(null)
+        }
+        val localRenderAvailable = remember(effect,offlineReplay.intValue,outputId) {
+            mutableStateOf(true)
+        }
+        val localClock = remember(effect,offlineReplay.intValue,outputId) {
+            PreviewFrameClock()
+        }
+        val currentSettings by rememberUpdatedState(settings)
+        val currentThird by rememberUpdatedState(thirdSnapshot)
+        val currentStops by rememberUpdatedState(customStops)
+        val selectedRendererPalette = OfflinePreviewPalettePolicy.rendererId(effect,settings[5])
+        val rendererPalette = OfflinePreviewPalettePolicy.availableRendererId(
+            selectedRendererPalette, customStops != null)
+        val currentPalette by rememberUpdatedState(rendererPalette)
+        val selectedOutput = outputs[outputId]
+        val actualOutputPixels by rememberUpdatedState(
+            selectedOutput?.optInt("pixels",0)?.coerceAtLeast(0) ?: 0)
+        val actualOutputZones by rememberUpdatedState(
+            selectedOutput?.optJSONArray("zones")?.length() ?: 0)
         val hasMicPermission = microphonePermissionRevision.let {
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -964,18 +990,45 @@ class ComposeMainActivity : ComponentActivity() {
             }
             onDispose { if(needsMic) localMicrophone.stop() }
         }
-        LaunchedEffect(localSketch, effect, offlineReplay.intValue, foregroundActivity.value, previewPaused.value) {
-            if (!localSketch || effect == 0 || !foregroundActivity.value || previewPaused.value)
+        // Native frame stepping happens ONCE per vsync, off the Compose draw
+        // callback. Recomposition can redraw a cached frame but cannot advance
+        // native particles, phases or second-output clocks twice.
+        LaunchedEffect(localSketch,effect,offlineReplay.intValue,outputId,
+            foregroundActivity.value,previewPaused.value) {
+            if (!localSketch || !foregroundActivity.value || previewPaused.value) {
+                localClock.suspendTimestamp()
                 return@LaunchedEffect
-            var previous = -1L
+            }
             while (true) {
-                withFrameNanos { now ->
-                    if (previous >= 0L) {
-                        localTimeNanos.longValue += now - previous
-                        localFrameMs.intValue=((now-previous)/1_000_000L).toInt().coerceIn(1,65535)
-                    }
-                    previous = now
+                val sample=withFrameNanos { now -> localClock.onFrame(now) }
+                if (!sample.advance) continue
+                val params=currentSettings.copyOf()
+                val third=currentThird
+                val stops=currentStops
+                val palette=currentPalette
+                val audio=if(effect==185)localMicrophone.latest() else null
+                val pixels=IntArray(30)
+                val nativeStep=withContext(Dispatchers.Default) {
+                    val started=System.nanoTime()
+                    val ok=renderer.render(sample.elapsedMs,sample.frameMs,
+                        params[2],params[3],params[4],palette,params[0],params[1],
+                        third ?: 0xff000000.toInt(),third != null,
+                        stops,audio?.get(0) ?: 0f,audio?.get(1) ?: 0f,
+                        audio!=null,pixels)
+                    ok to ((System.nanoTime()-started)/1_000L)
                 }
+                if(!currentCoroutineContext().isActive)return@LaunchedEffect
+                localRenderAvailable.value=nativeStep.first
+                localColors.value=if(nativeStep.first)pixels else null
+                // Debug-only diagnostic cadence; no UI, BLE, NVS or GPIO effects.
+                // O1 and O2 report independently, including variable zone sizes.
+                if(localClock.acceptedFrames()%120==0)
+                    android.util.Log.d("OpenTailPreview",
+                        "output=${outputId+1} zones=$actualOutputZones " +
+                        "configuredPixels=$actualOutputPixels samplePixels=30 " +
+                        "frames=${localClock.acceptedFrames()} " +
+                        "missedVsync=${localClock.skippedFrames()} " +
+                        "frameMs=${sample.frameMs} nativeUs=${nativeStep.second}")
             }
         }
         // Separate honest CORE telemetry from the saved design / read-only
@@ -1015,22 +1068,10 @@ class ComposeMainActivity : ComponentActivity() {
                 val capsuleWidth=(size.width-gap*(columns-1))/columns
                 val pitch=capsuleWidth+gap
                 val capsuleHeight = 24.dp.toPx()
-                val audio = if(effect==185) localMicrophone.latest() else null
-                // Keep an effect's saved palette, but do not send it to
-                // CORE when that effect's metadata declares no palette.
-                // A previous Rainbow/Palette selection otherwise makes
-                // Blink, Bouncing Balls and proprietary originals fail render.
-                // Preview-only: the locked palette engine is unchanged.
-                val selectedRendererPalette = OfflinePreviewPalettePolicy.rendererId(effect,settings[5])
-                val rendererPalette = OfflinePreviewPalettePolicy.availableRendererId(
-                    selectedRendererPalette, customStops != null)
-                val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
-                    localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
-                    settings[0],settings[1],
-                    thirdSnapshot ?: 0xff000000.toInt(), thirdSnapshot != null,
-                    customStops,audio?.get(0) ?: 0f,
-                    audio?.get(1) ?: 0f,audio!=null,localColors)
-                if(localSketch) localRenderAvailable.value=localRendered
+                // Draw only immutable frame snapshots. Drawing is never a
+                // timing tick, never a JNI render, and never a BLE read.
+                val drawnPixels=localColors.value
+                val localRendered=localSketch && drawnPixels != null
                 for (col in 0 until columns) {
                     val sample = if (frame != null && frame.size() > 0)
                         col * (frame.size() - 1) / (columns - 1) else -1
@@ -1051,7 +1092,7 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                     val color = if (localSketch) {
-                        if(localRendered) Color(localColors[col]) else t.raised
+                        if(localRendered) Color(drawnPixels!![col]) else t.raised
                     } else if (sample >= 0) Color(frame!!.colorAt(sample))
                         else configuredColor
                     drawRoundRect(color,

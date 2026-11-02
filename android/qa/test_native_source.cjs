@@ -156,7 +156,7 @@ const captureLoop = compose.split('private fun EffectsPreview(t: Tone, effect: I
   ?.split('Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))')[0];
 const captureStart = bleSource.split('boolean captureFrame(int output) {')[1]
   ?.split('private final ArrayAdapter<String> entries;')[0];
-assert(captureLoop && captureLoop.includes('withFrameNanos { now ->') &&
+assert(captureLoop && captureLoop.includes('withFrameNanos { now -> localClock.onFrame(now) }') &&
        !captureLoop.includes('delay(500)') &&
        !captureLoop.includes('while(foregroundActivity.value && !offlinePreview.value && !previewPaused.value)') &&
        captureStart &&
@@ -241,7 +241,7 @@ assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
        bleSource.includes('infoReadPending'),
        'Actual firmware INFO metadata must remain safely serialized after owner authorization');
-assert(gradle.includes("versionName '0.2.0-alpha6'"));
+assert(gradle.includes("versionName '0.2.0-alpha7'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
@@ -1021,13 +1021,16 @@ for(const exercise of ['capabilityNegotiationFailsClosed',
 
 console.log('PASS: shipped Kotlin/Compose navigation, screens, universal geometry, BLE security, verified CORE frame path and project v4 contracts (static only).');
 
-assert(captureLoop.includes('val localTimeNanos = remember(effect,offlineReplay.intValue)') &&
-       captureLoop.includes('withFrameNanos { now ->') &&
+assert(captureLoop.includes('val localClock = remember(effect,offlineReplay.intValue,outputId)') &&
+       captureLoop.includes('withFrameNanos { now -> localClock.onFrame(now) }') &&
        !captureLoop.includes('delay(33L)') && !captureLoop.includes('localTick++'),
        'Local animation must use display timestamps and preserve phase across edits');
 const drawPreview=previewSrc.split('Canvas(Modifier.fillMaxWidth().height(24.dp))')[1].split('Row(Modifier.fillMaxWidth()')[0];
-assert(!drawPreview.includes('prefs.getInt(') && drawPreview.includes('renderer.render('),
-       'Preview draw must use one frame-stable parameter snapshot');
+assert(!drawPreview.includes('prefs.getInt(') && !drawPreview.includes('renderer.render(') &&
+       drawPreview.includes('val drawnPixels=localColors.value') &&
+       captureLoop.includes('withContext(Dispatchers.Default)') &&
+       captureLoop.includes('renderer.render(sample.elapsedMs,sample.frameMs'),
+       'Draw must only consume cached output-specific frames; JNI renders once per vsync');
 for(const call of ['this::authorizeStored','this::pairWithBoot','this::readTriggerMap',
                   '()->saveTriggerMap(expectedRevision,requested)','()->saveOutput(index,json)',
                   '()->fxPreset(action,slot)','()->authorize(tokenHex)'])
@@ -1044,7 +1047,8 @@ assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d'
 assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
        compose.includes('registerOnSharedPreferenceChangeListener(observer)') &&
        compose.includes('unregisterOnSharedPreferenceChangeListener(observer)') &&
-       compose.includes('settings[2],settings[3],settings[4],rendererPalette') &&
+       compose.includes('params[2],params[3],params[4],palette') &&
+       compose.includes('val currentSettings by rememberUpdatedState(settings)') &&
        compose.includes('OfflinePreviewPalettePolicy.rendererId(effect,settings[5])') &&
        fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt','utf8')
            .includes('NativeEffectParameters.forId(effectId)?.palette == true'),
