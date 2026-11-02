@@ -2087,11 +2087,20 @@ static uint8_t fx_cos8(uint8_t phase) {
  * primary (SEGCOLOR0) with its per-pixel beat-derived brightness. */
 static void bpm_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                       ot_wled_rgb_t *pixels,size_t count) {
-    const uint8_t phase=(uint8_t)(now/20u);
+    /* WLED's 8-bit phase subtraction wraps 0->255 at the low edge,
+     * producing full-brightness flashes and a hard 5.12s wrap that the
+     * owner saw as BPM stutter. Retain the beat rate and 1D offset but
+     * reflect the travel ramp and saturate brightness instead of wrapping.
+     * This intentional visual correction has a separate source golden. */
+    const uint32_t travel=(now/20u)&511u;
+    const uint32_t phase=travel<256u?travel:511u-travel;
     const uint8_t beat=fx_beatsin8(cfg->speed,64u,255u,now);
     for(size_t i=0;i<count;i++) {
-        const uint8_t intensity=(uint8_t)((uint32_t)beat-phase+i*10u);
-        pixels[i]=scaled(fx_video_fade(cfg->foreground,intensity),cfg->brightness);
+        int32_t level=(int32_t)beat-(int32_t)phase+(int32_t)(i*10u);
+        if(level<0)level=0;
+        if(level>255)level=255;
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,(uint8_t)level),
+                         cfg->brightness);
     }
 }
 /* Source mode_lake() palette=0: keep WLED's signed-range beatsin8
