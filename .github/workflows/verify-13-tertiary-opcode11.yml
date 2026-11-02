@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'core-firmware/main/ble_fx_command.c'
+      - 'core-firmware/main/ble_fx_command.h'
+      - 'core-firmware/main/ble_status.c'
+      - 'android/app/src/main/java/com/opentail/android/BleDiscovery.java'
       - 'core-firmware/tests/test_ble_fx_tertiary.c'
       - 'core-firmware/tests/test_ble_tertiary_wiring_contract.py'
       - 'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java'
@@ -35,6 +38,9 @@ jobs:
           assert git('merge-base','--is-ancestor',base,'HEAD')==''
           allowed={
             'core-firmware/main/ble_fx_command.c',
+            'core-firmware/main/ble_fx_command.h',
+            'core-firmware/main/ble_status.c',
+            'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
             'core-firmware/tests/test_ble_fx_tertiary.c',
             'core-firmware/tests/test_ble_tertiary_wiring_contract.py',
             'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java',
@@ -51,14 +57,12 @@ jobs:
             'core-firmware/main/wled_fx_compat.h',
             'core-firmware/main/effects_1d.c',
             'core-firmware/main/ot_auto_effects.c',
-            'core-firmware/main/ble_status.c',
             'core-firmware/main/opentail_core.c',
             'core-firmware/main/config_journal.c',
             'core-firmware/main/trigger_manager.c',
             'core-firmware/main/ot_version.h',
             'android/app/src/main/cpp/core/wled_fx_compat.c',
             'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
-            'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
             'scripts/package_core_flash.py',
             '.github/workflows/verify-active-sources.yml'):
               assert git('rev-parse','HEAD:'+p)==git('rev-parse',base+':'+p),p
