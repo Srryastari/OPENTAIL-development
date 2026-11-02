@@ -1255,7 +1255,8 @@ static void chase_frame(const ot_wled_fx_config_t *cfg,
                         ot_wled_fx_state_t *state,uint32_t now,
                         uint32_t call,ot_wled_rgb_t *pixels,size_t count) {
     ot_wled_rgb_t base=cfg->background;
-    ot_wled_rgb_t c2=cfg->foreground,c3=cfg->foreground;
+    ot_wled_rgb_t c2=cfg->foreground,
+                  c3=cfg->tertiary_set?cfg->tertiary:cfg->foreground;
     if(cfg->effect_id==OT_WLED_CHASE_RAINBOW) {
         uint32_t sep=256u/(uint32_t)count;
         if(sep==0u)sep=1u;
@@ -1294,7 +1295,9 @@ static void two_dots_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t other=scaled(black_bg?cfg->foreground:cfg->background,
                                    cfg->brightness);
-    for(size_t i=0;i<count;i++)pixels[i]=(ot_wled_rgb_t){0,0,0};
+    const ot_wled_rgb_t floor=scaled(cfg->tertiary_set?cfg->tertiary:
+                                        (ot_wled_rgb_t){0,0,0},cfg->brightness);
+    for(size_t i=0;i<count;i++)pixels[i]=floor;
     for(size_t j=0;j<width;j++) {
         pixels[(offset+j)%count]=fg;
         pixels[(offset+j+count/2u)%count]=other;
@@ -1425,7 +1428,8 @@ static void running_sine_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
         if(dual) {
             const uint32_t b=((uint32_t)count-1u-(uint32_t)i)*x_scale-counter;
             const uint8_t r=wled_sin_gap((uint16_t)b);
-            const ot_wled_rgb_t other=blend_colors(cfg->background,black,r);
+            const ot_wled_rgb_t other=blend_colors(cfg->background,
+                  cfg->tertiary_set?cfg->tertiary:black,r);
             c=blend_colors(c,other,127u);
         }
         pixels[i]=scaled(c,cfg->brightness);
@@ -1817,9 +1821,11 @@ static void chase_random_frame(const ot_wled_fx_config_t *cfg,
     const ot_wled_rgb_t base=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
     const ot_wled_rgb_t old=scaled(wheel_rgb((uint8_t)state->aux1),cfg->brightness);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
+    const ot_wled_rgb_t third=scaled(cfg->tertiary_set?
+                                     cfg->tertiary:cfg->foreground,cfg->brightness);
     for(size_t i=0;i<count;i++)pixels[i]=i>=a?old:base;
     for(size_t i=0;i<width;i++)pixels[(a+i)%count]=fg;
-    for(size_t i=0;i<width;i++)pixels[(a+width+i)%count]=fg;
+    for(size_t i=0;i<width;i++)pixels[(a+width+i)%count]=third;
 }
 
 /* Pinned FX.cpp mode_running_random() and its original 16-bit LCG.
@@ -3844,7 +3850,8 @@ static void glitter_frame(const ot_wled_fx_config_t *cfg,
     }
     if(cfg->intensity>fx_rand8(state,256u)) {
         const size_t pos=fx_rand_index(state,count);
-        pixels[pos]=scaled((ot_wled_rgb_t){255u,255u,255u},cfg->brightness);
+        pixels[pos]=scaled(cfg->tertiary_set?cfg->tertiary:
+                     (ot_wled_rgb_t){255u,255u,255u},cfg->brightness);
     }
 }
 
