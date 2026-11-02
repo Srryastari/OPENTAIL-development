@@ -1260,7 +1260,11 @@ static void chase_frame(const ot_wled_fx_config_t *cfg,
     if(cfg->effect_id==OT_WLED_CHASE_RAINBOW) {
         uint32_t sep=256u/(uint32_t)count;
         if(sep==0u)sep=1u;
-        base=wheel_rgb((uint8_t)((state->step*sep+call)&255u));
+        /* A truly black user background is an OFF region, not a hidden
+         * rainbow backlight. Preserve the source wheel when BG is nonzero. */
+        base=(cfg->background.r||cfg->background.g||cfg->background.b)?
+             wheel_rgb((uint8_t)((state->step*sep+call)&255u)):
+             (ot_wled_rgb_t){0,0,0};
         c3=cfg->background;
     } else if(cfg->effect_id==OT_WLED_CHASE_RAINBOW_WHITE) {
         const uint32_t n=state->step,m=(n+1u)%(uint32_t)count;
@@ -1822,8 +1826,13 @@ static void chase_random_frame(const ot_wled_fx_config_t *cfg,
     }
     state->step=(uint32_t)a;
     const size_t width=1u+(((uint32_t)cfg->intensity*(uint32_t)count)>>10);
-    const ot_wled_rgb_t base=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
-    const ot_wled_rgb_t old=scaled(wheel_rgb((uint8_t)state->aux1),cfg->brightness);
+    /* Source wheel remains available with an authored nonblack BG.
+     * Explicit #000000 means moving-color-only for the owner preview. */
+    const bool off_bg=!(cfg->background.r||cfg->background.g||cfg->background.b);
+    const ot_wled_rgb_t base=scaled(off_bg?(ot_wled_rgb_t){0,0,0}:
+                       wheel_rgb((uint8_t)state->aux0),cfg->brightness);
+    const ot_wled_rgb_t old=scaled(off_bg?(ot_wled_rgb_t){0,0,0}:
+                       wheel_rgb((uint8_t)state->aux1),cfg->brightness);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t third=scaled(cfg->tertiary_set?
                                      cfg->tertiary:cfg->foreground,cfg->brightness);
@@ -4090,8 +4099,10 @@ typedef struct {
     uint16_t previous_r, previous_g, previous_b;
 } ot_tv_state_t;
 
-static uint16_t tv_rand16_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
-    return (uint16_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
+static uint32_t tv_rand16_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
+    /* The source TV scene duration can exceed UINT16_MAX. Never
+     * truncate a 32-bit millisecond interval to 16 bits. */
+    return (uint32_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
 }
 static uint8_t tv_rand8_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
     return (uint8_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
@@ -4118,8 +4129,12 @@ static void tv_simulator_frame(const ot_wled_fx_config_t *cfg,
     }
     if(now-tv->scene_start>=tv->scene_duration || state->aux1==0u) {
         tv->scene_start=now;
-        tv->scene_duration=tv_rand16_range(state,60u*250u*color_speed,
-                                                  60u*750u*color_speed);
+        /* 1D phone/controller cadence: higher speed must shorten the
+         * scene, not create a multi-minute almost-static preview. Scenes
+         * remain independent of the short flicker fade (250..2500 ms). */
+        const uint32_t scene_scale=21u-(uint32_t)color_speed;
+        tv->scene_duration=tv_rand16_range(state,
+                         250u*scene_scale,750u*scene_scale);
         tv->scene_color_hue=tv_rand16_range(state,0u,768u);
         tv->scene_color_sat=tv_rand8_range(state,100u,130u+color_intensity);
         tv->scene_color_bri=tv_rand8_range(state,200u,240u);
@@ -5598,7 +5613,12 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         cycle_time += (uint32_t)cfg->frame_time_ms*2u;
         uint32_t cycle_index=time_ms/cycle_time;
         uint32_t phase=time_ms%cycle_time;
-        on=(cycle_index!=state->step || phase<=on_time);
+        /* At speed=255 the WLED source cycle is exactly 2*FRAMETIME
+         * and the inclusive on-time plus catch-up forces all evenly
+         * sampled 30/60/120fps frames ON. Preserve older source math at
+         * every other speed; sample strict half-period at the extreme. */
+        on=cfg->speed==255u ? (phase<on_time) :
+            (cycle_index!=state->step || phase<=on_time);
         state->step=cycle_index;
     }
 
