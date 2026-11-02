@@ -908,6 +908,20 @@ class ComposeMainActivity : ComponentActivity() {
             OfflinePreviewSettings.read(effect) { key, fallback -> prefs.getInt(key,fallback) }
         }
         val settings = settingsOverride ?: storedSettings
+        // Snapshot tertiary alongside the six existing renderer values,
+        // never query SharedPreferences from within the 30-capsule draw.
+        val showThird = remember(effect,settingsRevision,frameRevision) {
+            when {
+                prefs.contains("wled.${effect}.color2") ->
+                    prefs.getInt("wled.${effect}.color2",0xff000000.toInt())
+                prefs.contains("wled.${effect}.accent") ->
+                    prefs.getInt("wled.${effect}.accent",0xff000000.toInt())
+                else -> null
+            }
+        }
+        val thirdSnapshot = if(settingsOverride != null)
+            settingsOverride.getOrNull(6)?.takeUnless { it == Int.MIN_VALUE }
+            else showThird
         val renderer = remember(effect,offlineReplay.intValue) { OfflineCoreRenderer(effect,30) }
         DisposableEffect(renderer) { onDispose { renderer.close() } }
         val localSketch = animateOffline && renderer.available()
@@ -1012,10 +1026,7 @@ class ComposeMainActivity : ComponentActivity() {
                 val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
                     localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
                     settings[0],settings[1],
-                    prefs.getInt("wled.${effect}.color2",
-                        prefs.getInt("wled.${effect}.accent",0xff000000.toInt())),
-                    prefs.contains("wled.${effect}.color2") ||
-                        prefs.contains("wled.${effect}.accent"),
+                    thirdSnapshot ?: 0xff000000.toInt(), thirdSnapshot != null,
                     customStops,audio?.get(0) ?: 0f,
                     audio?.get(1) ?: 0f,audio!=null,localColors)
                 if(localSketch) localRenderAvailable.value=localRendered
@@ -1899,7 +1910,10 @@ class ComposeMainActivity : ComponentActivity() {
             android.graphics.Color.parseColor(eventPreview.optString("color","#ffffff")),
             android.graphics.Color.parseColor(eventPreview.optString("secondary","#000000")),
             eventPreview.optInt("speed",128),eventPreview.optInt("intensity",128),
-            eventPreview.optInt("brightness",100)*255/100,eventPreview.optInt("paletteId",0)))
+            eventPreview.optInt("brightness",100)*255/100,eventPreview.optInt("paletteId",0),
+            if(eventPreview.has("accent"))
+                android.graphics.Color.parseColor(eventPreview.optString("accent","#000000"))
+            else Int.MIN_VALUE))
         var eventEditing by remember { mutableStateOf<String?>(null) }
         var choosing by remember { mutableStateOf<String?>(null) }
         var search by remember { mutableStateOf("") }
