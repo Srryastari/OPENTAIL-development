@@ -36,6 +36,9 @@ jobs:
              "core-firmware/tests/test_dev_console_contract.py",
              "core-firmware/tests/test_ble_tertiary_wiring_contract.py",
              "core-firmware/tests/run-host-tests.sh",
+             "scripts/package_core_flash.py",
+             "scripts/tests/test_core_flash_package.py",
+             "docs/CORE-FLASH-PACKAGE-RECEIPT-2026-11-01.md",
              ".github/workflows/verify-core-tertiary-ble.yml",
              "docs/CORE-TERTIARY-BLE-CONTRACT-2026-11-01.md",
           }
@@ -67,6 +70,8 @@ jobs:
           PY
       - name: Tertiary GATT/CORE/NVS static contract
         run: python3 core-firmware/tests/test_ble_tertiary_wiring_contract.py
+      - name: Flash ZIP correctness regression including missing real OTA data
+        run: python3 -m unittest -v scripts/tests/test_core_flash_package.py
 
   complete-core-host:
     needs: source-and-contract
@@ -87,6 +92,31 @@ jobs:
           OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/check_regressions.py --mode audit
 
+  trigger-safety:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Pin exactly tested independent trigger SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Physical arbitration/8-input remap/trigger durable record source regression
+        run: |
+          python3 core-firmware/tests/test_trigger_runtime_contract.py
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c main/show_logic.c tests/test_trigger_manager.c \
+            -o /tmp/ot-trigger-safety && /tmp/ot-trigger-safety
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c tests/test_prior_trigger_profiles.c \
+            -o /tmp/ot-prior-trigger-safety && /tmp/ot-prior-trigger-safety
+
   android-contract-unchanged:
     needs: source-and-contract
     runs-on: ubuntu-latest
@@ -101,7 +131,7 @@ jobs:
           node android/qa/test_native_source.cjs
 
   esp-idf-555-and-bench-binaries:
-    needs: [complete-core-host, android-contract-unchanged]
+    needs: [complete-core-host, trigger-safety, android-contract-unchanged]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -118,27 +148,51 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
-      - name: Verify complete matching bench image manifest
+      - name: Build manifest-locked ZIP using four real ESP-IDF images — NO SUBSTITUTES
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          b=Path("core-firmware/build")
-          for p in ("opentail_core_alpha.bin","bootloader/bootloader.bin",
-                    "partition_table/partition-table.bin","flasher_args.json"):
-              assert (b/p).is_file() and (b/p).stat().st_size>0,p
-          m=json.loads((b/"flasher_args.json").read_text())["flash_files"]
-          assert len(m)>=3 and all((b/p).is_file() for p in m.values())
-          print("PASS: exact HEAD bin + boot + partition + manifest; bench only")
-          PY
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build \
+            --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip" \
+            --source-sha "$PIN"
+      - name: Verify extracted ZIP CRC, flash offsets and every SHA256
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-core-tertiary-complete-$PIN.zip.sha256" \
+            --source-sha "$PIN"
       - uses: actions/upload-artifact@v4
         with:
-          name: opentail-core-tertiary-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          name: opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            core-firmware/build/opentail_core_alpha.bin
-            core-firmware/build/bootloader/bootloader.bin
-            core-firmware/build/partition_table/partition-table.bin
-            core-firmware/build/flasher_args.json
+            core-firmware/releases/opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}.zip
+            core-firmware/releases/opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
-# No physical 22-case or automatic hardware failover certification implied.
+
+  downloaded-zip-integrity:
+    needs: esp-idf-555-and-bench-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Retrieve actual published artifact ZIP and checksum from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: opentail-core-tertiary-complete-${{ github.event.pull_request.head.sha || github.sha }}
+          path: downloaded-bench
+      - name: Fail if downloaded flash package omits OTA or mismatches any manifest SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "downloaded-bench/opentail-core-tertiary-complete-$PIN.zip" \
+            --sha256-file "downloaded-bench/opentail-core-tertiary-complete-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# 22 physical checks, independent hardware failover, Android phone certification
+# and vehicle release remain unverified. Do not flash or merge.
