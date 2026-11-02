@@ -31,7 +31,7 @@ ble = (source / "BleDiscovery.java").read_text()
 owner = (source / "BleOwnerVault.java").read_text()
 check("Android manifest and styles parse", manifest.tag == "manifest" and style.getroot().tag == "resources")
 check("Android v0.2.0-alpha6 native release numbers", 
-      "versionName '0.2.0-alpha6'" in gradle and "versionCode 36" in gradle and
+      "versionName '0.2.0-alpha6'" in gradle and "versionCode 37" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
 check("Sole Kotlin Compose launcher; no Java UI entry or network transport permission",
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
