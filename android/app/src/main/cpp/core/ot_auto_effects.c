@@ -193,11 +193,21 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
             break;
           }
           case OT_FX_FUSION_CORE:{
-            uint32_t radius=1u+(uint32_t)count*(32u+tri8(phase*2u))/1536u;
-            c=distance<radius?blend(fg,white,(uint8_t)(220u-distance*150u/(radius+1u))):bg;
-            if(distance>=radius&&distance<radius*4u){
-                uint32_t aura=128u-(distance-radius)*128u/(radius*3u+1u);
+            /* Keep a fused white center, but make its expanding energy
+             * boundary distinct from Solid Glitter's isolated pixels.
+             * Both rings use the same closed phase: no loop discontinuity. */
+            const uint32_t radius=1u+(uint32_t)count*(32u+tri8(phase*2u))/1536u;
+            const uint32_t ring_width=1u+width/2u;
+            const uint32_t ring=absdiff(distance,radius);
+            c=distance<radius?
+              blend(fg,white,(uint8_t)(220u-distance*150u/(radius+1u))):bg;
+            if(distance>=radius && distance<radius*4u){
+                const uint32_t aura=128u-(distance-radius)*128u/(radius*3u+1u);
                 c=blend(bg,fg,(uint8_t)(aura*cfg->intensity/255u));
+            }
+            if(ring<=ring_width){
+                const uint32_t power=(ring_width+1u-ring)*190u/(ring_width+1u);
+                c=blend(c,white,(uint8_t)(power*cfg->intensity/255u));
             }
             break;
           }
@@ -253,14 +263,19 @@ static bool render_original_concept(const ot_wled_fx_config_t *cfg,uint32_t seed
           }
           case OT_FX_EVENT_HORIZON:{
             if(ms>=duration){c=fg;break;}
-            const uint32_t front=(one_shot_t*((uint32_t)count-1u))/255u;
-            uint32_t d=absdiff(p,front);
+            /* The original small black front was nearly invisible on
+             * short strips against black foreground. A bright leading
+             * accretion edge and trailing chromatic wake keep the
+             * intended traveling-black-core one-shot recognizable. */
+            const uint32_t front=(uint32_t)(((uint64_t)whole*
+                                  ((uint32_t)count-1u))/duration);
+            const uint32_t d=absdiff(p,front);
             c=fg;
-            if(d<=width)c=bg; /* traveling black gravitational core */
-            else if(d<=width+2u)c=white; /* compressed bright ring */
+            if(d<=width)c=bg;
+            else if(d<=width+3u)c=white;
             else if(p<front && d<=width+12u)
                 c=blend(fg,wheel((uint8_t)(t*4u+d*19u)),
-                    (uint8_t)(200u-(d-width-2u)*120u/13u));
+                    (uint8_t)(200u-(d-width-3u)*120u/13u));
             break;
           }
           case OT_FX_SINGULARITY_SHUTDOWN:{
