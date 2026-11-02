@@ -1,0 +1,70 @@
+name: Effects Issue93 authoritative renderer exact SHA
+on:
+  pull_request:
+    branches: [codex/issue93-android-effects-preview]
+    paths:
+      - 'core-firmware/main/wled_fx_compat.*'
+      - 'core-firmware/main/effects_1d.*'
+      - 'core-firmware/tests/**'
+      - '.github/workflows/verify-effects-issue93.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-host-color-and-all-140:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pin exact commit
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: 140-effect profiles, third-slot golden tests, full source and safety regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+
+  esp-idf-555-s3:
+    needs: core-host-color-and-all-140
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pin exact commit
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Build authoritative CORE ESP32-S3 image, do not flash
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify firmware image manifest
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+
+  android-unchanged-ui-metadata:
+    needs: core-host-color-and-all-140
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pin exact commit
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Existing 140 catalog and Android source checks (JNI needs future repin)
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
