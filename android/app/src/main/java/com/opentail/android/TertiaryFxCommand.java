@@ -23,7 +23,7 @@ final class TertiaryFxCommand {
     /** Extra INFO token distinguishes new 13-ID CORE from older 11-ID CORE. */
     static boolean advertised13(String info){
         if(!advertised(info))return false;
-        for(String part:info.split("\\\\|"))
+        for(String part:info.split("\\|"))
             if(part.trim().equals("fx-tertiary13-v1"))return true;
         return false;
     }
