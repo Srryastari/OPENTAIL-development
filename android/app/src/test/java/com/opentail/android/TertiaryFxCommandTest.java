@@ -8,6 +8,10 @@ public class TertiaryFxCommandTest {
    assertFalse(TertiaryFxCommand.advertised("OpenTail CORE 0.1 |continuous-fx-v1"));
    assertFalse(TertiaryFxCommand.advertised("OpenTail CORE 0.1 |fx-tertiary-v11"));
    assertFalse(TertiaryFxCommand.advertised(null));
+   assertTrue(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |continuous-fx-v1|fx-tertiary-v1|fx-tertiary13-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |continuous-fx-v1|fx-tertiary-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |fx-tertiary13-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |fx-tertiary-v1|fx-tertiary13-v11"));
  }
  @Test public void explicitBlackAndColorSlotAreEncoded() {
    byte[] black=TertiaryFxCommand.encode(54,1,1,255,0,0,0,255,0,24,255,128,0,0xff000000);
