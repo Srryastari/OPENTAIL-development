@@ -190,7 +190,13 @@ class ComposeMainActivity : ComponentActivity() {
             brightness = prefs.getInt("brightness", 160),
             speed = prefs.getInt("speed", 128),
             intensity = prefs.getInt("intensity", 128),
-            paletteId = NativePaletteEngine.corePreviewPalette(effectId, paletteId)
+            paletteId = NativePaletteEngine.corePreviewPalette(effectId, paletteId),
+            tertiary = if (TertiaryFxCommand.supported(effectId) &&
+                (prefs.contains("wled.${effectId}.color2") ||
+                 prefs.contains("wled.${effectId}.accent")))
+                prefs.getInt("wled.${effectId}.color2",
+                    prefs.getInt("wled.${effectId}.accent",0xff000000.toInt()))
+                else null
         ))
     }
 
@@ -1005,7 +1011,12 @@ class ComposeMainActivity : ComponentActivity() {
                     selectedRendererPalette, customStops != null)
                 val localRendered = localSketch && renderer.render(localTimeNanos.longValue / 1_000_000L,
                     localFrameMs.intValue,settings[2],settings[3],settings[4],rendererPalette,
-                    settings[0],settings[1],customStops,audio?.get(0) ?: 0f,
+                    settings[0],settings[1],
+                    prefs.getInt("wled.${effect}.color2",
+                        prefs.getInt("wled.${effect}.accent",0xff000000.toInt())),
+                    prefs.contains("wled.${effect}.color2") ||
+                        prefs.contains("wled.${effect}.accent"),
+                    customStops,audio?.get(0) ?: 0f,
                     audio?.get(1) ?: 0f,audio!=null,localColors)
                 if(localSketch) localRenderAvailable.value=localRendered
                 for (col in 0 until columns) {
@@ -1167,10 +1178,9 @@ class ComposeMainActivity : ComponentActivity() {
                         prefs.edit().putInt("wled.${id}.color${slot}",rgb)
                             .putInt("wled.${id}.${key}",rgb)
                             .putInt(key,rgb).apply()
-                        // Slot 3 is saved correctly but the CORE BLE preview
-                        // Frame contract has only foreground/background slots.
-                        if(slot < 2) previewCurrentEffect(id)
-                        else invalidateCoreFrame()
+                        // All three roles are renderer-owned. Third RGB is
+                        // capability-gated before BLE, never silently dropped.
+                        previewCurrentEffect(id)
                     },
                     onPalette = { id,selected ->
                         prefs.edit().putInt("wled.${id}.palette",selected)
