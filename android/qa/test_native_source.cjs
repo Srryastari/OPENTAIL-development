@@ -6,6 +6,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const crypto=require('node:crypto');
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
@@ -1040,7 +1041,31 @@ assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOper
 
 const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8');
 const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
-assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d' &&
+/* Issue103: actual SHA256 and byte-identity checks, not a stale source
+ * comment claiming parity. Only reviewed pure renderer sources are repinned. */
+assert(nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
+       nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
+       nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
+       nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
+       nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
+       nativeManifest.tertiary_source_proven_modes===13 &&
+       nativeManifest.tertiary_transport_admitted_modes===11,
+       'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
+for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
+    const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),expectedHash,
+                 'JNI source manifest mismatch: '+file);
+}
+for(const file of ['wled_fx_compat.c','wled_fx_compat.h',
+                   'ot_auto_effects.c','effects_1d.c','effects_1d.h']){
+    assert.deepEqual(
+        fs.readFileSync(path.join('android/app/src/main/cpp/core',file)),
+        fs.readFileSync(path.join('core-firmware/main',file)),
+        'JNI/CORE renderer divergence: '+file);
+}
+assert(fs.readFileSync('android/app/src/main/cpp/core/wled_fx_compat.c','utf8')
+         .includes('bool ot_wled_fx_tertiary_supported(uint16_t id)') &&
+       nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
        nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
        nativePreview.includes('ot_wled_palette_global_tick('),
        'All effects must use the pinned authoritative registry and palette producer');

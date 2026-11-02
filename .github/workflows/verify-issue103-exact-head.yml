@@ -1,0 +1,147 @@
+name: Issue103 reconciled Effects/Firmware/Android exact SHA (software only)
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/**'
+      - 'android/app/src/main/cpp/**'
+      - 'android/qa/**'
+      - 'scripts/package_core_flash.py'
+      - 'scripts/tests/test_core_flash_package.py'
+      - 'docs/EFFECTS-**'
+      - '.github/workflows/verify-issue103-exact-head.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sources-and-140-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact HEAD, frozen 106 lineage, immutable renderer and firmware ZIP provenance
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor db7bcdff187197c0493b5c38991870224f2c244a HEAD
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):
+              return subprocess.check_output(['git',*args],text=True).strip()
+          fx='6180e2a5ccbfbf8567513504669c6840b68c045b'
+          fw='df27209b9876630b2b10f3a189f36817a2764009'
+          for p in ('ot_auto_effects.c','wled_fx_compat.c','wled_fx_compat.h'):
+              want=git('rev-parse',fx+':core-firmware/main/'+p)
+              assert git('rev-parse','HEAD:core-firmware/main/'+p)==want
+              assert git('rev-parse','HEAD:android/app/src/main/cpp/core/'+p)==want
+          for p in ('scripts/package_core_flash.py',
+                    'scripts/tests/test_core_flash_package.py',
+                    '.github/workflows/verify-core-tertiary-ble.yml'):
+              assert git('rev-parse','HEAD:'+p)==git('rev-parse',fw+':'+p),p
+          protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
+          assert not any(p.startswith(('android/app/src/main/java/','android/app/src/main/res/',
+             'core-firmware/main/ble_', 'core-firmware/main/config_journal.',
+             'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
+             'core-firmware/main/ot_version.')) for p in protected)
+          print('PASS: exact reconciled Effects CORE+JNI, corrected Firmware96 package, locked UI/physical source')
+          PY
+      - name: All 140 CORE host golden, speed, third roles, palette, stop, independent original/regression
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Firmware #96 flash package unit regression, including missing OTA fail-closed
+        run: python3 -m unittest -v scripts/tests/test_core_flash_package.py
+
+  android-jni-140-oracle:
+    needs: sources-and-140-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
+          path: pinned-effects110
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: JNI file SHA256, locked UI architecture and Android source checks
+        run: |
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - name: Independent 140/140 JNI vs reconciled CORE RGB oracle + 13 third roles
+        run: |
+          python3 android/qa/test_full_offline_preview.py \
+            --core-dir pinned-effects110 \
+            --continuity-dir pinned-effects110 \
+            --color-dir pinned-effects110 > issue103-jni-140-parity.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue103-jni-140-oracle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: issue103-jni-140-parity.json
+          if-no-files-found: error
+
+  esp-idf555-complete-package:
+    needs: sources-and-140-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Compile ESP32-S3 exact HEAD, do not flash
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Package and verify four real images, OTA at 0xF000 and CRC/SHA256
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build \
+            --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-issue103-$PIN.zip" \
+            --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-issue103-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-issue103-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue103-complete-bench-package-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-issue103-${{ github.event.pull_request.head.sha || github.sha }}.zip
+            core-firmware/releases/opentail-issue103-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256
+          if-no-files-found: error
+
+  recheck-downloaded-package:
+    needs: esp-idf555-complete-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue103-complete-bench-package-${{ github.event.pull_request.head.sha || github.sha }}
+          path: downloaded
+      - name: Independently reject missing OTA, wrong offsets and mismatched SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "downloaded/opentail-issue103-$PIN.zip" \
+            --sha256-file "downloaded/opentail-issue103-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# Host/software only: 22 physical checks, owner phone, backup failover and vehicle release NOT CERTIFIED.
