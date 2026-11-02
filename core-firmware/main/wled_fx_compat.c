@@ -1312,7 +1312,8 @@ static void tricolor_chase_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     size_t idx=(now/cycle)%(width*3u);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
-    const ot_wled_rgb_t third=scaled(cfg->tertiary,cfg->brightness);
+    const ot_wled_rgb_t third=scaled(cfg->tertiary_set?cfg->tertiary:
+                       (ot_wled_rgb_t){0,0,0},cfg->brightness);
     for(size_t i=0;i<count;i++) {
         ot_wled_rgb_t c=third;
         if(idx>width*2u-1u)c=bg;
@@ -1330,7 +1331,8 @@ static void tricolor_wipe_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     const size_t index=(size_t)(((uint64_t)prog*(uint32_t)count*3u)>>16);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
-    const ot_wled_rgb_t third=scaled(cfg->tertiary,cfg->brightness);
+    const ot_wled_rgb_t third=scaled(cfg->tertiary_set?cfg->tertiary:
+                       (ot_wled_rgb_t){0,0,0},cfg->brightness);
     for(size_t i=0;i<count;i++) pixels[i]=third;
     if(index<count) {
         for(size_t i=0;i<count;i++)pixels[i]=i>index?fg:bg;
@@ -1349,7 +1351,8 @@ static void tricolor_fade_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
     const uint16_t t=(uint16_t)(now*((uint32_t)(cfg->speed>>3)+1u));
     const uint32_t progress=((uint32_t)t*768u)>>16;
     const uint8_t fraction=(uint8_t)progress;
-    const ot_wled_rgb_t third=cfg->tertiary;
+    const ot_wled_rgb_t third=cfg->tertiary_set?cfg->tertiary:
+                               (ot_wled_rgb_t){0,0,0};
     ot_wled_rgb_t a,b;
     if(progress<256u){a=cfg->foreground;b=cfg->background;}
     else if(progress<512u){a=cfg->background;b=third;}
@@ -1444,7 +1447,8 @@ static void tri_pattern_frame(const ot_wled_fx_config_t *cfg,
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     for(size_t i=0;i<count;i++) {
         const size_t phase=(i/width)%3u;
-        pixels[i]=phase==0u?fg:(phase==1u?bg:scaled(cfg->tertiary,cfg->brightness));
+        pixels[i]=phase==0u?fg:(phase==1u?bg:scaled(cfg->tertiary_set?
+           cfg->tertiary:(ot_wled_rgb_t){0,0,0},cfg->brightness));
     }
 }
 
@@ -1462,7 +1466,7 @@ static void colorful_frame(const ot_wled_fx_config_t *cfg,
         colors=3u;
         choices[0]=cfg->foreground;
         choices[1]=cfg->background;
-        choices[2]=cfg->tertiary;
+        choices[2]=cfg->tertiary_set?cfg->tertiary:(ot_wled_rgb_t){0,0,0};
     } else if(cfg->intensity<80u) {
         choices[0]=(ot_wled_rgb_t){255,128,64};
         choices[1]=(ot_wled_rgb_t){229,210,65};
