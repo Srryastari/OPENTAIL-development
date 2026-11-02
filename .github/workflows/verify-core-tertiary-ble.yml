@@ -32,6 +32,7 @@ jobs:
              "core-firmware/main/fx_zone_bank.h",
              "core-firmware/main/opentail_core.c",
              "core-firmware/tests/test_ble_fx_tertiary.c",
+             "core-firmware/tests/test_http_stop_contract.py",
              "core-firmware/tests/test_ble_tertiary_wiring_contract.py",
              "core-firmware/tests/run-host-tests.sh",
              ".github/workflows/verify-core-tertiary-ble.yml",
