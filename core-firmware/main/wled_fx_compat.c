@@ -590,6 +590,29 @@ ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
     return (ot_wled_rgb_t){g[c.r],g[c.g],g[c.b]};
 }
 
+/* Only the implemented, source-proven tertiary consumers. Six other
+ * metadata-declared third positions belong to optional overlays or source
+ * options that the current isolated 1D profile does not implement. */
+bool ot_wled_fx_tertiary_supported(uint16_t id){
+    switch(id){
+      case OT_WLED_CHASE_COLOR:
+      case OT_WLED_CHASE_RANDOM:
+      case OT_WLED_COLORFUL:
+      case OT_WLED_TWO_DOTS:
+      case OT_WLED_RUNNING_DUAL:
+      case OT_WLED_TRICOLOR_CHASE:
+      case OT_WLED_TRICOLOR_WIPE:
+      case OT_WLED_TRICOLOR_FADE:
+      case OT_WLED_SOLID_PATTERN_TRI:
+      case OT_WLED_GLITTER:
+      case OT_WLED_SOLID_GLITTER:
+      case OT_WLED_AURORA:
+      case OT_WLED_POPCORN:
+        return true;
+      default:return false;
+    }
+}
+
 /* Parse the color-role segment of source-pinned WLED metadata. Retain
  * ordinal slots, including disabled gaps. No Android labels are hardcoded
  * into rendering code and palette capability is a separate flag. */
