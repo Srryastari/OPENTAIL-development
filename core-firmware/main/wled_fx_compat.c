@@ -600,7 +600,20 @@ bool ot_wled_fx_color_roles(uint16_t id,ot_wled_fx_color_role_t roles[3]){
     memset(roles,0,3u*sizeof(*roles));
     const char *at=strchr(meta.wled_metadata,'@');
     const char *section=at?strchr(at+1,';'):NULL;
-    if(!section)return true; /* e.g. Solid or non-editable roles */
+    if(!section){
+        /* A small number of legacy source entries (e.g. Solid) carry
+         * capability booleans but no semicolon role grammar. Retain those
+         * declared editable slots; never invent a third one. */
+        if(meta.supports_foreground){
+            roles[0].enabled=true;
+            memcpy(roles[0].label,"1",2u);
+        }
+        if(meta.supports_background){
+            roles[1].enabled=true;
+            memcpy(roles[1].label,"2",2u);
+        }
+        return true;
+    }
     const char *cursor=section+1u;
     for(unsigned slot=0u;slot<3u && *cursor && *cursor!=';';slot++){
         const char *end=cursor;
