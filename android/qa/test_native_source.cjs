@@ -1047,7 +1047,8 @@ assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d'
 assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
        compose.includes('registerOnSharedPreferenceChangeListener(observer)') &&
        compose.includes('unregisterOnSharedPreferenceChangeListener(observer)') &&
-       compose.includes('settings[2],settings[3],settings[4],rendererPalette') &&
+       compose.includes('params[2],params[3],params[4],palette') &&
+       compose.includes('val currentSettings by rememberUpdatedState(settings)') &&
        compose.includes('OfflinePreviewPalettePolicy.rendererId(effect,settings[5])') &&
        fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt','utf8')
            .includes('NativeEffectParameters.forId(effectId)?.palette == true'),
