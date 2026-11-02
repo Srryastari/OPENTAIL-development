@@ -24,6 +24,7 @@ bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
             if(ot_fx_slot_active(slot,now_ms) &&
                slot->request.effect_id==request->effect_id){
                 slot->request=*request;
+                slot->tertiary=(ot_ble_fx_tertiary_t){0}; /* legacy command restores legacy third default */
                 slot->standalone=standalone;
                 slot->continuous=false;
                 slot->refreshed_ms=now_ms;
@@ -122,9 +123,9 @@ void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank){
             bank->zones[o][z].configured=false;
 }
 
-bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
+bool ot_fx_bank_apply_continuous_tertiary(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
- uint32_t now_ms){
+ const ot_ble_fx_tertiary_t *tertiary,uint32_t now_ms){
  if(!bank||!request||!outputs||!request->chain_mask||
     (request->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))||
     !request->zone_mask||request->ttl_sec<1||request->ttl_sec>60)return false;
@@ -156,9 +157,17 @@ bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
   effective.chain_mask=(uint8_t)(1u<<o);effective.zone_mask=masks[o];
   if(!ot_fx_bank_apply(bank,&effective,now_ms,false))return false;
   for(unsigned z=0;z<OT_OM_ZONES;z++)
-   if(masks[o]&(1u<<z))bank->zones[o][z].continuous=true;
+   if(masks[o]&(1u<<z)){
+      bank->zones[o][z].continuous=true;
+      if(tertiary)bank->zones[o][z].tertiary=*tertiary;
+   }
  }
  return true;
+}
+bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ uint32_t now_ms){
+ return ot_fx_bank_apply_continuous_tertiary(bank,request,outputs,NULL,now_ms);
 }
 void ot_fx_bank_stop_continuous(ot_fx_zone_bank_t *bank){
  if(!bank)return;
