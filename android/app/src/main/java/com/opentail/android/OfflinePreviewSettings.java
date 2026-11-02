@@ -17,7 +17,7 @@ final class OfflinePreviewSettings {
     }
     static int[] read(int effect,Reader prefs) {
         String scope="wled."+effect+".";
-        Reader source=(key,fallback)->prefs.get("effectId",effect)==effect ? prefs.get(key,fallback) : fallback;
+        Reader source=(key,fallback)->prefs.get("effectId",-1)==effect ? prefs.get(key,fallback) : fallback;
         return new int[]{
             prefs.get(scope+"color0",prefs.get(scope+"foreground",source.get("foreground",0xffffffff))),
             prefs.get(scope+"color1",prefs.get(scope+"background",source.get("background",0xff000000))),
