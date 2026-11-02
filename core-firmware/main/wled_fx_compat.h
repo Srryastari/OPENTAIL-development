@@ -331,6 +331,11 @@ typedef struct {
     char label[24];
 } ot_wled_fx_color_role_t;
 bool ot_wled_fx_color_roles(uint16_t id,ot_wled_fx_color_role_t roles[3]);
+/* Source-proof gate for renderer third-color consumption. The source
+ * metadata may describe a third editor role that the supported 1D/default
+ * options do NOT currently consume; never infer opcode11 admission from
+ * the metadata label alone. */
+bool ot_wled_fx_tertiary_supported(uint16_t id);
 bool ot_wled_fx_metadata(uint16_t id, ot_wled_fx_metadata_t *out);
 /* Enumerates exactly the locally implemented FX IDs for BLE capabilities. */
 size_t ot_wled_fx_supported_ids(uint16_t *dest,size_t max_ids);
