@@ -17,6 +17,7 @@ on:
       - 'core-firmware/tests/test_prior_trigger_profiles.c'
       - 'core-firmware/tests/test_verified_bench_contract.c'
       - 'core-firmware/tests/run-host-tests.sh'
+      - 'core-firmware/tests/test_trigger_tertiary_safety.c'
       - '.github/workflows/verify-trigger-integration.yml'
   workflow_dispatch:
 permissions:
@@ -31,6 +32,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Assert exact checked-out commit (reject synthetic merge checkout)
         env:
@@ -70,3 +72,25 @@ jobs:
             tests/test_verified_bench_contract.c \
             -o /tmp/ot-verified-bench-contract
           /tmp/ot-verified-bench-contract
+      - name: Verify integrated third-color CORE source provenance
+        run: |
+          set -eu
+          # Integrated Android #97 contains exactly Firmware #96 CORE source.
+          test -z "$(git diff --name-only ca758652f659e123f39f20ae3411c92c8e7b4d19 HEAD -- core-firmware/main)"
+          test -z "$(git diff --name-only 2b312f163e6c98ede35ee98e1db0c22c00f122ab ca758652f659e123f39f20ae3411c92c8e7b4d19 -- core-firmware)"
+          echo "PASS: integrated third-color CORE byte-identical to Firmware #96"
+      - name: Full combined CORE host regression on exact checked-out HEAD
+        run: bash tests/run-host-tests.sh
+      - name: Independent tertiary renderer to physical OEM override and Show resume
+        run: |
+          set -eu
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/ble_fx_command.c main/effects_1d.c main/ot_auto_effects.c \
+            main/palette_1d.c main/wled_fx_compat.c \
+            main/particle_system_1d.c main/wled_1d.c \
+            main/fx_zone_bank.c main/fx_overlay_engine.c \
+            main/trigger_manager.c main/output_manager.c \
+            main/core_logic.c main/arbitration_logic.c main/show_logic.c \
+            tests/test_trigger_tertiary_safety.c \
+            -o /tmp/ot-trigger-thirdcolor-safety -lm
+          /tmp/ot-trigger-thirdcolor-safety
