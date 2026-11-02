@@ -130,8 +130,45 @@ jobs:
           python3 android/qa/check_release.py
           node android/qa/test_native_source.cjs
 
+  android-97-wire-compatibility:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: Srryastari/OPENTAIL-development
+          ref: ca758652f659e123f39f20ae3411c92c8e7b4d19
+          path: android97
+          persist-credentials: false
+      - name: Verify exact Android #97 SHA, JNI C source and BLE opcode compatibility
+        run: |
+          test "$(git -C android97 rev-parse HEAD)" = "ca758652f659e123f39f20ae3411c92c8e7b4d19"
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path(".")
+          a=root/"android97/android/app/src/main/cpp/core"
+          b=root/"core-firmware/main"
+          for name in ("effects_1d.c","effects_1d.h",
+                       "wled_fx_compat.c","wled_fx_compat.h"):
+              assert (a/name).read_bytes()==(b/name).read_bytes(),name
+          packet=(root/"android97/android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java").read_text()
+          header=(b/"ble_fx_command.h").read_text()
+          status=(b/"ble_status.c").read_text()
+          for token in ("static final int OPCODE=11","new byte[20]","out[16]=1",
+                        "out[17]","out[18]","out[19]",
+                        '"fx-tertiary-v1"'):
+              assert token in packet,token
+          assert '#define OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE 11u' in header
+          assert '#define OT_BLE_FX_TERTIARY_WIRE_BYTES 20u' in header
+          assert 'OT_BLE_FX_TERTIARY_CAPABILITY' in status
+          print("PASS Android #97: four exact Effects JNI C blobs, opcode11, 20B, presence flag, RGB and capability")
+          PY
+
   esp-idf-555-and-bench-binaries:
-    needs: [complete-core-host, trigger-safety, android-contract-unchanged]
+    needs: [complete-core-host, trigger-safety, android-contract-unchanged, android-97-wire-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
