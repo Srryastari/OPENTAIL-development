@@ -34,6 +34,14 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   tests/test_issue93_color_slots.c -o /tmp/ot-issue93-colors -lm
 /tmp/ot-issue93-colors
 
+# Issue 99 observed phone regressions: deterministic 30/60/120fps pulses,
+# black Chase gaps, TV scene evolution and proprietary frame identity.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c \
+  main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+  tests/test_issue99_frame_quality.c -o /tmp/ot-issue99-quality -lm
+/tmp/ot-issue99-quality
+
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
 # Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
