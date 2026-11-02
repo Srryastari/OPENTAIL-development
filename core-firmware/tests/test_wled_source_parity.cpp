@@ -6448,7 +6448,7 @@ int main() {
         return 1;
     }
     std::printf("WLED source parity unchanged except Issue99 documented speed255 blink/strobe, black chase and TV scene policy cases; those RGB vectors have separate deterministic tests.\n");
-    std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (RGB with default/explicit fixed palettes where enabled, gamma-off except Fairy/Fairytwinkle; synchronized test RNG)\n",
+    std::printf("WLED source-golden gate passed: %u compared RGB samples across %zu catalog modes, excluding only explicitly listed Issue99 visual-policy deviations; see Issue99 frame goldens\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
     return 0;
 }
