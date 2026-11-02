@@ -5,10 +5,14 @@ package com.opentail.android;
  */
 final class TertiaryFxCommand {
     static final int OPCODE=11;
-    private static final int[] SOURCE_VERIFIED={28,29,34,50,52,54,55,56,84,87,103};
+    private static final int[] SOURCE_VERIFIED={28,29,34,38,50,52,54,55,56,84,87,95,103};
     static boolean supported(int id){
         for(int value:SOURCE_VERIFIED)if(value==id)return true;
         return false;
+    }
+    /** Source support is 13 IDs; Aurora RGB3 is effective only with palette 4. */
+    static boolean supported(int id,int palette){
+        return supported(id) && (id!=38 || palette==4);
     }
     static boolean advertised(String info){
         if(info==null||!info.startsWith("OpenTail CORE "))return false;
@@ -19,7 +23,8 @@ final class TertiaryFxCommand {
     static byte[] encode(int id,int chains,int zones,int r,int g,int b,
         int br,int bg,int bb,int brightness,int speed,int intensity,int palette,
         int tertiary) {
-        if(!supported(id))throw new IllegalArgumentException("Tertiary effect not source verified");
+        if(!supported(id,palette))
+            throw new IllegalArgumentException("Tertiary effect/palette not source verified");
         // Reuse existing strict validation: target masks, RGB, brightness and palette.
         byte[] legacy=ContinuousFxCommand.encode(id,chains,zones,r,g,b,
             br,bg,bb,brightness,speed,intensity,palette);
