@@ -1,10 +1,10 @@
 {
   "source_commit": "1767b144e193ed6978816899ebb5eba237ee6e2d",
   "files": {
-    "wled_fx_compat.c": "63029d595c64db1c3913176dfdd48ea1b07e2eb74d66b71f9c4165ecbd511259",
-    "wled_fx_compat.h": "e557cb9d5b620e5eb9d99faa9d9533d338364edc79e3708ef5f149f9dca67fa0",
-    "effects_1d.c": "5844a1992fd7916acf64d7162dfcede3e1ed9b556d2c1cf46b39f8cfefa99d1f",
-    "effects_1d.h": "5badd61a2fc5b2ac98ef9fbe7a681ef8419ca3ce4a4f5f63530a5d0be420e692",
+    "wled_fx_compat.c": "ce81638b0300829b7fbc05cff0f7dca3126dd9e53221de27f884d2e9fe2978e5",
+    "wled_fx_compat.h": "d255e1a77e6e7c4f644869dbfe771c90b61eb0119f8659f091f97a44ef11d3c5",
+    "effects_1d.c": "e7d8d1f95f84f828f5c5b8d139e6328ce02fefbd6357a8c026f0cfe4bc0fc0b6",
+    "effects_1d.h": "6e7a45b1d433e56cd7c11d7597fbc09790ff76aa4230230a4587c0961b41aa90",
     "wled_1d.c": "44116fbc03f467bf61b511f097f4edcbf093251e71818ca71b3525aab47542ab",
     "wled_1d.h": "ffa77e0da8f2f9efee32f20bc8c083beb0831440b39f7bcf3977e571147a3c55",
     "palette_1d.c": "c7b5d24b79d5e0a014eb892d45692a8e22c40996d0e4169786d291d1fad00afa",
@@ -21,5 +21,12 @@
     "effects_1d.h",
     "ot_auto_effects.c",
     "ot_auto_effects.h"
+  ],
+  "color_slot_source_commit": "984a12aeec4e348b869ba2504a2f994fc944f7f2",
+  "color_slot_files": [
+    "wled_fx_compat.c",
+    "wled_fx_compat.h",
+    "effects_1d.c",
+    "effects_1d.h"
   ]
 }
