@@ -935,12 +935,13 @@ class ComposeMainActivity : ComponentActivity() {
                 if(verified!=null) runCatching { NativePaletteV3.stops(verified) }.getOrNull()
                 else runCatching {
                     val raw=JSONObject(project.exportJson()).optJSONObject("palettePreviews")?.optJSONArray(id.toString())
-                    if(raw==null || raw.length() !in 2..18) null else ByteArray(raw.length()*4) { index ->
+                    if(raw==null || raw.length() !in 2..NativePaletteV3.STOPS_MAX) null
+                    else ByteArray(raw.length()*4) { index ->
                         val value=(raw.getJSONArray(index/4).get(index%4) as? Number)?.toDouble()
                             ?: error("Non-numeric palette stop")
                         require(value.isFinite() && value in 0.0..255.0 && value % 1.0 == 0.0)
                         value.toInt().toByte()
-                    }
+                    }.also { NativePaletteV3.validateStops(it) }
                 }.getOrNull()
             }
         }

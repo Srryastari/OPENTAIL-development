@@ -17,11 +17,11 @@ class NativePaletteMetadataTest {
 
     @Test fun exactProjectRgbStopsAndOffsetsArePreserved() {
         val project = JSONObject()
-            .put("palettePreviews", JSONObject().put("4",
+            .put("palettePreviews", JSONObject().put("204",
                 JSONArray().put(stop(0, 255, 0, 0))
                     .put(stop(128, 0, 255, 0))
                     .put(stop(255, 0, 0, 255))))
-        val palette = NativePaletteEngine.lookup(project, 4)
+        val palette = NativePaletteEngine.lookup(project, 204)
         val stops = palette.stops ?: error("Real fixed-color stops must be visible")
         assertEquals(3, stops.size)
         assertEquals(0f, stops[0].first, 0f)
@@ -98,4 +98,38 @@ class NativePaletteMetadataTest {
         assertNull(NativePaletteEngine.lookup(project,4,0xffffffff.toInt()).stops)
     }
 
+
+    @Test fun allRealProjectPalettes73To255AndReservedWithoutStops() {
+        for (id in listOf(73,127,200,201,204,255)) {
+            val project=JSONObject().put("palettePreviews",JSONObject().put(id.toString(),
+                JSONArray().put(stop(0,0,0,0))
+                    .put(stop(96,255,0,255)).put(stop(255,255,255,255))))
+            val stops=NativePaletteEngine.lookup(project,id).stops!!
+            assertEquals(3,stops.size)
+            assertEquals(96f/255f,stops[1].first,0.000001f)
+            assertEquals(1f,stops[2].second.blue,0f)
+        }
+        assertNull(NativePaletteEngine.lookup(JSONObject(),255).stops)
+    }
+    @Test fun malformedStopsAreNeverResortedOrInvented() {
+        for (id in listOf(73,201,255)) {
+            val previews=JSONObject()
+            fun valid(vararg rows:JSONArray)=JSONObject().put("palettePreviews",
+                JSONObject().put(id.toString(),JSONArray().apply { rows.forEach { put(it) } }))
+            assertNull(NativePaletteEngine.lookup(valid(
+                stop(0,255,0,0),stop(0,0,0,255),stop(255,0,255,0)),id).stops)
+            assertNull(NativePaletteEngine.lookup(valid(
+                stop(64,255,0,0),stop(255,0,255,0)),id).stops)
+            assertNull(NativePaletteEngine.lookup(valid(
+                stop(0,255,0,0),stop(250,0,255,0)),id).stops)
+            assertNull(NativePaletteEngine.lookup(valid(
+                stop(0,255,0,0),stop(255,0,0.5,255)),id).stops)
+        }
+    }
+    @Test fun projectPaletteCannotRecolorImmutableSourceGradient() {
+        val project=JSONObject().put("palettePreviews", JSONObject().put("72",
+            JSONArray().put(stop(0,255,0,0)).put(stop(255,0,0,255))))
+        assertNull(NativePaletteEngine.lookup(project,72).stops)
+        assertNull(NativePaletteEngine.lookup(project,4).stops)
+    }
 }

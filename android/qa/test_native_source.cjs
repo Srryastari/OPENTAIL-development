@@ -241,7 +241,7 @@ assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
        bleSource.includes('infoReadPending'),
        'Actual firmware INFO metadata must remain safely serialized after owner authorization');
-assert(gradle.includes("versionName '0.2.0-alpha5'"));
+assert(gradle.includes("versionName '0.2.0-alpha6'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
@@ -325,7 +325,7 @@ assert(compose.split('ApprovedWledEffectsEditor(').length - 1 === 3 &&
        'Approved Effects interface must have three independently persisted editor contexts and no unapproved control header');
 assert(palettes.includes('fun usesEditableColorSlots(id: Int): Boolean = id in 2..5') &&
        palettes.includes('fun isImmutableFixedGradient(id: Int): Boolean') &&
-       palettes.includes('if (isImmutableFixedGradient(id))') &&
+       palettes.includes('if (fixedPalette)') &&
        approved.includes('val allowColorSlots = def != null') &&
        approved.includes('takeIf { allowColorSlots }'),
        'Immutable WLED source gradient must never inherit Main/Set Color');
@@ -847,7 +847,7 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
   'project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())',
-  'entry.length() != 4', 'stops.sortBy { it.first }',
+  'entry.length() != 4', 'if (parts[0] <= previous',
   'return NativePalette(id, name, null)',
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);

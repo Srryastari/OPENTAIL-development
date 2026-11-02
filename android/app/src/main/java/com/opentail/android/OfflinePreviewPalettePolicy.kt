@@ -7,7 +7,9 @@ package com.opentail.android
 internal object OfflinePreviewPalettePolicy {
     fun rendererId(effectId: Int, savedPaletteId: Int): Int =
         if (NativeEffectParameters.forId(effectId)?.palette == true) savedPaletteId else 0
+    // Local-only source-backed 73..255 stops are valid; CORE BLE remains gated
+    // separately to its advertised and authenticated 73..200 transport range.
     // Admission only: never modify the saved selection or palette data.
     fun availableRendererId(candidate: Int, hasCustomStops: Boolean): Int =
-        if (candidate in 0..72 || (candidate in 73..200 && hasCustomStops)) candidate else 0
+        if (candidate in 0..72 || (candidate in 73..255 && hasCustomStops)) candidate else 0
 }

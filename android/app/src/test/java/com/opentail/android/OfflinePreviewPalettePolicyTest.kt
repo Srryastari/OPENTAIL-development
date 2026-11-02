@@ -32,8 +32,8 @@ class OfflinePreviewPalettePolicyTest {
             assertEquals(0,OfflinePreviewPalettePolicy.availableRendererId(id,false))
         for (id in 0..72)
             assertEquals(id,OfflinePreviewPalettePolicy.availableRendererId(id,false))
-        for (id in 73..200)
+        for (id in 73..255)
             assertEquals(id,OfflinePreviewPalettePolicy.availableRendererId(id,true))
-        assertEquals(0,OfflinePreviewPalettePolicy.availableRendererId(255,true))
+        assertEquals(0,OfflinePreviewPalettePolicy.availableRendererId(256,true))
     }
 }
