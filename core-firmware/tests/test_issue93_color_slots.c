@@ -152,6 +152,14 @@ int main(void){
         assert(ot_wled_fx_render(&cfg,&st,33u,pixels,97u));
         assert(found(pixels,97u,yellow));
     }
+    cfg.effect_id=OT_WLED_SOLID_PATTERN_TRI;
+    ot_wled_fx_reset(&st);
+    assert(ot_wled_fx_render(&cfg,&st,33u,pixels,97u));
+    assert(found(pixels,97u,yellow));
+    cfg.effect_id=OT_WLED_COLORFUL;
+    ot_wled_fx_reset(&st);
+    assert(ot_wled_fx_render(&cfg,&st,33u,pixels,97u));
+    assert(found(pixels,97u,yellow));
     cfg.effect_id=OT_WLED_RUNNING_DUAL;
     ot_wled_fx_reset(&st);
     cfg.tertiary_set=false;
