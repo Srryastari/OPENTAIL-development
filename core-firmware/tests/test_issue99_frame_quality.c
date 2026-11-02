@@ -91,6 +91,59 @@ int main(void){
     assert(blue_seen);
     ot_wled_fx_reset(&glitter);
 
+    /* BPM's 5.12-second travel wrap must no longer reset a full
+     * brightness region. Sample both sides on two seeded zones; source
+     * phase remains deterministic at 30/60/120 FPS. */
+    c.effect_id=68u;c.speed=128u;c.intensity=128u;
+    c.background=black;c.foreground=red;
+    for(unsigned frame=8u;frame<=33u;frame=frame==8u?16u:frame==16u?33u:34u){
+        ot_wled_fx_state_t sa={0},sb={0};
+        int max_delta=0;
+        int32_t previous=-1;
+        for(uint32_t t=4920u;t<=5320u;t+=frame){
+            assert(ot_wled_fx_render(&c,&sa,t,p,97u));
+            assert(ot_wled_fx_render(&c,&sb,t,other,97u));
+            assert(memcmp(p,other,97u*sizeof(*p))==0);
+            if(previous>=0){
+                int delta=(int)p[0].r-(int)previous;
+                if(delta<0)delta=-delta;
+                if(delta>max_delta)max_delta=delta;
+            }
+            previous=p[0].r;
+        }
+        assert(max_delta<100);
+        ot_wled_fx_reset(&sa);ot_wled_fx_reset(&sb);
+    }
+    /* Unchanged authored Breathe/Fade waveforms need bounded consecutive
+     * frame deltas with no 8-bit brightness overflow or frame-order drift. */
+    for(unsigned j=0;j<2;j++){
+        c.effect_id=j?12u:2u;c.speed=255u;c.foreground=red;
+        ot_wled_fx_state_t s={0};
+        int last=-1,max_delta=0;
+        for(uint32_t t=0;t<2048u;t+=8u){
+            assert(ot_wled_fx_render(&c,&s,t,p,97u));
+            if(last>=0){
+                int delta=(int)p[0].r-last;if(delta<0)delta=-delta;
+                if(delta>max_delta)max_delta=delta;
+            }
+            last=p[0].r;
+        }
+        assert(max_delta<96);
+        ot_wled_fx_reset(&s);
+    }
+    /* Fireworks 1D is source-frame physics: enforce identical fixed
+     * cadence/seed traces, not invented in-between-frame interpolation. */
+    c.effect_id=90u;c.speed=128u;c.intensity=255u;c.background=black;
+    ot_wled_fx_state_t fw1={0},fw2={0};
+    for(uint32_t t=0u;t<2000u;t+=23u){
+        p[97]=guard;other[97]=guard;
+        assert(ot_wled_fx_render(&c,&fw1,t,p,97u));
+        assert(ot_wled_fx_render(&c,&fw2,t,other,97u));
+        assert(memcmp(p,other,97u*sizeof(*p))==0);
+        assert(eq(p[97],guard)&&eq(other[97],guard));
+    }
+    ot_wled_fx_reset(&fw1);ot_wled_fx_reset(&fw2);
+
     /* TV source state is zone-owned. Pixel output changes over a
      * deterministic multi-scene trace; repeated seed/time produces the
      * identical frame sequence. Frame guards cannot be written. */
