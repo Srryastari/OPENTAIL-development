@@ -47,4 +47,24 @@ public class PreviewFrameClockTest {
    assertTrue(s.skippedIntervals>=100);
    assertEquals(2000,s.frameMs);
  }
+
+ @Test public void pauseAndResumeDoNotJumpTheAnimationPhase(){
+   PreviewFrameClock c=new PreviewFrameClock(60);
+   c.onFrame(0);
+   assertEquals(16,c.onFrame(16_666_667L).elapsedMs);
+   c.suspendTimestamp();
+   PreviewFrameClock.Sample resumed=c.onFrame(5_000_000_000L);
+   assertTrue(resumed.advance);
+   assertEquals(16,resumed.elapsedMs);
+   assertEquals(0,c.skippedFrames());
+   assertEquals(33,c.onFrame(5_016_666_667L).elapsedMs);
+ }
+ @Test public void effectSwitchResetsOnlyTheNewRendererClock(){
+   PreviewFrameClock first=new PreviewFrameClock();
+   first.onFrame(0);first.onFrame(100_000_000L);
+   PreviewFrameClock second=new PreviewFrameClock();
+   assertEquals(0,second.onFrame(100_000_000L).elapsedMs);
+   assertEquals(100,first.onFrame(100_000_000L).elapsedMs);
+   assertEquals(16,second.onFrame(116_666_667L).elapsedMs);
+ }
 }
