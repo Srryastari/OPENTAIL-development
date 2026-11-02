@@ -6345,8 +6345,21 @@ int main() {
                             std::fprintf(stderr,"CORE rejected pinned FX %u (%s)\n",fx.id,fx.name);
                             return 1;
                         }
+                        /* Issue #99 explicitly changes a tiny set of
+                         * formerly pinned WLED behaviors: max-Speed sample
+                         * aliasing, true-black Chase gaps, and truncated /
+                         * almost-static TV scene durations. All other cases
+                         * remain byte-compared against the pinned upstream.
+                         * The deviations are independently tested in
+                         * test_issue99_frame_quality.c, not called parity. */
+                        const bool issue99_delta=
+                            ((fx.id==1u || fx.id==23u ||
+                              fx.id==24u || fx.id==26u) && speed==255u) ||
+                            ((fx.id==29u || fx.id==30u) && color_case==1u) ||
+                            fx.id==116u;
                         for(size_t i=0;i<count;i++) {
-                            if(pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
+                            if(!issue99_delta &&
+                               pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
                                !mismatch_reported) {
                                 std::fprintf(stderr,
                                   "WLED 1:1 mismatch id=%u %s pal=%u color_case=%u frame_ms=%u len=%u speed=%u intensity=%u ms=%u px=%zu upstream=%06X CORE=%06X\n",
@@ -6434,6 +6447,7 @@ int main() {
         std::fprintf(stderr,"WLED direct source-parity failed in %u distinct effects; no parity release claim.\n",mismatched_modes);
         return 1;
     }
+    std::printf("WLED source parity unchanged except Issue99 documented speed255 blink/strobe, black chase and TV scene policy cases; those RGB vectors have separate deterministic tests.\n");
     std::printf("WLED pinned-source golden-frame comparison passed: %u RGB samples, %zu distinct modes (RGB with default/explicit fixed palettes where enabled, gamma-off except Fairy/Fairytwinkle; synchronized test RNG)\n",
                 checked,sizeof(refs)/sizeof(refs[0]));
     return 0;
