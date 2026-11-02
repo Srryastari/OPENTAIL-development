@@ -32,6 +32,23 @@ bool ot_effects_1d_metadata(uint16_t id,ot_wled_fx_metadata_t *meta){
         true,true,true,true,false};
     return true;
 }
+bool ot_effects_1d_color_roles(uint16_t id,ot_wled_fx_color_role_t roles[3]){
+    if(!roles)return false;
+    if(ot_wled_fx_color_roles(id,roles))return true;
+    ot_wled_fx_metadata_t meta;
+    if(!ot_effects_1d_metadata(id,&meta))return false;
+    memset(roles,0,3u*sizeof(*roles));
+    /* Embers and the native originals never claim an unsupported third slot. */
+    if(meta.supports_foreground){
+        roles[0].enabled=true;
+        memcpy(roles[0].label,"1",2u);
+    }
+    if(meta.supports_background){
+        roles[1].enabled=true;
+        memcpy(roles[1].label,"2",2u);
+    }
+    return true;
+}
 void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed){
     if(!s)return;
     /* Free any source-ported dynamic pixel state before resetting the

@@ -78,6 +78,16 @@ internal object ApprovedEditorMetadata {
         "Custom 3", "Option 1", "Option 2", "Option 3")
     fun definition(name: String, flags: EffectParameters?): Definition {
         val raw = sample[name]
+        // Every effect uses exact Effects #95 role positions. Disabled roles
+        // remain empty (e.g. Solid Glitter BG / disabled / GL).
+        val authoritativeRoles = runCatching {
+            OfflineCoreRenderer.colorRoles(NativeEffectCatalog.byName(name).id)
+        }.getOrNull()?.mapIndexedNotNull { position, label ->
+            if(label.isNullOrBlank()) null else Role(position,when(label){
+                "Glitter color" -> "GL"
+                else -> label
+            })
+        }
         if (raw == null) return Definition(
             buildList {
                 if(flags?.speed==true)add(Param(0,"Speed",false))
@@ -86,7 +96,7 @@ internal object ApprovedEditorMetadata {
             buildList {
                 if(flags?.foreground==true)add(Role(0,"Fx"))
                 if(flags?.background==true)add(Role(1,"Bg"))
-            },flags?.palette==true
+            }.let { authoritativeRoles ?: it },flags?.palette==true
         )
         val sections=raw.split(';')
         val params=sections.getOrElse(0){""}.split(',').mapIndexedNotNull { i, label ->
@@ -100,7 +110,7 @@ internal object ApprovedEditorMetadata {
             })
         }
         // CORE capability can supersede the 16-example UI reference catalog.
-        return Definition(params,roles,sections.getOrElse(2){""}.isNotEmpty() || flags?.palette == true)
+        return Definition(params,authoritativeRoles ?: roles,sections.getOrElse(2){""}.isNotEmpty() || flags?.palette == true)
     }
     fun parameterKey(position:Int):String=when(position){0->"speed";1->"intensity";else->"param${position}"}
 }

@@ -12,17 +12,25 @@ final class OfflineCoreRenderer implements AutoCloseable {
     synchronized boolean render(long ms,int frameMs,int speed,int intensity,int brightness,
         int palette,int foreground,int background,byte[] custom,
         float peakHz,float magnitude,boolean audioPresent,int[] out){
+        return render(ms,frameMs,speed,intensity,brightness,palette,foreground,
+            background,0,false,custom,peakHz,magnitude,audioPresent,out);
+    }
+    synchronized boolean render(long ms,int frameMs,int speed,int intensity,int brightness,
+        int palette,int foreground,int background,int third,boolean thirdSet,
+        byte[] custom,float peakHz,float magnitude,boolean audioPresent,int[] out){
         return handle!=0 && frame(handle,ms,frameMs,speed,intensity,brightness,
-            palette,foreground,background,custom,peakHz,magnitude,audioPresent,out);
+            palette,foreground,background,third,thirdSet,custom,
+            peakHz,magnitude,audioPresent,out);
     }
     @Override public synchronized void close(){if(handle!=0){destroy(handle);handle=0;}}
     /** Authoritative fixed WLED palette colors for editor swatches.
      * Null for dynamic/custom/unsupported palette IDs; no invented gradients.
      * Uses the same immutable native source as the offline FX renderer. */
     static native int[] fixedPalette(int id,int foreground,int background,int accent);
+    static native String[] colorRoles(int effectId);
     private static native long create(int effect,int pixels);
     private static native void destroy(long handle);
     private static native boolean frame(long handle,long ms,int frameMs,int speed,
         int intensity,int brightness,int palette,int foreground,int background,
-        byte[] custom,float peakHz,float magnitude,boolean audioPresent,int[] out);
+        int third,boolean thirdSet,byte[] custom,float peakHz,float magnitude,boolean audioPresent,int[] out);
 }

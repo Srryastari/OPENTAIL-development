@@ -71,7 +71,8 @@ for(const required of [
 for(const required of [
   'class LiveBlePreview', 'private val intervalMs = 60L', 'handler.postDelayed(drain',
   'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
-  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId', 'ble.showContinuousFx(', 'fun stop()',
+  'frame.brightness.coerceIn(0,24)', 'frame.paletteId', 'ble.showContinuousFx(', 'ble.showContinuousTertiaryFx(',
+  'ble.canTertiaryFx()', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
@@ -180,7 +181,10 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         !controllerEditor.includes('if(liveArmed.value && key in') &&
         !controllerEditor.includes('if(liveArmed.value && slot < 2)') &&
         controllerEditor.includes('if(key in setOf("speed","intensity","brightness"))') &&
-        controllerEditor.includes('if(slot < 2) previewCurrentEffect(id)'),
+        controllerEditor.includes('previewCurrentEffect(id)') &&
+        compose.includes('tertiary = if (TertiaryFxCommand.supported(effectId)') &&
+        preview.includes('ble.showContinuousTertiaryFx(') &&
+        preview.includes('ble.canTertiaryFx()'),
         'Authenticated effect edits must not require an already-armed preview');
  assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
         compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&

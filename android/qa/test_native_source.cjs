@@ -241,7 +241,7 @@ assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
        bleSource.includes('infoReadPending'),
        'Actual firmware INFO metadata must remain safely serialized after owner authorization');
-assert(gradle.includes("versionName '0.2.0-alpha4'"));
+assert(gradle.includes("versionName '0.2.0-alpha5'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
@@ -1062,7 +1062,10 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         !controllerEditor.includes('if(liveArmed.value && key in') &&
         !controllerEditor.includes('if(liveArmed.value && slot < 2)') &&
         controllerEditor.includes('if(key in setOf("speed","intensity","brightness"))') &&
-        controllerEditor.includes('if(slot < 2) previewCurrentEffect(id)'),
+        controllerEditor.includes('previewCurrentEffect(id)') &&
+        compose.includes('tertiary = if (TertiaryFxCommand.supported(effectId)') &&
+        preview.includes('ble.showContinuousTertiaryFx(') &&
+        preview.includes('ble.canTertiaryFx()'),
         'Authenticated effect edits must not require an already-armed preview');
  assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
         compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&

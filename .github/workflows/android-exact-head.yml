@@ -46,6 +46,11 @@ jobs:
         with:
           ref: 7c0fcc450a7619a57603aabf833dea855a18bcd8
           path: pinned-effects80
+      - name: Checkout exact Effects #95 source color-slot contract
+        uses: actions/checkout@v4
+        with:
+          ref: 984a12aeec4e348b869ba2504a2f994fc944f7f2
+          path: pinned-effects95
       - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
         run: python3 android/qa/check_pinned_core49_contract.py
       - uses: actions/setup-java@v4
@@ -53,7 +58,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: All 140 local preview effects against immutable CORE oracle
-        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50 --continuity-dir pinned-effects80 > offline-preview-140.json
+        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50 --continuity-dir pinned-effects80 --color-dir pinned-effects95 > offline-preview-140.json
       - name: Preserve authoritative proprietary loop goldens and seven one-shot endpoints
         working-directory: pinned-effects80/core-firmware
         run: |
