@@ -124,7 +124,11 @@ int main(void){
                 for(size_t k=0;k<257u;k++)assert(same(pixels[k],black));
                 assert(same(pixels[257],guard));
                 cfg.brightness=255u;
-                assert(ot_effects_1d_render(&cfg,&state,17u,pixels,257u));
+                if(!ot_effects_1d_render(&cfg,&state,17u,pixels,257u)){
+                    fprintf(stderr,"Issue93 unsupported mode ID=%u Speed=%u Intensity=%u\\n",
+                        (unsigned)ids[i],cfg.speed,cfg.intensity);
+                    assert(0 && "full catalog frame render admission");
+                }
                 assert(same(pixels[257],guard));
                 ot_effects_1d_reset(&state,0u);
                 matrix++;
