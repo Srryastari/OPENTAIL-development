@@ -13,6 +13,8 @@ bank_h=file("fx_zone_bank.h")
 preset=file("fx_preset_record.h")
 effect=file("wled_fx_compat.h")
 assert 'OT_BLE_FX_TERTIARY_CAPABILITY' in ble
+assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in ble
+assert 'fx-tertiary13-v1' in hdr
 assert 'fx-tertiary-v1' in hdr
 assert '#define OT_BLE_FX_TERTIARY_WIRE_BYTES 20u' in hdr
 assert '#define OT_BLE_FX_WIRE_BYTES 17u' in hdr
