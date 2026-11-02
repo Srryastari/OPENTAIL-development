@@ -27,7 +27,7 @@ final class PreviewFrameClock {
         if(nanos<0)throw new IllegalArgumentException("Negative frame timestamp");
         if(previous<0){
             previous=nanos;accepted++;
-            return new Sample(0,16,0,true);
+            return new Sample(elapsed/1_000_000L,16,0,true);
         }
         if(nanos<=previous)return new Sample(elapsed/1_000_000L,16,0,false);
         long delta=nanos-previous;previous=nanos;
@@ -38,6 +38,9 @@ final class PreviewFrameClock {
         int frameMs=(int)Math.min(65535L,Math.max(1L,(delta+500_000L)/1_000_000L));
         return new Sample(elapsed/1_000_000L,frameMs,dropped,true);
     }
+    /** Freeze the active local phase across pause/background without counting
+     * wall-clock time as renderer time or inventing skipped output frames. */
+    void suspendTimestamp(){previous=-1L;}
     int acceptedFrames(){return accepted;}
     long skippedFrames(){return missed;}
 }
