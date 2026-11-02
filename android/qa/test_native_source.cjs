@@ -1062,7 +1062,10 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         !controllerEditor.includes('if(liveArmed.value && key in') &&
         !controllerEditor.includes('if(liveArmed.value && slot < 2)') &&
         controllerEditor.includes('if(key in setOf("speed","intensity","brightness"))') &&
-        controllerEditor.includes('if(slot < 2) previewCurrentEffect(id)'),
+        controllerEditor.includes('previewCurrentEffect(id)') &&
+        compose.includes('tertiary = if (TertiaryFxCommand.supported(effectId)') &&
+        preview.includes('ble.showContinuousTertiaryFx(') &&
+        preview.includes('ble.canTertiaryFx()'),
         'Authenticated effect edits must not require an already-armed preview');
  assert(compose.includes('liveChainMask.intValue = mask\n                                offlinePreview.value = false') &&
         compose.includes('liveZoneMask.intValue = mask\n                            offlinePreview.value = false') &&
