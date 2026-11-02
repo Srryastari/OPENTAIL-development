@@ -31,10 +31,11 @@ int main(void){
     const ot_wled_rgb_t red={255,0,0},green={0,255,0},
                        blue={0,0,255},white={255,255,255},
                        black={0,0,0},guard={29,47,83};
+    const ot_wled_audio_peak_t audio={440.0f,1280.0f};
     ot_wled_fx_config_t cfg={
         .speed=128,.intensity=255,.brightness=255,.palette_id=0,
         .frame_time_ms=16,.foreground={255,0,0},.background={0,255,0},
-        .tertiary={0,0,255},.tertiary_set=true
+        .tertiary={0,0,255},.tertiary_set=true,.audio_peak=&audio
     };
     ot_wled_fx_state_t st={0};
     expect_roles(OT_WLED_TRICOLOR_CHASE,"1","2","3");
