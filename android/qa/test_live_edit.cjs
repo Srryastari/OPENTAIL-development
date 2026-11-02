@@ -71,7 +71,8 @@ for(const required of [
 for(const required of [
   'class LiveBlePreview', 'private val intervalMs = 60L', 'handler.postDelayed(drain',
   'if (!armed) return', '!ble.canControl()', 'frame.effectId !in supportedIds()',
-  'frame.brightness.coerceIn(0, 24)', 'frame.paletteId', 'ble.showContinuousFx(', 'fun stop()',
+  'frame.brightness.coerceIn(0,24)', 'frame.paletteId', 'ble.showContinuousFx(', 'ble.showContinuousTertiaryFx(',
+  'ble.canTertiaryFx()', 'fun stop()',
   'handler.removeCallbacks(drain)', 'ble.stopShow()'
 ]) assert(preview.includes(required), 'Transient hardware preview regression: '+required);
 assert(compose.includes('Text("Bluetooth · " + ble.connectionPhase()') &&
