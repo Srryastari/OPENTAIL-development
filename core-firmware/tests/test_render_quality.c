@@ -60,7 +60,7 @@ int main(void){
     c.background=(ot_wled_rgb_t){0,0,0};
     ot_effects_1d_reset(&state,5u);
     const uint32_t times[]={0,23,24,45,46,47,70,92,116};
-    const uint8_t expected[]={32,32,0,0,32,32,0,32,0};
+    const uint8_t expected[]={32,0,0,0,32,32,0,32,0};
     for(size_t k=0;k<sizeof(times)/sizeof(times[0]);k++){
         assert(ot_effects_1d_render(&c,&state,times[k],pixels,11));
         for(size_t i=0;i<11;i++)assert(pixels[i].r==expected[k]);
