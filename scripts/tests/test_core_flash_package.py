@@ -37,7 +37,7 @@ class FlashPackageTests(unittest.TestCase):
 
     def test_actual_dual_ota_csv_and_preserved_nvs(self):
         pkg.expected_layout(self.partition, self.sdkconfig)
-        wrong = self.partition.replace(b"0x9000", b"0xa000", 1)
+        wrong = self.partition.replace(b"nvs,      data, nvs,   0x9000,", b"nvs,      data, nvs,   0xa000,", 1)
         with self.assertRaises(pkg.PackageError):
             pkg.expected_layout(wrong, self.sdkconfig)
         with self.assertRaises(pkg.PackageError):
