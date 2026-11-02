@@ -241,7 +241,7 @@ assert(bleSource.includes('setInfoListener(') &&
        bleSource.includes('if(infoReadQueued && coreInfo!=null && gatt!=null)') &&
        bleSource.includes('infoReadPending'),
        'Actual firmware INFO metadata must remain safely serialized after owner authorization');
-assert(gradle.includes("versionName '0.2.0-alpha4'"));
+assert(gradle.includes("versionName '0.2.0-alpha5'"));
 // Verify the actual released Compose UI; obsolete Java Views are NOT a release oracle.
 const layout=compose.split('private fun LayoutPage(t: Tone) {')[1].split('private fun addZoneAfter(')[0];
 const triggers=compose.split('private fun TriggersPage(t: Tone) {')[1].split('private fun AutoEventsPage(')[0];
