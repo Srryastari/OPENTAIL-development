@@ -48,7 +48,7 @@ JNIEXPORT void JNICALL Java_com_opentail_android_OfflineCoreRenderer_destroy(
 JNIEXPORT jboolean JNICALL Java_com_opentail_android_OfflineCoreRenderer_frame(
     JNIEnv *env,jclass cls,jlong handle,jlong ms,jint frame_ms,jint speed,
     jint intensity,jint brightness,jint palette,jint fg,jint bg,
-    jbyteArray custom,jfloat hz,jfloat magnitude,jboolean audio,jintArray out) {
+    jint third,jboolean third_set,jbyteArray custom,jfloat hz,jfloat magnitude,jboolean audio,jintArray out) {
     (void)cls;binding *b=(binding *)(intptr_t)handle;
     if(!b||!out||ms<0||frame_ms<1||frame_ms>65535||
        speed<0||speed>255||intensity<0||intensity>255||brightness<0||brightness>255||
@@ -60,8 +60,31 @@ JNIEXPORT jboolean JNICALL Java_com_opentail_android_OfflineCoreRenderer_frame(
     ot_wled_audio_peak_t peak={hz,magnitude};
     if(!ot_preview_render(b->preview,(uint32_t)ms,(uint16_t)frame_ms,
         (uint8_t)speed,(uint8_t)intensity,(uint8_t)brightness,(uint8_t)palette,
-        (uint32_t)fg,(uint32_t)bg,bytes?stops:NULL,(size_t)bytes/4,
+        (uint32_t)fg,(uint32_t)bg,(uint32_t)third,third_set==JNI_TRUE,
+        bytes?stops:NULL,(size_t)bytes/4,
         audio?&peak:NULL,b->colors))return JNI_FALSE;
     (*env)->SetIntArrayRegion(env,out,0,b->count,(jint *)b->colors);
     return (*env)->ExceptionCheck(env)?JNI_FALSE:JNI_TRUE;
+}
+
+/* Source-owned metadata: three positions, with disabled slots preserved. */
+JNIEXPORT jobjectArray JNICALL Java_com_opentail_android_OfflineCoreRenderer_colorRoles(
+    JNIEnv *env,jclass cls,jint id) {
+    (void)cls;
+    if(id<0||id>65535)return NULL;
+    ot_wled_fx_color_role_t roles[3]={{0}};
+    if(!ot_effects_1d_color_roles((uint16_t)id,roles))return NULL;
+    jclass strings=(*env)->FindClass(env,"java/lang/String");
+    if(!strings)return NULL;
+    jobjectArray out=(*env)->NewObjectArray(env,3,strings,NULL);
+    if(!out)return NULL;
+    for(int i=0;i<3;i++){
+        if(!roles[i].enabled)continue;
+        jstring label=(*env)->NewStringUTF(env,roles[i].label);
+        if(!label)return NULL;
+        (*env)->SetObjectArrayElement(env,out,i,label);
+        (*env)->DeleteLocalRef(env,label);
+        if((*env)->ExceptionCheck(env))return NULL;
+    }
+    return out;
 }
