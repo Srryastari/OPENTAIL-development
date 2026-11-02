@@ -20,6 +20,13 @@ final class TertiaryFxCommand {
             if(part.trim().equals("fx-tertiary-v1"))return true;
         return false;
     }
+    /** Extra INFO token distinguishes new 13-ID CORE from older 11-ID CORE. */
+    static boolean advertised13(String info){
+        if(!advertised(info))return false;
+        for(String part:info.split("\\\\|"))
+            if(part.trim().equals("fx-tertiary13-v1"))return true;
+        return false;
+    }
     static byte[] encode(int id,int chains,int zones,int r,int g,int b,
         int br,int bg,int bb,int brightness,int speed,int intensity,int palette,
         int tertiary) {
