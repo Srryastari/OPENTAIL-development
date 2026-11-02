@@ -847,7 +847,7 @@ for (const required of ['private fun PalettePicker(', 'NativePaletteEngine.looku
 }
 for (const required of ['"Default", "Random Cycle", "Color 1", "Colors 1&2", "Color Gradient"',
   'project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())',
-  'entry.length() != 4', 'stops.sortBy { it.first }',
+  'entry.length() != 4', 'if (parts[0] <= previous',
   'return NativePalette(id, name, null)',
   'fun effectiveStepPalette(']) {
   assert(palettes.includes(required), 'Palette catalog or authentic-stop parser regressed: ' + required);
