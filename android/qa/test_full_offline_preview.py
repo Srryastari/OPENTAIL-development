@@ -40,8 +40,8 @@ int palette_ok(int id,int pal){return ot_palette_1d_supported(id,pal);}
 void *make(int id){oracle *p=calloc(1,sizeof(*p));p->id=id;p->seed=0x5eed1234;
  ot_effects_1d_reset(&p->s,0x5eed1234);ot_wled_palette_global_init(&p->pal,draw,&p->seed);return p;}
 void drop(oracle *p){ot_wled_fx_reset(&p->s.wled);free(p);}
-int frame(oracle *p,uint32_t ms,int speed,int intensity,int bri,int palette,
- uint32_t fg,uint32_t bg,float hz,float magnitude,uint32_t *out){
+int frame_impl(oracle *p,uint32_t ms,int speed,int intensity,int bri,int palette,
+ uint32_t fg,uint32_t bg,uint32_t third,int third_set,float hz,float magnitude,uint32_t *out){
  ot_wled_palette16_t custom;const ot_wled_palette16_t *resolved=NULL;
  const uint8_t stops[]={0,12,50,100,255,200,3,22};
  if(!ot_wled_palette_global_tick(&p->pal,ms,5,16,750,true,draw,&p->seed))return 0;
@@ -52,10 +52,20 @@ int frame(oracle *p,uint32_t ms,int speed,int intensity,int bri,int palette,
  .brightness=bri,.palette_id=palette,.frame_time_ms=16,
  .foreground={(uint8_t)(fg>>16),(uint8_t)(fg>>8),(uint8_t)fg},
  .background={(uint8_t)(bg>>16),(uint8_t)(bg>>8),(uint8_t)bg},
+ .tertiary={(uint8_t)(third>>16),(uint8_t)(third>>8),(uint8_t)third},
+ .tertiary_set=third_set!=0,
  .audio_peak=&audio,.resolved_palette=resolved};
  if(!ot_effects_1d_render(&cfg,&p->s,ms,p->px,30))return 0;
  for(int i=0;i<30;i++)out[i]=0xff000000u|(uint32_t)p->px[i].r<<16|(uint32_t)p->px[i].g<<8|p->px[i].b;
  return 1;
+}
+int frame(oracle *p,uint32_t ms,int speed,int intensity,int bri,int palette,
+ uint32_t fg,uint32_t bg,float hz,float magnitude,uint32_t *out){
+ return frame_impl(p,ms,speed,intensity,bri,palette,fg,bg,0,0,hz,magnitude,out);
+}
+int frame3(oracle *p,uint32_t ms,int speed,int intensity,int bri,int palette,
+ uint32_t fg,uint32_t bg,uint32_t third,int present,float hz,float magnitude,uint32_t *out){
+ return frame_impl(p,ms,speed,intensity,bri,palette,fg,bg,third,present,hz,magnitude,out);
 }
 '''
 
@@ -73,7 +83,11 @@ public class FullPreviewHarness {
    long ms=Long.parseLong(f[2]);int speed=Integer.parseInt(f[3]),intensity=Integer.parseInt(f[4]),bri=Integer.parseInt(f[5]),pal=Integer.parseInt(f[6]);
    int fg=(int)Long.parseLong(f[7]),bg=(int)Long.parseLong(f[8]);
    long start=System.nanoTime();
-   boolean ok=r.render(ms,16,speed,intensity,bri,pal,fg,bg,pal>72?custom:null,440,2048,true,colors);
+   boolean ok=f.length>9
+    ?r.render(ms,16,speed,intensity,bri,pal,fg,bg,
+        (int)Long.parseLong(f[9]),Integer.parseInt(f[10])==1,
+        pal>72?custom:null,440,2048,true,colors)
+    :r.render(ms,16,speed,intensity,bri,pal,fg,bg,pal>72?custom:null,440,2048,true,colors);
    long ns=System.nanoTime()-start;
    if(!ok)throw new AssertionError("rejected "+line);
    durations.computeIfAbsent(id,k->new ArrayList<>()).add(ns);
@@ -86,6 +100,13 @@ public class FullPreviewHarness {
    System.err.print("\""+e.getKey()+"\":{\"frames\":"+v.size()+",\"mean_ns\":"+(sum/v.size())+
     ",\"p50_ns\":"+v.get(v.size()/2)+",\"p95_ns\":"+v.get(v.size()*95/100)+",\"p99_ns\":"+v.get(v.size()*99/100)+"}");
   }System.err.println("}");
+  for(int id:new int[]{54,55,56,84,103}) {
+    String[] roles=OfflineCoreRenderer.colorRoles(id);
+    if(roles==null || roles.length!=3 || roles[2]==null)
+        throw new AssertionError("Missing source third color role: "+id);
+    if(id==103 && roles[1]!=null)
+        throw new AssertionError("Solid Glitter disabled middle slot compacted");
+  }
   try(OfflineCoreRenderer invalid=new OfflineCoreRenderer(65535,30)){
    if(invalid.available())throw new AssertionError("unknown effect accepted");
   }
@@ -163,6 +184,10 @@ def main():
         lib.drop.argtypes=[C.c_void_p]
         lib.frame.argtypes=[C.c_void_p,C.c_uint32,*[C.c_int]*4,C.c_uint32,C.c_uint32,C.c_float,C.c_float,C.POINTER(C.c_uint32)]
         lib.frame.restype=C.c_int
+        lib.frame3.argtypes=[C.c_void_p,C.c_uint32,*[C.c_int]*4,
+            C.c_uint32,C.c_uint32,C.c_uint32,C.c_int,
+            C.c_float,C.c_float,C.POINTER(C.c_uint32)]
+        lib.frame3.restype=C.c_int
         # Dedicated Startup/Shutdown animations are true one-shots: they
         # advance through different frames and hold their final image.
         # A loop-seam assertion would be wrong for these intentional events.
@@ -245,6 +270,23 @@ def main():
                          'speed_supported':bool(flags&1),'intensity_supported':bool(flags&2),
                          'palette_supported':bool(flags&16),'profiles':len(profiles),
                          'frames':count-start_count,'speed_0_vs_255_trace_differs':hashes[1]!=hashes[2]})
+        # Exercise the exact 11 source-verified third-slot consumers in JNI,
+        # including explicit black and changing only third while preserving the
+        # first two colors. No fabricated Android-only frame substitution.
+        third_consumers=(28,29,34,50,52,54,55,56,84,87,103)
+        for fx in third_consumers:
+            for idx,third in enumerate((0x000000,0xff0000,0x0000ff)):
+                h=lib.make(fx)
+                for step in range(24):
+                    ms=step*64
+                    assert lib.frame3(h,ms,128,200,255,0,0x00ff00,0x220033,
+                        third,1,440,2048,frame),(fx,ms,third)
+                    pixels=b''.join(int(x).to_bytes(4,'big') for x in frame)
+                    expected.extend(pixels)
+                    plan.append(','.join(map(str,[int(step==0),fx,ms,128,200,255,
+                        0,0x00ff00,0x220033,third,1])))
+                    count+=1
+                lib.drop(h)
         result=subprocess.run([str(jdk/'bin/java'),'-Djava.library.path='+str(t),'-cp',str(t),
                                'com.opentail.android.FullPreviewHarness'],
                               input=('\n'.join(plan)+'\n').encode(),capture_output=True,check=True)
@@ -259,7 +301,8 @@ def main():
                 'frames':count,'argb_bytes':len(expected),'parity':'byte-exact JNI vs independent pinned CORE build',
                 'timing_scope':'Linux host JNI renderer only; excludes Android display/composition/microphone acquisition/BLE. Not measured phone FPS.',
                 'audio_fixture':'test input 440 Hz, PCM magnitude 2048; app uses live Android microphone, never this fixture',
-                'motion_scan':motion,'per_effect':rows}
+                'motion_scan':motion,'tertiary_effects_tested':list(third_consumers),
+                'per_effect':rows}
         print(json.dumps(report,indent=2))
 
 if __name__=='__main__':main()
