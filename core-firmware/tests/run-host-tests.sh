@@ -42,6 +42,13 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   tests/test_issue99_frame_quality.c -o /tmp/ot-issue99-quality -lm
 /tmp/ot-issue99-quality
 
+# Issue102: independently verify all eight previously metadata-only RGB3 roles.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c \
+  main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+  tests/test_issue102_third_roles.c -o /tmp/ot-issue102-rgb -lm
+/tmp/ot-issue102-rgb
+
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
 # Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
