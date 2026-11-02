@@ -5,7 +5,7 @@ Authoritative reconciled renderer: Effects PR #110 `6180e2a5ccbfbf8567513504669c
 
 ## New capability admission (existing authenticated `fx-tertiary-v1`)
 
-The existing 20-byte opcode **11** remains unchanged; Android and CORE now both admit **13** independently source-tested consumers:
+The existing 20-byte opcode **11** remains unchanged; Android and CORE now both admit **13** independently source-tested consumers. CORE continues advertising `fx-tertiary-v1` for the original 11 and **also** advertises `fx-tertiary13-v1` for the two additions. Android requires the extra token before attempting Aurora/Popcorn on a connected controller, so older 11-ID firmware is never falsely treated as 13-ID capable:
 
 `28, 29, 34, 38, 50, 52, 54, 55, 56, 84, 87, 95, 103`.
 
@@ -20,5 +20,5 @@ The existing 20-byte opcode **11** remains unchanged; Android and CORE now both 
 - Existing controller-owned continuous playback, BLE session/HMAC authorization, physically assigned output/zone masks, gamma/color swizzle, STOP, OEM Brake/Turn/Reverse priority, staged NVS, NVS recovery and 12V brightness cap are unchanged.
 - Focused C parser tests exercise all 13 allowlisted IDs, Aurora palette 4/0/50 conditions, six blocked IDs, no output mutation on rejection, true black, 17-byte compatibility, zone isolation and phase continuity.
 - Android JUnit verifies 13 IDs, 38/palette4 versus palette0/50, Popcorn RGB bytes, invalid packet/ranges, capability token. Exact-HEAD workflows require all 140 CORE host/JNI frame parity, Android APK, ESP-IDF v5.5.5 and a complete four-image ZIP with OTA initialization at 0xF000, verified after artifact download.
-- Earlier PR #111 immutable integration provenance check intentionally does not authorize changing BLE/parser or Android Java sources. The new scope-limited exact-head workflow is a **successor** that explicitly allows *only* these reviewed changes. It does not weaken physical release gates or rewrite old receipts.
+- Earlier PR #111 immutable integration provenance check intentionally does not authorize changing BLE/parser, INFO or Android Java sources. The new scope-limited exact-head workflow is a **successor** that explicitly allows *only* these reviewed changes. It does not weaken physical release gates or rewrite old receipts.
 - Owner-approved six-screen Native Android UI remains exactly 1:1. No firmware version bump. Draft PR only; do not merge or flash. Physical 22-case checks, phone GATT ACK/optical color measurements, hardware failover and vehicle release remain **NOT RUN / NOT CERTIFIED**.
