@@ -43,6 +43,7 @@ int main(void){
     expect_roles(OT_WLED_TRICOLOR_FADE,"1","2","3");
     expect_roles(OT_WLED_SOLID_GLITTER,"BG",NULL,"GL");
     expect_roles(OT_WLED_RAILWAY,"1","2",NULL);
+    expect_roles(OT_WLED_SOLID,"1",NULL,NULL);
     assert(!ot_wled_fx_color_roles(65535u,(ot_wled_fx_color_role_t[3]){{0}}));
 
     cfg.effect_id=OT_WLED_TRICOLOR_CHASE;
