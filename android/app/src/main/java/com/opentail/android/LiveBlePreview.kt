@@ -31,6 +31,8 @@ internal class LiveBlePreview(
         val speed: Int,
         val intensity: Int,
         val paletteId: Int,
+        // Null means omit third slot; never synthesize a legacy third color.
+        val tertiary: Int? = null,
     )
 
     private val handler = Handler(Looper.getMainLooper())
@@ -52,19 +54,32 @@ internal class LiveBlePreview(
         lastSentAt = SystemClock.uptimeMillis()
         // One accepted edit sends one command. CORE owns lifetime and arbitration.
         // No keepalive, timeout or NVS write.
-        ble.showContinuousFx(
-            frame.effectId, frame.chainMask, frame.zoneMask,
-            (frame.foreground shr 16) and 255,
-            (frame.foreground shr 8) and 255,
-            frame.foreground and 255,
-            (frame.background shr 16) and 255,
-            (frame.background shr 8) and 255,
-            frame.background and 255,
-            frame.brightness.coerceIn(0, 24),
-            frame.speed.coerceIn(0, 255),
-            frame.intensity.coerceIn(0, 255),
-            frame.paletteId
-        )
+        val third = frame.tertiary
+        if(third != null && !TertiaryFxCommand.supported(frame.effectId)){
+            report("Third color is not verified for this CORE effect; local preview only")
+            return@Runnable
+        }
+        if(third != null && !ble.canTertiaryFx()){
+            report("CORE fx-tertiary-v1 unavailable; third color stays local; update firmware")
+            return@Runnable
+        }
+        val fg=frame.foreground
+        val bg=frame.background
+        if(third != null)
+            ble.showContinuousTertiaryFx(
+                frame.effectId,frame.chainMask,frame.zoneMask,
+                (fg shr 16) and 255,(fg shr 8) and 255,fg and 255,
+                (bg shr 16) and 255,(bg shr 8) and 255,bg and 255,
+                frame.brightness.coerceIn(0,24),
+                frame.speed.coerceIn(0,255),frame.intensity.coerceIn(0,255),
+                frame.paletteId,third)
+        else ble.showContinuousFx(
+            frame.effectId,frame.chainMask,frame.zoneMask,
+            (fg shr 16) and 255,(fg shr 8) and 255,fg and 255,
+            (bg shr 16) and 255,(bg shr 8) and 255,bg and 255,
+            frame.brightness.coerceIn(0,24),
+            frame.speed.coerceIn(0,255),frame.intensity.coerceIn(0,255),
+            frame.paletteId)
     }
 
     fun isArmed(): Boolean = armed
