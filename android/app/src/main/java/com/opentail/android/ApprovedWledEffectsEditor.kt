@@ -143,7 +143,9 @@ internal fun ApprovedWledEffectsEditor(
     var effectSearch by rememberSaveable(scopeKey) { mutableStateOf("") }
     var stateRevision by remember(scopeKey) { mutableIntStateOf(0) }
     val currentId=selectedId ?: 0
-    val paletteId=readPalette?.invoke() ?: prefs.getInt("wled.${currentId}.palette",prefs.getInt("paletteId",0))
+    val selectedIsActive=prefs.getInt("effectId",-1)==currentId
+    val paletteId=readPalette?.invoke() ?: prefs.getInt("wled.${currentId}.palette",
+        if(selectedIsActive)prefs.getInt("paletteId",0) else 0)
     val stops=paletteFor(paletteId).stops
     // CORE source palette_1d defines editable user colors ONLY for 2..5.
     // An immutable fixed WLED palette (0, 6..72), random or custom preset
@@ -152,16 +154,18 @@ internal fun ApprovedWledEffectsEditor(
     fun intSetting(key:String,default:Int):Int {
         @Suppress("UNUSED_VARIABLE") val observe = stateRevision
         return readSetting?.invoke(key,default)
-            ?: prefs.getInt("wled.${currentId}.${key}",prefs.getInt(key,default))
+            ?: prefs.getInt("wled.${currentId}.${key}",
+                if(selectedIsActive)prefs.getInt(key,default) else default)
     }
     fun colorSetting(slot:Int):Int {
         @Suppress("UNUSED_VARIABLE") val observe = stateRevision
         readColor?.invoke(slot)?.let { return it }
-        return prefs.getInt("wled.${currentId}.color${slot}", when(slot){
-            0->prefs.getInt("foreground",0xffd735f4.toInt())
-            1->prefs.getInt("background",0xff000000.toInt())
-            else->prefs.getInt("accent",0xffffffff.toInt())
-        })
+        val field=when(slot){0->"foreground";1->"background";else->"accent"}
+        val fallback=when(slot){0->0xffd735f4.toInt();1->0xff000000.toInt()
+            else->0xffffffff.toInt()}
+        return prefs.getInt("wled.${currentId}.color${slot}",
+            prefs.getInt("wled.${currentId}.${field}",
+                if(selectedIsActive)prefs.getInt(field,fallback) else fallback))
     }
     fun changeParam(key:String,value:Int) {
         onParam(currentId,key,value)
@@ -337,7 +341,7 @@ internal fun ApprovedWledEffectsEditor(
                     }
                 }
             }
-            val brightness=(hsv[2]*255).toInt()
+            val brightness=kotlin.math.round(hsv[2]*255f).toInt().coerceIn(0,255)
             EditorNumeric("Value/Brightness",brightness,255,{v->
                 changeColor(role,android.graphics.Color.HSVToColor(
                     floatArrayOf(hsv[0],hsv[1],v/255f)))
