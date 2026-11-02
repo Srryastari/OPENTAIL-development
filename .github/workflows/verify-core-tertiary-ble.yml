@@ -1,0 +1,142 @@
+name: CORE tertiary BLE exact-SHA software gate (bench only)
+on:
+  pull_request:
+    branches: [effects/issue93-shared-tertiary-roles-20261101]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-and-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact Effects 95 source, no Android/NVS/OTA/UI changes or gate weakening
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          base="984a12aeec4e348b869ba2504a2f994fc944f7f2"
+          initial="b970f92c9155ac9e2d2c9ffa54afa2d1ca3502cd"
+          allowed={
+             "core-firmware/main/ble_fx_command.c",
+             "core-firmware/main/ble_fx_command.h",
+             "core-firmware/main/ble_status.c",
+             "core-firmware/main/fx_zone_bank.c",
+             "core-firmware/main/fx_zone_bank.h",
+             "core-firmware/main/opentail_core.c",
+             "core-firmware/tests/test_ble_fx_tertiary.c",
+             "core-firmware/tests/test_ble_tertiary_wiring_contract.py",
+             "core-firmware/tests/run-host-tests.sh",
+             ".github/workflows/verify-core-tertiary-ble.yml",
+             "docs/CORE-TERTIARY-BLE-CONTRACT-2026-11-01.md",
+          }
+          def git(*args):
+              return subprocess.check_output(["git",*args],text=True).strip()
+          assert git("merge-base","--is-ancestor",initial,"HEAD")==""
+          assert git("merge-base","--is-ancestor",base,"HEAD")==""
+          paths=set(git("diff","--name-only",base,"HEAD").splitlines())
+          assert paths<=allowed, "Out-of-scope files: "+repr(paths-allowed)
+          for name in (
+              "core-firmware/main/wled_fx_compat.c",
+              "core-firmware/main/wled_fx_compat.h",
+              "core-firmware/main/effects_1d.c",
+              "core-firmware/main/effects_1d.h",
+              "core-firmware/main/fx_preset_record.h",
+              "core-firmware/main/fx_preset_record.c",
+              "core-firmware/main/output_manager.c",
+              "core-firmware/main/trigger_manager.c",
+              "core-firmware/main/ot_failover_essential.c",
+              "core-firmware/main/ot_version.h",
+              "docs/CI-REGRESSION-BASELINE.json",
+              ".github/workflows/verify-active-sources.yml",
+              "scripts/check_regressions.py",
+          ):
+              assert git("rev-parse","HEAD:"+name)==git("rev-parse",base+":"+name),name
+          assert all(not x.startswith(("android/","web-studio/")) for x in paths)
+          assert "core-firmware/main/ble_status.c" in paths
+          print("PASS: exact Effects95 renderer, old NVS and 22 physical gates unchanged")
+          PY
+      - name: Tertiary GATT/CORE/NVS static contract
+        run: python3 core-firmware/tests/test_ble_tertiary_wiring_contract.py
+
+  complete-core-host:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert immutable SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Full CORE and all-140 effects, tertiary, Trigger, BLE, STOP, NVS tests
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Diff-aware regression audit (physical release remains blocked)
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  android-contract-unchanged:
+    needs: source-and-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Android UI unchanged and original 140-effect contract still readable
+        run: |
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
+
+  esp-idf-555-and-bench-binaries:
+    needs: [complete-core-host, android-contract-unchanged]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert same tested SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF v5.5.5 ESP32-S3 build — NO FLASH
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify complete matching bench image manifest
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path("core-firmware/build")
+          for p in ("opentail_core_alpha.bin","bootloader/bootloader.bin",
+                    "partition_table/partition-table.bin","flasher_args.json"):
+              assert (b/p).is_file() and (b/p).stat().st_size>0,p
+          m=json.loads((b/"flasher_args.json").read_text())["flash_files"]
+          assert len(m)>=3 and all((b/p).is_file() for p in m.values())
+          print("PASS: exact HEAD bin + boot + partition + manifest; bench only")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-core-tertiary-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+          if-no-files-found: error
+          retention-days: 14
+# No physical 22-case or automatic hardware failover certification implied.
