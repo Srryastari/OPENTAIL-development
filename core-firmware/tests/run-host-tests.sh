@@ -26,6 +26,14 @@ cc -std=c11 -Wall -Wextra -Werror -Imain main/core_logic.c main/arbitration_logi
 
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/wled_fx_compat.c tests/test_wled_fx_compat.c -o /tmp/ot-wled-fx-tests -lm && /tmp/ot-wled-fx-tests
 
+# Issue #93 authoritative shared color roles, third RGB slot and 140-effect
+# Speed/Intensity/color/black/sentinel acceptance. No Android presentation fix.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c \
+  main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+  tests/test_issue93_color_slots.c -o /tmp/ot-issue93-colors -lm
+/tmp/ot-issue93-colors
+
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
 # Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
