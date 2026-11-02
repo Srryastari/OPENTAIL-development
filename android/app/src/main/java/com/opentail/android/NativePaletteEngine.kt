@@ -59,12 +59,13 @@ internal object NativePaletteEngine {
         // immutable WLED palette. If the exact JNI builder is unavailable,
         // leave the swatch unknown, not misleading. Editable 2..5 retain
         // their pinned CORE-derived local fallback for non-JNI JVM tests.
-        if (isImmutableFixedGradient(id))
-            return NativePalette(id, name, null)
+        if (fixedPalette)
+            return NativePalette(id, name, coreFixedStops(id, foreground, background))
         val raw = project.optJSONObject("palettePreviews")?.optJSONArray(id.toString())
             ?: return NativePalette(id, name, coreFixedStops(id, foreground, background))
-        if (raw.length() !in 1..64) return NativePalette(id, name, null)
+        if (raw.length() !in 2..NativePaletteV3.STOPS_MAX) return NativePalette(id, name, null)
         val stops = ArrayList<Pair<Float, Color>>(raw.length())
+        var previous = -1
         for (i in 0 until raw.length()) {
             val entry = raw.optJSONArray(i) ?: return NativePalette(id, name, null)
             if (entry.length() != 4) return NativePalette(id, name, null)
@@ -76,11 +77,16 @@ internal object NativePaletteEngine {
                     return NativePalette(id, name, null)
                 number.toInt()
             }
+            if (parts[0] <= previous || (i == 0 && parts[0] != 0) ||
+                (i == raw.length()-1 && parts[0] != 255))
+                return NativePalette(id, name, null)
+            previous = parts[0]
             stops.add(parts[0] / 255f to Color(
                 0xff000000.toInt() or (parts[1] shl 16) or (parts[2] shl 8) or parts[3]
             ))
         }
-        stops.sortBy { it.first }
+        // CORE-defined sorted endpoints are mandatory; never repair a malformed
+        // palette by sorting or inventing missing endpoint colors.
         // Compose gradients need endpoints for reliable fill; retain the
         // actual sample positions and colors, including repeated stops.
         val bounded = ArrayList<Pair<Float, Color>>(stops.size + 2)
@@ -111,7 +117,7 @@ internal object NativePaletteEngine {
 
     private fun parseVerifiedCustom(text: String): List<Pair<Float, Color>>? {
         val records = text.split(',')
-        if (records.size !in 2..16) return null
+        if (records.size !in 2..NativePaletteV3.STOPS_MAX) return null
         val result = ArrayList<Pair<Float, Color>>(records.size)
         var previous = -1
         val pattern = Regex("(\\d{1,3}):#([0-9A-Fa-f]{6})")
