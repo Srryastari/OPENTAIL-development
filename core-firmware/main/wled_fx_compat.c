@@ -3198,12 +3198,22 @@ static void popcorn_frame(const ot_wled_fx_config_t *cfg,
             popcorn[i].vel=sqrtf(-2.0f*gravity*(float)peak);
             /* Palette=0, no tertiary: pinned source consumes a random
              * color-slot draw and maps every slot to primary. */
-            (void)fx_rand8(state,3u);
-            popcorn[i].col_index=0u;
+            const uint8_t source_slot=fx_rand8(state,3u);
+            /* Legacy default palette maps every source slot to FG.
+             * An explicitly enabled third RGB config instead maps the
+             * source-drawn index to its authored three source colors. */
+            popcorn[i].col_index=cfg->tertiary_set?source_slot:0u;
         }
         if(popcorn[i].pos>=0.0f) {
             const size_t index=(size_t)popcorn[i].pos;
-            if(index<count)pixels[index]=fg;
+            if(index<count){
+                ot_wled_rgb_t color=fg;
+                if(cfg->tertiary_set && popcorn[i].col_index==1u)
+                    color=bg;
+                else if(cfg->tertiary_set && popcorn[i].col_index==2u)
+                    color=scaled(cfg->tertiary,cfg->brightness);
+                pixels[index]=color;
+            }
         }
     }
 }
@@ -3592,8 +3602,11 @@ static void aurora_frame(const ot_wled_fx_config_t *cfg,
     if(!data)return;
     ot_wled_palette16_t palette;
     const uint8_t id=cfg->palette_id?cfg->palette_id:50u;
+    /* Aurora's authored third slot is consumed by explicit three-color
+     * palette modes, not by the default Aurora palette ID 50. */
     if(!fx_palette_build(cfg,id,cfg->foreground,
-               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
+               cfg->background,cfg->tertiary_set?cfg->tertiary:
+               (ot_wled_rgb_t){0,0,0},&palette))return;
     for(unsigned w=0;w<waves;w++) {
         ot_aurora_wave_t *wave=&data[w];
         if(wave->alive) {
