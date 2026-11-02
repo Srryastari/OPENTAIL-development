@@ -47,6 +47,13 @@ int main(void){
     assert(!ot_wled_fx_color_roles(65535u,(ot_wled_fx_color_role_t[3]){{0}}));
 
     cfg.effect_id=OT_WLED_TRICOLOR_CHASE;
+    /* A nonzero unused tertiary field must not change a legacy two-slot
+     * request until the independent third-color flag is explicitly set. */
+    cfg.tertiary_set=false;
+    assert(ot_wled_fx_render(&cfg,&st,0u,pixels,97u));
+    assert(!found(pixels,97u,blue));
+    ot_wled_fx_reset(&st);
+    cfg.tertiary_set=true;
     assert(ot_wled_fx_render(&cfg,&st,0u,pixels,97u));
     assert(found(pixels,97u,red)&&found(pixels,97u,green)&&found(pixels,97u,blue));
     ot_wled_fx_reset(&st);
