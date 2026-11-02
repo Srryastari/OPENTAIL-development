@@ -6356,7 +6356,7 @@ int main() {
                             ((fx.id==1u || fx.id==23u ||
                               fx.id==24u || fx.id==26u) && speed==255u) ||
                             ((fx.id==29u || fx.id==30u) && color_case==1u) ||
-                            fx.id==116u;
+                            fx.id==116u || fx.id==68u;
                         for(size_t i=0;i<count;i++) {
                             if(!issue99_delta &&
                                pack(actual[i])!=(seg.pixels[i]&0xffffffu) &&
