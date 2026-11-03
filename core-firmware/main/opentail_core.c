@@ -1896,6 +1896,16 @@ static void config_activation_task(void *unused){
 static void input_sampler_task(void *arg){
     (void)arg;
     ot_inputs_t sampler={0};
+    /* Bootstrap the debouncer from the GPIO snapshot captured BEFORE any
+     * RMT frame. Without this, the first 3 samples would overwrite a held
+     * Brake/Turn/Reverse with zero until the fourth 10ms sample. */
+    const uint8_t boot_physical=live_input_mask;
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        const bool asserted=(boot_physical&(uint8_t)(1u<<i))!=0u;
+        sampler.settled[i]=asserted;
+        sampler.pending[i]=asserted;
+        sampler.ticks[i]=OT_DEBOUNCE_TICKS;
+    }
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
