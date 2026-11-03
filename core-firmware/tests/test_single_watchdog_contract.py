@@ -46,6 +46,11 @@ assert "if(ot_sw_idf_boot_loop_seen())" in boot and 'ot_st_set_fault(' in boot
 assert "const bool sampler_ready=input_watched &&" in boot
 assert "ot_sw_idf_watch_render()" in render
 assert render.index("ot_sw_idf_watch_render()") < render.index("native_outputs_ready=true;")
+assert "const uint8_t boot_physical=live_input_mask;" in sampler
+assert "sampler.settled[i]=asserted;" in sampler
+assert "sampler.pending[i]=asserted;" in sampler
+assert "sampler.ticks[i]=OT_DEBOUNCE_TICKS;" in sampler
+assert sampler.index("sampler.settled[i]=asserted;") < sampler.index("gpio_get_level(input_pin[i])")
 assert sampler.index("gpio_get_level(input_pin[i])") < sampler.index(
     "ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS)")
 assert sampler.index("live_input_mask=physical") < sampler.index("ot_sw_idf_input_sampled()")
