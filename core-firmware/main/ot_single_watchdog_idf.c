@@ -86,13 +86,13 @@ void ot_sw_idf_input_sampled(void){
     __atomic_store_n(&last_input_ms,clock_ms(),__ATOMIC_RELAXED);
     (void)esp_task_wdt_reset_user(input_user);
 }
-void ot_sw_idf_render_cycle(bool all_outputs_completed,bool diagnosed_fault,
-                            bool configuration_fault){
+void ot_sw_idf_render_cycle(bool all_outputs_completed,bool any_output_completed,
+                            bool diagnosed_fault,bool configuration_fault){
     if(!render_user ||
-       !ot_sw_render_progress_eligible(all_outputs_completed,diagnosed_fault))return;
-    /* Blocking in RMT completion or an infinitely incomplete transfer cannot
-     * reach this point and therefore cannot feed TWDT. A handled driver fault
-     * is a terminal failure state: retain its latch, do not reset forever. */
+       !ot_sw_render_progress_eligible(all_outputs_completed,any_output_completed))return;
+    /* RMT completion is the only feed: a loop repeating a latched failure
+     * without any successful physical driver transfer must NOT feed TWDT.
+     * Unfinished DMA/async_done never reaches here and times out. */
     if(all_outputs_completed){
         __atomic_add_fetch(&completed_frames,1u,__ATOMIC_RELAXED);
         __atomic_store_n(&last_frame_ms,clock_ms(),__ATOMIC_RELAXED);
@@ -105,7 +105,6 @@ void ot_sw_idf_render_cycle(bool all_outputs_completed,bool diagnosed_fault,
            __atomic_load_n(&input_samples,__ATOMIC_RELAXED),
            __atomic_load_n(&completed_frames,__ATOMIC_RELAXED),
            diagnosed_fault,configuration_fault)){
-        __atomic_store_n(&boot.stable,true,__ATOMIC_RELEASE);
         __atomic_store_n(&recovery_inhibit,false,__ATOMIC_RELEASE);
         ESP_LOGI(TAG,"one ESP has 60s observed input + full RMT progress; boot streak cleared in RTC, no flash write");
     }
