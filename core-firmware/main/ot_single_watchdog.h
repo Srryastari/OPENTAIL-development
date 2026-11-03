@@ -53,6 +53,6 @@ bool ot_sw_mark_stable(ot_sw_rtc_record_t *record, ot_sw_boot_t *boot,
  * latched/handled driver fault, qualifies as progress. A submitted transfer
  * or merely looping through the render task is NOT progress. */
 bool ot_sw_render_progress_eligible(bool all_lanes_completed,
-                                     bool diagnosed_output_fault);
+                                     bool any_lane_completed);
 bool ot_sw_decorative_inhibited(const ot_sw_boot_t *boot);
 const char *ot_sw_reset_name(ot_sw_reset_class_t reason);
