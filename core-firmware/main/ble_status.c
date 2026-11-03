@@ -383,11 +383,14 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn || !authorized)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    uint8_t p[11u+3u*OT_FRAME_SNAPSHOT_CHUNK_PIXELS]={0};
+    /* Every transmitted byte is assigned below. Chunk reads validate and copy
+     * under one snapshot lock; a separate metadata read provides no guarantee
+     * across that lock boundary and needlessly contends with the renderer. */
+    uint8_t p[11u+3u*OT_FRAME_SNAPSHOT_CHUNK_PIXELS];
     size_t size=0;
-    ot_frame_snapshot_info_t info={0};
-    if(!ot_frame_snapshot_info(&info))return BLE_ATT_ERR_UNLIKELY;
     if(frame_reply_kind==1){
+        ot_frame_snapshot_info_t info={0};
+        if(!ot_frame_snapshot_info(&info))return BLE_ATT_ERR_UNLIKELY;
         p[0]=1;p[1]=1;p[2]=(uint8_t)(info.ready?1:(info.pending?0:2));
         p[3]=info.output;p[4]=(uint8_t)info.count;p[5]=(uint8_t)(info.count>>8);
         p[6]=(uint8_t)info.sequence;p[7]=(uint8_t)(info.sequence>>8);

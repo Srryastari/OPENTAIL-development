@@ -218,3 +218,13 @@ other connection handles. ESP-IDF v5.5.5 compilation and BLE contract tests
 pass. No phone-visible latency improvement has been measured. Prior commit
 and package receipts describe the earlier watchdog build; use this follow-up
 commit's CI artifacts for the optimized firmware.
+
+The second BLE optimization removes an unused metadata lookup from each RGB
+snapshot chunk read, reducing shared snapshot-lock acquisitions from two to
+one. Status reads still fetch current metadata; chunk reads still validate
+output, sequence, readiness and bounds under the snapshot lock. Response buffers
+are filled only for the bytes sent rather than clearing the entire maximum
+buffer. Tests execute the production callback against the production snapshot
+store for all 56 supported chunk sizes, compare every transmitted byte and
+check unauthorized, stale, out-of-bounds and post-reset reads. This is a reduction
+in firmware work and lock contention, not a measured radio-throughput claim.

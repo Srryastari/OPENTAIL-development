@@ -117,3 +117,79 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",str(c),"-o",str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
 print("PASS: production catalog callback caches once and preserves connection admission and complete payload")
+
+# Run the actual frame callback against the production snapshot store. Count
+# store accesses and verify every transmitted byte for all supported chunk sizes.
+frame_program = r'''
+#include "ot_frame_snapshot.h"
+#include <assert.h>
+#include <string.h>
+#define BLE_GATT_ACCESS_OP_READ_CHR 1
+#define BLE_ATT_ERR_READ_NOT_PERMITTED 2
+#define BLE_ATT_ERR_INSUFFICIENT_RES 3
+#define BLE_ATT_ERR_UNLIKELY 4
+struct ble_gatt_access_ctxt {int op; void *om;};
+static uint16_t active_conn=7;
+static bool authorized=true;
+static uint8_t frame_reply_kind=2,frame_reply_output=1,frame_reply_count;
+static uint16_t frame_reply_first=8;
+static uint32_t frame_reply_sequence=0x12345678;
+static unsigned info_calls,chunk_calls,appends;
+static uint8_t received[179];
+static size_t received_len;
+static bool counted_info(ot_frame_snapshot_info_t *p){
+    info_calls++;return ot_frame_snapshot_info(p);
+}
+static bool counted_chunk(uint8_t o,uint32_t s,uint16_t f,uint8_t n,uint8_t *p){
+    chunk_calls++;return ot_frame_snapshot_chunk(o,s,f,n,p);
+}
+static int os_mbuf_append(void *om,const void *p,size_t n){
+    (void)om;appends++;assert(n<=sizeof(received));
+    memcpy(received,p,n);received_len=n;return 0;
+}
+static int read_frame(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg)
+''' + body("frame_read").replace("ot_frame_snapshot_info(&", "counted_info(&").replace(
+    "ot_frame_snapshot_chunk(", "counted_chunk(") + r'''
+int main(void){
+    struct ble_gatt_access_ctxt ctx={1,0};
+    assert(ot_frame_snapshot_request(1));
+    assert(ot_frame_snapshot_begin(1,64,frame_reply_sequence));
+    for(unsigned i=0;i<64;i++)ot_frame_snapshot_pixel(i,i,i+1,i+2);
+    ot_frame_snapshot_complete(true);
+    for(unsigned n=1;n<=56;n++){
+        frame_reply_count=n;
+        assert(read_frame(7,0,&ctx,0)==0);
+        assert(info_calls==0 && chunk_calls==n && appends==n);
+        assert(received_len==11+3*n);
+        const uint8_t header[]={1,2,1,1,0x78,0x56,0x34,0x12,8,0};
+        assert(memcmp(received,header,sizeof(header))==0 && received[10]==n);
+        for(unsigned i=0;i<n;i++)for(unsigned c=0;c<3;c++)
+            assert(received[11+i*3+c]==8+i+c);
+    }
+    authorized=false;
+    assert(read_frame(7,0,&ctx,0)==2 && chunk_calls==56);
+    authorized=true;
+    assert(read_frame(8,0,&ctx,0)==2 && chunk_calls==56);
+    frame_reply_sequence++;
+    assert(read_frame(7,0,&ctx,0)==4 && appends==56);
+    frame_reply_sequence--;frame_reply_first=63;frame_reply_count=2;
+    assert(read_frame(7,0,&ctx,0)==4 && appends==56);
+    frame_reply_kind=1;
+    assert(read_frame(7,0,&ctx,0)==0 && info_calls==1 && received_len==12);
+    ot_frame_snapshot_info_t info;assert(ot_frame_snapshot_info(&info));
+    const uint8_t status[]={1,1,1,1,64,0,0x78,0x56,0x34,0x12,
+                            (uint8_t)info.crc,(uint8_t)(info.crc>>8)};
+    assert(memcmp(received,status,12)==0);
+    ot_frame_snapshot_reset();frame_reply_kind=2;frame_reply_first=0;frame_reply_count=1;
+    assert(read_frame(7,0,&ctx,0)==4 && appends==57);
+    return 0;
+}
+'''
+with tempfile.TemporaryDirectory() as tmp:
+    c=Path(tmp)/"frame.c";exe=Path(tmp)/"frame"
+    main=Path(__file__).resolve().parents[1]/"main"
+    c.write_text(frame_program)
+    subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror","-I",str(main),
+                    str(c),str(main/"ot_frame_snapshot.c"),"-o",str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)
+print("PASS: frame reads use one store access; all 56 chunk sizes, wire bytes, status, auth, stale sequence, bounds and reset validated")
