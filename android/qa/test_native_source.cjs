@@ -135,8 +135,14 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
-assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
-       'Bluetooth status pill must reflect actual connection state, not transient messages');
+assert(homeSection.includes('val connectionPhase = unifiedConnectionPhase()') &&
+       settingsSection.includes('val connectionPhase = unifiedConnectionPhase()') &&
+       compose.includes('private fun unifiedConnectionPhase(): String') &&
+       compose.includes('ble.connectionPhase().replaceFirstChar { it.uppercase() }') &&
+       compose.includes('linkPolicy.diagnosticTransport(SystemClock.elapsedRealtime())') &&
+       compose.includes('if (wifiStatusReady.value && !ble.canControl()) "Wi-Fi secondary"') &&
+       bleSource.includes('String connectionPhase()'),
+       'Connection pill must reflect actual BLE state or same-controller verified Wi-Fi, never transient GATT messages');
 assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
