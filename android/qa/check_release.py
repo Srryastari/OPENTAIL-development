@@ -33,11 +33,23 @@ check("Android manifest and styles parse", manifest.tag == "manifest" and style.
 check("Android v0.2.0-alpha7 native release numbers", 
       "versionName '0.2.0-alpha7'" in gradle and "versionCode 37" in gradle and
       all(x in gradle for x in ("minSdk 26", "compileSdk 35", "targetSdk 35")))
-check("Sole Kotlin Compose launcher; no Java UI entry or network transport permission",
+# Only the exact CORE AP IP is allowed for read-only HTTP status.
+network_xml = read("app/src/main/res/xml/opentail_core_local_network.xml")
+wifi_probe = (source / "WifiCoreStatusProbe.java").read_text()
+check("Sole Kotlin Compose launcher; restricted BLE-first Wi-Fi diagnostic transport",
       manifest_xml.count('android.intent.category.LAUNCHER') == 1 and
       'android:name=".ComposeMainActivity"' in manifest_xml and
       'android:name=".MainActivity"' not in manifest_xml and
-      'android.permission.INTERNET' not in manifest_xml and
+      'android.permission.INTERNET' in manifest_xml and
+      'android.permission.ACCESS_NETWORK_STATE' in manifest_xml and
+      'android:networkSecurityConfig="@xml/opentail_core_local_network"' in manifest_xml and
+      'usesCleartextTraffic="true"' not in manifest_xml and
+      '<base-config cleartextTrafficPermitted="false"' in network_xml and
+      network_xml.count('<domain includeSubdomains="false">192.168.4.1</domain>') == 1 and
+      network_xml.count('<domain ') == 1 and
+      'network.openConnection(STATUS_URL)' in wifi_probe and
+      'setRequestMethod("GET")' in wifi_probe and
+      'setRequestMethod("POST")' not in wifi_probe and
       manifest_xml.index('android:name=".ComposeMainActivity"') <
       manifest_xml.index('android.intent.category.LAUNCHER'))
 check("No WebView or packaged Studio HTML runtime assets",

@@ -27,8 +27,22 @@ assert(!fs.existsSync('android/app/src/main/assets/opentail.htm'),
   'No HTML copy may be bundled in the native APK');
 assert(!fs.existsSync('android/app/src/main/assets/unified-shell.js'),
   'No JS navigation overlay may be bundled in the native APK');
-assert(!manifest.includes('android.permission.INTERNET')&&!manifest.includes('usesCleartextTraffic="true"'),
-  'Native offline designer must not request arbitrary network access');
+// Explicit owner-approved BLE-first / Wi-Fi-second diagnostic transport:
+ // no arbitrary cleartext access, no WebView, no HTTP lighting commands.
+const networkPolicy=fs.readFileSync('android/app/src/main/res/xml/opentail_core_local_network.xml','utf8');
+const wifiProbe=fs.readFileSync('android/app/src/main/java/com/opentail/android/WifiCoreStatusProbe.java','utf8');
+assert(manifest.includes('android.permission.INTERNET') &&
+       manifest.includes('android.permission.ACCESS_NETWORK_STATE') &&
+       manifest.includes('android:networkSecurityConfig="@xml/opentail_core_local_network"') &&
+       !manifest.includes('usesCleartextTraffic="true"') &&
+       networkPolicy.includes('<base-config cleartextTrafficPermitted="false"') &&
+       (networkPolicy.match(/<domain includeSubdomains="false">192\.168\.4\.1<\/domain>/g)||[]).length===1 &&
+       (networkPolicy.match(/<domain /g)||[]).length===1 &&
+       wifiProbe.includes('network.openConnection(STATUS_URL)') &&
+       wifiProbe.includes('setRequestMethod("GET")') &&
+       !wifiProbe.includes('setRequestMethod("POST")') &&
+       !wifiProbe.includes('setDoOutput(true)'),
+  'Only the known CORE AP may serve read-only secondary status; arbitrary network writes remain forbidden');
 // Check the actual launch contract, not merely the retained Java source.
 assert(manifest.includes('android:name=".ComposeMainActivity"'), 'Compose is not registered');
 assert(!manifest.includes('android:name=".MainActivity"'), 'Legacy Java UI remains launchable');
@@ -121,8 +135,14 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
-assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
-       'Bluetooth status pill must reflect actual connection state, not transient messages');
+assert(homeSection.includes('val connectionPhase = unifiedConnectionPhase()') &&
+       settingsSection.includes('val connectionPhase = unifiedConnectionPhase()') &&
+       compose.includes('private fun unifiedConnectionPhase(): String') &&
+       compose.includes('ble.connectionPhase().replaceFirstChar { it.uppercase() }') &&
+       compose.includes('linkPolicy.diagnosticTransport(SystemClock.elapsedRealtime())') &&
+       compose.includes('if (wifiStatusReady.value && !ble.canControl()) "Wi-Fi secondary"') &&
+       bleSource.includes('String connectionPhase()'),
+       'Connection pill must reflect actual BLE state or same-controller verified Wi-Fi, never transient GATT messages');
 assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
@@ -208,7 +228,8 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
        compose.includes('offlinePreview.value -> "Offline design preview"') &&
        compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
-       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
+       compose.includes('private fun unifiedFirmwareVersion(): String') &&
+       compose.includes('return firmwareVersion.value ?: secondary ?: "Unavailable"') &&
        compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
        compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
