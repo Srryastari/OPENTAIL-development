@@ -228,7 +228,8 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
        compose.includes('offlinePreview.value -> "Offline design preview"') &&
        compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
-       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
+       compose.includes('private fun unifiedFirmwareVersion(): String') &&
+       compose.includes('return firmwareVersion.value ?: secondary ?: "Unavailable"') &&
        compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
        compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
