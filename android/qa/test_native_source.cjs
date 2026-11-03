@@ -27,8 +27,22 @@ assert(!fs.existsSync('android/app/src/main/assets/opentail.htm'),
   'No HTML copy may be bundled in the native APK');
 assert(!fs.existsSync('android/app/src/main/assets/unified-shell.js'),
   'No JS navigation overlay may be bundled in the native APK');
-assert(!manifest.includes('android.permission.INTERNET')&&!manifest.includes('usesCleartextTraffic="true"'),
-  'Native offline designer must not request arbitrary network access');
+// Explicit owner-approved BLE-first / Wi-Fi-second diagnostic transport:
+ // no arbitrary cleartext access, no WebView, no HTTP lighting commands.
+const networkPolicy=fs.readFileSync('android/app/src/main/res/xml/opentail_core_local_network.xml','utf8');
+const wifiProbe=fs.readFileSync('android/app/src/main/java/com/opentail/android/WifiCoreStatusProbe.java','utf8');
+assert(manifest.includes('android.permission.INTERNET') &&
+       manifest.includes('android.permission.ACCESS_NETWORK_STATE') &&
+       manifest.includes('android:networkSecurityConfig="@xml/opentail_core_local_network"') &&
+       !manifest.includes('usesCleartextTraffic="true"') &&
+       networkPolicy.includes('<base-config cleartextTrafficPermitted="false"') &&
+       (networkPolicy.match(/<domain includeSubdomains="false">192\.168\.4\.1<\/domain>/g)||[]).length===1 &&
+       (networkPolicy.match(/<domain /g)||[]).length===1 &&
+       wifiProbe.includes('network.openConnection(STATUS_URL)') &&
+       wifiProbe.includes('setRequestMethod("GET")') &&
+       !wifiProbe.includes('setRequestMethod("POST")') &&
+       !wifiProbe.includes('setDoOutput(true)'),
+  'Only the known CORE AP may serve read-only secondary status; arbitrary network writes remain forbidden');
 // Check the actual launch contract, not merely the retained Java source.
 assert(manifest.includes('android:name=".ComposeMainActivity"'), 'Compose is not registered');
 assert(!manifest.includes('android:name=".MainActivity"'), 'Legacy Java UI remains launchable');
