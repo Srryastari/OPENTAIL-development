@@ -79,6 +79,10 @@ jobs:
             main/ot_single_watchdog.c tests/test_single_watchdog.c \
             -o /tmp/ot-sw113 && /tmp/ot-sw113
           python3 tests/test_single_watchdog_contract.py
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/core_logic.c main/arbitration_logic.c tests/test_watchdog_held_input_boot.c \
+            -o /tmp/ot-held-input113
+          /tmp/ot-held-input113
           python3 tests/test_nvs_finalization_contract.py
           python3 tests/test_ota_boot_confirmation_contract.py
       - name: No automatic physical release promotion
