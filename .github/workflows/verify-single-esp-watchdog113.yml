@@ -33,6 +33,7 @@ jobs:
             "core-firmware/main/CMakeLists.txt",
             "core-firmware/sdkconfig.defaults",
             "core-firmware/tests/test_single_watchdog.c",
+            "core-firmware/tests/test_single_watchdog_timeline.c",
             "core-firmware/tests/test_single_watchdog_contract.py",
             "core-firmware/tests/run-host-tests.sh",
             "core-firmware/tests/test_failover_runtime_isolation.py",
@@ -94,6 +95,13 @@ jobs:
           persist-credentials: false
       - name: 140 source Effects, BLE 13 supported / 6 unsupported, NVS, STOP, OTA, physical triggers, watchdog full host
         run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Record reproducible HOST_SIMULATED watchdog fault timeline (not physical results)
+        run: cp /tmp/ot-single-watchdog-host-timeline.jsonl watchdog-host-timeline.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue113-host-only-watchdog-event-timeline-${{ github.event.pull_request.head.sha || github.sha }}
+          path: watchdog-host-timeline.jsonl
+          if-no-files-found: error
 
   independent-trigger-guard:
     needs: exact-source-and-host-policy
