@@ -82,6 +82,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Complete CORE host and 13-ID tertiary, old 17-byte and fail-closed checks
         run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Execute 13-ID BLE runtime packet, phase, and STOP regression
+        run: |
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/ble_fx_command.c main/fx_zone_bank.c main/fx_overlay_engine.c \
+            main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c \
+            main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+            tests/test_ble_fx_tertiary.c -o /tmp/ot-ble-fx-tertiary-tests -lm
+          /tmp/ot-ble-fx-tertiary-tests
       - name: Independent input, held-trigger and OEM safety source regression
         run: python3 core-firmware/tests/test_trigger_runtime_contract.py
   android-jni-junit-apk:
