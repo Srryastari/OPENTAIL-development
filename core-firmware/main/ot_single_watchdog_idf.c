@@ -22,6 +22,7 @@ static bool watchdog_configured=false;
 static uint32_t input_samples=0,completed_frames=0,handled_fault_cycles=0;
 static uint32_t last_input_ms=0,last_frame_ms=0;
 static bool recovery_inhibit=false;
+static bool stable_run=false; /* published atomically; boot policy is render-task-owned */
 static const char *TAG="OT_SW_WDT";
 
 static ot_sw_reset_class_t classify(esp_reset_reason_t reason){
@@ -43,6 +44,7 @@ void ot_sw_idf_boot_record(void){
      * Corrupt/uninitialized RTC is fail-safe: never trusted as a valid streak. */
     const esp_reset_reason_t reason=esp_reset_reason();
     boot=ot_sw_boot_record(&rtc_record,classify(reason));
+    __atomic_store_n(&stable_run,false,__ATOMIC_RELEASE);
     __atomic_store_n(&recovery_inhibit,ot_sw_decorative_inhibited(&boot),__ATOMIC_RELEASE);
     ESP_LOGW(TAG,"single ESP reset=%s (%d) crash_streak=%lu boot_loop=%u; no backup light path",
         ot_sw_reset_name(boot.reset_class),(int)reason,
@@ -100,11 +102,12 @@ void ot_sw_idf_render_cycle(bool all_outputs_completed,bool any_output_completed
         __atomic_add_fetch(&handled_fault_cycles,1u,__ATOMIC_RELAXED);
     }
     (void)esp_task_wdt_reset_user(render_user);
-    if(!__atomic_load_n(&boot.stable,__ATOMIC_ACQUIRE) &&
+    if(!__atomic_load_n(&stable_run,__ATOMIC_ACQUIRE) &&
        ot_sw_mark_stable(&rtc_record,&boot,clock_ms(),
            __atomic_load_n(&input_samples,__ATOMIC_RELAXED),
            __atomic_load_n(&completed_frames,__ATOMIC_RELAXED),
            diagnosed_fault,configuration_fault)){
+        __atomic_store_n(&stable_run,true,__ATOMIC_RELEASE);
         __atomic_store_n(&recovery_inhibit,false,__ATOMIC_RELEASE);
         ESP_LOGI(TAG,"one ESP has 60s observed input + full RMT progress; boot streak cleared in RTC, no flash write");
     }
@@ -113,7 +116,7 @@ bool ot_sw_idf_decorative_inhibited(void){
     return __atomic_load_n(&recovery_inhibit,__ATOMIC_ACQUIRE);
 }
 bool ot_sw_idf_stable(void){
-    return __atomic_load_n(&boot.stable,__ATOMIC_ACQUIRE);
+    return __atomic_load_n(&stable_run,__ATOMIC_ACQUIRE);
 }
 bool ot_sw_idf_boot_loop_seen(void){return boot.boot_loop_seen;}
 void ot_sw_idf_status_json(char *out,size_t size){
