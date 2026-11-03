@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -15,6 +17,7 @@
         android:icon="@drawable/ic_opentail"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/opentail_core_local_network"
         android:theme="@style/Theme.OpenTail">
         <!-- The Kotlin/Compose activity is the only app UI entry point. -->
         <activity
