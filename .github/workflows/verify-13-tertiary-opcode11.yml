@@ -1,0 +1,189 @@
+name: Issue93 13 source-supported tertiary BLE exact-head candidate
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/main/ble_fx_command.c'
+      - 'core-firmware/main/ble_fx_command.h'
+      - 'core-firmware/main/ble_status.c'
+      - 'android/app/src/main/java/com/opentail/android/BleDiscovery.java'
+      - 'core-firmware/tests/test_ble_fx_tertiary.c'
+      - 'core-firmware/tests/test_ble_tertiary_wiring_contract.py'
+      - 'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java'
+      - 'android/app/src/test/java/com/opentail/android/TertiaryFxCommandTest.java'
+      - 'android/app/src/main/cpp/core/SOURCE.json'
+      - 'android/qa/test_native_source.cjs'
+      - '.github/workflows/verify-13-tertiary-opcode11.yml'
+      - 'docs/ISSUE93-13-TERTIARY-BLE-ACCEPTANCE.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-scope-and-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact-HEAD 111 lineage and bounded 13-ID wire-only delta
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
+          base='1a9cfc4b25ef57bda38a7861ac5548c3747d9605'
+          assert git('merge-base','--is-ancestor',base,'HEAD')==''
+          allowed={
+            'core-firmware/main/ble_fx_command.c',
+            'core-firmware/main/ble_fx_command.h',
+            'core-firmware/main/ble_status.c',
+            'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
+            'core-firmware/tests/test_ble_fx_tertiary.c',
+            'core-firmware/tests/test_ble_tertiary_wiring_contract.py',
+            'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java',
+            'android/app/src/test/java/com/opentail/android/TertiaryFxCommandTest.java',
+            'android/app/src/main/cpp/core/SOURCE.json',
+            'android/qa/test_native_source.cjs',
+            '.github/workflows/verify-13-tertiary-opcode11.yml',
+            'docs/ISSUE93-13-TERTIARY-BLE-ACCEPTANCE.md',
+          }
+          changed=set(git('diff','--name-only',base,'HEAD').splitlines())
+          assert changed<=allowed,('Unexpected files',changed-allowed)
+          for p in (
+            'core-firmware/main/wled_fx_compat.c',
+            'core-firmware/main/wled_fx_compat.h',
+            'core-firmware/main/effects_1d.c',
+            'core-firmware/main/ot_auto_effects.c',
+            'core-firmware/main/opentail_core.c',
+            'core-firmware/main/config_journal.c',
+            'core-firmware/main/trigger_manager.c',
+            'core-firmware/main/ot_version.h',
+            'android/app/src/main/cpp/core/wled_fx_compat.c',
+            'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
+            'scripts/package_core_flash.py',
+            '.github/workflows/verify-active-sources.yml'):
+              assert git('rev-parse','HEAD:'+p)==git('rev-parse',base+':'+p),p
+          print('PASS: bounded 13-ID admission change, approved 1:1 UI/renderer/STOP/NVS/version/gates unchanged')
+          PY
+      - name: Verify GATT authentication and volatile tertiary/legacy contract
+        run: |
+          python3 core-firmware/tests/test_ble_tertiary_wiring_contract.py
+          python3 -m unittest -v scripts/tests/test_core_flash_package.py
+          node android/qa/test_native_source.cjs
+  all-140-core-and-trigger:
+    needs: exact-scope-and-safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Complete CORE host and 13-ID tertiary, old 17-byte and fail-closed checks
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Execute 13-ID BLE runtime packet, phase, and STOP regression
+        run: |
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/ble_fx_command.c main/fx_zone_bank.c main/fx_overlay_engine.c \
+            main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/effects_1d.c main/ot_auto_effects.c main/wled_fx_compat.c \
+            main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+            tests/test_ble_fx_tertiary.c -o /tmp/ot-ble-fx-tertiary-tests -lm
+          /tmp/ot-ble-fx-tertiary-tests
+      - name: Independent input, held-trigger and OEM safety source regression
+        run: python3 core-firmware/tests/test_trigger_runtime_contract.py
+  android-jni-junit-apk:
+    needs: exact-scope-and-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
+          path: pinned-effects110
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: 140-effect real JNI independent CORE frame oracle
+        run: |
+          python3 android/qa/test_full_offline_preview.py \
+            --core-dir pinned-effects110 --continuity-dir pinned-effects110 \
+            --color-dir pinned-effects110 > issue93-13-parity.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue93-13-jni-140-oracle
+          path: issue93-13-parity.json
+          if-no-files-found: error
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Android source, Kotlin/Java tests and app build
+        run: |
+          python3 android/qa/check_release.py
+          cd android
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-13-supported-tertiary-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+  esp-idf-bench-package:
+    needs: [exact-scope-and-safety,all-140-core-and-trigger]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Build and verify four real ESP32-S3 images including OTA at 0xF000
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-13tertiary-$PIN.zip" --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-13tertiary-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-13tertiary-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-13-supported-tertiary-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-13tertiary-*.zip
+            core-firmware/releases/opentail-13tertiary-*.zip.sha256
+          if-no-files-found: error
+  downloaded-package-integrity:
+    needs: esp-idf-bench-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: opentail-13-supported-tertiary-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: downloaded
+      - name: Verify actually published package, 4-image checksum and OTA initialization
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "downloaded/opentail-13tertiary-$PIN.zip" \
+            --sha256-file "downloaded/opentail-13tertiary-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# Software-only: user phone/radio, 22 physical bench checks, automatic failover and vehicle release NOT CERTIFIED.

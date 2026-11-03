@@ -51,18 +51,30 @@ static void test_wire_and_auth(void){
     assert(ot_ble_fx_parse(legacy,17,true,&fx)==OT_BLE_FX_OK);
     assert(ot_ble_fx_parse(legacy,17,false,&fx)==OT_BLE_FX_UNAUTHORIZED);
     assert(ot_ble_fx_parse(legacy,20,true,&fx)==OT_BLE_FX_BAD_WIRE);
-    /* Explicit supported 3-slot source IDs only (not eight unverified roles). */
-    const uint8_t verified[]={28,29,34,50,52,54,55,56,84,87,103};
+    /* Every Effects #110 source-proven ID is now BLE-authorized, but
+     * Aurora ID38 only consumes third RGB with source palette ID4. */
+    const uint8_t verified[]={28,29,34,38,50,52,54,55,56,84,87,95,103};
     for(size_t i=0;i<sizeof(verified);i++){
         cmd[2]=verified[i];
+        cmd[15]=cmd[2]==38u?4u:0u;
         assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_OK);
     }
-    const uint8_t unproven[]={10,11,38,40,48,60,91,95};
-    for(size_t i=0;i<sizeof(unproven);i++){
-        cmd[2]=unproven[i];
+    cmd[2]=38u;cmd[15]=0u;
+    fx.effect_id=500u;third.set=false;
+    assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_UNSUPPORTED);
+    assert(fx.effect_id==500u && !third.set); /* reject without mutation */
+    cmd[15]=50u;
+    assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_UNSUPPORTED);
+    cmd[15]=4u;
+    assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_OK);
+    const uint8_t unsupported[]={10,11,40,48,60,91};
+    for(size_t i=0;i<sizeof(unsupported);i++){
+        cmd[2]=unsupported[i];cmd[15]=0u;
+        fx.effect_id=500u;third.set=false;
         assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_UNSUPPORTED);
+        assert(fx.effect_id==500u && !third.set);
     }
-    cmd[2]=0;
+    cmd[2]=0;cmd[15]=0;
     assert(ot_ble_fx_parse_tertiary(cmd,20,true,&fx,&third)==OT_BLE_FX_UNSUPPORTED);
 }
 static void test_zone_phase_and_legacy_reset(void){
@@ -116,6 +128,6 @@ static void test_zone_phase_and_legacy_reset(void){
 int main(void){
     test_wire_and_auth();
     test_zone_phase_and_legacy_reset();
-    printf("PASS: authenticated 20-byte tertiary, 17-byte compatibility, 11 verified IDs, true black, isolated zones, continuous phase and STOP\n");
+    printf("PASS: authenticated 20-byte tertiary, 17-byte compatibility, 13 proven IDs, 6 unsupported, Aurora palette4 only, true black, isolated zones, continuous phase and STOP\n");
     return 0;
 }

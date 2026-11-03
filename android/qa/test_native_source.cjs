@@ -1049,7 +1049,9 @@ assert(nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b'
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
        nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
        nativeManifest.tertiary_source_proven_modes===13 &&
-       nativeManifest.tertiary_transport_admitted_modes===11,
+       nativeManifest.tertiary_transport_admitted_modes===13 &&
+        bleSource.includes('TertiaryFxCommand.advertised13(info)') &&
+        bleSource.includes('!canTertiary13Fx()'),
        'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
 for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
     const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));

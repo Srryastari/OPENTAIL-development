@@ -13,6 +13,8 @@ bank_h=file("fx_zone_bank.h")
 preset=file("fx_preset_record.h")
 effect=file("wled_fx_compat.h")
 assert 'OT_BLE_FX_TERTIARY_CAPABILITY' in ble
+assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in ble
+assert 'fx-tertiary13-v1' in hdr
 assert 'fx-tertiary-v1' in hdr
 assert '#define OT_BLE_FX_TERTIARY_WIRE_BYTES 20u' in hdr
 assert '#define OT_BLE_FX_WIRE_BYTES 17u' in hdr
@@ -20,6 +22,8 @@ assert 'p[16]!=1u' in parser
 assert 'ot_ble_fx_parse(legacy,sizeof(legacy),true,&candidate)' in parser
 assert 'if(!authorized)return OT_BLE_FX_UNAUTHORIZED' in parser
 assert 'third_color_source_verified' in parser
+assert 'ot_wled_fx_tertiary_supported(id)' in parser
+assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in parser
 assert 'ot_effects_1d_color_roles' in parser
 assert 'ot_ble_fx_parse_tertiary(buf,n,authorized,&fx,&tertiary)' in ble
 assert 'ot_ble_apply_continuous_fx_tertiary' in ble
