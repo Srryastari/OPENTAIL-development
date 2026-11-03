@@ -41,6 +41,8 @@ jobs:
             "android/app/src/main/java/com/opentail/android/WifiCoreStatusProbe.java",
             "android/app/src/main/res/xml/opentail_core_local_network.xml",
             "android/app/src/test/java/com/opentail/android/ControllerLinkPolicyTest.java",
+            "android/qa/test_native_source.cjs",
+            "android/qa/check_release.py",
             "docs/UNIFIED-BLE-WIFI-LINK-2026-11-03.md",
             ".github/workflows/verify-unified-link.yml",
           }
