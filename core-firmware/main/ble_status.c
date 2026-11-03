@@ -161,15 +161,22 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
      * callback returns the COMPLETE value. Do not slice by ctx->offset or ATT
      * MTU here: that double-applies the offset and returns GATT 7 on Android.
      * v1 format: up to 254 IDs, 510 bytes, within the 512-byte ATT limit. */
-    uint16_t ids[254]={0};
-    size_t total=ot_effects_1d_supported_ids(ids,254u);
-    if(total>254u)total=254u;
-    uint8_t payload[2u+254u*2u]={1,(uint8_t)total};
-    for(size_t i=0;i<total;i++){
-        payload[2u+i*2u]=(uint8_t)ids[i];
-        payload[3u+i*2u]=(uint8_t)(ids[i]>>8);
+    /* This catalog is immutable for the running image. NimBLE serializes
+     * access callbacks on its host task, so lazy initialization needs no lock.
+     * Retain it across connections/host resets; it contains no session data. */
+    static uint8_t payload[2u+254u*2u];
+    static size_t payload_len=0u;
+    if(payload_len==0u){
+        uint16_t ids[254]={0};
+        size_t total=ot_effects_1d_supported_ids(ids,254u);
+        if(total>254u)total=254u;
+        payload[0]=1u;payload[1]=(uint8_t)total;
+        for(size_t i=0;i<total;i++){
+            payload[2u+i*2u]=(uint8_t)ids[i];
+            payload[3u+i*2u]=(uint8_t)(ids[i]>>8);
+        }
+        payload_len=2u+total*2u;
     }
-    const size_t payload_len=2u+total*2u;
     return os_mbuf_append(ctx->om,payload,payload_len)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 /* Revoked owner sessions discard cached output, frame and trigger replies. */
@@ -376,11 +383,14 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR || conn!=active_conn || !authorized)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    uint8_t p[11u+3u*OT_FRAME_SNAPSHOT_CHUNK_PIXELS]={0};
+    /* Every transmitted byte is assigned below. Chunk reads validate and copy
+     * under one snapshot lock; a separate metadata read provides no guarantee
+     * across that lock boundary and needlessly contends with the renderer. */
+    uint8_t p[11u+3u*OT_FRAME_SNAPSHOT_CHUNK_PIXELS];
     size_t size=0;
-    ot_frame_snapshot_info_t info={0};
-    if(!ot_frame_snapshot_info(&info))return BLE_ATT_ERR_UNLIKELY;
     if(frame_reply_kind==1){
+        ot_frame_snapshot_info_t info={0};
+        if(!ot_frame_snapshot_info(&info))return BLE_ATT_ERR_UNLIKELY;
         p[0]=1;p[1]=1;p[2]=(uint8_t)(info.ready?1:(info.pending?0:2));
         p[3]=info.output;p[4]=(uint8_t)info.count;p[5]=(uint8_t)(info.count>>8);
         p[6]=(uint8_t)info.sequence;p[7]=(uint8_t)(info.sequence>>8);

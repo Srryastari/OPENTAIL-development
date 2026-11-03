@@ -94,7 +94,8 @@ ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
 assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
 assert "if(!outputs_ready)return false;" in ota
 assert "return e==ESP_OK;" in ota
-assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;" in ota
+assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY){" in ota
+assert "&boot_confirmation_state,&expected,2u" in ota
 # Factory/non-OTA images have no OTA rollback state: don't poll flash every frame.
 assert "running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0" in ota
 assert "running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;" in ota

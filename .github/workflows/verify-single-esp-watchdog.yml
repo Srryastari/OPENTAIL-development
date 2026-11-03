@@ -1,0 +1,88 @@
+name: Single ESP watchdog software candidate (no vehicle release)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-and-protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin source and preserve owner baseline and 22 physical gates
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 scripts/check_watchdog_candidate.py
+          python3 scripts/test_final_day_evidence_lock.py
+      - name: Complete CORE, Trigger, Effects, BLE, NVS, STOP and recovery suites
+        run: |
+          bash core-firmware/tests/run-host-tests.sh
+          python3 core-firmware/tests/test_trigger_runtime_contract.py
+          python3 core-firmware/tests/test_ota_contract.py
+          python3 -m unittest discover -s scripts/tests -v
+      - name: Unchanged Android protocol and source checks
+        run: |
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/checkout@v4
+        with:
+          repository: Srryastari/OPENTAIL-development
+          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
+          path: watchdog-effects-oracle
+          persist-credentials: false
+      - name: All 140 JNI effects against independent pinned CORE oracle
+        run: |
+          python3 android/qa/test_full_offline_preview.py --core-dir watchdog-effects-oracle --continuity-dir watchdog-effects-oracle --color-dir watchdog-effects-oracle > watchdog-jni-parity.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchdog-jni-parity-${{ github.event.pull_request.head.sha || github.sha }}
+          path: watchdog-jni-parity.json
+          if-no-files-found: error
+  idf555-four-image-zip:
+    needs: host-and-protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pin exact firmware HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: ESP-IDF v5.5.5 ESP32-S3 compile (NO FLASH)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify injection disabled and four-image ZIP integrity
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(sed -n 's/CONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=//p' core-firmware/sdkconfig)" = 0
+          mkdir -p watchdog-package
+          python3 scripts/package_core_flash.py build --build-dir core-firmware/build --project-dir core-firmware --source-sha "$PIN" --output watchdog-package/single-esp-watchdog.zip
+          python3 scripts/package_core_flash.py verify --zip watchdog-package/single-esp-watchdog.zip --sha256-file watchdog-package/single-esp-watchdog.zip.sha256 --source-sha "$PIN"
+          cp core-firmware/sdkconfig core-firmware/dependencies.lock watchdog-package/
+          git rev-parse HEAD > watchdog-package/SOURCE_SHA.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watchdog-four-images-${{ github.event.pull_request.head.sha || github.sha }}
+          path: watchdog-package/
+          if-no-files-found: error
+          retention-days: 14
+# Independent bench-software evidence only. Existing release-evidence workflows
+# are unchanged. No automatic merge, flash, physical PASS or vehicle release.

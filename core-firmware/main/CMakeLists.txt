@@ -11,8 +11,10 @@ idf_component_register(
          "status_logic.c" "status_led.c" "ble_status.c"
          "ble_command.c" "ble_config.c" "ot_ota_update.c"
          "ot_fps_pacer.c" "ot_frame_snapshot.c" "ot_failover_essential.c"
+         "ot_recovery_policy.c" "ot_watchdog.c"
     INCLUDE_DIRS "."
     EMBED_TXTFILES "assets/dev_console.htm"
     REQUIRES esp_wifi esp_netif esp_event esp_http_server esp_driver_spi
-             esp_timer driver nvs_flash json bt mbedtls app_update esp_partition
+             esp_timer esp_system driver nvs_flash json bt mbedtls app_update esp_partition
+    PRIV_REQUIRES espressif__led_strip
 )

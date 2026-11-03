@@ -11,6 +11,22 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Reserve startup headroom; renderer and sampler task stacks stay unchanged.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
+# One system TWDT supervises idle tasks plus progress users (10s bound).
+# Keep interrupt, boot RTC and brownout protection enabled. The bootloader
+# hands RTC WDT ownership back to IDF before app_main; application startup is
+# guarded by the TWDT. Never disable either watchdog to accommodate a stall.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=300
+CONFIG_BOOTLOADER_WDT_ENABLE=y
+CONFIG_BOOTLOADER_WDT_TIME_MS=9000
+CONFIG_ESP_BROWNOUT_DET=y
+
 # BLE show and output manager over authorized GATT, Wi-Fi remains full Studio transport
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y

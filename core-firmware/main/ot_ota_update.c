@@ -20,8 +20,43 @@
 #include "esp_image_format.h"
 #include "ot_version.h"
 #include "ot_ota_update.h"
+#include "ot_watchdog.h"
+#include "esp_timer.h"
 static const char *TAG="OT_OTA";
 static bool ota_active=false;
+/* 0=waiting, 1=flash confirmation in progress, 2=confirmed, 3=expired. */
+static unsigned boot_confirmation_state=0u;
+static esp_timer_handle_t boot_guard=NULL;
+static void boot_confirmation_expired(void *unused){
+    (void)unused;
+    unsigned expected=0u;
+    if(!__atomic_compare_exchange_n(&boot_confirmation_state,&expected,3u,false,
+                                    __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)){
+        /* Serialize timeout against flash validation. A stuck validation is
+         * still covered by render TWDT; a brief call gets one second to finish. */
+        if(expected==1u)ESP_ERROR_CHECK(esp_timer_start_once(boot_guard,1000000u));
+        return;
+    }
+    ESP_LOGE(TAG,"OTA candidate not confirmed in 30s; request rollback (no lighting proof)");
+    ot_watchdog_phase(OT_PHASE_OTA_TIMEOUT);
+    /* A pending-verify image is rolled back by IDF on restart. Request the
+     * explicit supported rollback path first; restart if no usable slot exists. */
+    (void)esp_ota_mark_app_invalid_rollback_and_reboot();
+    esp_restart();
+}
+void ot_ota_watch_boot(void){
+    if(ot_watchdog_quarantined())return; /* diagnostics survive failed rollback */
+    const esp_partition_t *running=esp_ota_get_running_partition();
+    if(!running || running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0 ||
+       running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return;
+    esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
+    const esp_err_t e=esp_ota_get_state_partition(running,&state);
+    if(e==ESP_OK && state!=ESP_OTA_IMG_PENDING_VERIFY)return;
+    const esp_timer_create_args_t args={.callback=boot_confirmation_expired,
+        .name="ot-ota-boot"};
+    ESP_ERROR_CHECK(esp_timer_create(&args,&boot_guard));
+    ESP_ERROR_CHECK(esp_timer_start_once(boot_guard,(uint64_t)OT_RECOVERY_OTA_MS*1000u));
+}
 
 static esp_err_t reply(httpd_req_t *r,const char *status,const char *text) {
     httpd_resp_set_status(r,status);
@@ -140,10 +175,20 @@ bool ot_ota_confirm_boot(bool outputs_ready) {
        running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;
     esp_ota_img_states_t state=ESP_OTA_IMG_UNDEFINED;
     if(esp_ota_get_state_partition(running,&state)!=ESP_OK)return false;
-    if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;
+    if(state!=ESP_OTA_IMG_PENDING_VERIFY){
+        /* A state read may recover after watch_boot saw a transient error.
+         * Cancel its guard as well; never race an already expired candidate. */
+        unsigned expected=0u;
+        return __atomic_compare_exchange_n(&boot_confirmation_state,&expected,2u,false,
+                    __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE) || expected==2u;
+    }
     /* Keep rollback available until the RMT renderer has completed a frame
      * AND ESP-IDF actually accepts the new candidate. Retry if flash fails. */
+    unsigned expected=0u;
+    if(!__atomic_compare_exchange_n(&boot_confirmation_state,&expected,1u,false,
+                                    __ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
     const esp_err_t e=esp_ota_mark_app_valid_cancel_rollback();
+    __atomic_store_n(&boot_confirmation_state,e==ESP_OK?2u:0u,__ATOMIC_RELEASE);
     ESP_LOGW(TAG,"OTA candidate boot validation: %s",esp_err_to_name(e));
     return e==ESP_OK;
 }
