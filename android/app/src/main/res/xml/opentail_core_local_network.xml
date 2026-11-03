@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Legacy diagnostic AP is HTTP; never allow arbitrary cleartext hosts.
+         The IP literal is intentionally scoped to the controller's static AP.
+         WPA2 AP association is NOT equivalent to owner authentication. -->
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.4.1</domain>
+    </domain-config>
+</network-security-config>
