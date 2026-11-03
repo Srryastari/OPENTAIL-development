@@ -13,6 +13,11 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_single_watchdog.c tests/test_single_watchdog.c \
   -o /tmp/ot-single-watchdog-test && /tmp/ot-single-watchdog-test
 python3 tests/test_single_watchdog_contract.py
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_single_watchdog.c tests/test_single_watchdog_timeline.c \
+  -o /tmp/ot-single-watchdog-timeline
+/tmp/ot-single-watchdog-timeline > /tmp/ot-single-watchdog-host-timeline.jsonl
+test "$(wc -l < /tmp/ot-single-watchdog-host-timeline.jsonl)" -ge 10
 # Pure failover model only: no backup GPIO, supervisor or auto-takeover.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_failover_essential.c main/output_manager.c main/trigger_manager.c \
