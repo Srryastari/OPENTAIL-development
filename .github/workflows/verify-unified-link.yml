@@ -49,7 +49,7 @@ jobs:
                     "core-firmware/main/ot_auto_effects.c","core-firmware/main/wled_fx_compat.c",
                     "core-firmware/main/config_journal.c","core-firmware/main/trigger_manager.c",
                     "core-firmware/main/ot_version.h","core-firmware/partitions_ota.csv",
-                    "android/app/src/main/cpp/wled_native_jni.cpp",
+                    "android/app/src/main/cpp/preview_jni.c",
                     "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv"):
               old=subprocess.check_output(["git","rev-parse",base+":"+p],text=True).strip()
               new=subprocess.check_output(["git","rev-parse","HEAD:"+p],text=True).strip()
