@@ -65,8 +65,8 @@ bool ot_sw_mark_stable(ot_sw_rtc_record_t *record, ot_sw_boot_t *boot,
     return true;
 }
 bool ot_sw_render_progress_eligible(bool all_lanes_completed,
-                                     bool diagnosed_output_fault){
-    return all_lanes_completed||diagnosed_output_fault;
+                                     bool any_lane_completed){
+    return all_lanes_completed||any_lane_completed;
 }
 bool ot_sw_decorative_inhibited(const ot_sw_boot_t *boot){
     return boot && boot->boot_loop_seen&&!boot->stable;
