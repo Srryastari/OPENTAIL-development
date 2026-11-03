@@ -7,6 +7,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -80,6 +83,56 @@ class ComposeMainActivity : ComponentActivity() {
     private val pages = listOf("Home", "Show Modes", "Layout", "Triggers", "Auto Events", "Settings")
     private lateinit var project: NativeProject
     private lateinit var ble: BleDiscovery
+    private lateinit var wifiProbe: WifiCoreStatusProbe
+    private val linkPolicy = ControllerLinkPolicy()
+    private val wifiStatusReady = mutableStateOf(false)
+    private val wifiVersion = mutableStateOf<String?>(null)
+    private val connectivityHandler = Handler(Looper.getMainLooper())
+
+    private fun observeUnifiedLink() {
+        if (ble.canControl()) {
+            val id = ble.controllerId()
+            if (linkPolicy.bleAuthorized(id))
+                prefs.edit().putString("last_owner_authenticated_core_id",id).apply()
+        } else linkPolicy.bleUnavailable()
+        wifiStatusReady.value =
+            linkPolicy.diagnosticTransport(SystemClock.elapsedRealtime()) ==
+                ControllerLinkPolicy.Transport.WIFI
+    }
+    private fun unifiedConnectionPhase(): String =
+        if (wifiStatusReady.value && !ble.canControl()) "Wi-Fi secondary"
+        else ble.connectionPhase().replaceFirstChar { it.uppercase() }
+    private fun unifiedFirmwareVersion(): String {
+        val secondary = if (wifiStatusReady.value) wifiVersion.value else null
+        return firmwareVersion.value ?: secondary ?: "Unavailable"
+    }
+    private fun selectKnownController(address: String) {
+        linkPolicy.switchController()
+        wifiStatusReady.value=false
+        wifiVersion.value=null
+        prefs.edit().remove("last_owner_authenticated_core_id").apply()
+        ble.connectFoundDevice(address)
+    }
+    private val connectivityPoll = object : Runnable {
+        override fun run() {
+            if (!foregroundActivity.value) return
+            observeUnifiedLink()
+            val id=linkPolicy.controllerId()
+            if (id!=null) {
+                val capturedLease=linkPolicy.lease()
+                wifiProbe.probe(id) { data ->
+                    if (!foregroundActivity.value) return@probe
+                    if (data!=null && linkPolicy.wifiObserved(
+                            data.optString("controller_id"),SystemClock.elapsedRealtime(),capturedLease))
+                        wifiVersion.value=data.optString("version","Unavailable")
+                    wifiStatusReady.value =
+                        linkPolicy.diagnosticTransport(SystemClock.elapsedRealtime()) ==
+                            ControllerLinkPolicy.Transport.WIFI
+                }
+            }
+            connectivityHandler.postDelayed(this,4000L)
+        }
+    }
     private val revision = mutableIntStateOf(0)
     // Import/preset restoration replaces the local document; ordinary saves
     // must not reset in-progress TextField values (including typed spaces).
@@ -239,8 +292,11 @@ class ComposeMainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         project = NativeProject(this)
         selectedEffect.intValue = prefs.getInt("effectId", 0)
+        linkPolicy.restoreKnownController(prefs.getString("last_owner_authenticated_core_id",null))
+        wifiProbe=WifiCoreStatusProbe(this)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
+            observeUnifiedLink()
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilitiesAfterAuth()
             if (!ble.isConnected()) firmwareVersion.value = null
@@ -261,7 +317,10 @@ class ComposeMainActivity : ComponentActivity() {
             }
         } }
         ble.setInfoListener { version ->
-            runOnUiThread { firmwareVersion.value = version }
+            runOnUiThread {
+                firmwareVersion.value = version
+                observeUnifiedLink()
+            }
         }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
@@ -349,6 +408,8 @@ class ComposeMainActivity : ComponentActivity() {
         super.onStart()
         foregroundEpoch.intValue++
         foregroundActivity.value = true
+        connectivityHandler.removeCallbacks(connectivityPoll)
+        connectivityHandler.post(connectivityPoll)
         if (!ble.isConnected()) {
             prefs.getString("preferred_ble_address", null)?.let { ble.tryReconnect(it) }
         } else if (!ble.canControl()) {
@@ -358,6 +419,8 @@ class ComposeMainActivity : ComponentActivity() {
     override fun onStop() {
         localMicrophone.stop()
         foregroundActivity.value = false
+        connectivityHandler.removeCallbacks(connectivityPoll)
+        wifiStatusReady.value=false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
         ble.cancelFrameCapture()
         invalidateCoreFrame()
@@ -373,6 +436,7 @@ class ComposeMainActivity : ComponentActivity() {
         if (liveArmed.value) livePreview.detach()
         localMicrophone.stop()
         ble.shutdown()
+        wifiProbe.close()
         super.onDestroy()
     }
     private fun refresh() {
@@ -826,7 +890,7 @@ class ComposeMainActivity : ComponentActivity() {
 
     @Composable
     private fun HomePage(t: Tone, changePage: (Int) -> Unit) {
-        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
+        val connectionPhase = unifiedConnectionPhase()
         Title("Home", t)
         stopNotice.value?.let { Caption(it,t) }
         Panel(t) {
@@ -850,7 +914,7 @@ class ComposeMainActivity : ComponentActivity() {
             }
             // Discovered choices disappear while a controller is connected.
             if (!ble.isConnected()) foundDevices.forEach { (address, label) ->
-                Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
+                Pill(label + " · Connect", t) { selectKnownController(address) }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -869,7 +933,7 @@ class ComposeMainActivity : ComponentActivity() {
             Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             listOf("Connection" to connectionPhase,
                 "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
-                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
+                "Firmware" to unifiedFirmwareVersion()).forEachIndexed { index, (label, value) ->
                 if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween) {
@@ -2252,7 +2316,7 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit,
                              light: Boolean, toggleAppearance: () -> Unit) {
-        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
+        val connectionPhase = unifiedConnectionPhase()
         Title("Settings", t)
         var controllers by remember { mutableStateOf(false) }
         var appearance by remember { mutableStateOf(false) }
@@ -2267,7 +2331,7 @@ class ComposeMainActivity : ComponentActivity() {
                 controllers = !controllers
             }
             if(controllers) foundDevices.forEach { (address,label) ->
-                Pill(label, t) { ble.connectFoundDevice(address); controllers=false }
+                Pill(label, t) { selectKnownController(address); controllers=false }
             }
         }
         Panel(t) {
@@ -2332,7 +2396,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             foundDevices.forEach { (address, label) ->
-                Pill(label + " · Connect", t) { ble.connectFoundDevice(address) }
+                Pill(label + " · Connect", t) { selectKnownController(address) }
             }
             Pill("Read supported effects", t) { ble.readFxCapabilities() }
             Caption(supportedIds.value.size.toString() + " effects reported by connected CORE", t)
