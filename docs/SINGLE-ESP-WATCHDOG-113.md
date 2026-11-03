@@ -205,3 +205,16 @@ The firmware now declares its existing LED-strip dependency explicitly in CMake.
 No local third-party code, tools, sdkconfig, binaries or credentials are committed.
 The dedicated software workflow uses the normal registry dependency and the
 official v5.5.5 IDF action; its artifacts do not approve vehicle release.
+
+## Owner-requested BLE optimization follow-up
+
+The immutable effect capability payload is now built once by the NimBLE host
+callback and reused for later Read Blob requests and connections. This removes
+repeated catalog enumeration/encoding and the 510-byte payload stack buffer,
+using 510 bytes of static RAM instead. Connection admission and full-value
+NimBLE offset handling remain unchanged. A host test executes the actual
+callback and verifies one enumeration across repeated reads and rejection of
+other connection handles. ESP-IDF v5.5.5 compilation and BLE contract tests
+pass. No phone-visible latency improvement has been measured. Prior commit
+and package receipts describe the earlier watchdog build; use this follow-up
+commit's CI artifacts for the optimized firmware.

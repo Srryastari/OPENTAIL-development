@@ -7,6 +7,7 @@ BASE = "1a300767d985343d060faf344bff2da772dca88f"
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
     "core-firmware/main/CMakeLists.txt",
+    "core-firmware/main/ble_status.c", # owner-requested BLE catalog optimization
     "core-firmware/main/Kconfig.projbuild",
     "core-firmware/main/opentail_core.c",
     "core-firmware/main/ot_ota_update.c",
@@ -22,6 +23,7 @@ ALLOWED = {
     "core-firmware/tests/test_watchdog_runtime.py",
     "core-firmware/tests/test_watchdog_integration.py",
     "core-firmware/tests/test_ota_deadline.py",
+    "core-firmware/tests/test_nimble_long_read_contract.py",
     "core-firmware/tests/test_ota_boot_confirmation_contract.py",
     "scripts/check_integrated_candidate.py",
     "scripts/check_watchdog_candidate.py",

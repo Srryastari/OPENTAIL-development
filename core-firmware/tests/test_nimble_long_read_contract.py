@@ -71,3 +71,49 @@ offset = 40
 prior_callback_bytes = payload[offset:offset + 22]
 assert len(prior_callback_bytes) - offset < 0
 print("PASS: FX 140-ID NimBLE Read Blob offsets across MTUs, no double-slicing in 4 callbacks")
+
+# Execute the real callback body: repeated reads reuse one catalog build,
+# and an unauthorized connection cannot receive cached bytes.
+import subprocess
+import tempfile
+program = r"""
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <assert.h>
+#define BLE_GATT_ACCESS_OP_READ_CHR 1
+#define BLE_ATT_ERR_READ_NOT_PERMITTED 2
+#define BLE_ATT_ERR_INSUFFICIENT_RES 3
+struct ble_gatt_access_ctxt {int op; void *om;};
+static uint16_t active_conn=7;
+static unsigned enumerations,appends;
+static uint8_t received[510];
+static size_t received_len;
+static size_t ot_effects_1d_supported_ids(uint16_t *ids,size_t cap){
+    assert(cap>=140);enumerations++;
+    for(unsigned i=0;i<140;i++)ids[i]=i<120?i:32768+i-120;
+    return 140;
+}
+static int os_mbuf_append(void *om,const void *p,size_t n){
+    (void)om;appends++;memcpy(received,p,n);received_len=n;return 0;
+}
+static int read_catalog(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg)
+""" + body("fx_capabilities_read") + r"""
+int main(void){
+    struct ble_gatt_access_ctxt ctx={1,0};
+    assert(read_catalog(8,0,&ctx,0)==2 && enumerations==0);
+    assert(read_catalog(7,0,&ctx,0)==0 && received_len==282);
+    uint8_t first[282];memcpy(first,received,282);
+    for(unsigned i=0;i<20;i++)assert(read_catalog(7,0,&ctx,0)==0);
+    assert(enumerations==1 && appends==21 && memcmp(first,received,282)==0);
+    assert(read_catalog(8,0,&ctx,0)==2 && appends==21);
+    assert(received[0]==1 && received[1]==140);
+    return 0;
+}
+"""
+with tempfile.TemporaryDirectory() as tmp:
+    c=Path(tmp)/"catalog.c";exe=Path(tmp)/"catalog"
+    c.write_text(program)
+    subprocess.run(["cc","-std=c11","-Wall","-Wextra","-Werror",str(c),"-o",str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)
+print("PASS: production catalog callback caches once and preserves connection admission and complete payload")
