@@ -34,6 +34,7 @@ jobs:
             "core-firmware/sdkconfig.defaults",
             "core-firmware/tests/test_single_watchdog.c",
             "core-firmware/tests/test_single_watchdog_timeline.c",
+            "core-firmware/tests/test_watchdog_held_input_boot.c",
             "core-firmware/tests/test_single_watchdog_contract.py",
             "core-firmware/tests/run-host-tests.sh",
             "core-firmware/tests/test_failover_runtime_isolation.py",
