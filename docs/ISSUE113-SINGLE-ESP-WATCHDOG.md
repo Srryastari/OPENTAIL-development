@@ -1,0 +1,27 @@
+# Issue #113 — ONE ESP32-S3 progress watchdog, crash recovery and fail-closed policy
+
+## Owner-locked architecture / exact compatibility base
+
+- Source baseline: Firmware/Android/Effects integrated PR #112 at `1a300767d985343d060faf344bff2da772dca88f`.
+- ONE ESP32-S3 N16R8. PR #84 dual-ESP essential profile logic and Hardware #32 plans are superseded, not silently deleted. No hardware handoff or independent failover is implemented.
+- Preserve all 140 effects, source-authentic 13 supported tertiary IDs and six unsupported, BLE/HMAC/palette, GPIO16/17 outputs and eight GPIO4–11 active-low trigger inputs, committed/staged NVS journals, STOP/OTA, firmware version, four-image flash package, and approved Android six-screen UI 1:1.
+
+## Supported ESP-IDF 5.5.5 mechanisms
+
+Uses IDF's boot-initialized Task Watchdog reconfigured with 15,000ms panic/reset, both CPU idle tasks, default interrupt WDT and bootloader RTC WDT. No custom tick-driven feed loop, no disabling built-in watchdogs and no new external GPIO. One Task WDT user receives credit only after all eight GPIO reads, debounce and physical input publication; a second user receives credit only after a successful actual RMT async_done transfer. A transfer merely submitted, a repeated fault-loop iteration, a BLE ACK, idle/status heartbeat, or a stopped Show Mode is NOT progress. If one RMT lane fails and the other completes, the healthy lane continues supplying progress; full-frame/STOP/OTA credit still requires both.
+
+On reset, esp_reset_reason() classifies task WDT, interrupt WDT, other WDT, panic, CPU lockup, brownout, power-on and software/OTA restart. A checkword-protected RTC_NOINIT_ATTR record increments a bounded panic/WDT crash streak without writing NVS. Three consecutive crash resets mark a boot-loop, latch onboard fault indication and inhibit decorative playback; physical Brake/Turn/Reverse/Hazards retain their existing zone-specific priority while CORE runs. Inhibition may clear only after 60 seconds, at least 100 real GPIO sampling cycles and 100 complete two-output driver frames, with no output/NVS recovery fault. New pending OTA boots cannot confirm before that stable runtime; ESP-IDF rollback remains enabled.
+
+During startup, physically read held GPIO input levels immediately after GPIO configuration, BEFORE the first RMT frame, so Brake/Turn/Reverse remain observable during the sampler debounce startup. Keep NVS staged activation dependent on physical quiet window; never promote an uncommitted journal on reset. No road-going essential light fallback is fabricated.
+
+The existing GET /api/v1/status includes an additive watchdog object with status (enabled, single_controller, reset_reason, crash_streak, boot_loop_seen, decorative_inhibited, stable), and monotonic boot-run input/RMT progress counters. It does not change the existing Android UI or BLE data structures.
+
+## Reproducible software tests / physical test gates
+
+Execute full CORE host suite `cd core-firmware && bash tests/run-host-tests.sh`. It includes a pure-C RTC/reset policy test and a structural check for exactly placed ESP-IDF feeds and held GPIO startup. Synthetic host event timeline scenarios: (1) task deadlock -> no sampler feed; (2) starved CPU idle tasks -> IDF TWDT; (3) blocked RMT async_done -> no render feed; (4) O1 fault and O2 completed -> O2 continues but no complete frame; (5) both lanes dead -> no progress; (6) BLE disconnect and STOP -> real sampling/transfers continue; (7) asserted physical input during reset -> boot raw sample before first output; (8) corrupt or interrupted NVS journal -> no stable clearance/promotion; (9) watchdog/panic streak 1,2,3 -> decorative inhibited; (10) brownout/power -> separately classified; (11) pending OTA -> no confirmation until stable progress.
+
+These are HOST/SOURCE tests, not physical measurements. Each listed actual stimulus remains NOT_RUN until a powered-board UART / RMT / trigger-LED capture with owner-approved fixture measures time to reset, first safe output, held trigger override and dual-lane behavior. All original 22 mandatory physical checks remain NOT_RUN for this candidate.
+
+## Explicit safety limits
+
+One internal watchdog cannot reboot or illuminate pixels when the only MCU, regulator, wiring, data shifter, LED rail or WS2815 chain is permanently failed. A separate optional low-cost reset supervisor is Hardware Team scope and NOT a second ESP or an independent brake/turn/reverse fallback. An independently powered, electrically verified essential-light path remains a release prerequisite. No optical/automotive certification, direct main commit, flash, version bump, merge or Android design changes are claimed.

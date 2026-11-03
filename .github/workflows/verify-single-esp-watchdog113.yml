@@ -1,0 +1,201 @@
+name: Issue113 ONE ESP32-S3 progress watchdog exact HEAD and bench package
+on:
+  pull_request:
+    branches: [codex/issue93-enable-13-tertiary-20261102]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-source-and-host-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin exact Issue113 integrated PR112 base and prohibit renderer, UI, BLE ABI, NVS or hardware release changes
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):return subprocess.check_output(["git",*args],text=True).strip()
+          base="1a300767d985343d060faf344bff2da772dca88f"
+          assert git("merge-base","--is-ancestor",base,"HEAD")==""
+          allowed={
+            "core-firmware/main/ot_single_watchdog.c",
+            "core-firmware/main/ot_single_watchdog.h",
+            "core-firmware/main/ot_single_watchdog_idf.c",
+            "core-firmware/main/ot_single_watchdog_idf.h",
+            "core-firmware/main/opentail_core.c",
+            "core-firmware/main/CMakeLists.txt",
+            "core-firmware/sdkconfig.defaults",
+            "core-firmware/tests/test_single_watchdog.c",
+            "core-firmware/tests/test_single_watchdog_timeline.c",
+            "core-firmware/tests/test_watchdog_held_input_boot.c",
+            "core-firmware/tests/test_single_watchdog_contract.py",
+            "core-firmware/tests/run-host-tests.sh",
+            "core-firmware/tests/test_failover_runtime_isolation.py",
+            "core-firmware/tests/test_trigger_runtime_contract.py",
+            "core-firmware/tests/test_ota_boot_confirmation_contract.py",
+            "docs/ISSUE113-SINGLE-ESP-WATCHDOG.md",
+            ".github/workflows/verify-single-esp-watchdog113.yml"
+          }
+          changed=set(git("diff","--name-only",base,"HEAD").splitlines())
+          assert changed<=allowed,("Unexpected files",changed-allowed)
+          for p in (
+             "core-firmware/main/wled_fx_compat.c",
+             "core-firmware/main/wled_fx_compat.h",
+             "core-firmware/main/effects_1d.c",
+             "core-firmware/main/effects_1d.h",
+             "core-firmware/main/ot_auto_effects.c",
+             "core-firmware/main/ble_fx_command.c",
+             "core-firmware/main/ble_fx_command.h",
+             "core-firmware/main/ble_status.c",
+             "core-firmware/main/trigger_manager.c",
+             "core-firmware/main/output_manager.c",
+             "core-firmware/main/config_journal.c",
+             "core-firmware/main/ot_ota_update.c",
+             "core-firmware/main/ot_version.h",
+             "core-firmware/partitions_ota.csv",
+             "core-firmware/main/ot_failover_essential.c",
+             "core-firmware/main/board_config.h",
+             "scripts/package_core_flash.py",
+             "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv",
+             "docs/CI-REGRESSION-BASELINE.json",
+             ".github/workflows/verify-active-sources.yml",
+             "scripts/check_regressions.py"
+          ):
+            assert git("rev-parse","HEAD:"+p)==git("rev-parse",base+":"+p),p
+          assert not any(x.startswith(("android/","web-studio/")) for x in changed)
+          print("PASS Issue113 narrow one-ESP watchdog-only delta; exact PR112 renderer/13 RGB3, BLE, NVS, 22 physical gates unchanged")
+          PY
+      - name: Source boundary and pure C watchdog/reset/bootloop event tests
+        run: |
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/ot_single_watchdog.c tests/test_single_watchdog.c \
+            -o /tmp/ot-sw113 && /tmp/ot-sw113
+          python3 tests/test_single_watchdog_contract.py
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/core_logic.c main/arbitration_logic.c tests/test_watchdog_held_input_boot.c \
+            -o /tmp/ot-held-input113
+          /tmp/ot-held-input113
+          python3 tests/test_nvs_finalization_contract.py
+          python3 tests/test_ota_boot_confirmation_contract.py
+      - name: No automatic physical release promotion
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  full-core-host:
+    needs: exact-source-and-host-policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: 140 source Effects, BLE 13 supported / 6 unsupported, NVS, STOP, OTA, physical triggers, watchdog full host
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Record reproducible HOST_SIMULATED watchdog fault timeline (not physical results)
+        run: cp /tmp/ot-single-watchdog-host-timeline.jsonl watchdog-host-timeline.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue113-host-only-watchdog-event-timeline-${{ github.event.pull_request.head.sha || github.sha }}
+          path: watchdog-host-timeline.jsonl
+          if-no-files-found: error
+
+  independent-trigger-guard:
+    needs: exact-source-and-host-policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Independent GPIO8 priority, held-input and durable staged NVS source regression
+        run: |
+          python3 core-firmware/tests/test_trigger_runtime_contract.py
+          python3 core-firmware/tests/test_nvs_finalization_contract.py
+          cd core-firmware
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/trigger_manager.c main/core_logic.c main/arbitration_logic.c \
+            main/output_manager.c main/show_logic.c tests/test_trigger_manager.c \
+            -o /tmp/ot-issue113-triggers
+          /tmp/ot-issue113-triggers
+
+  android-unchanged-contract:
+    needs: exact-source-and-host-policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact existing 13 RGB3 BLE and six-screen Android architecture, no design change
+        run: |
+          python3 android/qa/check_release.py
+          node android/qa/test_native_source.cjs
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+
+  esp-idf555-four-image-bench:
+    needs: [full-core-host, independent-trigger-guard, android-unchanged-contract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify same firmware SHA as host
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Package four original ESP-IDF images and require real OTA data + SHA256
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-single-esp-watchdog-$PIN.zip" \
+            --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-single-esp-watchdog-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-single-esp-watchdog-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-single-esp-watchdog113-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-single-esp-watchdog-*.zip
+            core-firmware/releases/opentail-single-esp-watchdog-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  downloaded-bench-integrity:
+    needs: esp-idf555-four-image-bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: opentail-single-esp-watchdog113-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: received
+      - name: Independently verify real published inner ZIP + OTA, offsets and checksum
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "received/opentail-single-esp-watchdog-$PIN.zip" \
+            --sha256-file "received/opentail-single-esp-watchdog-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# Bench software candidate ONLY. Actual on-board WDT timeline, 22 physical checks,
+# OEM independent essential lighting and vehicle release remain NOT_VERIFIED.

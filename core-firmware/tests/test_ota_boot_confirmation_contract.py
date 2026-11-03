@@ -10,7 +10,7 @@ led = core.split("static void led_task(void *p) {", 1)[1].split("void app_main(v
 startup = core.split("void app_main(void) {", 1)[1]
 done = "led_strip_refresh_async_done(strip[ch])"
 all_lanes = "const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)"
-gate = "if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&"
+gate = "if(full_frame && ot_sw_idf_stable() &&"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
@@ -41,11 +41,11 @@ input_init = core.split("static bool input_init(void) {",1)[1].split(
 assert "ESP_ERROR_CHECK(gpio_config(" not in input_init
 assert "const esp_err_t e=gpio_config(&cfg);" in input_init
 assert "return false;" in input_init and "return true;" in input_init
-assert "const bool inputs_ready=input_init();" in startup
-assert 'if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");' in startup
-assert "const bool sampler_ready=inputs_ready &&" in startup
+assert "const bool inputs_ready=watchdog_ready&&input_init();" in startup
+assert 'if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");' in startup
+assert "const bool sampler_ready=input_watched &&" in startup
 assert "bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();" in startup
-assert startup.index("const bool inputs_ready=input_init();") < startup.index("xTaskCreate(led_task")
+assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < startup.index("xTaskCreate(led_task")
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
 assert "http_startup_ready=wifi_started&&http_start();" in startup
