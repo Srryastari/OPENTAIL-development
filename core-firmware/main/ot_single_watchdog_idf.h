@@ -12,8 +12,8 @@ bool ot_sw_idf_watch_render(void);
 void ot_sw_idf_cancel_inputs(void);
 void ot_sw_idf_cancel_render(void);
 void ot_sw_idf_input_sampled(void);
-void ot_sw_idf_render_cycle(bool all_outputs_completed, bool diagnosed_fault,
-                            bool configuration_fault);
+void ot_sw_idf_render_cycle(bool all_outputs_completed, bool any_output_completed,
+                            bool diagnosed_fault, bool configuration_fault);
 bool ot_sw_idf_decorative_inhibited(void);
 bool ot_sw_idf_stable(void);
 bool ot_sw_idf_boot_loop_seen(void);
