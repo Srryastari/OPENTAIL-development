@@ -7,6 +7,12 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/te
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
 python3 tests/test_main_stack_boot_contract.py
+# #113: deterministic single-ESP crash streak/stable boot and exact progress
+# gates. Actual WDT reset timing/GPIO/optics requires a powered-board test.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_single_watchdog.c tests/test_single_watchdog.c \
+  -o /tmp/ot-single-watchdog-test && /tmp/ot-single-watchdog-test
+python3 tests/test_single_watchdog_contract.py
 # Pure failover model only: no backup GPIO, supervisor or auto-takeover.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_failover_essential.c main/output_manager.c main/trigger_manager.c \
