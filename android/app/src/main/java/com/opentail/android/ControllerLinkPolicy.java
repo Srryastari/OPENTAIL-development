@@ -40,6 +40,14 @@ final class ControllerLinkPolicy {
         bleAuthorized = true;
         return true;
     }
+    /** Only restore a controller ID previously saved after owner-authenticated BLE. */
+    synchronized boolean restoreKnownController(String previouslyAuthenticatedId) {
+        String id = normalizedId(previouslyAuthenticatedId);
+        if (id == null || controllerId != null) return false;
+        controllerId = id;
+        lease++;
+        return true;
+    }
     /** Explicit controller switch invalidates previous Wi-Fi identity. */
     synchronized void switchController() {
         controllerId = null;
