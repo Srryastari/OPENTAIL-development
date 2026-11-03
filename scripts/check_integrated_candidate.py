@@ -3,7 +3,16 @@
 import json
 from pathlib import Path
 import subprocess
+import sys
 def git(*a): return subprocess.check_output(["git",*a],text=True).strip()
+# Issue113 explicitly authorizes a firmware recovery delta atop exact PR112.
+# Its stricter whole-repository allowlist replaces stale whole-tree receipts
+# for this candidate; historical checks remain for earlier integration heads.
+if subprocess.run(["git","merge-base","--is-ancestor",
+                   "1a300767d985343d060faf344bff2da772dca88f","HEAD"],
+                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
+    subprocess.check_call([sys.executable,"scripts/check_watchdog_candidate.py"])
+    sys.exit(0)
 m=json.loads(Path("docs/SOFTWARE-COMPATIBILITY-MATRIX.json").read_text())
 for area,key in (("android","android"),("core-firmware","firmware")):
     expected=m["sources"][key]["tree"]

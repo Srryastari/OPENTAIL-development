@@ -1,6 +1,6 @@
 /* OpenTail CORE Alpha — universal user-profile pixel counts, hardware-budgeted, not road firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
- * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
+ * Single-controller watchdog recovery only; no independent backup or OEM-bulb fallback. Do not drive on road.
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -49,6 +49,7 @@
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
 #include "ot_frame_snapshot.h"
+#include "ot_watchdog.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -85,6 +86,7 @@ static void request_render_refresh(void){
 /* Latches successful physical GPIO setup and sampler task creation before
  * BLE/HTTP configuration endpoints start accepting durable mapping writes. */
 static bool input_sampler_ready=false;
+static bool input_sampler_primed=false; /* four real boot samples before external RMT setup */
 /* GPIO any-edge ISR records transitions even during a slow NVS write.
  * A quiet debounced window + unchanged epoch is required to promote. */
 static volatile uint32_t input_edge_epoch=0u;
@@ -1459,14 +1461,15 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used]=0;
     char elf_sha256[65]={0};
     (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
-    char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+    char recovery_json[320];ot_watchdog_format_json(recovery_json,sizeof(recovery_json));
+    char buf[2300];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"recovery\":%s}",
        OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
-       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json,recovery_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
@@ -1884,6 +1887,7 @@ static void config_activation_task(void *unused){
             }
             xSemaphoreGive(om_write_mutex);
         }
+        ot_watchdog_progress(OT_WATCH_CONFIG); /* examined promotion gate / completed any journal work */
         vTaskDelay(pdMS_TO_TICKS(25u));
     }
 }
@@ -1893,6 +1897,7 @@ static void config_activation_task(void *unused){
 static void input_sampler_task(void *arg){
     (void)arg;
     ot_inputs_t sampler={0};
+    unsigned boot_samples=0u;
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
@@ -1915,6 +1920,9 @@ static void input_sampler_task(void *arg){
         }else input_quiet_samples=0u;
         portEXIT_CRITICAL(&state_lock);
         if(target)xTaskNotifyGive(target);
+        ot_watchdog_progress(OT_WATCH_INPUTS); /* sampled all pins and published debounce */
+        if(boot_samples<OT_DEBOUNCE_TICKS && ++boot_samples==OT_DEBOUNCE_TICKS)
+            __atomic_store_n(&input_sampler_primed,true,__ATOMIC_RELEASE);
         vTaskDelayUntil(&last_wake,period);
     }
 }
@@ -1963,6 +1971,7 @@ static void led_task(void *p) {
     }
     bool boot_frame_verified=false;
     uint32_t previous_frame_ms=0;
+    uint32_t last_idle_yield_ms=0, last_confirm_attempt_ms=0;
     TaskHandle_t self=xTaskGetCurrentTaskHandle();
     esp_timer_handle_t frame_timer=NULL;
     esp_timer_create_args_t timer_args={
@@ -1982,6 +1991,7 @@ static void led_task(void *p) {
     native_outputs_ready=true; /* RMT and frame timer initialized; ready to render. */
     portEXIT_CRITICAL(&state_lock);
     while(1){
+       ot_watchdog_phase(OT_PHASE_RENDER);
        const int64_t frame_started_us=esp_timer_get_time();
        TickType_t now=xTaskGetTickCount();
        uint8_t physical=0;
@@ -2028,6 +2038,7 @@ static void led_task(void *p) {
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!output_failed[ch]){
+                   ot_watchdog_phase(OT_PHASE_RESIZE);
                    frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
                    if(!frame_ready[ch]){
                        /* A failed resize may leave an old handle or no handle.
@@ -2199,6 +2210,7 @@ static void led_task(void *p) {
                }
                if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
                // Hardware driver transmits only this output's configured active length.
+               ot_watchdog_phase(ch==0?OT_PHASE_SUBMIT_O1:OT_PHASE_SUBMIT_O2);
                esp_err_t e=led_strip_refresh_async(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer submit",e);
@@ -2212,6 +2224,7 @@ static void led_task(void *p) {
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!frame_submitted[ch])continue;
+               ot_watchdog_phase(ch==0?OT_PHASE_COMPLETE_O1:OT_PHASE_COMPLETE_O2);
                esp_err_t e=led_strip_refresh_async_done(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer completion",e);
@@ -2236,7 +2249,14 @@ static void led_task(void *p) {
             * first frame; startup faults must leave rollback available. */
            if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&
               ot_ble_radio_ever_ready() && !boot_frame_verified)
-               boot_frame_verified=ot_ota_confirm_boot(true);
+           {
+               const uint32_t attempt_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+               if(last_confirm_attempt_ms==0u || attempt_ms-last_confirm_attempt_ms>=1000u){
+                   last_confirm_attempt_ms=attempt_ms;
+                   boot_frame_verified=ot_ota_confirm_boot(true);
+               }
+           }
+           ot_watchdog_frame(full_frame,boot_frame_verified);
            if(!native_rendering && full_frame){
                portENTER_CRITICAL(&state_lock);
                /* Both software refresh calls completed after this Stop was
@@ -2262,6 +2282,16 @@ static void led_task(void *p) {
                frame_window_frames=0;frame_window_start_ms=ms;
            }
            portENTER_CRITICAL(&state_lock); frame_index++; portEXIT_CRITICAL(&state_lock);
+       }
+       /* Completion credit only after ALL attempted driver operations returned.
+        * Explicit lane errors stay isolated; a blocked call cannot reach here. */
+       ot_watchdog_phase(OT_PHASE_FRAME_DONE);
+       ot_watchdog_progress(OT_WATCH_RENDER);
+       const uint32_t idle_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       if(idle_ms-last_idle_yield_ms>=1000u){
+           /* taskYIELD does not let lower-priority IDLE run under sustained
+            * overload/edge notifications. Give IDF idle WDT genuine CPU time. */
+           last_idle_yield_ms=idle_ms;vTaskDelay(1);
        }
        /* Observe measured work + RGB800 wire minimum. At overload there is
         * no extra delay; actual FPS may dip below the preferred 53 FPS. */
@@ -2292,24 +2322,41 @@ static void led_task(void *p) {
 #endif
 void app_main(void) {
     ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ot_palette_runtime_load();
+    ot_watchdog_init();
+    ot_ota_watch_boot();
+    const esp_err_t nvs_ready=nvs_flash_init();
+    /* Never erase active/staged data to escape a boot failure. Corruption
+     * leaves diagnostics available and all external pixel outputs uninitialized. */
+    config_recovery_fault=nvs_ready!=ESP_OK || ot_watchdog_quarantined();
+    if(nvs_ready==ESP_OK && !ot_watchdog_quarantined())ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
-    om_load();
-    tm_load();
-    om_journal_load();
-    tm_journal_load();
+    ot_om_defaults(om_outputs);
+    ot_tm_defaults(&tm_profile);
+    if(nvs_ready==ESP_OK && !ot_watchdog_quarantined()){
+        om_load();tm_load();
+        om_journal_load();tm_journal_load();
+    }
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
         (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
+    if(ot_watchdog_quarantined())ot_st_set_fault("repeated resets: diagnostic-only quarantine; power cycle after repair");
     const bool inputs_ready=input_init();
     if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
+    if(inputs_ready)ot_watchdog_arm(OT_WATCH_INPUTS);
     const bool sampler_ready=inputs_ready &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
-    if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    if(inputs_ready && !sampler_ready){
+        ot_watchdog_disarm(OT_WATCH_INPUTS);
+        ot_st_set_fault("physical input sampler could not start");
+    }
     input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
+    /* Wait for the held-input debounce snapshot before allocating/clearing
+     * external strips or allowing journal promotion. Startup and sampler WDT
+     * users bound a stalled first sample; this wait never feeds either user. */
+    while(sampler_ready && !__atomic_load_n(&input_sampler_primed,__ATOMIC_ACQUIRE))
+        vTaskDelay(1);
     bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
     const bool wifi_started=wifi_ap_init();
@@ -2318,19 +2365,24 @@ void app_main(void) {
     /* Configuration writes already reject a missing mutex. Keep local
      * trigger-driven rendering alive rather than rebooting on this fault. */
     if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
-    else{
+    else if(!config_recovery_fault){
+        ot_watchdog_arm(OT_WATCH_CONFIG);
         config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
             5120,NULL,5,NULL)==pdPASS;
-        if(!config_promotion_ready)
+        if(!config_promotion_ready){
+            ot_watchdog_disarm(OT_WATCH_CONFIG);
             ot_st_set_fault("durable configuration promoter failed to start");
+        }
     }
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
     http_startup_ready=wifi_started&&http_start();
     if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
     if(outputs_ready){
+        ot_watchdog_arm(OT_WATCH_RENDER);
         BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
-        if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
+        if(created!=pdPASS){ot_watchdog_disarm(OT_WATCH_RENDER);portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
         /* OTA validation is deferred until led_task finishes its first full frame. */
     }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
+    ot_watchdog_disarm(OT_WATCH_STARTUP);
 }

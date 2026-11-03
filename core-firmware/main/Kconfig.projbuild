@@ -1,4 +1,16 @@
 menu "OpenTail CORE Alpha"
+  config OPENTAIL_WATCHDOG_TEST_FAULT
+    int "BENCH ONLY: inject watchdog fault after 5s (0 disables)"
+    range 0 8
+    default 0
+    help
+      Never enable in a release image. Connect serial logging and independently
+      powered essential lights first. 1=input task suspension, 2=render task
+      suspension, 3=output submit hang simulation, 4=output completion hang
+      simulation, 5=config task suspension, 6=scheduler starvation on render
+      core, 7=interrupt blocking on render core, 8=software panic. Repeats on
+      recovery boots until diagnostic quarantine. Does not prove real RMT
+      fault recovery or actual illumination. No remote fault-injection API.
   config OPENTAIL_AP_PASSWORD
     string "Bench-only Wi-Fi AP WPA2 password (8-63 characters)"
     default "OpenTailLab-ChangeMe"
