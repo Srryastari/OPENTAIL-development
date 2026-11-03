@@ -12,6 +12,7 @@
 #include "nvs.h"
 #include "mbedtls/md.h"
 #include "status_led.h"
+#include "ot_controller_identity.h"
 #include "ot_version.h"
 #include "ble_command.h"
 #include "ble_fx_command.h"
@@ -140,8 +141,14 @@ static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0x
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
-    return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    char controller_id[13],message[220];
+    ot_controller_id(controller_id);
+    const int n=snprintf(message,sizeof(message),
+        "OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2"
+        " | continuous-fx-v1 | " OT_BLE_FX_TERTIARY_CAPABILITY
+        " | " OT_BLE_FX_TERTIARY13_CAPABILITY " | id=%s",controller_id);
+    if(n<0||(size_t)n>=sizeof(message))return BLE_ATT_ERR_INSUFFICIENT_RES;
+    return os_mbuf_append(ctx->om,message,(size_t)n)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
