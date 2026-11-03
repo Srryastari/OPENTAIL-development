@@ -92,7 +92,8 @@ class ComposeMainActivity : ComponentActivity() {
     private fun observeUnifiedLink() {
         if (ble.canControl()) {
             val id = ble.controllerId()
-            if (linkPolicy.bleAuthorized(id))
+            if (linkPolicy.bleAuthorized(id) &&
+                prefs.getString("last_owner_authenticated_core_id",null)!=id)
                 prefs.edit().putString("last_owner_authenticated_core_id",id).apply()
         } else linkPolicy.bleUnavailable()
         wifiStatusReady.value =
