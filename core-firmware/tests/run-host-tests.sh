@@ -13,6 +13,11 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_single_watchdog.c tests/test_single_watchdog.c \
   -o /tmp/ot-single-watchdog-test && /tmp/ot-single-watchdog-test
 python3 tests/test_single_watchdog_contract.py
+# Preserve physically held IN1..IN8 at the very first RMT frame through four
+# debounce samples; tests all 256 possible physical input masks.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/core_logic.c tests/test_watchdog_held_input_boot.c \
+  -o /tmp/ot-held-input-boot && /tmp/ot-held-input-boot
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_single_watchdog.c tests/test_single_watchdog_timeline.c \
   -o /tmp/ot-single-watchdog-timeline
