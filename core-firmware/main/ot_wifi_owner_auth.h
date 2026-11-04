@@ -16,6 +16,10 @@ typedef struct {
 /* Implemented by the existing BLE owner-key store. Owner secret never leaves CORE. */
 typedef bool (*ot_wifi_owner_hmac_t)(const uint8_t *data,size_t len,
                                     uint8_t out[OT_WIFI_OWNER_MAC_LEN]);
+/* Existing BLE owner credential remains the one source of truth. */
+bool ot_ble_owner_wifi_ready(void);
+bool ot_ble_owner_wifi_hmac(const uint8_t *data,size_t len,
+                            uint8_t out[OT_WIFI_OWNER_MAC_LEN]);
 void ot_wifi_owner_issue(ot_wifi_owner_challenge_t *state,
                          const uint8_t fresh_nonce[OT_WIFI_OWNER_NONCE_LEN],
                          uint32_t now_ms);
