@@ -13,6 +13,7 @@
 #include "mbedtls/md.h"
 #include "status_led.h"
 #include "ot_controller_identity.h"
+#include "ot_wifi_owner_auth.h"
 #include "ot_version.h"
 #include "ble_command.h"
 #include "ble_fx_command.h"
@@ -90,8 +91,20 @@ static bool owner_create(void){
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     if(e!=ESP_OK)return false;
-    memcpy(owner_key,candidate,sizeof(owner_key));owner_valid=true;
+    memcpy(owner_key,candidate,sizeof(owner_key));
+    __atomic_store_n(&owner_valid,true,__ATOMIC_RELEASE);
     return true;
+}
+/* HMAC oracle for a separate, one-use Wi-Fi owner request.
+ * Never export BLE owner key over HTTP or into the public controller ID.
+ */
+bool ot_ble_owner_wifi_ready(void){
+    return __atomic_load_n(&owner_valid,__ATOMIC_ACQUIRE);
+}
+bool ot_ble_owner_wifi_hmac(const uint8_t *data,size_t len,uint8_t out[32]){
+    if(!data||!out||!ot_ble_owner_wifi_ready())return false;
+    const mbedtls_md_info_t *md=mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    return md && mbedtls_md_hmac(md,owner_key,sizeof(owner_key),data,len,out)==0;
 }
 /* GPIO0 BOOT must be pressed AFTER power-up, never while resetting. */
 static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -586,5 +599,9 @@ bool ot_ble_start(void){
     return true;
 }
 #else
+bool ot_ble_owner_wifi_ready(void){return false;}
+bool ot_ble_owner_wifi_hmac(const uint8_t *data,size_t len,uint8_t out[32]){
+    (void)data;(void)len;(void)out;return false;
+}
 bool ot_ble_start(void){token_ready=false;return false;}
 #endif
