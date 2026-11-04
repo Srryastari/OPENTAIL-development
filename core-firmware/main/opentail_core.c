@@ -51,6 +51,7 @@
 #include "ot_frame_snapshot.h"
 #include "ot_single_watchdog_idf.h"
 #include "ot_controller_identity.h"
+#include "ot_wifi_owner_auth.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -1563,6 +1564,69 @@ static esp_err_t stop_post(httpd_req_t *r) {
     ot_st_show_active(false);
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
+/* Issue118: authenticated secondary STOP only.
+ * This is a new bounded command, NOT an HTTP owner session and NOT permission
+ * for legacy bench-only REST mutations. An HMAC binds one random challenge to
+ * exactly POST /api/v1/owner/stop; it is consumed on every attempted use.
+ */
+static ot_wifi_owner_challenge_t wifi_owner_stop_challenge;
+static int wifi_hex_digit(char ch){
+    if(ch>='0'&&ch<='9')return ch-'0';
+    if(ch>='a'&&ch<='f')return ch-'a'+10;
+    if(ch>='A'&&ch<='F')return ch-'A'+10;
+    return -1;
+}
+static bool wifi_decode_hex(const char *str,size_t n,uint8_t *out){
+    if(!str||!out||strlen(str)!=n*2u)return false;
+    for(size_t i=0;i<n;i++){
+        int hi=wifi_hex_digit(str[i*2u]),lo=wifi_hex_digit(str[i*2u+1u]);
+        if(hi<0||lo<0)return false;
+        out[i]=(uint8_t)((hi<<4)|lo);
+    }
+    return true;
+}
+static esp_err_t wifi_owner_challenge_get(httpd_req_t *r){
+    if(!ot_ble_owner_wifi_ready())
+        return respond_err(r,409,"BLE owner not enrolled; pair with BOOT before Wi-Fi control");
+    uint8_t nonce[OT_WIFI_OWNER_NONCE_LEN];
+    esp_fill_random(nonce,sizeof(nonce));
+    ot_wifi_owner_issue(&wifi_owner_stop_challenge,nonce,
+                        (uint32_t)(esp_timer_get_time()/1000LL));
+    char value[OT_WIFI_OWNER_NONCE_LEN*2u+1u];
+    for(size_t i=0;i<sizeof(nonce);i++)
+        (void)snprintf(value+i*2u,3u,"%02x",nonce[i]);
+    char reply[170];
+    (void)snprintf(reply,sizeof(reply),
+                   "{\"version\":1,\"nonce\":\"%s\",\"expires_ms\":%u,\"scope\":\"POST /api/v1/owner/stop\"}",
+                   value,(unsigned)OT_WIFI_OWNER_CHALLENGE_TTL_MS);
+    return send_json(r,reply);
+}
+static esp_err_t wifi_owner_stop_post(httpd_req_t *r){
+    /* No request body for STOP. Reject unexpected payload to keep the MAC
+     * canonical and prevent a proxy/body mismatch. No secret is transmitted.
+     */
+    if(r->content_len!=0)return respond_err(r,400,"authenticated STOP requires empty body");
+    char nonce_hex[33]={0},mac_hex[65]={0};
+    uint8_t nonce[OT_WIFI_OWNER_NONCE_LEN]={0},mac[OT_WIFI_OWNER_MAC_LEN]={0};
+    const bool valid_headers=
+        httpd_req_get_hdr_value_str(r,"X-OpenTail-Nonce",nonce_hex,sizeof(nonce_hex))==ESP_OK &&
+        httpd_req_get_hdr_value_str(r,"X-OpenTail-Proof",mac_hex,sizeof(mac_hex))==ESP_OK &&
+        wifi_decode_hex(nonce_hex,sizeof(nonce),nonce) &&
+        wifi_decode_hex(mac_hex,sizeof(mac),mac);
+    /* Invalid header attempts consume the challenge, too. */
+    if(!valid_headers){
+        wifi_owner_stop_challenge.pending=false;
+        httpd_resp_set_status(r,"403 Forbidden");
+        return send_json(r,"{\"error\":\"owner proof required\"}");
+    }
+    const bool admitted=ot_wifi_owner_verify_stop(&wifi_owner_stop_challenge,
+        nonce,mac,(uint32_t)(esp_timer_get_time()/1000LL),ot_ble_owner_wifi_hmac);
+    if(!admitted){
+        httpd_resp_set_status(r,"403 Forbidden");
+        return send_json(r,"{\"error\":\"invalid or expired owner proof\"}");
+    }
+    return stop_post(r); /* Single authoritative STOP: retains all OEM triggers. */
+}
 /* CORE ships only its own developer console. The approved Studio is
  * distributed independently as web-studio/opentail.htm and via Android.
  * CMake embeds this static page; no WLED runtime or browser network access
@@ -1580,7 +1644,7 @@ static esp_err_t legacy_dev_redirect(httpd_req_t *r){
     return httpd_resp_sendstr(r,"Controller tools have moved to /dev. OpenTail Studio is a separate design app.");
 }
 static bool http_start(void) {
-    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=30;cfg.stack_size=8192;cfg.recv_wait_timeout=30;
+    httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=34;cfg.stack_size=8192;cfg.recv_wait_timeout=30;
     httpd_handle_t server=NULL;
     esp_err_t e=httpd_start(&server,&cfg);
     if(e!=ESP_OK){
@@ -1603,6 +1667,8 @@ static bool http_start(void) {
         {.uri="/api/v1/demo",.method=HTTP_POST,.handler=demo_post},
         {.uri="/api/v1/simulate",.method=HTTP_POST,.handler=simulate_post},
         {.uri="/api/v1/stop",.method=HTTP_POST,.handler=stop_post},
+        {.uri="/api/v1/owner/challenge",.method=HTTP_GET,.handler=wifi_owner_challenge_get},
+        {.uri="/api/v1/owner/stop",.method=HTTP_POST,.handler=wifi_owner_stop_post},
         {.uri="/api/v1/show",.method=HTTP_GET,.handler=show_get},
         {.uri="/api/v1/show/start",.method=HTTP_POST,.handler=show_start},
         {.uri="/api/v1/show/stop",.method=HTTP_POST,.handler=show_stop},

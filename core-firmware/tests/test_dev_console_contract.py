@@ -19,7 +19,14 @@ assert "EMBED_TXTFILES \"assets/dev_console.htm\"" in cmake
 assert "studio.htm.gz" not in cmake
 assert "web-studio" not in cmake or "independent" in cmake
 assert "studio_gz_start" not in core and "_binary_dev_console_htm_start" in core
-assert 'cfg.max_uri_handlers=30' in core
+# New authenticated-owner routes increase the table. Bound capacity against
+# the ACTUAL registrations rather than freezing the old 30-slot sentinel.
+capacity=re.search(r'cfg\.max_uri_handlers=(\d+)',core)
+route_table=core.split('const httpd_uri_t routes[]={',1)[1].split('};',1)[0]
+registered=route_table.count('{.uri=')
+assert capacity and registered>=25 and registered<=int(capacity.group(1))<=48
+assert '{.uri="/api/v1/owner/challenge",.method=HTTP_GET,.handler=wifi_owner_challenge_get}' in route_table
+assert '{.uri="/api/v1/owner/stop",.method=HTTP_POST,.handler=wifi_owner_stop_post}' in route_table
 for route in ["/dev", "/api/v1/status", "/api/v1/status-led",
               "/api/v1/status-led/self-test", "/api/v1/status-led/session", "/api/v1/capabilities",
               "/api/v1/ble/session", "/api/v1/fx/catalog",

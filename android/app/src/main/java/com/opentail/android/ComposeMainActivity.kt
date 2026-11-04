@@ -84,6 +84,7 @@ class ComposeMainActivity : ComponentActivity() {
     private lateinit var project: NativeProject
     private lateinit var ble: BleDiscovery
     private lateinit var wifiProbe: WifiCoreStatusProbe
+    private lateinit var wifiStop: WifiOwnerStopClient
     private val linkPolicy = ControllerLinkPolicy()
     private val wifiStatusReady = mutableStateOf(false)
     private val wifiVersion = mutableStateOf<String?>(null)
@@ -194,8 +195,28 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     private fun stopControllerShow() {
-        stopNotice.value = if(ble.canControl()) null else "STOP not sent: reconnect and authorize CORE"
-        livePreview.stop()
+        if (ble.canControl()) {
+            stopNotice.value = null
+            livePreview.stop()
+        } else {
+            // Never send an unauthenticated REST STOP. This secondary path
+            // requires a previously HMAC-enrolled owner key and same CORE ID.
+            livePreview.detach()
+            val id = linkPolicy.controllerId()
+            val address = prefs.getString("preferred_ble_address", null)
+            val lease = linkPolicy.lease()
+            if (id != null && address != null &&
+                linkPolicy.diagnosticTransport(SystemClock.elapsedRealtime()) ==
+                    ControllerLinkPolicy.Transport.WIFI &&
+                wifiStop.stop(id,address) { accepted, message ->
+                    if (lease == linkPolicy.lease() && foregroundActivity.value)
+                        stopNotice.value = message
+                }) {
+                stopNotice.value = "Requesting authenticated Wi-Fi STOP"
+            } else {
+                stopNotice.value = "STOP not sent: reconnect and authorize CORE"
+            }
+        }
         liveArmed.value = false
         invalidateCoreFrame()
     }
@@ -295,6 +316,7 @@ class ComposeMainActivity : ComponentActivity() {
         selectedEffect.intValue = prefs.getInt("effectId", 0)
         linkPolicy.restoreKnownController(prefs.getString("last_owner_authenticated_core_id",null))
         wifiProbe=WifiCoreStatusProbe(this)
+        wifiStop=WifiOwnerStopClient(this)
         ble = BleDiscovery(this) { status -> runOnUiThread {
             bleMessage.value = status
             observeUnifiedLink()
@@ -438,6 +460,7 @@ class ComposeMainActivity : ComponentActivity() {
         localMicrophone.stop()
         ble.shutdown()
         wifiProbe.close()
+        wifiStop.close()
         super.onDestroy()
     }
     private fun refresh() {

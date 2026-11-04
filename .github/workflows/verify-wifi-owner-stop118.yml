@@ -1,0 +1,157 @@
+name: Issue118 owner-authenticated Wi-Fi STOP exact HEAD
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/main/**'
+      - 'core-firmware/tests/**'
+      - 'android/**'
+      - 'docs/ISSUE118-AUTHENTICATED-WIFI-STOP-STAGE1.md'
+      - '.github/workflows/verify-wifi-owner-stop118.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-and-core-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin Issue117 parent and scope P0 Wi-Fi owner STOP
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor e3c5b4b1d519f75cf7689e1b263d6c063503f775 HEAD
+          python3 - <<'PY'
+          import subprocess
+          base="e3c5b4b1d519f75cf7689e1b263d6c063503f775"
+          def git(*args):return subprocess.check_output(["git",*args],text=True).strip()
+          changed=set(git("diff","--name-only",base,"HEAD").splitlines())
+          allowed={
+              "core-firmware/main/ot_wifi_owner_auth.h",
+              "core-firmware/main/ot_wifi_owner_auth.c",
+              "core-firmware/main/ble_status.c",
+              "core-firmware/main/opentail_core.c",
+              "core-firmware/main/CMakeLists.txt",
+              "core-firmware/tests/test_wifi_owner_auth.c",
+              "core-firmware/tests/test_wifi_owner_stop_contract.py",
+              "core-firmware/tests/test_dev_console_contract.py",
+              "core-firmware/tests/run-host-tests.sh",
+              "android/app/src/main/java/com/opentail/android/WifiOwnerProof.java",
+              "android/app/src/main/java/com/opentail/android/WifiOwnerStopClient.java",
+              "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+              "android/app/src/test/java/com/opentail/android/WifiOwnerProofTest.java",
+              "docs/ISSUE118-AUTHENTICATED-WIFI-STOP-STAGE1.md",
+              ".github/workflows/verify-wifi-owner-stop118.yml",
+          }
+          assert changed<=allowed,("out of scope changes",sorted(changed-allowed))
+          for p in (
+              "core-firmware/main/ot_single_watchdog_idf.c",
+              "core-firmware/main/ot_single_watchdog.c",
+              "core-firmware/main/trigger_manager.c",
+              "core-firmware/main/ot_auto_effects.c",
+              "core-firmware/main/wled_fx_compat.c",
+              "core-firmware/main/ble_fx_command.c",
+              "core-firmware/main/output_manager.c",
+              "core-firmware/main/config_journal.c",
+              "core-firmware/main/ot_ota_update.c",
+              "core-firmware/main/ot_version.h",
+              "core-firmware/main/board_config.h",
+              "core-firmware/partitions_ota.csv",
+              "android/app/src/main/java/com/opentail/android/ControllerLinkPolicy.java",
+              "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
+              "android/app/src/main/cpp/preview_jni.c",
+              "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv",
+          ):
+              assert git("rev-parse",base+":"+p)==git("rev-parse","HEAD:"+p),p
+          print("PASS: exact-H EA D owner STOP only, 140 Effects/13 RGB3, single WDT, Trigger/NVS/JNI/physical gates intact")
+          PY
+      - name: One-use HMAC/replay test and all CORE regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: No physical release promotion
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  android-owner-proof-apk:
+    needs: source-and-core-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Native six-screen UI and BLE protocol static checks
+        run: |
+          node android/qa/test_native_source.cjs
+          python3 android/qa/check_release.py
+      - name: All Android JUnit tests including owner HMAC vectors
+        working-directory: android
+        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Compile installable debug APK
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-wifi-owner-stop118-android-${{ github.event.pull_request.head.sha || github.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  esp-idf555-bench:
+    needs: source-and-core-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Package verified four-image ESP-IDF bench firmware
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build --build-dir core-firmware/build --project-dir core-firmware --output "core-firmware/releases/opentail-wifi-owner-stop118-$PIN.zip" --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify --zip "core-firmware/releases/opentail-wifi-owner-stop118-$PIN.zip" --sha256-file "core-firmware/releases/opentail-wifi-owner-stop118-$PIN.zip.sha256" --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-wifi-owner-stop118-firmware-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-wifi-owner-stop118-*.zip
+            core-firmware/releases/opentail-wifi-owner-stop118-*.zip.sha256
+          if-no-files-found: error
+
+  downloaded-bench-integrity:
+    needs: esp-idf555-bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: opentail-wifi-owner-stop118-firmware-${{ github.event.pull_request.head.sha || github.sha }}
+          path: received
+      - name: Independently verify downloaded firmware checksum/OTA image/source SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify --zip "received/opentail-wifi-owner-stop118-$PIN.zip" --sha256-file "received/opentail-wifi-owner-stop118-$PIN.zip.sha256" --source-sha "$PIN"
