@@ -21,7 +21,7 @@ assert "web-studio" not in cmake or "independent" in cmake
 assert "studio_gz_start" not in core and "_binary_dev_console_htm_start" in core
 # New authenticated-owner routes increase the table. Bound capacity against
 # the ACTUAL registrations rather than freezing the old 30-slot sentinel.
-capacity=re.search(r'cfg\\.max_uri_handlers=(\\d+)',core)
+capacity=re.search(r'cfg\.max_uri_handlers=(\d+)',core)
 route_table=core.split('const httpd_uri_t routes[]={',1)[1].split('};',1)[0]
 registered=route_table.count('{.uri=')
 assert capacity and registered>=25 and registered<=int(capacity.group(1))<=48
