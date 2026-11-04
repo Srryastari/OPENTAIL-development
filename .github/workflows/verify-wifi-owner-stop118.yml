@@ -38,6 +38,7 @@ jobs:
               "core-firmware/main/CMakeLists.txt",
               "core-firmware/tests/test_wifi_owner_auth.c",
               "core-firmware/tests/test_wifi_owner_stop_contract.py",
+              "core-firmware/tests/test_dev_console_contract.py",
               "core-firmware/tests/run-host-tests.sh",
               "android/app/src/main/java/com/opentail/android/WifiOwnerProof.java",
               "android/app/src/main/java/com/opentail/android/WifiOwnerStopClient.java",
