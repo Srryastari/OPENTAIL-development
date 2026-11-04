@@ -36,6 +36,7 @@ python3 tests/test_ble_gap_recovery_contract.py
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/ot_wifi_owner_auth.c tests/test_wifi_owner_auth.c \
   -o /tmp/ot-wifi-owner-auth
+python3 tests/test_wifi_owner_stop_contract.py
 /tmp/ot-wifi-owner-auth
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
