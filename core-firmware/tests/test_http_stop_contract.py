@@ -90,7 +90,7 @@ assert "snprintf(buf,sizeof(buf)" in capabilities
 assert "OT_MAX_BRIGHTNESS_LIMIT" in capabilities
 assert 'return send_json(r,buf);' in capabilities
 literal = re.search(
-    r'snprintf\(buf,sizeof\(buf\),\s*("(?:\\\\.|[^"\\\\])*")\s*,\s*\(unsigned\)OT_MAX_BRIGHTNESS_LIMIT\)',
+    r'snprintf\(buf,sizeof\(buf\),\s*("(?:\\.|[^"\\])*")\s*,\s*\(unsigned\)OT_MAX_BRIGHTNESS_LIMIT\)',
     capabilities,
     re.S,
 )
