@@ -28,12 +28,15 @@ typedef struct {
     bool release_pending;
     uint8_t assertion_ticks;
     uint32_t inactive_since_us;
+    uint32_t last_edge_sequence;
+    bool last_raw_asserted;
 } ot_signal_debouncer_t;
 
-void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted);
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted,
+                              uint32_t initial_edge_sequence);
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
                                 uint32_t now_us, uint32_t raw_edge_us,
-                                unsigned stable_ticks);
+                                uint32_t raw_edge_sequence, unsigned stable_ticks);
 typedef enum { OT_DEMO_OFF=0, OT_DEMO_SOLID=1, OT_DEMO_CHASE=2 } ot_demo_mode_t;
 typedef struct {ot_demo_mode_t mode; ot_rgb_t color; uint8_t brightness; } ot_demo_t;
 
