@@ -16,7 +16,8 @@ def part(src,a,b):
 assert all(x in cmake for x in ('"ot_single_watchdog.c"','"ot_single_watchdog_idf.c"'))
 assert 'test_single_watchdog.c' in host
 for token in ("CONFIG_ESP_TASK_WDT_EN=y","CONFIG_ESP_TASK_WDT_INIT=y",
-              "CONFIG_ESP_TASK_WDT_PANIC=y","CONFIG_ESP_INT_WDT=y",
+              "CONFIG_ESP_TASK_WDT_PANIC=y","CONFIG_ESP_TASK_WDT_TIMEOUT_S=15",
+              "CONFIG_ESP_INT_WDT=y",
               "CONFIG_BOOTLOADER_WDT_ENABLE=y","CONFIG_BOOTLOADER_WDT_TIME_MS=9000",
               "CONFIG_ESP_INT_WDT_TIMEOUT_MS=300","CONFIG_ESP_BROWNOUT_DET=y",
               "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y"):
