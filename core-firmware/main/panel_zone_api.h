@@ -19,3 +19,9 @@ int ot_ble_panel_preview_update(uint8_t lane,const ot_pz_output_t *next,
                                 uint16_t base_revision);
 int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision);
 void ot_ble_panel_preview_cancel(void);
+
+/* Authenticated two-step destructive map reset. Return 0 only after durable readback. */
+int ot_ble_panel_reset_challenge(uint8_t lane,uint16_t expected_revision,
+                                 uint32_t *challenge);
+int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
+                               uint32_t challenge);
