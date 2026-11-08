@@ -69,6 +69,11 @@ bool ot_pz_valid(const ot_pz_controller_t *config);
 uint16_t ot_pz_zone_pixel_count(const ot_pz_zone_t *zone);
 bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
                           bool legacy_persisted,ot_pz_controller_t *out);
+/* Replace one lane from the unchanged legacy BLE v1 codec without erasing
+ * the other lane's panel IDs or hierarchical layout. */
+bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
+                              const ot_pz_controller_t *existing,
+                              ot_pz_output_t *out);
 bool ot_pz_to_legacy(const ot_pz_output_t *src,unsigned lane,
                      ot_om_output_t *dst);
 bool ot_pz_to_fx_view(const ot_pz_output_t *src,unsigned lane,
