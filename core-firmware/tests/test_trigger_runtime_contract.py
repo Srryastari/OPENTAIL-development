@@ -94,6 +94,14 @@ assert "ot_signal_debouncer_sample(state,now_us,OT_DEBOUNCE_TICKS)" in core
 assert "head_after!=head" in core
 assert "bool left_valid=false,right_valid=false;" in sampler
 assert "if(left_valid&&right_valid)" in sampler
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert "if(left_valid){\n            if(left)published|=OT_SIG_LEFT;" in sampler
+assert "else{\n            published=(uint8_t)((published&(uint8_t)~OT_SIG_LEFT)|" in sampler
+assert "if(right_valid){\n            if(right)published|=OT_SIG_RIGHT;" in sampler
+assert "else{\n            published=(uint8_t)((published&(uint8_t)~OT_SIG_RIGHT)|" in sampler
+assert "if(published!=previous){live_input_mask=published;target=render_task_handle;}" in sampler
+assert "if(left_valid&&right_valid)\n            ot_sw_idf_input_sampled();" in sampler
+assert "if(target)xTaskNotifyGive(target);" in sampler
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
 assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
 assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
