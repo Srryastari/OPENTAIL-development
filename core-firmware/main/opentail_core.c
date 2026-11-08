@@ -161,7 +161,6 @@ static ot_pz_preview_t pz_preview;
 static ot_pz_diag_state_t pz_diag;
 #define OT_PZ_RESET_TOMBSTONE_MAGIC 0x4f54525au
 #define OT_PZ_RESET_TOMBSTONE_VERSION 1u
-#define OT_PZ_RESET_CHALLENGE_TTL_MS 5000u
 #define OT_PZ_RESET_TOMBSTONE_KEY "reset_v3"
 typedef struct {
     uint32_t magic;
@@ -1128,9 +1127,18 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
     nvs_handle_t read_handle;ot_pz_journal_t readback={0};
     bool readback_ok=nvs_open("ot_zone_map",NVS_READONLY,&read_handle)==ESP_OK;
     if(readback_ok){
+        ot_pz_reset_tombstone_t tombstone={0};
+        size_t tombstone_size=sizeof(tombstone);
         readback_ok=pz_journal_read(read_handle,OT_PZ_JOURNAL_KEY_ACTIVE,&readback)==ESP_OK&&
             readback.candidate.outputs[lane].panel_count==0u&&
-            readback.candidate.outputs[lane].zone_count==0u;
+            readback.candidate.outputs[lane].zone_count==0u&&
+            readback.candidate_revision[lane]==pz_active_revision[lane]&&
+            nvs_get_blob(read_handle,OT_PZ_RESET_TOMBSTONE_KEY,
+                         &tombstone,&tombstone_size)==ESP_OK&&
+            tombstone_size==sizeof(tombstone)&&pz_reset_tombstone_valid(&tombstone)&&
+            (tombstone.reset_mask&(1u<<lane))!=0u&&
+            memcmp(&tombstone.controller,&readback.candidate,
+                   sizeof(readback.candidate))==0;
         nvs_close(read_handle);
     }
     if(!readback_ok){xSemaphoreGive(om_write_mutex);return 5;}
@@ -1198,6 +1206,7 @@ void ot_ble_diag_disconnect(void){
     active=pz_diag.mode!=OT_PZ_DIAG_NONE||pz_preview.active;
     ot_pz_diag_clear(&pz_diag);
     ot_pz_preview_cancel(&pz_preview);
+    pz_reset_challenge.active=false;
     portEXIT_CRITICAL(&state_lock);
     if(active)request_render_refresh();
 }
