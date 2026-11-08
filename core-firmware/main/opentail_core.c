@@ -2059,23 +2059,38 @@ static void input_sampler_task(void *arg){
             input_boot_snapshot_us,&left_valid);
         const bool right=turn_edge_queue_update(1u,&turn_signal[1],now_us,
             input_boot_snapshot_us,&right_valid);
-        if(left_valid&&right_valid){
-            physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
-            if(left)physical|=OT_SIG_LEFT;
-            if(right)physical|=OT_SIG_RIGHT;
-            TaskHandle_t target=NULL;
-            portENTER_CRITICAL(&state_lock);
-            if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
-            /* Sampler never writes NVS or swaps a journaled profile. Physical
-             * edges reset the independent quiet-window gate for the promoter. */
-            if(instantaneous==0u && physical==0u){
-                if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
-            }else input_quiet_samples=0u;
-            portEXIT_CRITICAL(&state_lock);
-            ot_sw_idf_input_sampled(); /* eight GPIO reads + complete edge history */
-            if(target)xTaskNotifyGive(target);
+        /* Publish all six unaffected inputs every sampler tick. A deferred
+         * Left/Right lane retains its last committed bit, but cannot hold Brake,
+         * Reverse, Park, AUX or the other valid turn lane stale. */
+        uint8_t published=(uint8_t)(physical&
+            (uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
+        portENTER_CRITICAL(&state_lock);
+        const uint8_t previous=live_input_mask;
+        if(left_valid){
+            if(left)published|=OT_SIG_LEFT;
+        }else{
+            published=(uint8_t)((published&(uint8_t)~OT_SIG_LEFT)|
+                                (previous&OT_SIG_LEFT));
         }
-        /* In-flight/unpublished turn edges defer this sampler heartbeat. */
+        if(right_valid){
+            if(right)published|=OT_SIG_RIGHT;
+        }else{
+            published=(uint8_t)((published&(uint8_t)~OT_SIG_RIGHT)|
+                                (previous&OT_SIG_RIGHT));
+        }
+        TaskHandle_t target=NULL;
+        if(published!=previous){live_input_mask=published;target=render_task_handle;}
+        /* Sampler never writes NVS or swaps a journaled profile. Physical
+         * edges reset the independent quiet-window gate for the promoter. */
+        if(instantaneous==0u && published==0u){
+            if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
+        }else input_quiet_samples=0u;
+        portEXIT_CRITICAL(&state_lock);
+        if(left_valid&&right_valid)
+            ot_sw_idf_input_sampled(); /* only complete eight-input snapshots advance watchdog */
+        if(target)xTaskNotifyGive(target);
+        /* In-flight/unpublished turn edges defer only the sampler heartbeat;
+         * unaffected physical inputs remain live and immediately arbitrated. */
         vTaskDelayUntil(&last_wake,period);
     }
 }
