@@ -19,6 +19,7 @@
 #include "fx_preset_record.h"
 #include "ble_config.h"
 #include "panel_zone_api.h"
+#include "panel_zone_diag.h"
 #include "trigger_manager.h"
 #include "ot_frame_snapshot.h"
 #include "palette_ble_v3.h"
@@ -237,7 +238,7 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
          * triggers, persistent scenes, or saved configuration profiles. */
         ot_ble_disconnect_show();
         cfg_reset();
-        panel_session_reset();ot_ble_diag_disconnect();
+        panel_session_reset();
         frame_reply_reset();
         ot_palette_ble_session_reset();
         trigger_last_status=0;
@@ -274,6 +275,7 @@ static void panel_session_reset(void){
     memset(panel_snapshot,0,sizeof(panel_snapshot));
     memset(panel_upload,0,sizeof(panel_upload));
     memset(panel_received,0,sizeof(panel_received));
+    ot_ble_diag_disconnect();
 }
 static void panel_ack(uint8_t opcode,uint8_t lane,uint8_t status){
     panel_response[0]=OT_PZ_WIRE_VERSION;
@@ -305,7 +307,7 @@ static int panel_cfg_read(uint16_t conn,uint16_t handle,
                           struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    if(conn!=active_conn||!authorized||!panel_caps_seen)
+    if(conn!=active_conn||!authorized||!panel_caps_seen||panel_response_len==0u)
         return BLE_ATT_ERR_READ_NOT_PERMITTED;
     return os_mbuf_append(ctx->om,panel_response,panel_response_len)==0?
            0:BLE_ATT_ERR_INSUFFICIENT_RES;
@@ -661,6 +663,11 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_palette_cmd_uuid.u,.access_cb=palette_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_palette_rsp_uuid.u,.access_cb=palette_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_palette_caps_uuid.u,.access_cb=palette_caps,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_panel_caps_uuid.u,.access_cb=panel_caps_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_panel_cfg_cmd_uuid.u,.access_cb=panel_cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_panel_cfg_rsp_uuid.u,.access_cb=panel_cfg_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_pixel_probe_uuid.u,.access_cb=pixel_probe_write,
+   .flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_NO_RSP},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
@@ -694,7 +701,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
             }
             active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
             challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
-            cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+            cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
             /* Request responsive live controls; Android may choose other parameters.
              * A central rejection is never a reason to terminate this link. */
             const struct ble_gap_upd_params fast={
@@ -709,7 +716,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;
         challenge_ready=false;pair_failures=0;
         ot_st_ble_connected(false);ot_ble_disconnect_show();
-        cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
+        cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     else if(ev->type==BLE_GAP_EVENT_MTU && ev->mtu.conn_handle==active_conn)
         ESP_LOGI(TAG,"BLE negotiated ATT MTU: %u",(unsigned)ev->mtu.value);
@@ -731,7 +738,7 @@ static void on_reset(int reason){
     authorized=false;last_result=OT_BLE_ERR_AUTH;
     challenge_ready=false;memset(owner_challenge,0,sizeof(owner_challenge));pair_failures=0;
     if(had_link){ot_st_ble_connected(false);ot_ble_disconnect_show();}
-    cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+    cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
     ESP_LOGW(TAG,"BLE host reset (%d); advertising resumes after sync",reason);
 }
 static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freertos_deinit();}
