@@ -131,8 +131,10 @@ assert "mask|=(uint8_t)(1u<<(p->function[i]-1u))" in manager
 renderer = between(core, "static void led_task(void *p) {", "void app_main(")
 assert "local_tm=tm_profile;" in renderer
 assert "combined=ot_tm_resolve(&local_tm,physical);" in renderer
-assert "if(before_deadline(now,sim_deadline)) combined|=sim_mask;" in renderer
-assert "ot_om_section_next(output,&zone_cursor,px)" in renderer
+assert "if(before_deadline(now,sim_deadline)){" in renderer
+assert "combined|=sim_mask;fallback_mask|=sim_mask;" in renderer
+assert "pixel_zone_map[ch][px]" in renderer
+assert "pixel_logical_map[ch][px]" in renderer
 assert "ot_om_trigger_overlay(role,combined," in renderer
 assert "if(!trigger_here){" in renderer
 assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
