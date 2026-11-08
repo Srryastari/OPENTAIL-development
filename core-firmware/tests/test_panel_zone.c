@@ -45,15 +45,18 @@ static void defaults_and_fallback(void){
         ot_pz_build_pixel_map(o,zones,logical);
         for(unsigned px=0;px<OT_PZ_MAX_PIXELS;px++)assert(zones[px]==0xffu);
         for(unsigned mask=0;mask<256;mask++){
-            const ot_rgb_t got=ot_pz_fallback_color(lane,(uint8_t)mask,OT_MAX_BRIGHTNESS);
+            const ot_rgb_t got=ot_pz_fallback_color(lane,(uint8_t)mask,32u);
             const ot_rgb_t want=expected_fallback(lane,(uint8_t)mask);
             assert(memcmp(&got,&want,sizeof(got))==0);
         }
     }
     const ot_rgb_t black={0,0,0},red={32,0,0},cyan={0,32,32};
-    assert(memcmp(&ot_pz_priority_color(true,true,red,true,cyan,red),&black,3)==0);
-    assert(memcmp(&ot_pz_priority_color(false,true,red,true,cyan,black),&red,3)==0);
-    assert(memcmp(&ot_pz_priority_color(false,false,black,true,cyan,red),&cyan,3)==0);
+    ot_rgb_t got=ot_pz_priority_color(true,true,red,true,cyan,red);
+    assert(memcmp(&got,&black,3)==0);
+    got=ot_pz_priority_color(false,true,red,true,cyan,black);
+    assert(memcmp(&got,&red,3)==0);
+    got=ot_pz_priority_color(false,false,black,true,cyan,red);
+    assert(memcmp(&got,&cyan,3)==0);
 }
 static void hierarchy_and_ranges(void){
     ot_pz_controller_t cfg;ot_pz_defaults(&cfg);
@@ -78,7 +81,6 @@ static void hierarchy_and_ranges(void){
      * sequence continues across the discontinuity without reordering the lane. */
     ot_pz_defaults(&cfg);o=&cfg.outputs[0];make_output(o,0,100);
     make_panel(o,0,100,"One housing");
-    o->zone_count=1;o->panels[0].zone_count=1;
     make_zone(o,0,1,100,OT_OM_DECORATIVE,"Accent",0,10);
     o->zones[0].range_count=2;o->zones[0].ranges[1]=(ot_pz_range_t){30,10};
     assert(ot_pz_valid(&cfg));
@@ -174,7 +176,7 @@ static void legacy_migration(void){
     assert(ot_pz_to_fx_view(o,0,&restored));
     assert(restored.active_pixels==417u&&restored.zone_count==5u);
     assert(restored.zones[0].pixels==77u);
-    assert(!ot_pz_migrate_legacy(legacy,false,NULL)==false);
+    assert(!ot_pz_migrate_legacy(legacy,false,NULL));
     ot_pz_controller_t fresh;
     assert(ot_pz_migrate_legacy(NULL,false,&fresh));
     assert(ot_pz_valid(&fresh)&&fresh.outputs[0].panel_count==0u);
