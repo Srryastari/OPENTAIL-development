@@ -57,7 +57,10 @@ assert "#define OT_TURN_RELEASE_HOLD_US 400000u" in logic_header
 assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
 assert "ot_signal_debouncer_init" in logic
 assert "ot_signal_debouncer_update" in logic
+assert "raw_previous_edge_us" in logic_header
 assert "(uint32_t)(effective_edge_us-state->inactive_since_us)" in logic
+assert "(edge_delta/2u)>=2u" in logic
+assert "raw_previous_edge_us-state->inactive_since_us" in logic
 assert "(uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US" in logic
 assert "static void input_sampler_task(void *arg){" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
@@ -68,7 +71,11 @@ assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
 assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
 assert "esp_timer_get_time()" in core[core.index("static bool read_turn_input_snapshot"):core.index("/* RMT drivers") ]
 assert "read_turn_input_snapshot(i,&levels[i]," in sampler
+assert "turn_previous_edge_snapshot_us[slot]" in sampler
 assert "turn_edge_snapshot_seq[slot]" in sampler
+assert "static DRAM_ATTR volatile uint32_t turn_prev_edge_us[2]" in core
+assert "__atomic_store_n(&turn_prev_edge_us[slot],previous_edge_us,__ATOMIC_RELAXED)" in core
+assert "__atomic_load_n(&turn_prev_edge_us[slot],__ATOMIC_RELAXED)" in core
 assert "static bool read_turn_input_snapshot(" in core
 assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
