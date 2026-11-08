@@ -24,6 +24,11 @@ typedef enum {
 } ot_sw_reset_class_t;
 
 typedef struct {
+    uint32_t healthy_since_ms;
+    bool active;
+} ot_sw_stability_window_t;
+
+typedef struct {
     uint32_t magic;
     uint32_t crash_streak;
     uint32_t stable_boot;
@@ -45,6 +50,10 @@ bool ot_sw_is_crash_reset(ot_sw_reset_class_t reason);
 bool ot_sw_can_mark_stable(uint32_t elapsed_ms, uint32_t sampled_inputs,
                            uint32_t full_frames, bool output_fault,
                            bool config_fault);
+/* Tracks a continuous healthy interval; unhealthy events reset its start. */
+bool ot_sw_stability_window_update(ot_sw_stability_window_t *window,
+                                   uint32_t now_ms, bool healthy,
+                                   uint32_t *healthy_elapsed_ms);
 bool ot_sw_mark_stable(ot_sw_rtc_record_t *record, ot_sw_boot_t *boot,
                         uint32_t elapsed_ms, uint32_t sampled_inputs,
                         uint32_t full_frames, bool output_fault,
