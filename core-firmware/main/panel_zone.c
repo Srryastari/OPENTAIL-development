@@ -142,20 +142,22 @@ bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
            quiet_samples>=required_samples && current_epoch==expected_epoch;
 }
 bool ot_pz_preview_expire(ot_pz_preview_t *state,uint32_t now_ms){
-    if(!state||!state->active)return false;
+    if(!state||!state->active||state->committing)return false;
     if((int32_t)(now_ms-state->expires_ms)<0)return false;
     state->active=false;
+    state->committing=false;
     return true;
 }
 void ot_pz_preview_cancel(ot_pz_preview_t *state){
-    if(state)state->active=false;
+    if(state){state->active=false;state->committing=false;}
 }
 bool ot_pz_preview_begin(ot_pz_preview_t *state,
                          const ot_pz_controller_t *committed,unsigned lane,
                          uint16_t active_revision,uint16_t base_revision,
                          bool pending,uint32_t now_ms){
     if(!state||!committed||lane>=OT_PZ_OUTPUTS||!active_revision||
-       active_revision!=base_revision||pending||!ot_pz_valid(committed))return false;
+       active_revision!=base_revision||pending||!ot_pz_valid(committed)||
+       state->committing)return false;
     (void)ot_pz_preview_expire(state,now_ms);
     if(state->active){
         if(state->lane!=lane||state->base_revision!=base_revision)return false;
@@ -172,7 +174,7 @@ bool ot_pz_preview_begin(ot_pz_preview_t *state,
 bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
                           const ot_pz_output_t *next,uint16_t base_revision,
                           uint16_t active_revision,bool pending,uint32_t now_ms){
-    if(!state||!next||!state->active||lane>=OT_PZ_OUTPUTS||
+    if(!state||!next||!state->active||state->committing||lane>=OT_PZ_OUTPUTS||
        state->lane!=lane||state->base_revision!=base_revision||
        active_revision!=base_revision||pending||
        (int32_t)(now_ms-state->expires_ms)>=0||
