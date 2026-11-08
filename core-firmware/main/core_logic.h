@@ -18,27 +18,23 @@ typedef struct {
     uint8_t ticks[OT_IN_COUNT];
 } ot_inputs_t;
 
-/* Turn-only release hold. now_us is the sampler's monotonic microsecond
- * clock; raw_edge_us is the latest GPIO edge timestamp captured in the ISR.
- * Both are uint32_t microseconds, so the 400ms interval remains wrap-safe.
- * Assertion still requires the existing four stable samples. */
-#define OT_TURN_RELEASE_HOLD_US 400000u
+/* Turn-only release hold. GPIO ISR transition timestamps and sampler time
+ * share esp_timer_get_time()'s monotonic microsecond epoch. */
+#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)
 typedef struct {
     bool asserted;
+    bool raw_asserted;
     bool release_pending;
     uint8_t assertion_ticks;
-    uint32_t inactive_since_us;
-    uint32_t last_edge_sequence;
-    bool last_raw_asserted;
-    bool awaiting_edge_record;
+    uint64_t release_deadline_us;
 } ot_signal_debouncer_t;
 
-void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted,
-                              uint32_t initial_edge_sequence);
-bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_us, uint32_t raw_previous_edge_us,
-                                uint32_t raw_edge_us, uint32_t raw_edge_sequence,
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted);
+void ot_signal_debouncer_transition(ot_signal_debouncer_t *state, bool raw_asserted,
+                                    uint64_t edge_time_us);
+bool ot_signal_debouncer_sample(ot_signal_debouncer_t *state, uint64_t now_us,
                                 unsigned stable_ticks);
+void ot_signal_debouncer_resync(ot_signal_debouncer_t *state, bool raw_asserted);
 typedef enum { OT_DEMO_OFF=0, OT_DEMO_SOLID=1, OT_DEMO_CHASE=2 } ot_demo_mode_t;
 typedef struct {ot_demo_mode_t mode; ot_rgb_t color; uint8_t brightness; } ot_demo_t;
 
