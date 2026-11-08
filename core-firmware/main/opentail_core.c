@@ -89,6 +89,8 @@ static bool input_sampler_ready=false;
 /* GPIO any-edge ISR records transitions even during a slow NVS write.
  * A quiet debounced window + unchanged epoch is required to promote. */
 static volatile uint32_t input_edge_epoch=0u;
+/* ISR-captured timestamps distinguish a real late reassertion from sampler jitter. */
+static DRAM_ATTR volatile uint32_t turn_edge_ms[2]={0u,0u};
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
 static bool config_promotion_ready=false;
@@ -1661,8 +1663,12 @@ static bool wifi_ap_init(void) {
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
     return true;
 }
-static void IRAM_ATTR input_edge_isr(void *ignored){
-    (void)ignored;
+static void IRAM_ATTR input_edge_isr(void *arg){
+    const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
+    if(input_index==2u || input_index==3u){
+        const uint32_t edge_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        __atomic_store_n(&turn_edge_ms[input_index-2u],edge_ms,__ATOMIC_RELAXED);
+    }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
 static bool input_init(void) {
@@ -1683,7 +1689,7 @@ static bool input_init(void) {
         return false;
     }
     for(unsigned i=0;i<OT_IN_COUNT;i++){
-        e=gpio_isr_handler_add(input_pin[i],input_edge_isr,NULL);
+        e=gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u));
         if(e!=ESP_OK){
             ESP_LOGE(TAG,"GPIO edge handler failed IN%u",i+1u);
             return false;
@@ -1924,10 +1930,12 @@ static void input_sampler_task(void *arg){
          * falling edge. Only IN3/IN4 get the 400ms hold; all other channels
          * retain the ordinary four-sample debounce above. */
         const uint32_t sample_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        const uint32_t left_edge_ms=__atomic_load_n(&turn_edge_ms[0],__ATOMIC_ACQUIRE);
+        const uint32_t right_edge_ms=__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE);
         const bool left=ot_signal_debouncer_update(&turn_signal[0],levels[2],
-                                                   sample_ms,OT_DEBOUNCE_TICKS);
+            sample_ms,left_edge_ms,OT_DEBOUNCE_TICKS);
         const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
-                                                    sample_ms,OT_DEBOUNCE_TICKS);
+            sample_ms,right_edge_ms,OT_DEBOUNCE_TICKS);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
         if(left)physical|=OT_SIG_LEFT;
         if(right)physical|=OT_SIG_RIGHT;
