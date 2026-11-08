@@ -144,10 +144,25 @@ static void restart_hold_after_pulse_between_sampler_wakes(void) {
      * turn unsigned subtraction into an immediate false release. */
     ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,2000u));
-    const uint32_t future_sequence=d.last_edge_sequence+2u;
+    const uint32_t future_sequence=d.last_edge_sequence+4u;
     assert(sample_us_with_sequence(&d,false,2000u*1000u,0u,2001u*1000u,
                                    future_sequence));
     assert(d.asserted&&d.release_pending);
+
+    /* A falling level observed before its ISR record is published must
+     * also wait; its release timer starts only from the coherent edge time. */
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample_us_with_sequence(&d,false,3000u*1000u,0u,0u,
+                                   d.last_edge_sequence));
+    assert(d.asserted&&!d.release_pending&&d.awaiting_edge_record);
+    assert(sample_us_with_sequence(&d,false,3010u*1000u,0u,0u,
+                                   d.last_edge_sequence));
+    assert(d.asserted&&!d.release_pending&&d.awaiting_edge_record);
+    const uint32_t falling_sequence=d.last_edge_sequence+2u;
+    assert(sample_us_with_sequence(&d,false,3010u*1000u,0u,3000u*1000u,
+                                   falling_sequence));
+    assert(d.asserted&&d.release_pending&&!d.awaiting_edge_record);
+    assert(d.inactive_since_us==3000u*1000u);
 
     /* The GPIO level may become active before its ISR timestamp is published.
      * Multiple sampler wakes must wait rather than compare a stale falling
