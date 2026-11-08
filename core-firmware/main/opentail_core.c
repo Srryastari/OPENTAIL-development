@@ -37,6 +37,8 @@
 #include "palette_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
+#include "panel_zone.h"
+#include "panel_zone_diag.h"
 #include "config_journal.h"
 #include "trigger_manager.h"
 #include "nvs.h"
@@ -141,7 +143,13 @@ static bool ble_fx_enabled=false;
 static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect assignments */
 static ot_ble_fx_packet_t ble_fx_request={0};
 
-static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
+static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for unchanged FX/v1 code. */
+static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v3. */
+static ot_pz_pending_t pz_deferred;
+static ot_pz_diag_state_t pz_diag;
+static bool pz_persistent=false;
+static uint16_t pz_revision[OT_PZ_OUTPUTS]={1u,1u};
+static uint16_t pz_active_revision[OT_PZ_OUTPUTS]={1u,1u};
 static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
