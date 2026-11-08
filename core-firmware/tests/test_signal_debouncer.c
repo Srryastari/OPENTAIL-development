@@ -75,15 +75,14 @@ static void scheduler_jitter_uses_edge_timestamp(void) {
     ot_signal_debouncer_t d;
     ot_signal_debouncer_init(&d,true);
     edge(&d,false,MS(500u));
-    assert(sample_ms(&d,912u)); /* sampler delayed 412ms */
-    edge(&d,true,MS(899u));     /* actual inactive gap was only 399ms */
-    assert(sample_ms(&d,912u));
+    edge(&d,true,MS(899u));     /* event is replayed before the delayed tick */
+    assert(sample_ms(&d,912u)); /* actual inactive gap was only 399ms */
     assert(d.asserted&&!d.release_pending);
 
     ot_signal_debouncer_init(&d,true);
     edge(&d,false,MS(500u));
-    assert(sample_ms(&d,912u));
     edge(&d,true,MS(901u)); /* actual gap was 401ms */
+    assert(!sample_ms(&d,912u));
     assert(!d.asserted&&!d.release_pending);
 }
 
