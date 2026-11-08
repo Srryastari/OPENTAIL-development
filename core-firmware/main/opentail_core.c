@@ -2338,6 +2338,9 @@ void app_main(void) {
     ot_st_init();
     const bool watchdog_ready=ot_sw_idf_configure();
     if(!watchdog_ready)ot_st_set_fault("single-ESP watchdog unavailable");
+    /* Start a bounded pending-OTA rollback guard. Confirmation is still
+     * deferred until 60s continuous healthy dual-lane/input progress. */
+    ot_ota_watch_boot();
     if(ot_sw_idf_boot_loop_seen())
         ot_st_set_fault("repeated watchdog/panic resets; decorative output inhibited");
     ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
