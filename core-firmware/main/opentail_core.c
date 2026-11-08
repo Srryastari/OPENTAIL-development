@@ -1114,6 +1114,7 @@ static esp_err_t show_stop(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ot_pz_diag_clear(&pz_diag);
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     request_render_refresh();
@@ -1463,6 +1464,7 @@ void ot_ble_stop_show(void){
         stop_request_generation++;
         refresh_requested=true;
     }
+    if(pz_diag.mode!=OT_PZ_DIAG_NONE){ot_pz_diag_clear(&pz_diag);refresh_requested=true;}
     portEXIT_CRITICAL(&state_lock);
     if(refresh_requested)request_render_refresh();
     /* Restore the previous status indication immediately, rather than
@@ -1772,6 +1774,7 @@ static esp_err_t stop_post(httpd_req_t *r) {
     sim_mask=0;sim_deadline=now;
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);
     native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ot_pz_diag_clear(&pz_diag);
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     request_render_refresh();
@@ -2383,6 +2386,7 @@ static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     portENTER_CRITICAL(&state_lock);
     native_outputs_ready=false;
     output_runtime_fault_mask|=(1u<<ch);
+    ot_pz_diag_clear(&pz_diag);
     ot_fx_bank_stop_continuous(&fx_bank); /* do not restart decorative playback after a fault */
     portEXIT_CRITICAL(&state_lock);
 }
@@ -2447,6 +2451,7 @@ static void led_task(void *p) {
            demo.mode=OT_DEMO_OFF;demo_deadline=0;
            native_show.mode=OT_SHOW_OFF;
            ble_fx_enabled=false;ble_owns_show=false;
+           ot_pz_diag_clear(&pz_diag);
            ot_fx_bank_stop_all(&fx_bank);
        }
        physical=live_input_mask;
