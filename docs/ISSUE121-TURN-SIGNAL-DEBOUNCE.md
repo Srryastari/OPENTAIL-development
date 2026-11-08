@@ -13,13 +13,13 @@ and publishes both with an odd/even sequence counter. The sampler takes a
 bounded seqlock snapshot of the raw GPIO level, previous/current edge
 timestamps and sequence, and double-reads the pin level around that snapshot;
 a torn or changing snapshot is discarded and does not feed watchdog progress. This prevents a GPIO edge racing the
-timestamp read from creating an impossible future edge time. If the level
-changes before the ISR has published its timestamp, a pending release waits
-for the coherent ISR edge record rather than classifying a stale timestamp.
+timestamp read from creating an impossible future edge time. If the level changes before the ISR has published its timestamp, the
+debouncer defers either assertion or release classification until the
+coherent ISR edge record arrives rather than classifying a stale timestamp.
 
 The first inactive raw sample starts the timer from its captured falling-edge
-timestamp (or conservatively from the sample time until a delayed ISR record
-arrives). A reassertion observed by the sampler uses its captured rising-edge
+timestamp. If ISR publication is delayed, the state machine waits for the
+matching edge sequence before starting or cancelling the timer. A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
 release. If a complete reassert-and-drop pulse occurs between sampler wakes,
 the penultimate edge timestamp identifies the last reassertion. A pulse that
