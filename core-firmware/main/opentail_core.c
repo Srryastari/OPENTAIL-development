@@ -1988,20 +1988,26 @@ static void input_sampler_task(void *arg){
             const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
                 turn_sample_us[1],turn_previous_edge_snapshot_us[1],
                 turn_edge_snapshot_us[1],turn_edge_snapshot_seq[1],OT_DEBOUNCE_TICKS);
-            physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
-            if(left)physical|=OT_SIG_LEFT;
-            if(right)physical|=OT_SIG_RIGHT;
-            TaskHandle_t target=NULL;
-            portENTER_CRITICAL(&state_lock);
-            if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
-            /* Sampler never writes NVS or swaps a journaled profile. Physical
-             * edges reset the independent quiet-window gate for the promoter. */
-            if(instantaneous==0u && physical==0u){
-                if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
-            }else input_quiet_samples=0u;
-            portEXIT_CRITICAL(&state_lock);
-            ot_sw_idf_input_sampled(); /* eight real GPIO reads + debounce published */
-            if(target)xTaskNotifyGive(target);
+            /* A raw level that has no matching even edge sequence is not a
+             * complete sample. Do not publish it or feed sampler progress;
+             * the watchdog remains the fail-safe if the ISR never catches up. */
+            if(!turn_signal[0].awaiting_edge_record &&
+               !turn_signal[1].awaiting_edge_record){
+                physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
+                if(left)physical|=OT_SIG_LEFT;
+                if(right)physical|=OT_SIG_RIGHT;
+                TaskHandle_t target=NULL;
+                portENTER_CRITICAL(&state_lock);
+                if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+                /* Sampler never writes NVS or swaps a journaled profile. Physical
+                 * edges reset the independent quiet-window gate for the promoter. */
+                if(instantaneous==0u && physical==0u){
+                    if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
+                }else input_quiet_samples=0u;
+                portEXIT_CRITICAL(&state_lock);
+                ot_sw_idf_input_sampled(); /* eight real GPIO reads + debounce published */
+                if(target)xTaskNotifyGive(target);
+            }
         }
         /* Invalid/torn snapshots intentionally skip progress publication, but
          * still yield on the sampler's fixed 10ms cadence. */
