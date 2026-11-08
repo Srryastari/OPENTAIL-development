@@ -59,7 +59,7 @@ static void journal_contract(void){
         assert(!ot_pz_journal_valid(&corrupt));
     }
     assert(!ot_pz_journal_recover(&active,&corrupt,&live,&pending,active_rev,staged_rev));
-    assert(!ot_pz_journal_recover(&active,&stage,&live,&pending,active_rev,staged_rev)==false);
+    assert(ot_pz_journal_recover(&active,&stage,&live,&pending,active_rev,staged_rev));
 }
 static void all_input_masks_crash_phases(void){
     ot_pz_controller_t old_cfg,new_cfg,live;
@@ -77,8 +77,9 @@ static void all_input_masks_crash_phases(void){
             ot_pz_pending_t pending={0};uint16_t ar[2]={0},sr[2]={0};
             assert(ot_pz_journal_recover(active,staged,&live,&pending,ar,sr));
             assert(memcmp(&live,&old_cfg,sizeof(live))==0);
-            assert(pending.pending);
-            assert(memcmp(&pending.candidate,&new_cfg,sizeof(new_cfg))==0);
+            assert(pending.pending==(phase!=0u));
+            if(phase==0u)assert(memcmp(&pending.candidate,&old_cfg,sizeof(old_cfg))==0);
+            else assert(memcmp(&pending.candidate,&new_cfg,sizeof(new_cfg))==0);
         }
     }
 }
