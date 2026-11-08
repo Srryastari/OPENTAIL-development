@@ -90,7 +90,10 @@ assert "const bool expected_raw=state->last_raw_asserted" in logic
 assert "raw_asserted!=expected_raw" in logic
 assert "const bool new_edge=(sequence_changed||level_changed)" in logic
 assert "if(sample_valid){" in sampler
+assert "if(!turn_signal[0].awaiting_edge_record &&" in sampler
+assert "!turn_signal[1].awaiting_edge_record" in sampler
 assert sampler.index("if(sample_valid){") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("ot_sw_idf_input_sampled();") > sampler.index("!turn_signal[1].awaiting_edge_record")
 assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("vTaskDelayUntil(&last_wake,period);")
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
 assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
