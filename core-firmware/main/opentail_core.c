@@ -69,6 +69,7 @@ extern bool ot_ble_start(void);
 extern bool ot_ble_radio_ever_ready(void);
 extern void ot_ble_session_hex(char out[33]);
 static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
+static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT];
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
 static led_strip_handle_t strip[OT_CHAIN_COUNT]={0};
 static uint16_t strip_capacity[OT_CHAIN_COUNT]={0}; /* Currently allocated/transmitted pixel count per lane. */
@@ -1687,7 +1688,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
         const uint64_t edge_time_us=(uint64_t)esp_timer_get_time();
         /* Use the ESP32-S3 LL register read: gpio_get_level() is not guaranteed
          * IRAM-safe when this ISR service is installed with ESP_INTR_FLAG_IRAM. */
-        const int level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin[input_index]);
+        const int level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
         const bool asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
         const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_RELAXED);
         const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
@@ -1707,6 +1708,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
 }
 static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
+        input_pin_isr[i]=input_pin[i];
         gpio_config_t cfg={.pin_bit_mask=1ULL<<input_pin[i],.mode=GPIO_MODE_INPUT,
                            .pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,
                            .intr_type=GPIO_INTR_ANYEDGE};
