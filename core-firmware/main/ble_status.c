@@ -462,6 +462,13 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             const uint16_t revision=(n==9u)?
                 (uint16_t)(packet[7]|((uint16_t)packet[8]<<8)):0u;
             if(n!=9u){panel_ack(opcode,lane,1u);break;}
+            /* Never let a preview BEGIN overwrite a partial durable upload or
+             * another lane's in-flight preview snapshot. Same-lane preview
+             * BEGIN may intentionally restart/renew that snapshot. */
+            if(panel_upload_index!=255u&&
+               (panel_upload_index!=lane||!panel_upload_preview)){
+                panel_ack(opcode,lane,2u);break;
+            }
             const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
             if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
             const int rc=ot_ble_panel_preview_begin(lane,revision);
@@ -519,7 +526,10 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             break;
         }
         case 0x13u:{ /* save latest preview through the staged/active NVS journal */
-            if(n!=3u||panel_preview_lane!=lane){panel_ack(opcode,lane,1u);break;}
+            if(n!=3u||panel_preview_lane!=lane||
+               panel_upload_index!=255u||panel_upload_preview){
+                panel_ack(opcode,lane,2u);break;
+            }
             const int rc=ot_ble_panel_preview_commit(lane,panel_preview_revision);
             panel_ack(opcode,lane,panel_save_status(rc));
             if(rc==0)panel_preview_lane=255;
