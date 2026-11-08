@@ -12,6 +12,8 @@ bool ot_sw_idf_watch_render(void);
 void ot_sw_idf_cancel_inputs(void);
 void ot_sw_idf_cancel_render(void);
 void ot_sw_idf_input_sampled(void);
+/* Compile-time-only bench injection; inert when Kconfig value is zero. */
+void ot_sw_idf_fault_inject(unsigned point);
 void ot_sw_idf_render_cycle(bool all_outputs_completed, bool any_output_completed,
                             bool diagnosed_fault, bool configuration_fault);
 bool ot_sw_idf_decorative_inhibited(void);
