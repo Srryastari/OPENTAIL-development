@@ -2227,6 +2227,7 @@ static void led_task(void *p) {
                }
                if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
                // Hardware driver transmits only this output's configured active length.
+               if(ch==0)ot_sw_idf_fault_inject(3u); /* Bench-only pre-submit stall. */
                esp_err_t e=led_strip_refresh_async(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer submit",e);
@@ -2240,6 +2241,7 @@ static void led_task(void *p) {
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!frame_submitted[ch])continue;
+               if(ch==0)ot_sw_idf_fault_inject(4u); /* Bench-only completion-wait stall. */
                esp_err_t e=led_strip_refresh_async_done(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer completion",e);
