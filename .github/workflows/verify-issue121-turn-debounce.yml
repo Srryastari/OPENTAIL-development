@@ -37,6 +37,7 @@ jobs:
               "core-firmware/tests/run-host-tests.sh",
               "core-firmware/tests/test_signal_debouncer.c",
               "core-firmware/tests/test_trigger_runtime_contract.py",
+              "core-firmware/tests/test_single_watchdog_contract.py",
               "docs/ISSUE121-TURN-SIGNAL-DEBOUNCE.md",
           }
           changed=set(git("diff","--name-only",base,"HEAD").splitlines())
