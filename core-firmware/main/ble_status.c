@@ -341,6 +341,35 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
     const uint8_t opcode=packet[1],lane=packet[2];
     panel_ack(opcode,lane,0u);
     if(!authorized||!panel_caps_seen){panel_ack(opcode,lane,5u);return 0;}
+    /* Two-step destructive map reset. 0xFF/0xAA requests a revision-bound
+     * challenge; 0xFF/0xAB confirms it. This is separate from Pixel Probe AA. */
+    if(opcode==0xffu&&lane==0xaau){
+        if(n!=6u){panel_ack(opcode,packet[3],1u);return 0;}
+        const uint8_t reset_lane=packet[3];
+        const uint16_t revision=(uint16_t)(packet[4]|((uint16_t)packet[5]<<8));
+        uint32_t challenge=0u;
+        const int rc=ot_ble_panel_reset_challenge(reset_lane,revision,&challenge);
+        if(rc!=0){panel_ack(opcode,reset_lane,rc==2?2u:(rc==3?3u:1u));return 0;}
+        panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0xffu;
+        panel_response[2]=0xaau;panel_response[3]=reset_lane;
+        panel_response[4]=(uint8_t)challenge;panel_response[5]=(uint8_t)(challenge>>8);
+        panel_response[6]=(uint8_t)(challenge>>16);panel_response[7]=(uint8_t)(challenge>>24);
+        panel_response[8]=(uint8_t)revision;panel_response[9]=(uint8_t)(revision>>8);
+        panel_response[10]=(uint8_t)OT_PZ_RESET_CHALLENGE_TTL_MS;
+        panel_response[11]=(uint8_t)(OT_PZ_RESET_CHALLENGE_TTL_MS>>8);
+        panel_response_len=12u;return 0;
+    }
+    if(opcode==0xffu&&lane==0xabu){
+        if(n!=10u){panel_ack(opcode,packet[3],1u);return 0;}
+        const uint8_t reset_lane=packet[3];
+        const uint32_t challenge=(uint32_t)packet[4]|
+            ((uint32_t)packet[5]<<8)|((uint32_t)packet[6]<<16)|
+            ((uint32_t)packet[7]<<24);
+        const uint16_t revision=(uint16_t)(packet[8]|((uint16_t)packet[9]<<8));
+        const int rc=ot_ble_panel_reset_confirm(reset_lane,revision,challenge);
+        panel_ack(opcode,reset_lane,rc==0?0u:(rc==5?2u:(rc==3?3u:(rc==4?4u:1u))));
+        return 0;
+    }
     if(lane>=OT_PZ_OUTPUTS){panel_ack(opcode,lane,1u);return 0;}
     switch(opcode){
         case 1u:{ /* immutable active snapshot */
