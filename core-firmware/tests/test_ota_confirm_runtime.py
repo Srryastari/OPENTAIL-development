@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Execute the actual OTA confirmation function with a fake IDF boundary.
-This verifies admission/retry policy only; bootloader rollback is separately
-pinned by sdkconfig and requires target/bench validation.
+"""Execute the actual OTA confirmation/rollback guard with a fake IDF boundary.
+No MCU, flash or physical rollback is simulated by this test.
 """
 from pathlib import Path
 import subprocess
@@ -19,12 +18,14 @@ typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_FAIL 1
 #define ESP_ERR_INVALID_ARG 2
+#define ESP_ERR_NOT_FOUND 3
 #define ESP_IMAGE_HEADER_MAGIC 0xe9
 #define HTTPD_SOCK_ERR_TIMEOUT -2
 #define ESP_PARTITION_TYPE_APP 0
 #define ESP_PARTITION_SUBTYPE_APP_OTA_0 16
 #define ESP_PARTITION_SUBTYPE_APP_OTA_15 31
 #define pdMS_TO_TICKS(x) (x)
+#define ESP_ERROR_CHECK(x) assert((x)==ESP_OK)
 typedef struct {int content_len;} httpd_req_t;
 esp_err_t httpd_resp_set_status(httpd_req_t *,const char *);
 esp_err_t httpd_resp_set_type(httpd_req_t *,const char *);
@@ -54,27 +55,49 @@ const char *esp_err_to_name(esp_err_t);
 void fake_log(const char *,const char *,...);
 #define ESP_LOGE(...) fake_log(__VA_ARGS__)
 #define ESP_LOGW(...) fake_log(__VA_ARGS__)
+typedef struct {void (*callback)(void *);const char *name;} esp_timer_create_args_t;
+typedef void *esp_timer_handle_t;
+esp_err_t esp_timer_create(const esp_timer_create_args_t *,esp_timer_handle_t *);
+esp_err_t esp_timer_start_once(esp_timer_handle_t,uint64_t);
+esp_err_t esp_timer_stop(esp_timer_handle_t);
 #endif
 '''
 test=r'''
 #include "fake.h"
+#include <setjmp.h>
 #include <stdio.h>
 #include "ot_ota_update.c"
 
 static esp_partition_t running={ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,0x600000,"ota_0"};
-static esp_ota_img_states_t state=ESP_OTA_IMG_PENDING_VERIFY;
+static esp_ota_img_states_t image_state=ESP_OTA_IMG_PENDING_VERIFY;
 static esp_err_t state_error=ESP_OK,mark_error=ESP_OK;
-static unsigned state_reads=0,mark_calls=0;
+static unsigned state_reads=0,mark_calls=0,rollback_calls=0,restart_calls=0;
+static unsigned timer_starts=0,timer_stops=0;
+static uint64_t timer_delay=0;
+static void (*timer_callback)(void *);
+static bool confirm_race=false;
+static jmp_buf reboot;
 const esp_partition_t *esp_ota_get_running_partition(void){return &running;}
 esp_err_t esp_ota_get_state_partition(const esp_partition_t *p,esp_ota_img_states_t *out){
-    (void)p;state_reads++;*out=state;return state_error;
+    (void)p;state_reads++;*out=image_state;return state_error;
 }
 esp_err_t esp_ota_mark_app_valid_cancel_rollback(void){
-    mark_calls++;if(mark_error==ESP_OK)state=ESP_OTA_IMG_VALID;return mark_error;
+    mark_calls++;
+    if(confirm_race)timer_callback(NULL);
+    if(mark_error==ESP_OK)image_state=ESP_OTA_IMG_VALID;
+    return mark_error;
 }
+esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void){rollback_calls++;return ESP_FAIL;}
 const char *esp_err_to_name(esp_err_t e){(void)e;return "fake";}
 void fake_log(const char *tag,const char *fmt,...){(void)tag;(void)fmt;}
-void esp_restart(void){}
+void esp_restart(void){restart_calls++;longjmp(reboot,1);}
+esp_err_t esp_timer_create(const esp_timer_create_args_t *a,esp_timer_handle_t *h){
+    timer_callback=a->callback;*h=(void *)&timer_callback;return ESP_OK;
+}
+esp_err_t esp_timer_start_once(esp_timer_handle_t h,uint64_t us){
+    assert(h);timer_starts++;timer_delay=us;return ESP_OK;
+}
+esp_err_t esp_timer_stop(esp_timer_handle_t h){assert(h);timer_stops++;return ESP_OK;}
 const esp_partition_t *esp_ota_get_next_update_partition(void *p){(void)p;return NULL;}
 const esp_app_desc_t *esp_app_get_description(void){return NULL;}
 esp_err_t esp_ota_get_partition_description(const esp_partition_t *p,esp_app_desc_t *d){(void)p;(void)d;return ESP_FAIL;}
@@ -83,7 +106,6 @@ esp_err_t esp_ota_write(esp_ota_handle_t h,const void *p,size_t n){(void)h;(void
 esp_err_t esp_ota_end(esp_ota_handle_t h){(void)h;return ESP_FAIL;}
 esp_err_t esp_ota_abort(esp_ota_handle_t h){(void)h;return ESP_FAIL;}
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t *p){(void)p;return ESP_FAIL;}
-esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void){return ESP_FAIL;}
 esp_err_t httpd_resp_set_status(httpd_req_t *r,const char *s){(void)r;(void)s;return ESP_OK;}
 esp_err_t httpd_resp_set_type(httpd_req_t *r,const char *s){(void)r;(void)s;return ESP_OK;}
 esp_err_t httpd_resp_set_hdr(httpd_req_t *r,const char *k,const char *v){(void)r;(void)k;(void)v;return ESP_OK;}
@@ -93,37 +115,57 @@ int httpd_req_recv(httpd_req_t *r,char *b,size_t n){(void)r;(void)b;(void)n;retu
 void vTaskDelay(unsigned n){(void)n;}
 
 static void reset(void){
-    running.type=ESP_PARTITION_TYPE_APP;
-    running.subtype=ESP_PARTITION_SUBTYPE_APP_OTA_0;
-    state=ESP_OTA_IMG_PENDING_VERIFY;state_error=ESP_OK;mark_error=ESP_OK;
-    state_reads=0;mark_calls=0;
+    running.type=ESP_PARTITION_TYPE_APP;running.subtype=ESP_PARTITION_SUBTYPE_APP_OTA_0;
+    image_state=ESP_OTA_IMG_PENDING_VERIFY;state_error=ESP_OK;mark_error=ESP_OK;
+    state_reads=mark_calls=rollback_calls=restart_calls=timer_starts=timer_stops=0;
+    timer_delay=0;timer_callback=NULL;confirm_race=false;
+    boot_confirmation_state=OTA_BOOT_WAITING;boot_guard=NULL;boot_guard_started=false;
+}
+static void fire_deadline(void){
+    assert(timer_callback);
+    if(setjmp(reboot)==0){timer_callback(NULL);assert(false && "deadline should restart pending/unreadable OTA");}
 }
 int main(void){
-    reset();
-    assert(!ot_ota_confirm_boot(false));
-    assert(state_reads==0 && mark_calls==0); /* Never confirm before outputs. */
-
-    reset();
+    reset();ot_ota_watch_boot();
+    assert(timer_starts==1 && timer_delay==120000000u);
+    assert(!ot_ota_confirm_boot(false) && mark_calls==0);
     assert(ot_ota_confirm_boot(true));
-    assert(state_reads==1 && mark_calls==1 && state==ESP_OTA_IMG_VALID);
+    assert(mark_calls==1 && timer_stops==1 && boot_confirmation_state==OTA_BOOT_CONFIRMED);
+    timer_callback(NULL);assert(restart_calls==0); /* Confirmed timer is inert. */
 
-    reset();mark_error=ESP_FAIL;
+    reset();ot_ota_watch_boot();mark_error=ESP_FAIL;
     assert(!ot_ota_confirm_boot(true));
-    assert(state_reads==1 && mark_calls==1); /* Flash validation failure is not success. */
+    assert(boot_confirmation_state==OTA_BOOT_WAITING);
+    fire_deadline();
+    assert(rollback_calls==1 && restart_calls==1 && boot_confirmation_state==OTA_BOOT_EXPIRED);
 
-    reset();state=ESP_OTA_IMG_VALID;
+    reset();ot_ota_watch_boot();confirm_race=true;
     assert(ot_ota_confirm_boot(true));
-    assert(state_reads==1 && mark_calls==0); /* Already-valid image is idempotent. */
+    assert(timer_starts==2 && timer_delay==1000000u && timer_stops==1);
+    timer_callback(NULL);assert(restart_calls==0); /* confirmation wins timer race */
 
-    reset();state_error=ESP_FAIL;
-    assert(!ot_ota_confirm_boot(true));
-    assert(state_reads==1 && mark_calls==0); /* Unknown OTA state fails closed. */
+    reset();ot_ota_watch_boot();
+    fire_deadline();
+    assert(rollback_calls==1 && restart_calls==1);
+    assert(!ot_ota_confirm_boot(true)); /* expired candidate cannot be accepted */
 
-    reset();running.subtype=0;state_error=ESP_FAIL;
+    reset();state_error=ESP_ERR_NOT_FOUND;ot_ota_watch_boot();
+    assert(timer_starts==0 && boot_confirmation_state==OTA_BOOT_NOT_APPLICABLE);
+    assert(ot_ota_confirm_boot(true) && mark_calls==0);
+
+    reset();image_state=ESP_OTA_IMG_VALID;ot_ota_watch_boot();
+    assert(timer_starts==0 && boot_confirmation_state==OTA_BOOT_NOT_APPLICABLE);
+    assert(ot_ota_confirm_boot(true) && mark_calls==0);
+
+    reset();state_error=ESP_FAIL;ot_ota_watch_boot();
+    assert(timer_starts==1 && timer_delay==120000000u);
+    fire_deadline();assert(restart_calls==1); /* unreadable state fails closed */
+
+    reset();running.subtype=0;ot_ota_watch_boot();
+    assert(timer_starts==0 && boot_confirmation_state==OTA_BOOT_NOT_APPLICABLE);
     assert(ot_ota_confirm_boot(true));
-    assert(state_reads==0 && mark_calls==0); /* Factory/non-OTA image has no rollback state. */
 
-    puts("PASS actual CORE OTA confirmation: output gate, pending verify, failed flash, already valid, state-read failure and non-OTA slot (fake IDF; bootloader rollback not simulated)");
+    puts("PASS actual CORE OTA boot guard: 120s deadline, pending confirm, retry failure, timer/flash race, expiry rollback, non-OTA/valid/not-found states (fake IDF; physical rollback NOT_RUN)");
     return 0;
 }
 '''
@@ -132,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix="ot-ota-confirm-") as tmp:
     (d/"fake.h").write_text(header)
     for name in ("freertos/FreeRTOS.h","freertos/task.h","esp_err.h","esp_log.h",
                  "esp_http_server.h","esp_ota_ops.h","esp_partition.h","esp_system.h",
-                 "esp_app_format.h","esp_app_desc.h","esp_image_format.h"):
+                 "esp_app_format.h","esp_app_desc.h","esp_image_format.h","esp_timer.h"):
         p=d/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('#include "fake.h"\n')
     (d/"test.c").write_text(test)
     exe=d/"test"
