@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
-      - triggers/issue121-turn-release-debounce-20261108
+      - firmware/issue113-single-esp-progress-wdt-20261103
   workflow_dispatch:
 permissions:
   contents: read
