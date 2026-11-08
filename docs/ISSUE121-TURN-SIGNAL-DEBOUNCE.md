@@ -8,17 +8,17 @@ sampler and four stable-sample assertion qualification remain unchanged.
 Only turn-signal deassertion is extended: the logical input remains asserted
 until 400ms of continuous inactive samples have elapsed.
 
-The GPIO ISR timestamps each Left/Right edge with the ESP-IDF monotonic clock.
+The GPIO ISRtimestamps each Left/Right edge with the ESP-IDF monotonic clock.
 The first inactive raw sample starts the timer from its captured falling-edge
 timestamp. A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
 release. Reassertion before the 400ms deadline cancels the pending release and
 leaves the logical mask asserted, so the renderer receives no false
 falling/rising edge between flashes. If the signal remains inactive through
-the deadline, the old assertion releases; a later assertion must again pass
+ the deadline, the old assertion releases; a later assertion must again pass
 four stable samples.
 
-Timing uses `esp_timer_get_time()/1000LL`, truncated to `uint32_t` milliseconds.
+Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds. The 400,000µs interval is safely shorter than the 32-bit wrap period.
 The existing GPIO edge ISR records the Left/Right transition timestamp so a
 late 10ms sampler wake can distinguish a reassertion just before 400ms from
 one after expiry. The ISR timestamp is read atomically by the sampler.
