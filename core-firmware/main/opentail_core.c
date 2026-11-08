@@ -2493,14 +2493,11 @@ static void led_task(void *p) {
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static uint16_t prior_fx_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static uint16_t prior_fx_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    static uint16_t prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    static uint8_t prior_fx_range_count[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    static ot_pz_range_t prior_fx_ranges[OT_CHAIN_COUNT][OT_OM_ZONES][OT_PZ_MAX_RANGES_PER_ZONE];
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    /* One shared scratch frame gathers/scatters discontiguous ranges of one
-     * logical zone. Physical frame history remains lane-indexed in fx_frame. */
+    static uint8_t prior_pixel_zone_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
     static uint8_t pixel_zone_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
     static uint16_t pixel_logical_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    /* One reusable compact logical-zone frame. */
     static ot_wled_rgb_t fx_zone_scratch[OT_PZ_MAX_PIXELS];
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
@@ -2651,34 +2648,45 @@ static void led_task(void *p) {
                    ot_frame_snapshot_unavailable((uint8_t)ch);
                    continue; /* No async transfer was submitted. */
                }
-               /* Render each selected zone once, even if the native frame is indexed by
-                * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
-               if(native_rendering && local_fx_enabled){
-                   /* Do not clear the entire frame: source-pinned WLED fade_out()
-                    * and overlay modes must see the preceding zone frame.
-                    * Inactive/replaced/moved zones are cleared individually. */
-                   unsigned offset=0;
-                   for(int z=0;z<output->zone_count;z++){
-                       unsigned len=output->zones[z].pixels;
+               /* Render one compact logical frame per zone. Physical ranges are
+                * gathered/scattered through the authoritative map; strip order
+                * and RMT ownership remain exclusively physical and CORE-owned. */
+               unsigned zone_global_start[OT_OM_ZONES]={0};
+               unsigned logical_total=0u;
+               for(unsigned z=0;z<output->zone_count;z++){
+                   zone_global_start[z]=logical_total;
+                   logical_total+=output->zones[z].pixels;
+               }
+               if(native_rendering&&local_fx_enabled){
+                   uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
+                   bool old_active[OT_OM_ZONES];
+                   memcpy(old_zone_id,prior_fx_zone_id[ch],sizeof(old_zone_id));
+                   memcpy(old_panel_id,prior_fx_panel_id[ch],sizeof(old_panel_id));
+                   memcpy(old_active,prior_fx_active[ch],sizeof(old_active));
+                   for(unsigned z=0;z<output->zone_count;z++){
+                       const unsigned len=output->zones[z].pixels;
+                       const ot_pz_zone_t *zone_cfg=&local_panel[ch].zones[z];
                        const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
-                       if(len && ot_fx_slot_active(slot,frame_ms) &&
-                          output->zones[z].role!=OT_OM_OFF &&
-                          offset+len<=OT_CHAIN_PIXELS){
-                           /* Reset ONLY this zone on replacement. Unrelated zone
-                            * particle motion and effect phase are preserved. */
-                           if(!prior_fx_active[ch][z] ||
-                              prior_fx_generation[ch][z]!=slot->generation ||
-                              prior_fx_offset[ch][z]!=offset ||
-                              prior_fx_length[ch][z]!=len){
-                               memset(&fx_frame[ch][offset],0,
-                                      (size_t)len*sizeof(fx_frame[ch][0]));
+                       const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&
+                           ot_fx_slot_active(slot,frame_ms);
+                       const bool same_identity=active&&old_active[z]&&
+                           prior_fx_generation[ch][z]==slot->generation&&
+                           old_zone_id[z]==zone_cfg->id&&old_panel_id[z]==zone_cfg->panel_id;
+                       if(active&&len<=OT_PZ_MAX_PIXELS){
+                           if(!same_identity)
                                ot_effects_1d_reset(&fx_state[ch][z],
-                                   0x1234u+ch*97u+(unsigned)z*19u+slot->generation);
-                               prior_fx_generation[ch][z]=slot->generation;
-                               prior_fx_offset[ch][z]=offset;
-                               prior_fx_length[ch][z]=len;
+                                   0x1234u+ch*97u+z*19u+slot->generation);
+                           memset(fx_zone_scratch,0,(size_t)len*sizeof(fx_zone_scratch[0]));
+                           for(unsigned px=0;px<render_pixels[ch];px++){
+                               if(pixel_zone_map[ch][px]!=(uint8_t)z)continue;
+                               const unsigned logical=pixel_logical_map[ch][px];
+                               if(logical>=len)continue;
+                               const uint8_t old_z=prior_pixel_zone_map[ch][px];
+                               if(same_identity&&old_z<OT_OM_ZONES&&old_active[old_z]&&
+                                  old_zone_id[old_z]==zone_cfg->id&&
+                                  old_panel_id[old_z]==zone_cfg->panel_id)
+                                   fx_zone_scratch[logical]=fx_frame[ch][px];
                            }
-                           prior_fx_active[ch][z]=true;
                            const ot_ble_fx_packet_t *fx=&slot->request;
                            ot_wled_fx_config_t cfg={
                                .effect_id=fx->effect_id,
@@ -2698,78 +2706,101 @@ static void led_task(void *p) {
                                     frame_palettes[ch*OT_OM_ZONES+z].present)?
                                    &frame_palettes[ch*OT_OM_ZONES+z].palette:NULL
                            };
-                           uint32_t zone_elapsed=frame_ms-slot->started_ms;
+                           const uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(((fx->palette_id>=73u&&fx->palette_id<=200u)&&
-                                 !frame_palettes[ch*OT_OM_ZONES+z].present) ||
+                                 !frame_palettes[ch*OT_OM_ZONES+z].present)||
                               !ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
-                                                &fx_frame[ch][offset],len)){
-                               memset(&fx_frame[ch][offset],0,
-                                      (size_t)len*sizeof(fx_frame[ch][0]));
+                                                    fx_zone_scratch,len)){
+                               memset(fx_zone_scratch,0,(size_t)len*sizeof(fx_zone_scratch[0]));
                                ot_st_set_fault("invalid BLE effect frame");
                                stop_continuous_on_fault();
-                           } else if(slot->overlay.style &&
-                                     !ot_fx_overlay_apply(&slot->overlay,
-                                         slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
-                                         zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
+                           }else if(slot->overlay.style&&
+                                    !ot_fx_overlay_apply(&slot->overlay,
+                                        slot->generation^((uint32_t)ch<<16)^((uint32_t)z<<8),
+                                        zone_elapsed,fx_zone_scratch,len,cfg.brightness)){
                                ot_st_set_fault("invalid effect overlay");
                                stop_continuous_on_fault();
                            }
-                       } else {
+                           for(unsigned px=0;px<render_pixels[ch];px++){
+                               if(pixel_zone_map[ch][px]!=(uint8_t)z)continue;
+                               const unsigned logical=pixel_logical_map[ch][px];
+                               if(logical<len)fx_frame[ch][px]=fx_zone_scratch[logical];
+                           }
+                           prior_fx_active[ch][z]=true;
+                           prior_fx_generation[ch][z]=slot->generation;
+                       }else{
                            prior_fx_active[ch][z]=false;
                        }
-                       offset+=len;
+                       prior_fx_zone_id[ch][z]=zone_cfg->id;
+                       prior_fx_panel_id[ch][z]=zone_cfg->panel_id;
                    }
-               } else {
-                   /* Stop, shutdown and show disable invalidate all historical
-                    * effect pixels without displaying stale retained frames. */
-                   for(int z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
+                   for(unsigned z=output->zone_count;z<OT_OM_ZONES;z++)
+                       prior_fx_active[ch][z]=false;
+               }else{
+                   for(unsigned z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
-               /* ot_om_layout() above validated zone totals and ordering.
-                * Visit each contiguous zone only once rather than performing
-                * a full ot_om_valid() plus name checks for every LED.
-                * This keeps the mapping universal and reduces render latency. */
-               ot_om_zone_cursor_t zone_cursor={0};
-               /* Capture one requested output, after CORE overlays/calibration,
-                * before driver color-order packing. No work in normal frames. */
+               /* Physical trigger overlays outrank diagnostics, which outrank
+                * show/demo pixels. Gaps and UNASSIGNED zones use raw fixed-input
+                * commissioning fallback; explicit OFF zones remain dark. */
                frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
-                                        output->active_pixels,frame_index+1u);
+                                        render_pixels[ch],frame_index+1u);
                bool pixel_write_failed=false;
-               for(unsigned px=0;px<output->active_pixels;++px){
+               for(unsigned px=0;px<render_pixels[ch];++px){
                    ot_rgb_t c={0,0,0};
-                   int zone=ot_om_section_next(output,&zone_cursor,px);
-                   if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
-                       const uint8_t role=output->zones[zone].role;
-                       const bool fx_here=native_rendering&&local_fx_enabled&&
-                           ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms);
-                       const bool legacy_here=native_rendering&&!local_fx_enabled&&
-                           (local_show.chain_mask&(1u<<ch))&&
-                           (local_show.section_mask&(1u<<zone));
-                       const bool demo_here=!fx_here&&!legacy_here&&
-                           local_demo.mode!=OT_DEMO_OFF;
-                       const bool decorated=fx_here||legacy_here||demo_here;
-                       /* Parking remains a baseline underneath show playback.
-                        * Brake/turn/hazard/reverse/AUX win only in their role-owned zones. */
-                       bool trigger_here=ot_om_trigger_overlay(role,combined,
-                                                 decorated,OT_MAX_BRIGHTNESS,&c);
-                       if(!trigger_here){
-                           if(fx_here){
-                               ot_wled_rgb_t fx=fx_frame[ch][px];
-                               const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][zone];
-                               const uint16_t progress=ot_transition_progress(
-                                   (uint32_t)(frame_ms-slot->started_ms),
-                                   OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
-                               const ot_transition_rgb_t black={0,0,0};
-                               const ot_transition_rgb_t target={fx.r,fx.g,fx.b};
-                               const ot_transition_rgb_t blended=ot_transition_blend(
-                                   black,target,progress);
-                               c=(ot_rgb_t){blended.r,blended.g,blended.b};
-                           }else if(legacy_here){
-                               c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
-                           }else if(demo_here){
-                               c=ot_pixel_color(&zone_layout,ch,px,0,&local_demo,frame_index);
-                           }
-                           if(decorated)c=ot_om_calibrate(c,output);
+                   const int zone=pixel_zone_map[ch][px]<output->zone_count?
+                                  (int)pixel_zone_map[ch][px]:-1;
+                   const uint8_t role=zone>=0?local_panel[ch].zones[zone].role:
+                                               OT_PZ_ROLE_UNASSIGNED;
+                   const bool fx_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
+                       local_fx_enabled&&
+                       ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms);
+                   const bool legacy_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
+                       !local_fx_enabled&&(local_show.chain_mask&(1u<<ch))&&
+                       (local_show.section_mask&(1u<<zone));
+                   const bool demo_here=zone>=0&&role!=OT_OM_OFF&&!fx_here&&
+                       !legacy_here&&local_demo.mode!=OT_DEMO_OFF;
+                   const bool decorated=fx_here||legacy_here||demo_here;
+                   bool trigger_here=false;
+                   if(zone<0||role==OT_PZ_ROLE_UNASSIGNED){
+                       c=ot_pz_fallback_color((unsigned)ch,fallback_mask,
+                                              (uint8_t)OT_MAX_BRIGHTNESS);
+                       trigger_here=c.r!=0u||c.g!=0u||c.b!=0u;
+                   }else if(role!=OT_OM_OFF){
+                       trigger_here=ot_om_trigger_overlay(role,combined,decorated,
+                                             (uint8_t)OT_MAX_BRIGHTNESS,&c);
+                   }
+                   bool diagnostic_here=false;
+                   if(!trigger_here){
+                       bool diagnostic_owned=false;ot_rgb_t diagnostic={0,0,0};
+                       if(ot_pz_diag_render(&local_diag,(unsigned)ch,(uint16_t)px,
+                                            frame_ms,&diagnostic_owned,&diagnostic)&&
+                          diagnostic_owned){
+                           c.r=(uint8_t)((diagnostic.r*OT_MAX_BRIGHTNESS+127u)/255u);
+                           c.g=(uint8_t)((diagnostic.g*OT_MAX_BRIGHTNESS+127u)/255u);
+                           c.b=(uint8_t)((diagnostic.b*OT_MAX_BRIGHTNESS+127u)/255u);
+                           diagnostic_here=true;
                        }
+                   }
+                   if(!trigger_here&&!diagnostic_here&&zone>=0&&role!=OT_OM_OFF){
+                       const unsigned logical_px=zone_global_start[zone]+
+                                                 pixel_logical_map[ch][px];
+                       if(fx_here){
+                           const ot_wled_rgb_t fx=fx_frame[ch][px];
+                           const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][zone];
+                           const uint16_t progress=ot_transition_progress(
+                               (uint32_t)(frame_ms-slot->started_ms),
+                               OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
+                           const ot_transition_rgb_t black={0,0,0};
+                           const ot_transition_rgb_t target={fx.r,fx.g,fx.b};
+                           const ot_transition_rgb_t blended=ot_transition_blend(
+                               black,target,progress);
+                           c=(ot_rgb_t){blended.r,blended.g,blended.b};
+                       }else if(legacy_here){
+                           c=ot_show_pixel(&local_show,&zone_layout,ch,logical_px,elapsed);
+                       }else if(demo_here){
+                           c=ot_pixel_color(&zone_layout,ch,logical_px,0,&local_demo,frame_index);
+                       }
+                       if(decorated)c=ot_om_calibrate(c,output);
                    }
                    if(frame_captured[ch])
                        ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
@@ -2809,10 +2840,12 @@ static void led_task(void *p) {
                    continue;
                }
                if(frame_captured[ch])ot_frame_snapshot_complete(true);
+               memcpy(prior_pixel_zone_map[ch],pixel_zone_map[ch],
+                      OT_PZ_MAX_PIXELS*sizeof(prior_pixel_zone_map[ch][0]));
                any_output_completed=true; /* completed RMT, not queued transfer */
                /* A failed lane must not throttle the surviving vehicle lights. */
-               if(local_outputs[ch].active_pixels>longest_pixels)
-                   longest_pixels=local_outputs[ch].active_pixels;
+               if(render_pixels[ch]>longest_pixels)
+                   longest_pixels=(uint16_t)render_pixels[ch];
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                portEXIT_CRITICAL(&state_lock);
