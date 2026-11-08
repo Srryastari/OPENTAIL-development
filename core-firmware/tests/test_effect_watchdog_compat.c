@@ -13,6 +13,7 @@
 #include <string.h>
 #include "effects_1d.h"
 #include "ot_single_watchdog.h"
+#include "ot_frame_contract.h"
 #include "output_manager.h"
 
 typedef struct {
@@ -104,10 +105,16 @@ int main(void) {
 
                     for (uint32_t frame = 0; frame < 3u; ++frame) {
                         const uint32_t frame_ms = frame * cadences[ci];
+                        /* Independent per-output state: rendering O1 cannot
+                         * mutate O2's state, and vice versa. */
+                        const ot_effects_1d_state_t o2_before = state[1];
                         assert(ot_effects_1d_render(&cfg, &state[0], frame_ms,
                             lane[0].pixels, OT_OM_MAX_PIXELS_PER_OUTPUT));
+                        assert(memcmp(&state[1], &o2_before, sizeof(state[1])) == 0);
+                        const ot_effects_1d_state_t o1_after = state[0];
                         assert(ot_effects_1d_render(&cfg, &state[1], frame_ms,
                             lane[1].pixels, OT_OM_MAX_PIXELS_PER_OUTPUT));
+                        assert(memcmp(&state[0], &o1_after, sizeof(state[0])) == 0);
                         assert(lane[0].before == 0x13579bdfu &&
                                lane[0].after == 0x2468ace0u);
                         assert(lane[1].before == 0xabcdef01u &&
@@ -144,6 +151,27 @@ int main(void) {
             }
         }
     }
+
+    /* Exercise both independent completion lanes. In production the
+     * frame_submitted[] flags are cleared for a failed async_done; therefore
+     * these arrays represent successful completions, not queued submissions. */
+    const bool both_completed[2] = {true,true};
+    const bool o1_stalled_o2_done[2] = {false,true};
+    const bool o1_done_o2_stalled[2] = {true,false};
+    const bool both_stalled[2] = {false,false};
+    assert(ot_frame_all_submitted(both_completed,2u));
+    assert(ot_sw_render_progress_eligible(
+        ot_frame_all_submitted(both_completed,2u),true));
+    assert(!ot_frame_all_submitted(o1_stalled_o2_done,2u));
+    assert(ot_sw_render_progress_eligible(false,true));
+    assert(!ot_sw_can_mark_stable(60000u,1000u,1000u,true,false));
+    assert(!ot_frame_all_submitted(o1_done_o2_stalled,2u));
+    assert(ot_sw_render_progress_eligible(false,true));
+    assert(!ot_sw_can_mark_stable(60000u,1000u,1000u,true,false));
+    /* If async_done hangs before returning, no lane completion is observed:
+     * the render watchdog receives no feed and must expire. */
+    assert(!ot_frame_all_submitted(both_stalled,2u));
+    assert(!ot_sw_render_progress_eligible(false,false));
 
     /* Exercise both sides of the deadline boundary. A 14,900ms render
      * plus 62ms completion can feed before 15s; a 14,940ms render plus 62ms
