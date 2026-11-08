@@ -106,6 +106,7 @@ static DRAM_ATTR ot_turn_edge_event_t turn_edge_events[2][OT_TURN_EDGE_QUEUE_CAP
 static DRAM_ATTR volatile uint32_t turn_edge_head[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_tail[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]={0u,0u};
+static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]={0u,0u};
 static uint64_t input_boot_snapshot_us=0u;
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
@@ -1685,6 +1686,9 @@ static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     if(input_index==2u || input_index==3u){
         const unsigned slot=input_index-2u;
+        /* Mark the producer active before timestamp capture. The dual-core
+         * sampler defers deadline expiry if this edge is not yet published. */
+        __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
         const uint64_t edge_time_us=(uint64_t)esp_timer_get_time();
         /* Use the ESP32-S3 LL register read: gpio_get_level() is not guaranteed
          * IRAM-safe when this ISR service is installed with ESP_INTR_FLAG_IRAM. */
@@ -1703,6 +1707,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
             event->asserted=asserted;
             __atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE);
         }
+        __atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE);
     }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
@@ -1733,43 +1738,86 @@ static bool input_init(void) {
     }
     return true;
 }
+/* Establish a coherent overflow recovery baseline. The ISR marks itself
+ * active before timestamp capture; a changed head or active writer means the
+ * GPIO level and queue discard boundary do not yet describe one instant. */
+static bool turn_edge_queue_resync(unsigned slot,ot_signal_debouncer_t *state,
+                                   uint64_t *baseline_us){
+    if(slot>=2u||!state||!baseline_us)return false;
+    if(__atomic_load_n(&turn_edge_writer_active[slot],__ATOMIC_ACQUIRE)!=0u)
+        return false;
+    const uint32_t head_before=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+    const uint64_t now=(uint64_t)esp_timer_get_time();
+    const int level=gpio_get_level(input_pin[slot+2u]);
+    const bool raw=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+    const uint32_t head_after=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+    if(__atomic_load_n(&turn_edge_writer_active[slot],__ATOMIC_ACQUIRE)!=0u ||
+       head_after!=head_before)
+        return false;
+    __atomic_store_n(&turn_edge_tail[slot],head_after,__ATOMIC_RELEASE);
+    ot_signal_debouncer_resync(state,raw);
+    *baseline_us=now;
+    /* An ISR that found the ring full while the discard boundary was being
+     * installed must be handled by another coherent resync next sampler tick. */
+    return __atomic_load_n(&turn_edge_overflow[slot],__ATOMIC_ACQUIRE)==0u;
+}
+
 /* Consume all ISR-published turn edges up to this sampler time. Events are
- * replayed in timestamp order, so multiple flashes between 10ms samples are
- * evaluated against the real absolute 400ms deadline. */
+ * replayed in timestamp order before the absolute release deadline is tested.
+ * If a producer is in flight or publishes after the cutoff, defer this lane's
+ * sample: never expire against a queue head that may be missing an earlier edge. */
 static bool turn_edge_queue_update(unsigned slot,ot_signal_debouncer_t *state,
                                    uint64_t now_us,uint64_t boot_snapshot_us,
-                                   bool current_raw){
-    if(slot>=2u||!state)return false;
+                                   bool *sample_valid){
+    if(sample_valid)*sample_valid=false;
+    if(slot>=2u||!state||!sample_valid)return false;
     bool overflow=__atomic_exchange_n(&turn_edge_overflow[slot],0u,__ATOMIC_ACQ_REL)!=0u;
     if(overflow){
-        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
-        __atomic_store_n(&turn_edge_tail[slot],head,__ATOMIC_RELEASE);
-        ot_signal_debouncer_resync(state,current_raw);
-    }else{
-        uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_RELAXED);
-        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
-        while(tail!=head){
-            const ot_turn_edge_event_t event=
-                turn_edge_events[slot][tail&OT_TURN_EDGE_QUEUE_MASK];
-            if(event.timestamp_us>now_us)break;
-            tail++;
-            /* Ignore history at/before the boot GPIO baseline. */
-            if(event.timestamp_us>boot_snapshot_us)
-                ot_signal_debouncer_transition(state,event.asserted,event.timestamp_us);
+        uint64_t baseline_us=0u;
+        if(!turn_edge_queue_resync(slot,state,&baseline_us)){
+            __atomic_store_n(&turn_edge_overflow[slot],1u,__ATOMIC_RELEASE);
+            return state->asserted;
         }
-        __atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE);
-        /* Catch overflow that occurred while the sampler was draining. */
-        if(__atomic_exchange_n(&turn_edge_overflow[slot],0u,__ATOMIC_ACQ_REL)!=0u){
-            const uint32_t latest_head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
-            __atomic_store_n(&turn_edge_tail[slot],latest_head,__ATOMIC_RELEASE);
-            ot_signal_debouncer_resync(state,current_raw);
-            overflow=true;
-        }
-    }
-    if(overflow){
         ESP_LOGE(TAG,"Turn input %u edge history overflow; held state cleared and raw input requalified",
                  slot==0u?3u:4u);
+        *sample_valid=true;
+        return ot_signal_debouncer_sample(state,baseline_us,OT_DEBOUNCE_TICKS);
     }
+
+    uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_RELAXED);
+    const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+    while(tail!=head){
+        const ot_turn_edge_event_t event=
+            turn_edge_events[slot][tail&OT_TURN_EDGE_QUEUE_MASK];
+        if(event.timestamp_us>now_us)break;
+        tail++;
+        /* Ignore history at/before the boot GPIO baseline. */
+        if(event.timestamp_us>boot_snapshot_us)
+            ot_signal_debouncer_transition(state,event.asserted,event.timestamp_us);
+    }
+    __atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE);
+
+    /* Catch overflow that occurred while the sampler was draining. */
+    if(__atomic_exchange_n(&turn_edge_overflow[slot],0u,__ATOMIC_ACQ_REL)!=0u){
+        uint64_t baseline_us=0u;
+        if(!turn_edge_queue_resync(slot,state,&baseline_us)){
+            __atomic_store_n(&turn_edge_overflow[slot],1u,__ATOMIC_RELEASE);
+            return state->asserted;
+        }
+        ESP_LOGE(TAG,"Turn input %u edge history overflow; held state cleared and raw input requalified",
+                 slot==0u?3u:4u);
+        *sample_valid=true;
+        return ot_signal_debouncer_sample(state,baseline_us,OT_DEBOUNCE_TICKS);
+    }
+
+    /* The producer may have started after the initial head snapshot. If its
+     * timestamp was captured before this sample cutoff, wait for publication. */
+    const uint32_t head_after=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+    if(__atomic_load_n(&turn_edge_writer_active[slot],__ATOMIC_ACQUIRE)!=0u ||
+       head_after!=head)
+        return state->asserted;
+
+    *sample_valid=true;
     return ot_signal_debouncer_sample(state,now_us,OT_DEBOUNCE_TICKS);
 }
 /* RMT drivers are created to the SAVED output length, never the board-wide
@@ -2006,24 +2054,28 @@ static void input_sampler_task(void *arg){
          * Brake is asserted: Brake > Turn is enforced downstream by arbitration,
          * while preserving turn state lets the signal resume without a reset. */
         const uint64_t now_us=(uint64_t)esp_timer_get_time();
+        bool left_valid=false,right_valid=false;
         const bool left=turn_edge_queue_update(0u,&turn_signal[0],now_us,
-            input_boot_snapshot_us,levels[2]);
+            input_boot_snapshot_us,&left_valid);
         const bool right=turn_edge_queue_update(1u,&turn_signal[1],now_us,
-            input_boot_snapshot_us,levels[3]);
-        physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
-        if(left)physical|=OT_SIG_LEFT;
-        if(right)physical|=OT_SIG_RIGHT;
-        TaskHandle_t target=NULL;
-        portENTER_CRITICAL(&state_lock);
-        if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
-        /* Sampler never writes NVS or swaps a journaled profile. Physical
-         * edges reset the independent quiet-window gate for the promoter. */
-        if(instantaneous==0u && physical==0u){
-            if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
-        }else input_quiet_samples=0u;
-        portEXIT_CRITICAL(&state_lock);
-        ot_sw_idf_input_sampled(); /* eight real GPIO reads + debounce published */
-        if(target)xTaskNotifyGive(target);
+            input_boot_snapshot_us,&right_valid);
+        if(left_valid&&right_valid){
+            physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
+            if(left)physical|=OT_SIG_LEFT;
+            if(right)physical|=OT_SIG_RIGHT;
+            TaskHandle_t target=NULL;
+            portENTER_CRITICAL(&state_lock);
+            if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
+            /* Sampler never writes NVS or swaps a journaled profile. Physical
+             * edges reset the independent quiet-window gate for the promoter. */
+            if(instantaneous==0u && physical==0u){
+                if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
+            }else input_quiet_samples=0u;
+            portEXIT_CRITICAL(&state_lock);
+            ot_sw_idf_input_sampled(); /* eight GPIO reads + complete edge history */
+            if(target)xTaskNotifyGive(target);
+        }
+        /* In-flight/unpublished turn edges defer this sampler heartbeat. */
         vTaskDelayUntil(&last_wake,period);
     }
 }
