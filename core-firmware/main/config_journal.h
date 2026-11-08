@@ -62,9 +62,8 @@ bool ot_om_journal_recover(const ot_om_journal_t *active,
                            ot_om_output_t live[OT_OM_OUTPUTS],
                            ot_om_pending_t *pending);
 
-/* Issue #126 hierarchical Panel/Zone journal. Kept in the existing output
- * namespace and promoter protocol, but on distinct keys and an explicit v3
- * schema so v1/v2 byte layouts are never reinterpreted. */
+/* Issue #126 hierarchical Panel/Zone journal. Stored in the dedicated
+ * ot_zone_map namespace; legacy v1/v2 profiles remain read-only in ot_output_cfg. */
 #define OT_PZ_JOURNAL_MAGIC 0x4f54504au
 #define OT_PZ_JOURNAL_VERSION OT_PZ_SCHEMA_VERSION
 #define OT_PZ_JOURNAL_KEY_ACTIVE "panel_active"
