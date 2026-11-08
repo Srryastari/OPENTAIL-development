@@ -73,7 +73,7 @@ assert "static bool read_turn_input_snapshot(" in core
 assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
-assert "const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);" in logic
+assert "const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);" in logic
 assert "edge_ahead<0x80000000u" in logic
 assert "if (raw_asserted && state->release_pending && level_changed && !sequence_changed)" in logic
 assert "const bool new_edge=(sequence_changed||level_changed)" in logic
