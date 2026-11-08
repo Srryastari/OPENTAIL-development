@@ -91,6 +91,7 @@ static bool input_sampler_ready=false;
 static volatile uint32_t input_edge_epoch=0u;
 /* ISR-captured timestamps distinguish a real late reassertion from sampler jitter. */
 static DRAM_ATTR volatile uint32_t turn_edge_us[2]={0u,0u};
+static DRAM_ATTR volatile uint32_t turn_edge_seq[2]={0u,0u};
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
 static bool config_promotion_ready=false;
@@ -1668,8 +1669,11 @@ static bool wifi_ap_init(void) {
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     if(input_index==2u || input_index==3u){
+        const unsigned slot=input_index-2u;
+        (void)__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL); /* writer: odd */
         const uint32_t edge_us=(uint32_t)esp_timer_get_time();
-        __atomic_store_n(&turn_edge_us[input_index-2u],edge_us,__ATOMIC_RELAXED);
+        __atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED);
+        (void)__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_RELEASE); /* writer: even */
     }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
@@ -1698,6 +1702,32 @@ static bool input_init(void) {
         }
     }
     return true;
+}
+/* Read a turn GPIO, its latest edge timestamp and edge sequence as one
+ * coherent snapshot. A racing edge invalidates the sample; caller then skips
+ * watchdog progress rather than publishing a mixed level/timestamp pair. */
+static bool read_turn_input_snapshot(unsigned input_index,bool *asserted,
+                                     uint32_t *sample_us,uint32_t *edge_us,
+                                     uint32_t *edge_sequence){
+    if(input_index<2u||input_index>3u||!asserted||!sample_us||
+       !edge_us||!edge_sequence)return false;
+    const unsigned slot=input_index-2u;
+    for(unsigned attempt=0u;attempt<3u;attempt++){
+        const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);
+        if(before&1u)continue;
+        const uint32_t now=(uint32_t)esp_timer_get_time();
+        const int level=gpio_get_level(input_pin[input_index]);
+        const uint32_t edge=__atomic_load_n(&turn_edge_us[slot],__ATOMIC_RELAXED);
+        const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);
+        if(before==after&&!(after&1u)){
+            *asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            *sample_us=now;
+            *edge_us=edge;
+            *edge_sequence=after;
+            return true;
+        }
+    }
+    return false;
 }
 /* RMT drivers are created to the SAVED output length, never the board-wide
  * memory safety budget. Resizing is render-task-owned; old pixels are cleared
@@ -1914,30 +1944,46 @@ static void input_sampler_task(void *arg){
         sampler.pending[i]=asserted;
         sampler.ticks[i]=OT_DEBOUNCE_TICKS;
     }
-    ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);
-    ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);
+    ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u,
+        __atomic_load_n(&turn_edge_seq[0],__ATOMIC_ACQUIRE));
+    ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u,
+        __atomic_load_n(&turn_edge_seq[1],__ATOMIC_ACQUIRE));
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
     for(;;){
         bool levels[OT_IN_COUNT];
         uint8_t instantaneous=0;
+        uint32_t turn_sample_us[2]={0u,0u};
+        uint32_t turn_edge_snapshot_us[2]={0u,0u};
+        uint32_t turn_edge_snapshot_seq[2]={0u,0u};
+        bool sample_valid=true;
         for(unsigned i=0;i<OT_IN_COUNT;i++){
-            const int level=gpio_get_level(input_pin[i]);
-            levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            if(i==2u||i==3u){
+                const unsigned slot=i-2u;
+                sample_valid=read_turn_input_snapshot(i,&levels[i],
+                    &turn_sample_us[slot],&turn_edge_snapshot_us[slot],
+                    &turn_edge_snapshot_seq[slot]);
+                if(!sample_valid)break;
+            }else{
+                const int level=gpio_get_level(input_pin[i]);
+                levels[i]=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+            }
             if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
+        if(!sample_valid){
+            vTaskDelayUntil(&last_wake,period);
+            continue; /* no watchdog progress from a torn GPIO snapshot */
+        }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
-        /* Use raw GPIO levels for turn release timing, not the 40ms settled
-         * falling edge. Only IN3/IN4 get the 400ms hold; all other channels
-         * retain the ordinary four-sample debounce above. */
-        const uint32_t sample_us=(uint32_t)esp_timer_get_time();
-        const uint32_t left_edge_us=__atomic_load_n(&turn_edge_us[0],__ATOMIC_ACQUIRE);
-        const uint32_t right_edge_us=__atomic_load_n(&turn_edge_us[1],__ATOMIC_ACQUIRE);
+        /* Only IN3/IN4 use the 400ms raw-edge release hold. The other six
+         * inputs retain the original four-sample assertion/release timing. */
         const bool left=ot_signal_debouncer_update(&turn_signal[0],levels[2],
-            sample_us,left_edge_us,OT_DEBOUNCE_TICKS);
+            turn_sample_us[0],turn_edge_snapshot_us[0],turn_edge_snapshot_seq[0],
+            OT_DEBOUNCE_TICKS);
         const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
-            sample_us,right_edge_us,OT_DEBOUNCE_TICKS);
+            turn_sample_us[1],turn_edge_snapshot_us[1],turn_edge_snapshot_seq[1],
+            OT_DEBOUNCE_TICKS);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
         if(left)physical|=OT_SIG_LEFT;
         if(right)physical|=OT_SIG_RIGHT;
