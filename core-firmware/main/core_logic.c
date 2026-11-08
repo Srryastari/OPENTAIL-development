@@ -35,107 +35,78 @@ uint8_t ot_debounce(ot_inputs_t *in, const bool levels[OT_IN_COUNT], unsigned st
     return mask;
 }
 
-void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted,
-                              uint32_t initial_edge_sequence) {
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted) {
     if (!state) return;
     *state=(ot_signal_debouncer_t){
         .asserted=initial_asserted,
-        .last_edge_sequence=initial_edge_sequence,
-        .last_raw_asserted=initial_asserted
+        .raw_asserted=initial_asserted
     };
 }
 
-bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_us, uint32_t raw_previous_edge_us,
-                                uint32_t raw_edge_us, uint32_t raw_edge_sequence,
-                                unsigned stable_ticks) {
-    if (!state) return false;
-    const uint32_t edge_delta=(uint32_t)(raw_edge_sequence-state->last_edge_sequence);
-    const bool sequence_changed=(edge_delta!=0u);
-    const bool level_changed=(raw_asserted!=state->last_raw_asserted);
-    /* A GPIO level can change just before its ISR publishes the edge record.
-     * Defer both assertion and release classification until the matching
-     * sequence arrives; never pair a new level with a stale edge timestamp. */
-    if (state->awaiting_edge_record) {
-        if (!sequence_changed) return state->asserted;
-        state->awaiting_edge_record=false;
-    }
-    if (level_changed && !sequence_changed) {
-        state->awaiting_edge_record=true;
-        return state->asserted;
-    }
-    if (sequence_changed) {
-        const bool expected_raw=state->last_raw_asserted ^ (((edge_delta/2u)&1u)!=0u);
-        if (raw_asserted!=expected_raw) {
-            /* The pin changed again before all corresponding GPIO ISRs ran. */
-            state->awaiting_edge_record=true;
-            return state->asserted;
-        }
-    }
-    const uint32_t effective_edge_us=raw_edge_us;
-    /* A mismatched snapshot must never make unsigned elapsed time look huge. */
-    const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);
-    if (edge_ahead!=0u && edge_ahead<0x80000000u) return state->asserted;
-    if (stable_ticks<1u) stable_ticks=1u;
-    if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
-    const bool new_edge=(sequence_changed||level_changed);
-    state->last_edge_sequence=raw_edge_sequence;
-    state->last_raw_asserted=raw_asserted;
+void ot_signal_debouncer_transition(ot_signal_debouncer_t *state, bool raw_asserted,
+                                    uint64_t edge_time_us) {
+    if (!state || raw_asserted==state->raw_asserted) return;
 
+    /* Expire at the absolute deadline BEFORE classifying an edge at or after
+     * it. Equality is expiry: a late pulse starts a fresh 4-sample assertion. */
+    if (state->release_pending && edge_time_us>=state->release_deadline_us) {
+        state->asserted=false;
+        state->release_pending=false;
+        state->assertion_ticks=0u;
+    }
+
+    state->raw_asserted=raw_asserted;
     if (raw_asserted) {
         if (state->release_pending) {
-            const uint32_t inactive_us=(uint32_t)(effective_edge_us-state->inactive_since_us);
-            if (inactive_us>=OT_TURN_RELEASE_HOLD_US) {
-                /* The previous assertion expired; this is a new edge and
-                 * must pass the normal assertion qualification again. */
-                state->asserted=false;
-                state->assertion_ticks=0u;
-            } else {
-                /* Reassertion before the deadline bridges the flash gap and
-                 * never publishes a false falling edge to the renderer. */
-                state->release_pending=false;
-                return state->asserted;
-            }
+            /* A rising edge strictly before expiry bridges this flash gap. */
             state->release_pending=false;
+        } else if (!state->asserted) {
+            state->assertion_ticks=0u;
         }
-        if (state->asserted) return true;
-        if (state->assertion_ticks<(uint8_t)stable_ticks) state->assertion_ticks++;
-        if (state->assertion_ticks>=(uint8_t)stable_ticks) state->asserted=true;
-        return state->asserted;
+        return;
     }
 
     state->assertion_ticks=0u;
-    if (!state->asserted) {
-        state->release_pending=false;
-        return false;
-    }
-    /* If multiple edges arrived between sampler wakes, the penultimate
-     * edge is the latest assertion and the final edge is its falling edge.
-     * A pulse that began after the original 400ms deadline cannot resurrect
-     * the old assertion; it must pass the normal four-sample qualification. */
-    if (state->release_pending && new_edge && (edge_delta/2u)>=2u) {
-        const uint32_t assertion_age=(uint32_t)(raw_previous_edge_us-
-                                                state->inactive_since_us);
-        if (assertion_age<0x80000000u &&
-            assertion_age>=OT_TURN_RELEASE_HOLD_US) {
-            state->asserted=false;
-            state->release_pending=false;
-            state->assertion_ticks=0u;
-            return false;
-        }
-    }
-    /* A pre-deadline reassertion followed by a new falling edge starts a
-     * fresh continuous-inactive interval at that latest falling edge. */
-    if (!state->release_pending || new_edge) {
+    if (state->asserted) {
         state->release_pending=true;
-        state->inactive_since_us=effective_edge_us;
+        state->release_deadline_us=edge_time_us+OT_TURN_RELEASE_HOLD_US;
+    } else {
+        state->release_pending=false;
     }
-    if ((uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US) {
+}
+
+bool ot_signal_debouncer_sample(ot_signal_debouncer_t *state, uint64_t now_us,
+                                unsigned stable_ticks) {
+    if (!state) return false;
+    if (state->release_pending && now_us>=state->release_deadline_us) {
         state->asserted=false;
         state->release_pending=false;
+        state->assertion_ticks=0u;
+    }
+    if (!state->raw_asserted) {
+        state->assertion_ticks=0u;
+    } else if (!state->asserted) {
+        if (stable_ticks<1u) stable_ticks=1u;
+        if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
+        if (state->assertion_ticks<(uint8_t)stable_ticks)
+            state->assertion_ticks++;
+        if (state->assertion_ticks>=(uint8_t)stable_ticks)
+            state->asserted=true;
     }
     return state->asserted;
 }
+
+void ot_signal_debouncer_resync(ot_signal_debouncer_t *state, bool raw_asserted) {
+    if (!state) return;
+    *state=(ot_signal_debouncer_t){
+        .asserted=false,
+        .raw_asserted=raw_asserted,
+        .release_pending=false,
+        .assertion_ticks=0u,
+        .release_deadline_us=0u
+    };
+}
+
 ot_rgb_t ot_pixel_color(const ot_layout_t *cfg, int chain, unsigned pixel, uint8_t signal_mask,
                         const ot_demo_t *demo, uint32_t tick) {
     const ot_rgb_t off={0,0,0};
