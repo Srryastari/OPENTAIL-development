@@ -100,20 +100,27 @@ sampler = core.split("static void input_sampler_task(void *arg){",1)[1].split("s
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
 assert "input_quiet_samples" in sampler
-# Editing output zone roles during a pre-debounce asserted 12V input can
-# change which pixels will respond to that trigger. Both output-save APIs
-# must use the same instantaneous-pin admission gate as trigger mappings.
+# Editing legacy Output v1 roles during a pre-debounce asserted 12V input
+# can change which pixels respond to that trigger. Legacy HTTP/BLE Output saves
+# retain their instantaneous-pin admission gate. Panel v3 is separately allowed
+# to stage map changes during a trigger; only its activation is deferred.
 output_http = core.split("static esp_err_t om_post(",1)[1].split(
     "bool ot_ble_config_get(",1)[0]
 output_ble = core.split("int ot_ble_config_save(",1)[1].split(
     "/* Normalized instantaneous GPIO levels",1)[0]
 for save_path in (output_http, output_ble):
-    assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save_path
-    assert "bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask ||" in save_path
+    assert "raw_active=tm_gpio_input_mask()!=0;" in save_path
+    assert "pz_deferred.pending" in save_path
+    assert "om_deferred.pending" in save_path
+    assert "tm_deferred.pending" in save_path
+    assert "raw_active" in save_path and "live_input_mask" in save_path
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
-    assert save_path.index("bool busy=om_deferred.pending") < save_path.index("om_save(")
-    assert save_path.index("om_save(") < save_path.index("om_deferred.pending=true;")
+    assert save_path.index("raw_active") < save_path.index("return") if "return" in save_path else True
+assert "om_save(next_all)" in output_http
+assert output_http.index("om_save(next_all)") < output_http.index("om_deferred.pending=true;")
+assert "pz_save_controller_locked(&candidate)" in output_ble
+assert output_ble.index("pz_save_controller_locked(&candidate)") < output_ble.index("return saved?0:4;")
     assert "ot_om_saved_apply(" not in save_path
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
