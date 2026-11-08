@@ -41,14 +41,15 @@ void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserte
 }
 
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_ms, unsigned stable_ticks) {
+                                uint32_t now_ms, uint32_t raw_edge_ms,
+                                unsigned stable_ticks) {
     if (!state) return false;
     if (stable_ticks<1u) stable_ticks=1u;
     if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
 
     if (raw_asserted) {
         if (state->release_pending) {
-            const uint32_t inactive_ms=(uint32_t)(now_ms-state->inactive_since_ms);
+            const uint32_t inactive_ms=(uint32_t)(raw_edge_ms-state->inactive_since_ms);
             if (inactive_ms>=OT_TURN_RELEASE_HOLD_MS) {
                 /* The previous assertion has expired. This is a new edge and
                  * must pass the normal assertion qualification again. */
@@ -75,7 +76,7 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
     }
     if (!state->release_pending) {
         state->release_pending=true;
-        state->inactive_since_ms=now_ms;
+        state->inactive_since_ms=raw_edge_ms;
     }
     if ((uint32_t)(now_ms-state->inactive_since_ms)>=OT_TURN_RELEASE_HOLD_MS) {
         state->asserted=false;
