@@ -18,9 +18,10 @@ typedef struct {
     uint8_t ticks[OT_IN_COUNT];
 } ot_inputs_t;
 
-/* Turn-only release hold. now_ms is a monotonic millisecond clock truncated
- * to uint32_t; unsigned elapsed subtraction remains wrap-safe for this
- * 400ms interval. Assertion still requires the existing four stable samples. */
+/* Turn-only release hold. now_ms is the sampler's monotonic millisecond
+ * clock; raw_edge_ms is the latest GPIO edge timestamp captured in the ISR.
+ * Both are uint32_t milliseconds, so short elapsed intervals remain wrap-safe.
+ * Assertion still requires the existing four stable samples. */
 #define OT_TURN_RELEASE_HOLD_MS 400u
 typedef struct {
     bool asserted;
