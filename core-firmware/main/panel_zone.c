@@ -357,8 +357,7 @@ bool ot_pz_wire_decode(const uint8_t wire[OT_PZ_MAX_WIRE_BYTES],
         zone->panel_id=read_le16(wire+k);k+=2u;
         memcpy(zone->name,wire+k,OT_PZ_NAME_LEN);k+=OT_PZ_NAME_LEN;
         zone->role=wire[k++];zone->flags=wire[k++];zone->range_count=wire[k++];
-        if(zone->range_count>OT_PZ_MAX_RANGES_PER_ZONE||
-           (zone->flags&OT_PZ_ZONE_FLAG_LEGACY_EMPTY)!=0u)return false;
+        if(zone->range_count>OT_PZ_MAX_RANGES_PER_ZONE)return false;
         for(unsigned r=0;r<OT_PZ_MAX_RANGES_PER_ZONE;r++){
             zone->ranges[r].start=read_le16(wire+k);k+=2u;
             zone->ranges[r].count=read_le16(wire+k);k+=2u;
