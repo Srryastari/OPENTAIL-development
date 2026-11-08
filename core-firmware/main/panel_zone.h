@@ -66,6 +66,7 @@ typedef struct {
     uint16_t base_revision;
     uint8_t lane;
     bool active;
+    bool committing; /* Freeze preview edits/lease while its journal commit is pending. */
 } ot_pz_preview_t;
 
 typedef struct {
