@@ -1,4 +1,16 @@
 menu "OpenTail CORE Alpha"
+  config OPENTAIL_WATCHDOG_TEST_FAULT
+    int "BENCH ONLY: inject a watchdog fault after 5 seconds (0 disables)"
+    range 0 7
+    default 0
+    help
+      Compile-time test only; default 0 is required for normal bench images.
+      1=suspend input sampler before its TWDT feed; 2=suspend render task;
+      3=suspend before output 1 RMT submit; 4=suspend before output 1 RMT
+      completion wait; 5=starve render-core idle task; 6=block interrupts
+      to exercise IWDT; 7=software panic. A selected fault repeats on
+      recovery boots until the three-reset quarantine suppresses injection.
+      No BLE or HTTP runtime control exists. Never use in a vehicle.
   config OPENTAIL_AP_PASSWORD
     string "Bench-only Wi-Fi AP WPA2 password (8-63 characters)"
     default "OpenTailLab-ChangeMe"
