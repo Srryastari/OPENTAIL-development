@@ -116,11 +116,15 @@ for save_path in (output_http, output_ble):
     assert "raw_active" in save_path and "live_input_mask" in save_path
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
-    assert save_path.index("raw_active") < save_path.index("return") if "return" in save_path else True
+assert re.search(r"busy\\s*=\\s*pz_deferred\\.pending", output_http)
+assert output_http.index("bool busy=") < output_http.index("om_save(next_all)")
 assert "om_save(next_all)" in output_http
-assert output_http.index("om_save(next_all)") < output_http.index("om_deferred.pending=true;")
-assert "pz_save_controller_locked(&candidate)" in output_ble
-assert output_ble.index("pz_save_controller_locked(&candidate)") < output_ble.index("return saved?0:4;")
+om_save_impl = core.split("static bool om_save(",1)[1].split(
+    "static void pz_sync_from_legacy(",1)[0]
+assert "pz_save_controller_locked(&candidate)" in om_save_impl
+assert re.search(r"busy\\s*=\\s*pz_deferred\\.pending", output_ble)
+assert output_ble.index("busy=pz_deferred.pending") < output_ble.index(
+    "pz_save_controller_locked(&candidate)")
     assert "ot_om_saved_apply(" not in save_path
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
