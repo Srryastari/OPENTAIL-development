@@ -66,7 +66,7 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_brightness_contrac
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
-  main/config_journal.c main/trigger_manager.c main/output_manager.c \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c tests/test_config_journal.c \
   -o /tmp/ot-config-journal-tests && /tmp/ot-config-journal-tests
 
@@ -149,7 +149,7 @@ python3 tests/test_effects_render_safety_contract.py
 # The same corrected NVS recovery journal must preserve independently
 # assigned FX zones and never auto-play a saved show after reboot.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
-  main/config_journal.c main/trigger_manager.c main/output_manager.c \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c main/fx_zone_bank.c \
   main/fx_overlay_engine.c tests/test_effects_nvs_recovery_isolation.c \
   -o /tmp/ot-effects-nvs-isolation && /tmp/ot-effects-nvs-isolation
