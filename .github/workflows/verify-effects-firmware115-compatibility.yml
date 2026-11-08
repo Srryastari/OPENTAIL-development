@@ -31,6 +31,7 @@ jobs:
       - name: Full authoritative 140-effect, source-golden, palette, OEM safety, NVS, STOP and watchdog host regressions
         run: cd core-firmware && bash tests/run-host-tests.sh
       - name: Render all 140 effects at maximum output length with watchdog progress policy
+        working-directory: core-firmware
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Imain \
             main/ot_single_watchdog.c main/effects_1d.c main/ot_auto_effects.c \
