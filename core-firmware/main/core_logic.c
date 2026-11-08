@@ -78,7 +78,7 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
         state->release_pending=true;
         state->inactive_since_ms=raw_edge_ms;
     }
-    if ((uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_MS) {
+    if ((uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US) {
         state->asserted=false;
         state->release_pending=false;
     }
