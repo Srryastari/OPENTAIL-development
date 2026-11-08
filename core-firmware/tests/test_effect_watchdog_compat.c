@@ -23,6 +23,27 @@ typedef struct {
 static guarded_lane_t lane[2];
 static ot_effects_1d_state_t state[2];
 
+static bool modeled_render_feed(uint64_t cycle_start_ms,
+                                uint64_t last_feed_ms,
+                                uint32_t render_work_ms,
+                                uint32_t completion_wait_ms,
+                                bool all_lanes_completed,
+                                bool any_lane_completed,
+                                uint64_t timeout_ms,
+                                uint64_t *feed_at_ms) {
+    if (!feed_at_ms ||
+        !ot_sw_render_progress_eligible(all_lanes_completed, any_lane_completed))
+        return false;
+    /* Render work happens before the async completion wait. The model adds
+     * both delays, intentionally not assuming RMT overlaps all CPU work. */
+    const uint64_t completed_at =
+        cycle_start_ms + (uint64_t)render_work_ms + completion_wait_ms;
+    if (completed_at - last_feed_ms >= timeout_ms)
+        return false;
+    *feed_at_ms = completed_at;
+    return true;
+}
+
 int main(void) {
     uint16_t ids[160] = {0};
     const size_t count = ot_effects_1d_supported_ids(ids, 160u);
@@ -35,6 +56,7 @@ int main(void) {
         (uint64_t)OT_OM_MAX_PIXELS_PER_OUTPUT * 30u + 300u;
     const uint64_t transfer_ms = (wire_us + 999u) / 1000u;
     const uint64_t twdt_timeout_ms = 15000u;
+    const uint32_t injected_render_work_ms = 250u;
 
     /* 800-kHz RGB wire-time budget for one maximum-length lane. Both RMT
      * submissions overlap; the longest lane bounds normal completion time. */
@@ -87,24 +109,31 @@ int main(void) {
                         assert(lane[1].before == 0xabcdef01u &&
                                lane[1].after == 0x10203040u);
 
-                        /* Normal case: both independently submitted RMT lanes
-                         * return ESP_OK from async_done; the render WDT user
-                         * is therefore eligible for a real feed. */
-                        assert(ot_sw_render_progress_eligible(true, true));
-                        now_ms += transfer_ms > cadences[ci]
-                            ? transfer_ms : cadences[ci];
-                        assert(now_ms - last_feed_ms < twdt_timeout_ms);
-                        last_feed_ms = now_ms;
+                        /* Normal case: add a synthetic renderer delay AND the
+                         * RMT completion wait before evaluating the 15s deadline.
+                         * Both lanes complete; this models the exact feed policy. */
+                        uint64_t next_feed_ms = 0u;
+                        assert(modeled_render_feed(now_ms,last_feed_ms,
+                            injected_render_work_ms,(uint32_t)transfer_ms,
+                            true,true,twdt_timeout_ms,&next_feed_ms));
+                        assert(next_feed_ms - last_feed_ms < twdt_timeout_ms);
+                        now_ms = next_feed_ms;
+                        last_feed_ms = next_feed_ms;
 
-                        /* One-lane fault: a completed surviving lane is genuine
-                         * progress, but it cannot satisfy full-frame stability. */
-                        assert(ot_sw_render_progress_eligible(false, true));
-                        now_ms += transfer_ms;
-                        assert(now_ms - last_feed_ms < twdt_timeout_ms);
-                        last_feed_ms = now_ms;
+                        /* One-lane fault: the surviving completion can feed,
+                         * but the production stable-window source guard still
+                         * requires all outputs and fresh inputs. */
+                        assert(modeled_render_feed(now_ms,last_feed_ms,
+                            injected_render_work_ms,(uint32_t)transfer_ms,
+                            false,true,twdt_timeout_ms,&next_feed_ms));
+                        assert(next_feed_ms - last_feed_ms < twdt_timeout_ms);
+                        now_ms = next_feed_ms;
+                        last_feed_ms = next_feed_ms;
 
-                        /* Neither transfer completed: queued work is not progress. */
-                        assert(!ot_sw_render_progress_eligible(false, false));
+                        /* Neither transfer completed: no feed, even when the
+                         * modeled render + wait interval reaches the deadline. */
+                        assert(!modeled_render_feed(now_ms,last_feed_ms,
+                            15000u,0u,false,false,twdt_timeout_ms,&next_feed_ms));
                         rendered_frames++;
                     }
                 }
@@ -112,20 +141,25 @@ int main(void) {
         }
     }
 
-    /* A fully stalled renderer has no eligible feed and reaches the configured
-     * 15-second timeout; this is a deterministic policy model, not a live WDT. */
-    const uint64_t stalled_at = now_ms;
-    assert(!ot_sw_render_progress_eligible(false, false));
-    now_ms += twdt_timeout_ms;
-    assert(now_ms - stalled_at == twdt_timeout_ms);
+    /* Exercise both sides of the deadline boundary. A 14,900ms render
+     * plus 62ms completion can feed before 15s; a 14,940ms render plus 62ms
+     * completion is overdue and must be rejected. Neither result is hardware. */
+    uint64_t boundary_feed = 0u;
+    assert(modeled_render_feed(0u,0u,14900u,(uint32_t)transfer_ms,
+                               true,true,twdt_timeout_ms,&boundary_feed));
+    assert(boundary_feed == 14900u + transfer_ms);
+    assert(!modeled_render_feed(0u,0u,14940u,(uint32_t)transfer_ms,
+                                true,true,twdt_timeout_ms,&boundary_feed));
+    assert(!modeled_render_feed(0u,0u,15000u,0u,false,false,
+                                twdt_timeout_ms,&boundary_feed));
 
     printf("PASS HOST_SIMULATED Effects/#115 watchdog compatibility: %zu/140 effects, "
            "%u dual-lane frames, Speed/Intensity 0/255, 8/33ms cadence, "
-           "%llu-pixel lane wire bound %llums vs %llums TWDT; "
-           "single-lane progress and zero-lane timeout policy verified; "
+           "synthetic render delay %ums + %llums completion < %llums TWDT; "
+           "14,900+62ms deadline PASS, 14,940+62ms overdue FAIL-CLOSED; "
            "RMT/TWDT hardware NOT_RUN\n",
            count, (unsigned)rendered_frames,
-           (unsigned long long)OT_OM_MAX_PIXELS_PER_OUTPUT,
+           (unsigned)injected_render_work_ms,
            (unsigned long long)transfer_ms,
            (unsigned long long)twdt_timeout_ms);
     return 0;
