@@ -12,6 +12,7 @@ root = Path(__file__).resolve().parents[1] / "main"
 core = (root / "opentail_core.c").read_text(encoding="utf-8")
 board = (root / "board_config.h").read_text(encoding="utf-8")
 logic = (root / "core_logic.c").read_text(encoding="utf-8")
+logic_header = (root / "core_logic.h").read_text(encoding="utf-8")
 ble = (root / "ble_status.c").read_text(encoding="utf-8")
 outputs = (root / "output_manager.c").read_text(encoding="utf-8")
 manager = (root / "trigger_manager.c").read_text(encoding="utf-8")
@@ -48,6 +49,30 @@ for token in ("pdMS_TO_TICKS(10u)", "gpio_get_level(input_pin[i])",
     assert token in sampler, f"Input sampler contract lost: {token}"
 assert "in->ticks[i]>=stable_ticks" in logic
 assert "in->settled[i]=in->pending[i]" in logic
+
+# Issue121: only raw IN3/IN4 feed independent 400ms release-hold states.
+# Assertion remains four stable 10ms samples; monotonic uint32 elapsed math
+# is wrap-safe. The other six channels remain on the original ot_debounce.
+assert "#define OT_TURN_RELEASE_HOLD_MS 400u" in logic_header
+assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
+assert "ot_signal_debouncer_init" in logic
+assert "ot_signal_debouncer_update" in logic
+assert "(uint32_t)(now_ms-state->inactive_since_ms)>=OT_TURN_RELEASE_HOLD_MS" in logic
+assert "static void input_sampler_task(void *arg){" in core
+assert "ot_signal_debouncer_t turn_signal[2];" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
+assert sampler.count("ot_signal_debouncer_update(") == 2
+assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
+assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
+assert "esp_timer_get_time()/1000LL" in sampler
+assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
+assert "if(left)physical|=OT_SIG_LEFT;" in sampler
+assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
+assert sampler.index("live_input_mask=physical") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("portEXIT_CRITICAL(&state_lock);") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("if(target)xTaskNotifyGive(target);")
+assert "millis()" not in logic and "Arduino.h" not in logic_header
 
 # 3: universal user mapping, duplicate/disabled functions and no
 # car-specific physical assignments in trigger resolution.
