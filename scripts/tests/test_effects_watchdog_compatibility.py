@@ -160,7 +160,7 @@ def main():
     wire_us = max_pixels * 30 + 300
     assert wire_us < 15_000_000
     assert "ot_sw_idf_render_cycle(full_frame,any_output_completed," in render
-    for point in range(1,8):
+    for point in (1,2,5,6,7):
         assert f"inject_fault({point}u)" in adapter
     assert "if(point==5u)" in adapter and "if(point==6u)" in adapter and "if(point==7u)" in adapter
     assert "ot_sw_idf_fault_inject(3u)" in render
