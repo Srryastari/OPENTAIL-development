@@ -16,6 +16,18 @@ int main(void){
  req.speed=200;
  assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,1000001u));
  assert(bank.zones[0][0].generation==gen&&bank.zones[0][0].started_ms==100);
+ /* Simulate a burst of authenticated same-effect BLE parameter updates.
+  * The zone generation/start anchor must remain stable so CORE does not
+  * reset the stateful renderer on each update. This is a host contract,
+  * not a radio-throughput or on-device latency measurement. */
+ for(unsigned i=0;i<128u;i++){
+  req.speed=(uint8_t)i;
+  req.intensity=(uint8_t)(255u-i);
+  req.r=(uint8_t)(i*3u);req.g=(uint8_t)(i*5u);req.b=(uint8_t)(i*7u);
+  assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,1000002u+i));
+  assert(bank.zones[0][0].generation==gen&&bank.zones[0][0].started_ms==100);
+  assert(bank.zones[1][0].generation==gen&&bank.zones[1][0].started_ms==100);
+ }
  before=bank;
  req.zone_mask=2;
  assert(!ot_fx_bank_apply_continuous(&bank,&req,outputs,1000002u));
