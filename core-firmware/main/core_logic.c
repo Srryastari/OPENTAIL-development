@@ -35,23 +35,33 @@ uint8_t ot_debounce(ot_inputs_t *in, const bool levels[OT_IN_COUNT], unsigned st
     return mask;
 }
 
-void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted) {
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted,
+                              uint32_t initial_edge_sequence) {
     if (!state) return;
-    *state=(ot_signal_debouncer_t){.asserted=initial_asserted};
+    *state=(ot_signal_debouncer_t){
+        .asserted=initial_asserted,
+        .last_edge_sequence=initial_edge_sequence,
+        .last_raw_asserted=initial_asserted
+    };
 }
 
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
                                 uint32_t now_us, uint32_t raw_edge_us,
-                                unsigned stable_ticks) {
+                                uint32_t raw_edge_sequence, unsigned stable_ticks) {
     if (!state) return false;
+    /* A mismatched snapshot must never make unsigned elapsed time look huge. */
+    if ((int32_t)(raw_edge_us-now_us)>0) return state->asserted;
     if (stable_ticks<1u) stable_ticks=1u;
     if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
+    const bool new_edge=(raw_edge_sequence!=state->last_edge_sequence);
+    state->last_edge_sequence=raw_edge_sequence;
+    state->last_raw_asserted=raw_asserted;
 
     if (raw_asserted) {
         if (state->release_pending) {
             const uint32_t inactive_us=(uint32_t)(raw_edge_us-state->inactive_since_us);
             if (inactive_us>=OT_TURN_RELEASE_HOLD_US) {
-                /* The previous assertion has expired. This is a new edge and
+                /* The previous assertion expired; this is a new edge and
                  * must pass the normal assertion qualification again. */
                 state->asserted=false;
                 state->assertion_ticks=0u;
@@ -74,9 +84,11 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
         state->release_pending=false;
         return false;
     }
-    if (!state->release_pending) {
+    /* A newer falling edge means the signal reasserted and dropped again
+     * between sampler wakes. Restart the continuous-inactive interval. */
+    if (!state->release_pending || new_edge) {
         state->release_pending=true;
-        state->inactive_since_us=raw_edge_ms;
+        state->inactive_since_us=raw_edge_us;
     }
     if ((uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US) {
         state->asserted=false;
