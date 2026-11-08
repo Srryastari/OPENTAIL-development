@@ -66,15 +66,15 @@ assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0
 assert sampler.count("ot_signal_debouncer_update(") == 2
 assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
 assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
-assert "esp_timer_get_time()" in sampler
+assert "esp_timer_get_time()" in core[core.index("static bool read_turn_input_snapshot"):core.index("/* RMT drivers") ]
 assert "read_turn_input_snapshot(i,&levels[i]," in sampler
 assert "turn_edge_snapshot_seq[slot]" in sampler
 assert "static bool read_turn_input_snapshot(" in core
 assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "if(before==after&&!(after&1u))" in core
-assert "if(!sample_valid)" in sampler
-assert sampler.index("if(!sample_valid)") < sampler.index("ot_sw_idf_input_sampled();")
+assert "if(sample_valid){" in sampler
+assert "if(!sample_valid)" not in sampler
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
 assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
 assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL)" in core
