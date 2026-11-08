@@ -1669,7 +1669,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     if(input_index==2u || input_index==3u){
         const uint32_t edge_us=(uint32_t)esp_timer_get_time();
-        __atomic_store_n(&turn_edge_ms[input_index-2u],edge_us,__ATOMIC_RELAXED);
+        __atomic_store_n(&turn_edge_us[input_index-2u],edge_us,__ATOMIC_RELAXED);
     }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
@@ -1932,12 +1932,12 @@ static void input_sampler_task(void *arg){
          * falling edge. Only IN3/IN4 get the 400ms hold; all other channels
          * retain the ordinary four-sample debounce above. */
         const uint32_t sample_us=(uint32_t)esp_timer_get_time();
-        const uint32_t left_edge_us=__atomic_load_n(&turn_edge_ms[0],__ATOMIC_ACQUIRE);
-        const uint32_t right_edge_us=__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE);
+        const uint32_t left_edge_us=__atomic_load_n(&turn_edge_us[0],__ATOMIC_ACQUIRE);
+        const uint32_t right_edge_us=__atomic_load_n(&turn_edge_us[1],__ATOMIC_ACQUIRE);
         const bool left=ot_signal_debouncer_update(&turn_signal[0],levels[2],
-            sample_ms,left_edge_ms,OT_DEBOUNCE_TICKS);
+            sample_us,left_edge_us,OT_DEBOUNCE_TICKS);
         const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
-            sample_ms,right_edge_ms,OT_DEBOUNCE_TICKS);
+            sample_us,right_edge_us,OT_DEBOUNCE_TICKS);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
         if(left)physical|=OT_SIG_LEFT;
         if(right)physical|=OT_SIG_RIGHT;
