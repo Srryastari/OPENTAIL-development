@@ -30,6 +30,9 @@ jobs:
             "core-firmware/main/ot_single_watchdog_idf.c",
             "core-firmware/main/ot_single_watchdog_idf.h",
             "core-firmware/main/opentail_core.c",
+            "core-firmware/main/ot_ota_update.c",
+            "core-firmware/main/ot_ota_update.h",
+            "core-firmware/main/Kconfig.projbuild",
             "core-firmware/main/CMakeLists.txt",
             "core-firmware/sdkconfig.defaults",
             "core-firmware/tests/test_single_watchdog.c",
@@ -40,7 +43,9 @@ jobs:
             "core-firmware/tests/test_failover_runtime_isolation.py",
             "core-firmware/tests/test_trigger_runtime_contract.py",
             "core-firmware/tests/test_ota_boot_confirmation_contract.py",
+            "core-firmware/tests/test_ota_confirm_runtime.py",
             "docs/ISSUE113-SINGLE-ESP-WATCHDOG.md",
+            "docs/ISSUE113-CANDIDATE-COMPARISON.md",
             ".github/workflows/verify-single-esp-watchdog113.yml"
           }
           changed=set(git("diff","--name-only",base,"HEAD").splitlines())
@@ -57,7 +62,6 @@ jobs:
              "core-firmware/main/trigger_manager.c",
              "core-firmware/main/output_manager.c",
              "core-firmware/main/config_journal.c",
-             "core-firmware/main/ot_ota_update.c",
              "core-firmware/main/ot_version.h",
              "core-firmware/partitions_ota.csv",
              "core-firmware/main/ot_failover_essential.c",
