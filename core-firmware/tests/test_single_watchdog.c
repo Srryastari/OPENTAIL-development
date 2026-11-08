@@ -53,6 +53,25 @@ static void separate_reset_causes(void){
         assert(!b.boot_loop_seen&&b.crash_streak_at_boot==0u);
     }
 }
+static void continuous_stability_window(void){
+    ot_sw_stability_window_t w={0};uint32_t elapsed=99u;
+    assert(!ot_sw_stability_window_update(&w,100u,false,&elapsed));
+    assert(!w.active && elapsed==0u);
+    assert(ot_sw_stability_window_update(&w,1000u,true,&elapsed));
+    assert(w.active && elapsed==0u);
+    assert(ot_sw_stability_window_update(&w,61000u,true,&elapsed));
+    assert(elapsed==60000u); /* exactly 60s of uninterrupted healthy progress */
+    assert(!ot_sw_stability_window_update(&w,61001u,false,&elapsed));
+    assert(!w.active && elapsed==0u); /* one bad cycle restarts the window */
+    assert(ot_sw_stability_window_update(&w,70000u,true,&elapsed) && elapsed==0u);
+    assert(ot_sw_stability_window_update(&w,129999u,true,&elapsed) && elapsed==59999u);
+    assert(ot_sw_stability_window_update(&w,130000u,true,&elapsed) && elapsed==60000u);
+    w.active=false;
+    assert(ot_sw_stability_window_update(&w,UINT32_MAX-1000u,true,&elapsed));
+    assert(elapsed==0u);
+    assert(ot_sw_stability_window_update(&w,58999u,true,&elapsed));
+    assert(elapsed==60000u); /* wrap-safe interval */
+}
 static void progress_based_liveness(void){
     /* Full 2-lane completion or surviving lane is actual driver progress.
      * A fault latch alone, a submitted-but-pending transfer, render-loop
@@ -71,6 +90,7 @@ int main(void){
     repeated_crash_and_bootloop();
     separate_reset_causes();
     progress_based_liveness();
+    continuous_stability_window();
     puts("PASS #113 RTC crash streak, panic/brownout/OTA reset classification, 3-crash "
          "bootloop, real sampled-input + completed-RMT progress, partial O1/O2 "
          "fault handling, fail-closed NVS and stable boot; host only");
