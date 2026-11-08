@@ -78,4 +78,18 @@ assert "ot_om_limit_brightness" in output_header
 assert "ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS)" in core
 assert "auto_sweep" not in core.lower()
 
-print("PASS Issue126 static runtime, namespace, ISR telemetry and brightness contracts")
+# Destructive reset is a revision-bound authenticated challenge/confirm flow.
+panel_api = (ROOT / "main/panel_zone_api.h").read_text()
+for token in ("ot_ble_panel_reset_challenge", "ot_ble_panel_reset_confirm",
+              "OT_PZ_RESET_CHALLENGE_TTL_MS"):
+    assert token in panel_api, token
+for token in ("opcode==0xffu&&lane==0xaau", "opcode==0xffu&&lane==0xabu",
+              "ot_ble_panel_reset_challenge", "ot_ble_panel_reset_confirm"):
+    assert token in ble, token
+for token in ("OT_PZ_RESET_TOMBSTONE_KEY", "pz_reset_tombstone_valid",
+              "pz_reset_tombstone_set_handle", "pz_reset_pending_mask",
+              "pz_reset_challenge.expires_ms", "readback.candidate_revision"):
+    assert token in core, token
+assert "reset_v3" in core
+
+print("PASS Issue126 static runtime, namespace, ISR telemetry, brightness and reset contracts")
