@@ -12,3 +12,10 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
 bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
                         bool authenticated,bool capability_seen);
 void ot_ble_diag_disconnect(void);
+
+/* Volatile authenticated live-arrangement preview; commit uses the existing journal. */
+int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision);
+int ot_ble_panel_preview_update(uint8_t lane,const ot_pz_output_t *next,
+                                uint16_t base_revision);
+int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision);
+void ot_ble_panel_preview_cancel(void);

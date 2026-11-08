@@ -811,19 +811,94 @@ bool ot_ble_panel_get(uint8_t lane,ot_pz_output_t *out,uint16_t *active_revision
     portEXIT_CRITICAL(&state_lock);
     return true;
 }
+
+int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS)return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
+       !native_outputs_ready)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool accepted=false;
+    portENTER_CRITICAL(&state_lock);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending;
+    accepted=!pending&&pz_revision[lane]==base_revision&&
+        ot_pz_preview_begin(&pz_preview,&pz_outputs,lane,
+                            pz_active_revision[lane],base_revision,pending,now_ms);
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreGive(om_write_mutex);
+    if(accepted)request_render_refresh();
+    return accepted?0:3;
+}
+int ot_ble_panel_preview_update(uint8_t lane,const ot_pz_output_t *next,
+                                uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool accepted=false;
+    portENTER_CRITICAL(&state_lock);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending;
+    accepted=!pending&&pz_revision[lane]==base_revision&&
+        ot_pz_preview_update(&pz_preview,lane,next,base_revision,
+                             pz_active_revision[lane],pending,now_ms);
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreGive(om_write_mutex);
+    if(accepted)request_render_refresh();
+    return accepted?0:3;
+}
+int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS)return 1;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    ot_pz_controller_t candidate;
+    bool accepted=false;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    portENTER_CRITICAL(&state_lock);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending;
+    if(!pending&&pz_preview.active&&pz_preview.lane==lane&&
+       pz_preview.base_revision==base_revision&&
+       pz_active_revision[lane]==base_revision&&
+       pz_revision[lane]==base_revision&&
+       (int32_t)(now_ms-pz_preview.expires_ms)<0){
+        candidate=pz_preview.candidate;
+        accepted=true;
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if(!accepted){
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    const bool saved=pz_save_controller_locked(&candidate);
+    if(saved){
+        portENTER_CRITICAL(&state_lock);
+        if(pz_preview.active&&pz_preview.lane==lane&&
+           pz_preview.base_revision==base_revision)
+            pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        portEXIT_CRITICAL(&state_lock);
+    }
+    xSemaphoreGive(om_write_mutex);
+    return saved?0:4;
+}
+void ot_ble_panel_preview_cancel(void){
+    bool active=false;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_preview.active;
+    ot_pz_preview_cancel(&pz_preview);
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
+}
+
 int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revision){
     if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
-    const bool raw_active=tm_gpio_input_mask()!=0;
     const TickType_t now=xTaskGetTickCount();
     ot_pz_controller_t candidate;bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
     candidate=pz_outputs;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
-        raw_active||live_input_mask||
         (before_deadline(now,sim_deadline)&&sim_mask)||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
     stale=pz_revision[lane]!=base_revision;
     exhausted=pz_revision[lane]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
@@ -835,6 +910,12 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     candidate.outputs[lane]=*next;
     if(!ot_pz_valid(&candidate)){xSemaphoreGive(om_write_mutex);return 1;}
     const bool saved=pz_save_controller_locked(&candidate);
+    if(saved){
+        portENTER_CRITICAL(&state_lock);
+        pz_preview.active=false;
+        portEXIT_CRITICAL(&state_lock);
+        request_render_refresh();
+    }
     xSemaphoreGive(om_write_mutex);
     return saved?0:4;
 }
@@ -859,8 +940,9 @@ bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
 void ot_ble_diag_disconnect(void){
     bool active;
     portENTER_CRITICAL(&state_lock);
-    active=pz_diag.mode!=OT_PZ_DIAG_NONE;
+    active=pz_diag.mode!=OT_PZ_DIAG_NONE||pz_preview.active;
     ot_pz_diag_clear(&pz_diag);
+    ot_pz_preview_cancel(&pz_preview);
     portEXIT_CRITICAL(&state_lock);
     if(active)request_render_refresh();
 }
