@@ -377,8 +377,9 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             panel_response_len=(uint8_t)(5u+count);break;
         }
         case 3u:{ /* begin durable upload: version/op/lane/length/CRC/base revision */
-            if(n!=9u||panel_preview_lane!=255u){panel_ack(opcode,lane,2u);break;}
-            panel_upload_preview=false;
+            if(n!=9u){panel_ack(opcode,lane,1u);break;}
+            ot_ble_panel_preview_cancel();
+            panel_preview_lane=255;panel_upload_preview=false;
             const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
             if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
             panel_upload_crc=(uint16_t)(packet[5]|((uint16_t)packet[6]<<8));
@@ -429,10 +430,7 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
         case 0x10u:{ /* begin/renew preview upload: length, CRC16, base revision */
             const uint16_t revision=(n==9u)?
                 (uint16_t)(packet[7]|((uint16_t)packet[8]<<8)):0u;
-            if(n!=9u||(panel_preview_lane!=255u&&
-               (panel_preview_lane!=lane||panel_preview_revision!=revision))){
-                panel_ack(opcode,lane,2u);break;
-            }
+            if(n!=9u){panel_ack(opcode,lane,1u);break;}
             const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
             if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
             const int rc=ot_ble_panel_preview_begin(lane,revision);
@@ -501,6 +499,7 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             ot_ble_panel_preview_cancel();
             panel_preview_lane=255;panel_upload_index=255;panel_upload_preview=false;
             memset(panel_received,0,sizeof(panel_received));
+            panel_ack(opcode,lane,0u);
             break;
         }
         case 0xabu: /* proposed Fill opcode intentionally not accepted */
