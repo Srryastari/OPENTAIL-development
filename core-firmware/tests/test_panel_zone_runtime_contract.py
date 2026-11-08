@@ -21,8 +21,10 @@ assert "prior_fx_offset" not in core
 assert "config_activation_idle(epoch)" not in core
 assert re.search(r"ot_frame_snapshot_begin\(\(uint8_t\)ch,\s*render_pixels\[ch\]", core)
 assert "ot_pz_preview_cancel(&pz_preview)" in core
-for token in ("ot_ble_panel_preview_begin", "ot_ble_panel_preview_update",
-              "ot_ble_panel_preview_commit", "ot_ble_panel_preview_cancel"):
+for token in ("ot_ble_panel_preview_begin", "ot_ble_panel_preview_update_ranges",
+              "ot_ble_panel_preview_heartbeat", "ot_ble_panel_preview_crc32",
+              "ot_ble_panel_preview_commit", "ot_ble_panel_preview_cancel",
+              "ot_ble_panel_render_revision"):
     assert token in core and token in api, token
 assert "OT_PZ_PREVIEW_LEASE_MS" in core
 assert "config_activation_idle(epoch,true)" in core
@@ -30,37 +32,53 @@ assert "config_activation_idle(epoch,false)" in core
 assert "if(pz_preview.active&&physical==0u)" in core
 assert "pz_preview.candidate.outputs" in core
 
-preview_begin = core.split("int ot_ble_panel_preview_begin(", 1)[1].split("int ot_ble_panel_preview_update(", 1)[0]
-preview_update = core.split("int ot_ble_panel_preview_update(", 1)[1].split("int ot_ble_panel_preview_commit(", 1)[0]
+preview_begin = core.split("int ot_ble_panel_preview_begin(", 1)[1].split("int ot_ble_panel_preview_update_ranges(", 1)[0]
+preview_update = core.split("int ot_ble_panel_preview_update_ranges(", 1)[1].split("int ot_ble_panel_preview_heartbeat(", 1)[0]
+preview_heartbeat = core.split("int ot_ble_panel_preview_heartbeat(", 1)[1].split("bool ot_ble_panel_preview_crc32(", 1)[0]
+preview_crc = core.split("bool ot_ble_panel_preview_crc32(", 1)[1].split("uint16_t ot_ble_panel_render_revision(", 1)[0]
 preview_commit = core.split("int ot_ble_panel_preview_commit(", 1)[1].split("void ot_ble_panel_preview_cancel(", 1)[0]
 preview_cancel = core.split("void ot_ble_panel_preview_cancel(", 1)[1].split("int ot_ble_panel_reset_challenge(", 1)[0]
 assert "ot_pz_preview_begin(" in preview_begin and "nvs_open(" not in preview_begin
-assert "ot_pz_preview_update(" in preview_update and "nvs_open(" not in preview_update
-assert "pz_save_controller_locked(&candidate)" in preview_commit
-assert "ot_fx_bank_stop_all" not in preview_begin+preview_update+preview_commit+preview_cancel
-assert "native_show" not in preview_begin+preview_update+preview_commit+preview_cancel
+assert "ot_pz_preview_apply_updates(" in preview_update and "nvs_open(" not in preview_update
+assert "xSemaphoreTake(om_write_mutex,0)" in preview_update
+assert "ot_pz_preview_heartbeat(" in preview_heartbeat and "nvs_open(" not in preview_heartbeat
+assert "ot_pz_wire_encode" in core and "ot_cfg_crc32" in core
+assert "pz_save_controller_locked(&snapshot.candidate)" in preview_commit
+assert "ot_fx_bank_stop_all" not in preview_begin+preview_update+preview_heartbeat+preview_crc+preview_commit+preview_cancel
+assert "native_show" not in preview_begin+preview_update+preview_heartbeat+preview_crc+preview_commit+preview_cancel
 assert "nvs_open(" not in preview_cancel
+assert "pz_render_revision[ch]=local_active_revision[ch]" in core
 
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
     "static bool om_save(", 1)[0]
 assert "pz_preview.active&&!pz_preview.committing" in pz_save
-assert "pz_preview.committing=!no_change" in core
+assert "else pz_preview.committing=true" in core
 panel_save = core.split("int ot_ble_panel_save(", 1)[1].split("bool ot_ble_pixel_probe(", 1)[0]
 assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
 assert "pz_preview.active" in panel_save
 assert "is_show_mode_active" not in panel_save
 
-for opcode in ("case 0x10u:", "case 0x11u:", "case 0x12u:",
-               "case 0x13u:", "case 0x14u:"):
-    assert opcode in ble, opcode
-assert "panel_upload_index!=lane||!panel_upload_preview" in ble
-assert "panel_upload_index!=255u||panel_upload_preview" in ble
+for token in ("panel_preview_control_write","panel_preview_update_write",
+              "panel_preview_status_read","ot_panel_preview_control_uuid",
+              "ot_panel_preview_update_uuid","ot_panel_preview_status_uuid",
+              "ot_pz_tx_parse_update","ot_pz_tx_sequence_check","ble_att_mtu(conn)"):
+    assert token in ble, token
+assert "panel_upload_preview" not in ble
+assert "case 0x10u:" not in ble and "case 0x14u:" not in ble
 assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in ble
 assert "panel_caps_seen" in ble and "authorized" in ble
 assert "OT_PZ_PREVIEW_LEASE_MS/1000u" in ble
 assert "(uint8_t)OT_MAX_BRIGHTNESS" in ble
 assert "led_strip_" not in ble and "rmt_" not in ble
+protocol = (ROOT / "main/panel_zone_protocol.c").read_text()
+protocol_header = (ROOT / "main/panel_zone_protocol.h").read_text()
+for token in ("OT_PZ_TX_UPDATE_HEADER_BYTES","OT_PZ_TX_DESCRIPTOR_BYTES",
+              "OT_PZ_TX_MAX_DESCRIPTORS","ot_pz_tx_sequence_check"):
+    assert token in protocol_header, token
+assert "ot_pz_tx_parse_update" in protocol
+assert "OT_PZ_PREVIEW_LEASE_MS 5000u" in (ROOT / "main/panel_zone.h").read_text()
+assert "OT_PZ_TX_OP_HEARTBEAT" in protocol_header
 
 # Panel/Zone active/staged records now live in the dedicated namespace.
 pz_load = core.split("static void pz_load(void)", 1)[1].split("static bool pz_save_controller_locked(", 1)[0]

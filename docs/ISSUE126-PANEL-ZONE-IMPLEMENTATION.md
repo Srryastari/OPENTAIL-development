@@ -40,23 +40,46 @@ Controller → Output Lane → Panel → Zone → Pixel Ranges → LEDs.
 - The exact five-byte Pixel Probe remains authenticated and has a 2-second volatile lease.
 - The cumulative Fill-to-Index primitive exists in CORE and reports endpoint+1 pixels. Its proposed separate BLE command is not accepted or advertised pending owner review. No visual sweep is implemented.
 
-### Live arrangement preview
+### Live arrangement preview — dedicated 0xFE transaction protocol
 
-The existing authenticated Panel v3 characteristic now has a bounded volatile preview transaction:
+The earlier draft-only 0x10–0x14 preview upload shim has been removed. Preview now uses separate BLE GATT characteristics, so durable Panel v3 configuration commands and transient arrangement traffic cannot share upload state:
 
-| Opcode | Purpose |
-|---:|---|
-| 0x10 | Begin/renew preview with lane, payload length, CRC16 and base revision |
-| 0x11 | Upload 1–15 byte chunks |
-| 0x12 | Validate and atomically replace the latest preview snapshot |
-| 0x13 | Save through the existing staged/active journal |
-| 0x14 | Cancel preview |
+| Characteristic UUID suffix | Access | Purpose |
+|---|---|---|
+| 0x35 | Write with response | BEGIN, COMMIT, CANCEL, HEARTBEAT control |
+| 0x36 | Write Without Response | Sequenced real-time range UPDATE |
+| 0x37 | Read | Transaction status, revisions, candidate CRC32 and render acknowledgement |
 
-- Preview lease: 2 seconds, wrap-safe and renewable.
-- Preview does not write NVS. Save stages durable state; authoritative readback remains old until promotion.
-- Preview is cancelled by disconnect, STOP, RMT fault and watchdog decorative inhibit.
-- Panel/Zone promotion may occur during Show Mode; Trigger and legacy Output promotion retain their Show Mode gate.
-- The separate hardware-only NVS schema and cross-namespace transaction remain outstanding as stated above.
+All three characteristics require the active authenticated owner connection and a prior Panel capability read. The session ID is a fresh random 32-bit value bound to that BLE connection, lane and expected base revision.
+
+**Control packets (little-endian multi-byte fields):**
+
+| Operation | Exact payload |
+|---|---|
+| BEGIN (0x01) | `FE 01 lane base_revision:u16 capacity:u16 schema_version` — 8 bytes |
+| COMMIT (0x03) | `FE 03 lane session_id:u32 candidate_crc32:u32` — 11 bytes |
+| CANCEL (0x04) | `FE 04 lane session_id:u32` — 7 bytes |
+| HEARTBEAT (0x05) | `FE 05 lane session_id:u32` — 7 bytes |
+
+**UPDATE (0x02) packet:**
+
+- Fixed 11-byte header: `FE 02 lane session_id:u32 sequence:u32`.
+- Followed by 1–4 fixed 8-byte descriptors: `panel_id:u8, zone_id:u8, range_slot:u8, start:u16, count:u16, role_flags:u8`.
+- The entire packet must fit one ATT write command. Maximum descriptors are `min(4, floor((ATT_MTU - 3 - 11) / 8))`: one at MTU 23, two at MTU 31, and four at MTU 46 or higher.
+- `range_slot` is the current zero-based range-array slot within the zone. `role_flags` bits 0–3 carry the zone role, bits 4–5 carry action (0 upsert, 1 delete range, 2 delete zone, 3 delete panel), and bits 6–7 must be zero. Delete actions require zero start/count and role fields.
+- UPDATE is applied as one candidate snapshot. Invalid IDs, duplicate targets, range overlap, out-of-capacity endpoints, cross-panel moves, and invalid role/action combinations are rejected without changing the previous preview snapshot.
+
+Sequence starts at 1. A strictly newer modular 32-bit sequence is accepted; an identical same-sequence/same-packet duplicate is idempotent; same-sequence/different-payload, stale, and out-of-order packets are rejected. The 5,000 ms geometry-preview lease is renewed only by HEARTBEAT, not by UPDATE. The separate five-byte Pixel Probe diagnostic lease remains 2,000 ms.
+
+- BEGIN binds the preview to the committed lane revision and its validated active pixel capacity. Unknown/unconfigured capacity cannot start a geometry preview.
+- UPDATE changes only the DRAM shadow candidate; it does not write NVS. CORE snapshots the candidate at a render-frame boundary and continues the existing global Show Mode/effect session.
+- COMMIT supplies the CRC32 of the canonical full two-output Panel v3 wire image. CORE independently recomputes it, validates the complete candidate, and stages it through the crash-safe journal. Status remains COMMITTING until the new active revision has been rendered by a successful RMT completion.
+- CANCEL discards only a non-committing preview. Once COMMITTING begins, cancellation is rejected; a disconnect does not erase a durable staged commit.
+- HEARTBEAT extends the lease only for the matching authenticated session, lane and base revision.
+- Expiry, disconnect, STOP, watchdog decorative inhibit and output fault cancel volatile preview state. Physical input frames always use committed geometry and physical safety arbitration; the preview may resume after release only while its lease remains valid.
+- Save during Show Mode does not stop or restart playback. Trigger and legacy Output promotion retain their existing Show Mode exclusion gates.
+
+No automatic visual sweep is implemented. The cumulative Fill-to-Index BLE command remains unadvertised pending its separately approved protocol.
 
 ### Trigger ISR telemetry (Issue #126 section 6D)
 
