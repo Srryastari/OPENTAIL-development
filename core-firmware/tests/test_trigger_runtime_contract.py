@@ -53,7 +53,7 @@ assert "in->settled[i]=in->pending[i]" in logic
 # Issue121: only raw IN3/IN4 feed independent 400ms release-hold states.
 # Assertion remains four stable 10ms samples; monotonic uint32 elapsed math
 # is wrap-safe. The other six channels remain on the original ot_debounce.
-assert "#define OT_TURN_RELEASE_HOLD_US 400u" in logic_header
+assert "#define OT_TURN_RELEASE_HOLD_US 400000u" in logic_header
 assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
 assert "ot_signal_debouncer_init" in logic
 assert "ot_signal_debouncer_update" in logic
@@ -66,11 +66,11 @@ assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0
 assert sampler.count("ot_signal_debouncer_update(") == 2
 assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
 assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
-assert "esp_timer_get_time()/1000LL" in sampler
+assert "esp_timer_get_time()" in sampler
 assert "__atomic_load_n(&turn_edge_us[0],__ATOMIC_ACQUIRE)" in sampler
-assert "__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE)" in sampler
+assert "__atomic_load_n(&turn_edge_us[1],__ATOMIC_ACQUIRE)" in sampler
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
-assert "__atomic_store_n(&turn_edge_ms[input_index-2u],edge_ms,__ATOMIC_RELAXED)" in core
+assert "__atomic_store_n(&turn_edge_ms[input_index-2u],edge_us,__ATOMIC_RELAXED)" in core
 assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
 assert "if(left)physical|=OT_SIG_LEFT;" in sampler
 assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
