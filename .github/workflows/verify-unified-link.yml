@@ -1,0 +1,129 @@
+name: Unified BLE-first Wi-Fi-secondary exact HEAD
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'core-firmware/main/opentail_core.c'
+      - 'core-firmware/main/ble_status.c'
+      - 'core-firmware/main/ot_controller_identity.h'
+      - 'docs/UNIFIED-BLE-WIFI-LINK-2026-11-03.md'
+      - '.github/workflows/verify-unified-link.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  exact-source-and-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Pin inherited watchdog, 140 effects, 13 RGB3 and Android UI; narrow transport scope
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor 1ec3ad7f41a5fa45e10314a270008cc83a4413b2 HEAD
+          python3 - <<'PY'
+          import subprocess
+          base="1ec3ad7f41a5fa45e10314a270008cc83a4413b2"
+          changed=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          allowed={
+            "core-firmware/main/ot_controller_identity.h",
+            "core-firmware/main/ble_status.c",
+            "core-firmware/main/opentail_core.c",
+            "android/app/src/main/AndroidManifest.xml",
+            "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
+            "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
+            "android/app/src/main/java/com/opentail/android/ControllerLinkPolicy.java",
+            "android/app/src/main/java/com/opentail/android/WifiCoreStatusProbe.java",
+            "android/app/src/main/res/xml/opentail_core_local_network.xml",
+            "android/app/src/test/java/com/opentail/android/ControllerLinkPolicyTest.java",
+            "android/qa/test_native_source.cjs",
+            "android/qa/check_release.py",
+            "docs/UNIFIED-BLE-WIFI-LINK-2026-11-03.md",
+            ".github/workflows/verify-unified-link.yml",
+          }
+          assert changed<=allowed,sorted(changed-allowed)
+          for p in ("core-firmware/main/ot_single_watchdog_idf.c",
+                    "core-firmware/main/ot_auto_effects.c","core-firmware/main/wled_fx_compat.c",
+                    "core-firmware/main/config_journal.c","core-firmware/main/trigger_manager.c",
+                    "core-firmware/main/ot_version.h","core-firmware/partitions_ota.csv",
+                    "android/app/src/main/cpp/preview_jni.c",
+                    "docs/FAILOVER-22-PHYSICAL-ACCEPTANCE.csv"):
+              old=subprocess.check_output(["git","rev-parse",base+":"+p],text=True).strip()
+              new=subprocess.check_output(["git","rev-parse","HEAD:"+p],text=True).strip()
+              assert old==new,p
+          print("PASS transport-only delta; FX, WDT, Trigger, NVS, JNI and physical gates intact")
+          PY
+      - name: Complete CORE host regressions
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: No physical release promotion
+        env:
+          OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/check_regressions.py --mode audit
+
+  android-junit-and-apk:
+    needs: exact-source-and-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Exact six-screen native UI and contract checks
+        run: |
+          node android/qa/test_native_source.cjs
+          python3 android/qa/check_release.py
+      - name: Android link policy unit tests and full native Android unit tests
+        working-directory: android
+        run: gradle --no-daemon :app:testDebugUnitTest
+      - name: Build installable debug APK
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-unified-blefirst-wifisecond-android-${{ github.event.pull_request.head.sha || github.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  esp-idf555-bench:
+    needs: exact-source-and-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Four-image flash ZIP with real OTA data and SHA256 integrity
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build --build-dir core-firmware/build --project-dir core-firmware --output "core-firmware/releases/opentail-unified-blewifi-$PIN.zip" --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify --zip "core-firmware/releases/opentail-unified-blewifi-$PIN.zip" --sha256-file "core-firmware/releases/opentail-unified-blewifi-$PIN.zip.sha256" --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-unified-blewifi-bench-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-unified-blewifi-*.zip
+            core-firmware/releases/opentail-unified-blewifi-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

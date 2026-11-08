@@ -290,6 +290,8 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic coreInfo;
     private boolean infoReadQueued=false;
     private Consumer<String> infoListener;
+    private volatile String controllerId;
+    String controllerId(){return controllerId;}
     private volatile boolean continuousFx=false;
     private volatile boolean tertiaryFx=false;
     private volatile boolean tertiary13Fx=false;
@@ -298,6 +300,7 @@ final class BleDiscovery {
     boolean canTertiary13Fx(){return canTertiaryFx() && tertiary13Fx;}
     void setInfoListener(Consumer<String> listener){infoListener=listener;}
     private void clearInfo(){
+        controllerId=null;
         continuousFx=false;tertiaryFx=false;tertiary13Fx=false;
         coreInfo=null;infoReadQueued=false;
         final Consumer<String> receiver=infoListener;
@@ -1473,6 +1476,7 @@ final class BleDiscovery {
         if(connection!=gatt)return;
         if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
             String info=new String(value,StandardCharsets.UTF_8);
+            controllerId=ControllerLinkPolicy.idFromBleInfo(info);
             continuousFx=ContinuousFxCommand.advertised(info);
             tertiaryFx=TertiaryFxCommand.advertised(info);
             tertiary13Fx=TertiaryFxCommand.advertised13(info);
