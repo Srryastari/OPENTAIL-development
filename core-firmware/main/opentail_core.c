@@ -2397,12 +2397,17 @@ static void led_task(void *p) {
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    /* Retain effect pixels only while the same universal zone is active.
-     * Stateful source effects (scanners/trails/particles) need their last frame.
-     * Never reuse stale pixels after a zone move, resize or effect replacement. */
-    static unsigned prior_fx_offset[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    static unsigned prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint16_t prior_fx_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint16_t prior_fx_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint16_t prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint8_t prior_fx_range_count[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static ot_pz_range_t prior_fx_ranges[OT_CHAIN_COUNT][OT_OM_ZONES][OT_PZ_MAX_RANGES_PER_ZONE];
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    /* One shared scratch frame gathers/scatters discontiguous ranges of one
+     * logical zone. Physical frame history remains lane-indexed in fx_frame. */
+    static uint8_t pixel_zone_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    static uint16_t pixel_logical_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    static ot_wled_rgb_t fx_zone_scratch[OT_PZ_MAX_PIXELS];
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
     /* One source-owned random palette for ALL outputs and zones. */
@@ -2442,8 +2447,10 @@ static void led_task(void *p) {
        uint8_t physical=0;
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
        uint32_t local_stop_generation=0;
+       uint8_t fallback_mask=0u;
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
-       ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
+       ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_pz_output_t local_panel[OT_PZ_OUTPUTS];
+       ot_pz_diag_state_t local_diag={0};ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
        /* Repeated reset: no decorative effect replay during recovery.
         * OEM physical GPIO trigger overlays remain authoritative. */
@@ -2456,10 +2463,16 @@ static void led_task(void *p) {
        }
        physical=live_input_mask;
        memcpy(local_outputs,om_outputs,sizeof(local_outputs));
+       memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
        combined=ot_tm_resolve(&local_tm,physical);
-       if(before_deadline(now,sim_deadline)) combined|=sim_mask;
+       fallback_mask=physical;
+       if(before_deadline(now,sim_deadline)){
+           combined|=sim_mask;fallback_mask|=sim_mask;
+       }
+       (void)ot_pz_diag_expire(&pz_diag,(uint32_t)(esp_timer_get_time()/1000LL));
+       local_diag=pz_diag;
        if(before_deadline(now,demo_deadline)) local_demo=demo;
        if(show_window(now)){
            local_show=native_show;show_started=native_show_started_ms;
@@ -2491,9 +2504,13 @@ static void led_task(void *p) {
            bool any_output_completed=false;
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
+           unsigned render_pixels[OT_CHAIN_COUNT]={0};
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+               render_pixels[ch]=local_panel[ch].active_pixels?
+                   local_panel[ch].active_pixels:OT_PZ_MAX_PIXELS;
+               ot_pz_build_pixel_map(&local_panel[ch],pixel_zone_map[ch],pixel_logical_map[ch]);
                if(!output_failed[ch]){
-                   frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+                   frame_ready[ch]=strip_configure_channel(ch,render_pixels[ch]);
                    if(!frame_ready[ch]){
                        /* A failed resize may leave an old handle or no handle.
                         * Never retry teardown/allocation on every render frame. */
