@@ -85,7 +85,9 @@ assert "const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);" in logi
 assert "edge_ahead<0x80000000u" in logic
 assert "if (state->awaiting_edge_record)" in logic
 assert "state->awaiting_edge_record=true;" in logic
-assert "if (raw_asserted && state->release_pending && level_changed && !sequence_changed)" in logic
+assert "if (level_changed && !sequence_changed)" in logic
+assert "const bool expected_raw=state->last_raw_asserted" in logic
+assert "raw_asserted!=expected_raw" in logic
 assert "const bool new_edge=(sequence_changed||level_changed)" in logic
 assert "if(sample_valid){" in sampler
 assert sampler.index("if(sample_valid){") < sampler.index("ot_sw_idf_input_sampled();")
