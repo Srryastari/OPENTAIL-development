@@ -2042,7 +2042,13 @@ static esp_err_t status_get(httpd_req_t *r) {
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false,\"panel_zone_schema\":3,\"live_arrangement_preview\":true,\"pixel_probe\":true,\"brightness_contract\":\"8-bit RGB channel values; effective CORE ceiling reported separately\",\"brightness_cap\":32,\"brightness_cap_is_measured_current_limit\":false}");
+    char buf[2048];
+    const int n=snprintf(buf,sizeof(buf),
+        "{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false,\"panel_zone_schema\":3,\"live_arrangement_preview\":true,\"pixel_probe\":true,\"brightness_contract\":\"8-bit RGB channel values; one effective CORE ceiling applied at final pixel output\",\"brightness_cap\":%u,\"brightness_cap_is_measured_current_limit\":false,\"brightness_ceiling_configurable\":true}",
+        (unsigned)OT_MAX_BRIGHTNESS_LIMIT);
+    if(n<0||(size_t)n>=sizeof(buf))
+        return respond_err(r,500,"capabilities formatting overflow");
+    return send_json(r,buf);
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -3095,12 +3101,11 @@ static void led_task(void *p) {
                    const bool decorated=fx_here||legacy_here||demo_here;
                    bool trigger_here=false;
                    if(zone<0||role==OT_PZ_ROLE_UNASSIGNED){
-                       c=ot_pz_fallback_color((unsigned)ch,fallback_mask,
-                                              (uint8_t)OT_MAX_BRIGHTNESS);
+                       c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u);
                        trigger_here=c.r!=0u||c.g!=0u||c.b!=0u;
                    }else if(role!=OT_OM_OFF){
                        trigger_here=ot_om_trigger_overlay(role,combined,decorated,
-                                             (uint8_t)OT_MAX_BRIGHTNESS,&c);
+                                             255u,&c);
                    }
                    bool diagnostic_here=false;
                    if(!trigger_here){
@@ -3108,9 +3113,7 @@ static void led_task(void *p) {
                        if(ot_pz_diag_render(&local_diag,(unsigned)ch,(uint16_t)px,
                                             frame_ms,&diagnostic_owned,&diagnostic)&&
                           diagnostic_owned){
-                           c.r=(uint8_t)((diagnostic.r*OT_MAX_BRIGHTNESS+127u)/255u);
-                           c.g=(uint8_t)((diagnostic.g*OT_MAX_BRIGHTNESS+127u)/255u);
-                           c.b=(uint8_t)((diagnostic.b*OT_MAX_BRIGHTNESS+127u)/255u);
+                           c=diagnostic;
                            diagnostic_here=true;
                        }
                    }
