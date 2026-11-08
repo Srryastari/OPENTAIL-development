@@ -182,13 +182,16 @@ bool ot_pz_journal_recover(const ot_pz_journal_t *active,
     if(active&&staged){
         /* A newer staged transaction must be based on the last fully written
          * active candidate; reject cross-revision or torn journal pairs. */
-        if(memcmp(&active->candidate,&staged->previous,sizeof(active->candidate))!=0||
-           memcmp(active->candidate_revision,staged->previous_revision,
-                  sizeof(active->candidate_revision))!=0)return false;
+        const bool promotion_copy=memcmp(active,staged,sizeof(*active))==0;
+        const bool next_transaction=
+            memcmp(&active->candidate,&staged->previous,sizeof(active->candidate))==0&&
+            memcmp(active->candidate_revision,staged->previous_revision,
+                   sizeof(active->candidate_revision))==0;
+        if(!promotion_copy&&!next_transaction)return false;
     }
     const ot_pz_journal_t *record=staged?staged:active;
     if(!record){
-        ot_pz_defaults(live);memset(&pending->candidate,0,sizeof(pending->candidate));
+        ot_pz_defaults(live);pending->candidate=*live;
         pending->pending=false;
         for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
             active_revision[lane]=staged_revision[lane]=1u;
