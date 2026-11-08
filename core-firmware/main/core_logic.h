@@ -30,6 +30,7 @@ typedef struct {
     uint32_t inactive_since_us;
     uint32_t last_edge_sequence;
     bool last_raw_asserted;
+    bool awaiting_edge_record;
 } ot_signal_debouncer_t;
 
 void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted,
