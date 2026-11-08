@@ -39,11 +39,14 @@ assert "ESP_RST_BROWNOUT" in adapter and "ESP_RST_CPU_LOCKUP" in adapter
 assert "OT_SW_BOOTLOOP_LIMIT 3u" in head
 assert "OT_SW_STABLE_MS 60000u" in head
 # Stability must be a continuous healthy window, not merely uptime since boot.
-assert "healthy_since_ms" in adapter and "healthy_window" in adapter
+assert "ot_sw_stability_window_t stable_window" in adapter
+assert "ot_sw_stability_window_update(&stable_window,now,healthy,&healthy_elapsed_ms)" in adapter
 assert "const bool healthy=all_outputs_completed" in adapter
 assert "(uint32_t)(now-last_input)<100u" in adapter
-assert "if(!healthy){\n        healthy_window=false;" in adapter
-assert "now-healthy_since_ms" in adapter
+assert "ot_sw_stability_window_update(&stable_window,clock_ms(),false,&ignored)" in adapter
+policy=(root/"main/ot_single_watchdog.c").read_text()
+assert "window->active=false" in policy and "window->healthy_since_ms=0u" in policy
+assert "(uint32_t)(now_ms-window->healthy_since_ms)" in policy
 # Bench fault injection is compile-time only, disabled by default, and has no
 # remote command path. Exercise input, render, RMT submit/completion, IWDT,
 # idle-task starvation and panic fault points.
