@@ -184,6 +184,7 @@ typedef struct {
 static ot_pz_reset_challenge_t pz_reset_challenge;
 static uint8_t pz_reset_pending_mask;
 static void pz_promote(uint32_t epoch);
+static bool config_activation_idle(uint32_t epoch,bool allow_show);
 static bool pz_persistent=false;
 static uint16_t pz_revision[OT_PZ_OUTPUTS]={1u,1u};
 static uint16_t pz_active_revision[OT_PZ_OUTPUTS]={1u,1u};
@@ -986,6 +987,144 @@ void ot_ble_panel_preview_cancel(void){
     if(active)request_render_refresh();
 }
 
+
+int ot_ble_panel_reset_challenge(uint8_t lane,uint16_t expected_revision,
+                                 uint32_t *challenge){
+    if(lane>=OT_PZ_OUTPUTS||!challenge)return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
+       !native_outputs_ready||ot_sw_idf_decorative_inhibited())return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    const uint32_t stop_generation=stop_request_generation;
+    bool safe=false;
+    portENTER_CRITICAL(&state_lock);
+    safe=!pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&
+        pz_revision[lane]==expected_revision&&
+        pz_active_revision[lane]==expected_revision&&
+        input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+        !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
+        !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
+        !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
+        !pz_preview.active&&stop_request_generation==stop_render_generation;
+    portEXIT_CRITICAL(&state_lock);
+    if(!safe||tm_gpio_input_mask()!=0u||
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch||
+       stop_request_generation!=stop_generation||ot_sw_idf_decorative_inhibited()){
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    uint32_t token=esp_random();
+    if(token==0u)token=esp_random();
+    if(token==0u){xSemaphoreGive(om_write_mutex);return 2;}
+    portENTER_CRITICAL(&state_lock);
+    pz_reset_challenge=(ot_pz_reset_challenge_t){
+        .active=true,.lane=lane,.revision=expected_revision,.value=token,
+        .expires_ms=now_ms+OT_PZ_RESET_CHALLENGE_TTL_MS,
+        .input_epoch=epoch,.stop_generation=stop_generation
+    };
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreGive(om_write_mutex);
+    *challenge=token;
+    return 0;
+}
+int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
+                               uint32_t challenge){
+    if(lane>=OT_PZ_OUTPUTS||challenge==0u)return 1;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    const uint32_t stop_generation=stop_request_generation;
+    ot_pz_controller_t candidate;
+    bool safe=false;
+    portENTER_CRITICAL(&state_lock);
+    safe=pz_reset_challenge.active&&pz_reset_challenge.lane==lane&&
+        pz_reset_challenge.revision==expected_revision&&
+        pz_reset_challenge.value==challenge&&
+        (int32_t)(now_ms-pz_reset_challenge.expires_ms)<0&&
+        pz_reset_challenge.input_epoch==epoch&&
+        pz_reset_challenge.stop_generation==stop_generation&&
+        pz_revision[lane]==expected_revision&&
+        pz_active_revision[lane]==expected_revision&&
+        !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&
+        input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+        !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
+        !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
+        !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
+        !pz_preview.active&&stop_request_generation==stop_render_generation;
+    if(safe){
+        candidate=pz_outputs;
+        candidate.outputs[lane].panel_count=0u;
+        candidate.outputs[lane].zone_count=0u;
+        memset(candidate.outputs[lane].panels,0,sizeof(candidate.outputs[lane].panels));
+        memset(candidate.outputs[lane].zones,0,sizeof(candidate.outputs[lane].zones));
+        pz_reset_pending_mask|=(uint8_t)(1u<<lane);
+    }
+    pz_reset_challenge.active=false; /* single-use even if the confirm fails */
+    portEXIT_CRITICAL(&state_lock);
+    if(!safe||tm_gpio_input_mask()!=0u||
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch||
+       stop_request_generation!=stop_generation||ot_sw_idf_decorative_inhibited()){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    if(!ot_pz_valid(&candidate)){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    if(!pz_save_controller_locked(&candidate)){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 4;
+    }
+    if(pz_deferred.pending){
+        pz_promote(epoch);
+        portENTER_CRITICAL(&state_lock);
+        const bool still_pending=pz_deferred.pending;
+        portEXIT_CRITICAL(&state_lock);
+        if(still_pending){xSemaphoreGive(om_write_mutex);return 5;}
+    }else{
+        /* Already-empty maps still get a durable tombstone so legacy embedded
+         * zones cannot reappear if the active map key is later lost. */
+        nvs_handle_t h;
+        if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK){
+            xSemaphoreGive(om_write_mutex);return 4;
+        }
+        uint16_t revisions[OT_PZ_OUTPUTS];
+        portENTER_CRITICAL(&state_lock);
+        memcpy(revisions,pz_active_revision,sizeof(revisions));
+        const ot_pz_controller_t snapshot=pz_outputs;
+        portEXIT_CRITICAL(&state_lock);
+        const bool tombstone_ok=pz_reset_tombstone_write_handle(
+            h,lane,&snapshot,revisions);
+        nvs_close(h);
+        if(!tombstone_ok){xSemaphoreGive(om_write_mutex);return 4;}
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+    }
+    /* Success is reported only after re-reading and validating the durable
+     * active journal and confirming that the selected lane has no panels/zones. */
+    nvs_handle_t read_handle;ot_pz_journal_t readback={0};
+    bool readback_ok=nvs_open("ot_zone_map",NVS_READONLY,&read_handle)==ESP_OK;
+    if(readback_ok){
+        readback_ok=pz_journal_read(read_handle,OT_PZ_JOURNAL_KEY_ACTIVE,&readback)==ESP_OK&&
+            readback.candidate.outputs[lane].panel_count==0u&&
+            readback.candidate.outputs[lane].zone_count==0u;
+        nvs_close(read_handle);
+    }
+    if(!readback_ok){xSemaphoreGive(om_write_mutex);return 5;}
+    ot_fx_bank_stop_all(&fx_bank);
+    request_render_refresh();
+    xSemaphoreGive(om_write_mutex);
+    return 0;
+}
 int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revision){
     if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
