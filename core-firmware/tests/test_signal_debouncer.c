@@ -6,234 +6,166 @@
 #include <stdio.h>
 
 #define TEST_STABLE_SAMPLES 4u
+#define MS(value) ((uint64_t)(value)*1000u)
 
-static bool sample_us_with_sequence(ot_signal_debouncer_t *state, bool raw,
-                                      uint32_t now_us, uint32_t raw_previous_edge_us,
-                                      uint32_t raw_edge_us, uint32_t raw_edge_sequence) {
-    return ot_signal_debouncer_update(state,raw,now_us,raw_previous_edge_us,
-                                      raw_edge_us,raw_edge_sequence,TEST_STABLE_SAMPLES);
+static void edge(ot_signal_debouncer_t *state,bool raw,uint64_t at_us) {
+    ot_signal_debouncer_transition(state,raw,at_us);
 }
-static bool sample_us(ot_signal_debouncer_t *state, bool raw,
-                      uint32_t now_us, uint32_t raw_edge_us) {
-    uint32_t sequence=state->last_edge_sequence;
-    if(raw!=state->last_raw_asserted)sequence+=2u;
-    return sample_us_with_sequence(state,raw,now_us,0u,raw_edge_us,sequence);
+static bool sample_at(ot_signal_debouncer_t *state,uint64_t now_us) {
+    return ot_signal_debouncer_sample(state,now_us,TEST_STABLE_SAMPLES);
 }
-static bool sample_at(ot_signal_debouncer_t *state, bool raw,
-                      uint32_t now_ms, uint32_t raw_edge_ms) {
-    return sample_us(state,raw,now_ms*1000u,raw_edge_ms*1000u);
-}
-static bool sample(ot_signal_debouncer_t *state, bool raw, uint32_t now_ms) {
-    return sample_at(state,raw,now_ms,now_ms);
+static bool sample_ms(ot_signal_debouncer_t *state,uint64_t now_ms) {
+    return sample_at(state,MS(now_ms));
 }
 
 static void assertion_keeps_four_sample_qualification(void) {
     ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,false,0u);
-    assert(!sample(&d,true,0u));
-    assert(!sample(&d,true,10u));
-    assert(!sample(&d,true,20u));
-    assert(sample(&d,true,30u));
+    ot_signal_debouncer_init(&d,false);
+    edge(&d,true,MS(0u));
+    assert(!sample_ms(&d,0u));
+    assert(!sample_ms(&d,10u));
+    assert(!sample_ms(&d,20u));
+    assert(sample_ms(&d,30u));
     assert(d.asserted&&!d.release_pending);
 }
 
 static void release_hold_bridges_short_gaps(void) {
-    const uint32_t gaps[]={100u,200u,300u,399u};
-    for(unsigned i=0;i<sizeof(gaps)/sizeof(gaps[0]);i++) {
+    const uint64_t gaps_ms[]={100u,200u,300u,399u};
+    for(unsigned i=0;i<sizeof(gaps_ms)/sizeof(gaps_ms[0]);i++) {
         ot_signal_debouncer_t d;
-        ot_signal_debouncer_init(&d,true,0u);
-        const uint32_t start=1000u+(uint32_t)i*1000u;
-        assert(sample(&d,false,start));
-        assert(sample(&d,false,start+gaps[i]/2u));
-        assert(sample(&d,true,start+gaps[i]));
+        const uint64_t fall=MS(1000u+(uint64_t)i*1000u);
+        const uint64_t rise=fall+gaps_ms[i]*1000u;
+        ot_signal_debouncer_init(&d,true);
+        edge(&d,false,fall);
+        assert(sample_at(&d,fall+gaps_ms[i]*500u));
+        edge(&d,true,rise);
+        assert(sample_at(&d,rise));
         assert(d.asserted&&!d.release_pending);
-        /* Repeated flash cycles must not publish a falling edge or reset
-         * the consumer's phase while every inactive gap is <400ms. */
-        assert(sample(&d,false,start+gaps[i]+10u));
-        assert(sample(&d,false,start+gaps[i]+409u));
-        assert(sample(&d,false,start+gaps[i]+410u)==false);
+        edge(&d,false,rise+1000u);
+        const uint64_t deadline=rise+1000u+OT_TURN_RELEASE_HOLD_US;
+        assert(sample_at(&d,deadline-1u));
+        assert(!sample_at(&d,deadline));
     }
 }
 
-static void release_occurs_at_400ms_and_reassertion_requalifies(void) {
+static void absolute_deadline_and_exact_boundary(void) {
     ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,2000u));
-    assert(sample(&d,false,2100u));
-    assert(sample(&d,false,2200u));
-    assert(sample(&d,false,2300u));
-    assert(sample(&d,false,2399u));
-    assert(!sample(&d,false,2400u)); /* exactly 400ms continuous inactive */
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(2000u));
+    assert(sample_ms(&d,2399u));
+    assert(!sample_ms(&d,2400u)); /* exact 400ms expiry */
     assert(!d.asserted&&!d.release_pending);
 
-    /* A raw return observed at the deadline is not "before" expiry: the old
-     * assertion ends, and the new assertion must qualify for four samples. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,3000u));
-    assert(!sample(&d,true,3400u));
-    assert(!sample(&d,true,3410u));
-    assert(!sample(&d,true,3420u));
-    assert(sample(&d,true,3430u));
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(3000u));
+    edge(&d,true,MS(3400u)); /* equality expires old assertion */
+    assert(!sample_ms(&d,3400u));
+    assert(!sample_ms(&d,3410u));
+    assert(!sample_ms(&d,3420u));
+    assert(sample_ms(&d,3430u)); /* new assertion qualifies after four samples */
 
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,4000u));
-    assert(!sample(&d,false,4401u)); /* longer than the release hold */
-}
-
-static void reassertion_before_deadline_cancels_timer(void) {
-    ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,100u));
-    assert(sample(&d,false,200u));
-    assert(sample(&d,true,499u)); /* 399ms inactive */
-    assert(d.asserted&&!d.release_pending);
-    assert(sample(&d,false,500u));
-    assert(sample(&d,false,899u));
-    assert(sample(&d,false,900u)==false); /* new 400ms window */
-}
-
-static void timer_wrap_and_scheduler_jitter(void) {
-    ot_signal_debouncer_t d;
-    const uint32_t start=UINT32_MAX-199999u;
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample_us(&d,false,start,start));
-    assert(sample_us(&d,false,start+101000u,start));
-    assert(sample_us(&d,false,start+250000u,start));
-    assert(sample_us(&d,false,start+399000u,start));
-    assert(!sample_us(&d,false,start+400000u,start)); /* wrap-safe 400ms */
-
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,500u));
-    const uint32_t jittered[]={507u,523u,547u,609u,800u,899u};
-    for(unsigned i=0;i<sizeof(jittered)/sizeof(jittered[0]);i++)
-        assert(sample_at(&d,false,jittered[i],500u));
-    assert(!sample_at(&d,false,900u,500u));
-
-    /* The sampler may run after a raw reassertion. Use the ISR edge timestamp
-     * to distinguish a 399ms gap from a real 401ms inactive interval. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample_at(&d,false,500u,500u));
-    assert(sample_at(&d,true,912u,899u)); /* sampled 412ms later; edge was 399ms */
-    assert(d.asserted&&!d.release_pending);
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample_at(&d,false,500u,500u));
-    assert(!sample_at(&d,true,912u,901u)); /* edge was 401ms: prior state expired */
-}
-
-static void restart_hold_after_pulse_between_sampler_wakes(void) {
-    ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,1000u)); /* falling edge starts first interval */
-    const uint32_t sequence=d.last_edge_sequence+4u; /* unseen rise + fall */
-    assert(sample_us_with_sequence(&d,false,1410u*1000u,1395u*1000u,1405u*1000u,sequence));
-    assert(d.inactive_since_us==1405u*1000u);
-    assert(sample_us_with_sequence(&d,false,1804u*1000u,1395u*1000u,1405u*1000u,sequence));
-    assert(!sample_us_with_sequence(&d,false,1805u*1000u,1395u*1000u,1405u*1000u,sequence));
-
-    /* A pulse that begins after the original deadline cannot resurrect
-     * the old assertion if both edges occur between sampler wakes. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,1001u));
-    assert(sample(&d,false,1400u)); /* 399ms: old assertion still held */
-    const uint32_t late_pulse_sequence=d.last_edge_sequence+4u;
-    assert(!sample_us_with_sequence(&d,false,1410u*1000u,1402u*1000u,
-                                    1405u*1000u,late_pulse_sequence));
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(4000u));
+    edge(&d,true,MS(4401u)); /* late pulse cannot resurrect expired assertion */
     assert(!d.asserted&&!d.release_pending);
+    assert(!sample_ms(&d,4401u));
+}
 
-    /* A single published edge with a GPIO level that has already toggled
-     * twice is a partial ISR history. Wait for the matching second edge before
-     * accepting the raw level/timestamp pair. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample_us_with_sequence(&d,true,1010u*1000u,0u,1000u*1000u,2u));
-    assert(d.asserted&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,true,1020u*1000u,1000u*1000u,
-                                   1010u*1000u,4u));
-    assert(d.asserted&&!d.awaiting_edge_record);
+static void scheduler_jitter_uses_edge_timestamp(void) {
+    ot_signal_debouncer_t d;
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(500u));
+    assert(sample_ms(&d,912u)); /* sampler delayed 412ms */
+    edge(&d,true,MS(899u));     /* actual inactive gap was only 399ms */
+    assert(sample_ms(&d,912u));
+    assert(d.asserted&&!d.release_pending);
 
-    /* A timestamp newer than its sample is a torn snapshot and must not
-     * turn unsigned subtraction into an immediate false release. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,2000u));
-    const uint32_t future_sequence=d.last_edge_sequence+4u;
-    assert(sample_us_with_sequence(&d,false,2000u*1000u,0u,2001u*1000u,
-                                   future_sequence));
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(500u));
+    assert(sample_ms(&d,912u));
+    edge(&d,true,MS(901u)); /* actual gap was 401ms */
+    assert(!d.asserted&&!d.release_pending);
+}
+
+static void multiple_unseen_pulses_are_replayed_in_order(void) {
+    ot_signal_debouncer_t d;
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(1001u));
+
+    /* All four transitions occur between two 10ms sampler wakes. The first
+     * rising edge bridges the original deadline; later pulses each restart
+     * the deadline. Latest-edge-only snapshots cannot reproduce this result. */
+    edge(&d,true,1400500u);
+    edge(&d,false,1400700u);
+    edge(&d,true,1402000u);
+    edge(&d,false,1405000u);
+    assert(sample_at(&d,MS(1410u)));
     assert(d.asserted&&d.release_pending);
+    assert(d.release_deadline_us==1805000u);
+    assert(sample_at(&d,1804999u));
+    assert(!sample_at(&d,1805000u));
 
-    /* A falling level observed before its ISR record is published must
-     * also wait; its release timer starts only from the coherent edge time. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample_us_with_sequence(&d,false,3000u*1000u,0u,0u,
-                                   d.last_edge_sequence));
-    assert(d.asserted&&!d.release_pending&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,false,3010u*1000u,0u,0u,
-                                   d.last_edge_sequence));
-    assert(d.asserted&&!d.release_pending&&d.awaiting_edge_record);
-    const uint32_t falling_sequence=d.last_edge_sequence+2u;
-    assert(sample_us_with_sequence(&d,false,3010u*1000u,0u,3000u*1000u,
-                                   falling_sequence));
-    assert(d.asserted&&d.release_pending&&!d.awaiting_edge_record);
-    assert(d.inactive_since_us==3000u*1000u);
+    /* A pulse after the original deadline expires the old assertion. Since
+     * the pulse ends before four stable samples, it cannot reassert the lane. */
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(1001u));
+    edge(&d,true,MS(1402u));
+    edge(&d,false,MS(1405u));
+    assert(!sample_ms(&d,1410u));
+    assert(!d.asserted&&!d.release_pending);
+}
 
-    /* The GPIO level may become active before its ISR timestamp is published.
-     * Multiple sampler wakes must wait rather than compare a stale falling
-     * timestamp and falsely expire the pending hold. */
-    ot_signal_debouncer_init(&d,true,0u);
-    assert(sample(&d,false,3000u));
-    const uint32_t rising_sequence=d.last_edge_sequence+2u;
-    assert(sample_us_with_sequence(&d,true,3390u*1000u,0u,3000u*1000u,
-                                   d.last_edge_sequence));
-    assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,true,3410u*1000u,0u,3000u*1000u,
-                                   d.last_edge_sequence));
-    assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,true,3410u*1000u,0u,3390u*1000u,
-                                   rising_sequence));
-    assert(d.asserted&&!d.release_pending&&!d.awaiting_edge_record);
+static void overflow_resync_is_explicit_and_requalifies(void) {
+    ot_signal_debouncer_t d;
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,MS(1000u));
+    ot_signal_debouncer_resync(&d,false);
+    assert(!d.asserted&&!d.release_pending);
+    ot_signal_debouncer_resync(&d,true);
+    assert(!sample_ms(&d,1010u));
+    assert(!sample_ms(&d,1020u));
+    assert(!sample_ms(&d,1030u));
+    assert(sample_ms(&d,1040u));
 }
 
 static void independent_turns_and_hazards(void) {
     ot_signal_debouncer_t left,right;
-    ot_signal_debouncer_init(&left,true,0u);
-    ot_signal_debouncer_init(&right,true,0u);
-    assert(sample(&left,false,1000u));
-    assert(sample(&right,false,1000u));
-
-    assert(sample(&left,true,1100u));  /* left flash returns before deadline */
-    assert(sample(&right,false,1100u));
-    uint8_t mask=(sample(&left,true,1400u)?OT_SIG_LEFT:0u) |
-                 (sample(&right,false,1400u)?OT_SIG_RIGHT:0u);
-    assert(mask==OT_SIG_LEFT);
+    ot_signal_debouncer_init(&left,true);
+    ot_signal_debouncer_init(&right,true);
+    edge(&left,false,MS(1000u));
+    edge(&right,false,MS(1000u));
+    edge(&left,true,MS(1100u));
+    assert(sample_ms(&left,1400u));
+    assert(!sample_ms(&right,1400u));
+    uint8_t mask=sample_ms(&left,1400u)?OT_SIG_LEFT:0u;
     ot_arbitration_t a=ot_arbitrate(mask,false,false);
     assert(!a.hazards);
 
-    /* Reassert right after its own expiry: left remains independently active. */
-    assert(sample(&left,true,1410u));
-    assert(!sample(&right,true,1410u));
-    assert(!sample(&right,true,1420u));
-    assert(!sample(&right,true,1430u));
-    assert(sample(&right,true,1440u));
-    mask=(sample(&left,true,1440u)?OT_SIG_LEFT:0u) |
-         (sample(&right,true,1440u)?OT_SIG_RIGHT:0u);
+    /* Right reasserts only after its own release; Left remains independent. */
+    edge(&right,true,MS(1410u));
+    assert(sample_ms(&left,1410u));
+    assert(!sample_ms(&right,1410u));
+    assert(!sample_ms(&right,1420u));
+    assert(!sample_ms(&right,1430u));
+    assert(sample_ms(&right,1440u));
+    mask=(sample_ms(&left,1440u)?OT_SIG_LEFT:0u)|
+         (sample_ms(&right,1440u)?OT_SIG_RIGHT:0u);
     a=ot_arbitrate(mask,false,false);
     assert(a.hazards);
 }
 
 static void one_turn_can_expire_while_other_continues(void) {
     ot_signal_debouncer_t left,right;
-    ot_signal_debouncer_init(&left,true,0u);
-    ot_signal_debouncer_init(&right,true,0u);
-    assert(sample(&left,false,1000u));
-    assert(sample(&right,false,1000u));
-    assert(sample(&left,false,1200u));
-    assert(sample(&right,true,1200u)); /* right flash returns; left stays off */
-    assert(!sample(&left,false,1400u));
-    assert(sample(&right,true,1400u));
-    const uint8_t mask=(sample(&left,false,1410u)?OT_SIG_LEFT:0u) |
-                       (sample(&right,true,1410u)?OT_SIG_RIGHT:0u);
-    assert(mask==OT_SIG_RIGHT); /* no false hazard, right phase continues */
-    assert(sample(&right,false,1420u));
-    assert(sample(&right,false,1819u));
-    assert(!sample(&right,false,1820u));
+    ot_signal_debouncer_init(&left,true);
+    ot_signal_debouncer_init(&right,true);
+    edge(&left,false,MS(1000u));
+    edge(&right,false,MS(1000u));
+    edge(&right,true,MS(1200u));
+    assert(!sample_ms(&left,1400u));
+    assert(sample_ms(&right,1400u));
+    edge(&right,false,MS(1420u));
+    assert(sample_ms(&right,1819u));
+    assert(!sample_ms(&right,1820u));
 }
 
 static void all_256_boot_masks_and_arbitration(void) {
@@ -247,12 +179,12 @@ static void all_256_boot_masks_and_arbitration(void) {
             sampler.ticks[i]=TEST_STABLE_SAMPLES;
         }
         ot_signal_debouncer_t left,right;
-        ot_signal_debouncer_init(&left,(held&OT_SIG_LEFT)!=0u,0u);
-        ot_signal_debouncer_init(&right,(held&OT_SIG_RIGHT)!=0u,0u);
+        ot_signal_debouncer_init(&left,(held&OT_SIG_LEFT)!=0u);
+        ot_signal_debouncer_init(&right,(held&OT_SIG_RIGHT)!=0u);
         uint8_t physical=ot_debounce(&sampler,levels,TEST_STABLE_SAMPLES);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
-        if(sample(&left,levels[2],100u))physical|=OT_SIG_LEFT;
-        if(sample(&right,levels[3],100u))physical|=OT_SIG_RIGHT;
+        if(sample_ms(&left,100u))physical|=OT_SIG_LEFT;
+        if(sample_ms(&right,100u))physical|=OT_SIG_RIGHT;
         assert(physical==(uint8_t)held);
 
         const ot_arbitration_t a=ot_arbitrate(physical,false,true);
@@ -303,15 +235,15 @@ static void safety_priorities_remain_unchanged(void) {
 int main(void) {
     assertion_keeps_four_sample_qualification();
     release_hold_bridges_short_gaps();
-    release_occurs_at_400ms_and_reassertion_requalifies();
-    reassertion_before_deadline_cancels_timer();
-    timer_wrap_and_scheduler_jitter();
-    restart_hold_after_pulse_between_sampler_wakes();
+    absolute_deadline_and_exact_boundary();
+    scheduler_jitter_uses_edge_timestamp();
+    multiple_unseen_pulses_are_replayed_in_order();
+    overflow_resync_is_explicit_and_requalifies();
     independent_turns_and_hazards();
     one_turn_can_expire_while_other_continues();
     all_256_boot_masks_and_arbitration();
     non_turn_inputs_keep_existing_four_sample_debounce();
     safety_priorities_remain_unchanged();
-    puts("PASS Issue121 SignalDebouncer: four-sample assertion, 100/200/300/399ms gaps, exact 400ms release, pre/post-deadline unseen pulses, independent turns/hazards, one-side expiry, 256 boot masks, safety arbitration, non-turn timing, wrap and scheduler jitter; HOST_SIMULATED");
+    puts("PASS Issue121 SignalDebouncer: ISR transition history, multiple inter-sample pulses, absolute 400ms deadline, strict equality expiry, four-sample requalification, independent Left/Right, hazards, 256 boot masks, unchanged non-turn inputs, overflow resync and arbitration; HOST_SIMULATED");
     return 0;
 }
