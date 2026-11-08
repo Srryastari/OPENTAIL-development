@@ -7,10 +7,14 @@
 
 #define TEST_STABLE_SAMPLES 4u
 
+static bool sample_us(ot_signal_debouncer_t *state, bool raw,
+                      uint32_t now_us, uint32_t raw_edge_us) {
+    return ot_signal_debouncer_update(state,raw,now_us,raw_edge_us,
+                                      TEST_STABLE_SAMPLES);
+}
 static bool sample_at(ot_signal_debouncer_t *state, bool raw,
                       uint32_t now_ms, uint32_t raw_edge_ms) {
-    return ot_signal_debouncer_update(state,raw,now_ms,raw_edge_ms,
-                                      TEST_STABLE_SAMPLES);
+    return sample_us(state,raw,now_ms*1000u,raw_edge_ms*1000u);
 }
 static bool sample(ot_signal_debouncer_t *state, bool raw, uint32_t now_ms) {
     return sample_at(state,raw,now_ms,now_ms);
@@ -83,13 +87,13 @@ static void reassertion_before_deadline_cancels_timer(void) {
 
 static void timer_wrap_and_scheduler_jitter(void) {
     ot_signal_debouncer_t d;
-    const uint32_t start=UINT32_MAX-199u;
+    const uint32_t start=UINT32_MAX-199999u;
     ot_signal_debouncer_init(&d,true);
-    assert(sample(&d,false,start));
-    assert(sample(&d,false,start+101u));
-    assert(sample(&d,false,start+250u));
-    assert(sample(&d,false,start+399u));
-    assert(!sample(&d,false,start+400u)); /* unsigned elapsed across wrap */
+    assert(sample_us(&d,false,start,start));
+    assert(sample_us(&d,false,start+101000u,start));
+    assert(sample_us(&d,false,start+250000u,start));
+    assert(sample_us(&d,false,start+399000u,start));
+    assert(!sample_us(&d,false,start+400000u,start)); /* wrap-safe 400ms */
 
     ot_signal_debouncer_init(&d,true);
     assert(sample(&d,false,500u));
