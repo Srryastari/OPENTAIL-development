@@ -120,6 +120,7 @@ def main():
     continuous_test = (ROOT / "core-firmware/tests/test_continuous_fx.c").read_text()
     assert "for(unsigned i=0;i<128u;i++)" in continuous_test
     assert "generation==gen&&bank.zones[0][0].started_ms==100" in continuous_test
+    assert "generation==gen2&&bank.zones[1][0].started_ms==100" in continuous_test
 
     # Production feed is reached only after successful asynchronous completion.
     render = section(core, "static void led_task(void *p) {", "void app_main(void) {")
