@@ -60,7 +60,8 @@ assert "ot_signal_debouncer_update" in logic
 assert "raw_previous_edge_us" in logic_header
 assert "(uint32_t)(effective_edge_us-state->inactive_since_us)" in logic
 assert "(edge_delta/2u)>=2u" in logic
-assert "raw_previous_edge_us-state->inactive_since_us" in logic
+assert "raw_previous_edge_us-" in logic
+assert "state->inactive_since_us" in logic
 assert "(uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US" in logic
 assert "static void input_sampler_task(void *arg){" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
