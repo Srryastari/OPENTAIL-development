@@ -30,6 +30,17 @@ assert "config_activation_idle(epoch,false)" in core
 assert "if(pz_preview.active&&physical==0u)" in core
 assert "pz_preview.candidate.outputs" in core
 
+preview_begin = core.split("int ot_ble_panel_preview_begin(", 1)[1].split("int ot_ble_panel_preview_update(", 1)[0]
+preview_update = core.split("int ot_ble_panel_preview_update(", 1)[1].split("int ot_ble_panel_preview_commit(", 1)[0]
+preview_commit = core.split("int ot_ble_panel_preview_commit(", 1)[1].split("void ot_ble_panel_preview_cancel(", 1)[0]
+preview_cancel = core.split("void ot_ble_panel_preview_cancel(", 1)[1].split("int ot_ble_panel_reset_challenge(", 1)[0]
+assert "ot_pz_preview_begin(" in preview_begin and "nvs_open(" not in preview_begin
+assert "ot_pz_preview_update(" in preview_update and "nvs_open(" not in preview_update
+assert "pz_save_controller_locked(&candidate)" in preview_commit
+assert "ot_fx_bank_stop_all" not in preview_begin+preview_update+preview_commit+preview_cancel
+assert "native_show" not in preview_begin+preview_update+preview_commit+preview_cancel
+assert "nvs_open(" not in preview_cancel
+
 panel_save = core.split("int ot_ble_panel_save(", 1)[1].split("bool ot_ble_pixel_probe(", 1)[0]
 assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
@@ -38,6 +49,8 @@ assert "is_show_mode_active" not in panel_save
 for opcode in ("case 0x10u:", "case 0x11u:", "case 0x12u:",
                "case 0x13u:", "case 0x14u:"):
     assert opcode in ble, opcode
+assert "panel_upload_index!=lane||!panel_upload_preview" in ble
+assert "panel_upload_index!=255u||panel_upload_preview" in ble
 assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in ble
 assert "panel_caps_seen" in ble and "authorized" in ble
 assert "OT_PZ_PREVIEW_LEASE_MS/1000u" in ble
