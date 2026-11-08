@@ -35,7 +35,7 @@ PR #114 adds a separate config-progress user fed from the configuration promoter
 
 ### OTA deadline — concept ported, not the 30s implementation
 
-PR #114 introduces a 30s pending-OTA timer. A 30s deadline conflicts with #115's 60s healthy-runtime requirement and could roll back a candidate before it has enough time to become stable. The canonical #115 branch now uses a **120s** pending-verify deadline, while preserving the 60s continuous healthy-output/input confirmation gate. It uses an atomic WAITING/CONFIRMING/CONFIRMED/EXPIRED state to prevent a timeout racing a flash confirmation, and explicitly requests IDF rollback on expiry. Factory/non-OTA, already-valid and `ESP_ERR_NOT_FOUND` states do not arm the deadline. The default ESP-IDF bootloader rollback remains enabled as reset-time fallback.
+PR #114 introduces a 30s pending-OTA timer. A 30s deadline conflicts with #115's 60s healthy-runtime requirement and could roll back a candidate before it has enough time to become stable. The canonical #115 branch now uses a **120s** pending-verify deadline, while preserving the 60s continuous healthy-output/input confirmation gate. It uses an atomic WAITING/CONFIRMING/CONFIRMED/EXPIRED state to prevent a timeout racing a flash confirmation, and explicitly requests IDF rollback on expiry. Factory/non-OTA, already-valid and `ESP_ERR_NOT_FOUND` states do not arm the deadline. The original #115 confirmation path also treated `ESP_ERR_NOT_FOUND` as a hard failure; the canonical correction now recognizes that state as no pending OTA record, so a first USB-flashed/non-pending OTA slot is not left permanently unconfirmable. The default ESP-IDF bootloader rollback remains enabled as reset-time fallback.
 
 ### Fault injection — narrowly ported
 
