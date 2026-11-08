@@ -66,13 +66,24 @@ The existing authenticated Panel v3 characteristic now has a bounded volatile pr
 - IN3/IN4 queue depth, high-water, overflow flag and cumulative overflow count are exposed through an authenticated read-only characteristic in the existing BLE service (UUID suffix 0x34). There is no new unauthenticated HTTP endpoint.
 - A compile-time lock-free assertion guards 32-bit ISR atomics. ESP32-S3 disassembly/IRAM-map confirmation remains a CI evidence gate.
 
-### Brightness contract (Issue #126 section 6B)
+### Brightness contract and bench protocol (Issue #126 section 6B)
 
-- Requests are accepted as 8-bit values 0–255 and clamped to the currently reported effective ceiling.
-- The final CORE pixel boundary applies one ratio-preserving ceiling after calibration and before frame capture/RMT swizzle. Trigger and diagnostic paths do not bypass it.
-- Current effective ceiling remains OT_MAX_BRIGHTNESS=32/255. This is a conservative software ceiling, NOT a measured current limiter. It has not been raised.
-- Host tests cover requested values 0, 1, 32, 64, 128, 200 and 255, RGB primaries, white and ratio-preserving output.
-- BlueGhozt optical A/B, current ramp, strip voltage drop and thermal measurements remain physical bench gates and have NOT been run.
+- The build-time ceiling is `CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT` / `OT_MAX_BRIGHTNESS_LIMIT`, Kconfig range 1–255, default 32. The legacy `OT_MAX_BRIGHTNESS` name aliases this setting.
+- The current effective ceiling remains 32/255. It is a conservative software ceiling, NOT a measured current limiter. It has not been raised.
+- All color and master-brightness values remain 8-bit RGB (0–255). Firmware reports the effective ceiling in REST status/capabilities and the authenticated Panel v3 capability descriptor.
+- Physical trigger, unassigned fallback and diagnostic paths produce full-scale RGB values and share the same final ratio-preserving ceiling immediately before frame capture/RMT swizzle. Decorative calibration uses an 8-bit gamma domain (0–255); it no longer contains a fixed 32/255 gamma ceiling.
+- The Kconfig ceiling is configurable for controlled bench builds, but do not select 64, 128 or 255 until the corresponding electrical/thermal step has been measured and approved. The existing default stays 32.
+- Host tests cover requested values 0, 1, 32, 64, 128, 200 and 255; trigger/fallback colors; gamma; the final RGB cap; and a separate 255/255 build.
+
+**Required physical bench sequence — NOT RUN:**
+
+1. Use a current-limited, appropriately fused supply and measure the actual strip rail at the source and furthest injection point. Record voltage and current at each permitted step.
+2. Test a representative 944-pixel strip at ceilings 32, 64, 128 and 255 only while the supply, fuse, wiring, connectors and strip remain within verified ratings. Stop escalation immediately at the approved current, voltage-drop or thermal limit.
+3. Run continuous white-fill for up to 15 minutes at each approved step. Record controller/driver, connector, wire and strip temperatures with an IR thermometer; do not assume a MOSFET is present unless the actual board has one.
+4. The installed bench strip is WS2815 12 V. Measure its 12 V LED rail at the furthest power injection point against the strip's specified operating range. The proposed 4.75 V threshold applies only to a separate 5 V logic/bus supply; monitor that rail separately and do not apply 4.75 V to the 12 V LED rail.
+5. Repeat the comparison against BlueGhozt using identical strip sections, power supply/voltage at the strip, color/pattern, illuminated pixel count, geometry and fixed camera exposure or a lux meter. Record actual voltage, current and optical readings.
+
+No 64/128/255 electrical measurements, 15-minute soak, controlled BlueGhozt A/B or full-brightness parity result is claimed. The 20 A bench fuse is protection, not a current regulator or proof of safe maximum load.
 
 ## STOP/system-inhibit audit
 
