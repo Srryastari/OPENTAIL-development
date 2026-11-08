@@ -66,6 +66,7 @@ assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 32u" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_head[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_tail[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]" in core
 assert "event->timestamp_us=edge_time_us;" in core
 assert "event->asserted=asserted;" in core
 assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
@@ -74,13 +75,25 @@ assert "__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE)" in core
 assert "__atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE)" in core
 assert "turn_edge_overflow[slot]" in core
 assert "gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])" in core
+assert "__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)" in core
+assert "__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)" in core
 assert "static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT]" in core
 assert "input_pin_isr[i]=input_pin[i];" in core
 assert "input_boot_snapshot_us=(uint64_t)esp_timer_get_time();" in core
 assert "static bool turn_edge_queue_update(" in core
 assert "ot_signal_debouncer_transition(state,event.asserted,event.timestamp_us)" in core
-assert "ot_signal_debouncer_resync(state,current_raw);" in core
+assert "static bool turn_edge_queue_resync(" in core
+assert "__atomic_load_n(&turn_edge_writer_active[slot],__ATOMIC_ACQUIRE)" in core
+assert "const uint32_t head_before=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);" in core
+assert "const uint32_t head_after=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);" in core
+assert "const int level=gpio_get_level(input_pin[slot+2u]);" in core
+assert "__atomic_store_n(&turn_edge_tail[slot],head_after,__ATOMIC_RELEASE)" in core
+assert "ot_signal_debouncer_resync(state,raw);" in core
+assert "ot_signal_debouncer_sample(state,baseline_us,OT_DEBOUNCE_TICKS)" in core
 assert "ot_signal_debouncer_sample(state,now_us,OT_DEBOUNCE_TICKS)" in core
+assert "head_after!=head" in core
+assert "bool left_valid=false,right_valid=false;" in sampler
+assert "if(left_valid&&right_valid)" in sampler
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
 assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
 assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
