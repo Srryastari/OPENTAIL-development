@@ -159,6 +159,31 @@ static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v3. *
 static ot_pz_pending_t pz_deferred;
 static ot_pz_preview_t pz_preview;
 static ot_pz_diag_state_t pz_diag;
+#define OT_PZ_RESET_TOMBSTONE_MAGIC 0x4f54525au
+#define OT_PZ_RESET_TOMBSTONE_VERSION 1u
+#define OT_PZ_RESET_CHALLENGE_TTL_MS 5000u
+#define OT_PZ_RESET_TOMBSTONE_KEY "reset_v3"
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint8_t reset_mask;
+    uint8_t reserved;
+    uint16_t revision[OT_PZ_OUTPUTS];
+    ot_pz_controller_t controller;
+    uint32_t crc32;
+} ot_pz_reset_tombstone_t;
+typedef struct {
+    bool active;
+    uint8_t lane;
+    uint16_t revision;
+    uint32_t value;
+    uint32_t expires_ms;
+    uint32_t input_epoch;
+    uint32_t stop_generation;
+} ot_pz_reset_challenge_t;
+static ot_pz_reset_challenge_t pz_reset_challenge;
+static uint8_t pz_reset_pending_mask;
+static void pz_promote(uint32_t epoch);
 static bool pz_persistent=false;
 static uint16_t pz_revision[OT_PZ_OUTPUTS]={1u,1u};
 static uint16_t pz_active_revision[OT_PZ_OUTPUTS]={1u,1u};
@@ -386,6 +411,33 @@ static void pz_refresh_legacy_projection_locked(void){
     memcpy(om_active_revision,pz_active_revision,sizeof(om_active_revision));
     om_persistent=pz_persistent;
 }
+static bool pz_reset_tombstone_valid(const ot_pz_reset_tombstone_t *record){
+    if(!record||record->magic!=OT_PZ_RESET_TOMBSTONE_MAGIC||
+       record->version!=OT_PZ_RESET_TOMBSTONE_VERSION||
+       (record->reset_mask&~((1u<<OT_PZ_OUTPUTS)-1u))!=0u)return false;
+    ot_pz_reset_tombstone_t copy=*record;
+    const uint32_t expected=copy.crc32;copy.crc32=0u;
+    return expected==ot_cfg_crc32(&copy,sizeof(copy));
+}
+static bool pz_reset_tombstone_write_handle(nvs_handle_t h,uint8_t lane,
+        const ot_pz_controller_t *controller,const uint16_t revision[OT_PZ_OUTPUTS]){
+    if(lane>=OT_PZ_OUTPUTS||!controller||!revision)return false;
+    ot_pz_reset_tombstone_t record={0};
+    size_t length=sizeof(record);
+    esp_err_t e=nvs_get_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,&length);
+    if(e==ESP_OK){
+        if(length!=sizeof(record)||!pz_reset_tombstone_valid(&record))return false;
+    }else if(e!=ESP_ERR_NVS_NOT_FOUND)return false;
+    record.magic=OT_PZ_RESET_TOMBSTONE_MAGIC;
+    record.version=OT_PZ_RESET_TOMBSTONE_VERSION;
+    record.reset_mask|=(uint8_t)(1u<<lane);
+    memcpy(record.revision,revision,sizeof(record.revision));
+    record.controller=*controller;
+    record.crc32=0u;record.crc32=ot_cfg_crc32(&record,sizeof(record));
+    e=nvs_set_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,sizeof(record));
+    if(e==ESP_OK)e=nvs_commit(h);
+    return e==ESP_OK;
+}
 static bool pz_stage_legacy_migration(void){
     ot_pz_controller_t previous,candidate;
     if(!ot_pz_migrate_legacy(om_outputs,om_persistent,&previous))return false;
@@ -434,11 +486,19 @@ static void pz_load(void){
         config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
     }else{
         ot_pz_journal_t active={0},stage={0};
+        ot_pz_reset_tombstone_t tombstone={0};
+        size_t tombstone_size=sizeof(tombstone);
+        const esp_err_t t=nvs_get_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,
+                                       &tombstone,&tombstone_size);
+        const bool has_tombstone=t==ESP_OK&&tombstone_size==sizeof(tombstone)&&
+                                 pz_reset_tombstone_valid(&tombstone);
         const esp_err_t a=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active);
         const esp_err_t b=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage);
         const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
         if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
-           (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
+           (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)||
+           (t!=ESP_OK&&t!=ESP_ERR_NVS_NOT_FOUND)||
+           (t==ESP_OK&&!has_tombstone))config_recovery_fault=true;
         nvs_close(h);
         if(config_recovery_fault){
             ot_pz_defaults(&pz_outputs);pz_deferred.pending=false;pz_persistent=false;
@@ -450,6 +510,13 @@ static void pz_load(void){
                 config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
                 pz_deferred.pending=false;pz_persistent=false;return;
             }
+            pz_persistent=true;
+        }else if(has_tombstone){
+            /* A reset tombstone is authoritative if the active map key was
+             * lost; never resurrect the legacy embedded zones. */
+            pz_outputs=tombstone.controller;
+            memcpy(pz_revision,tombstone.revision,sizeof(pz_revision));
+            memcpy(pz_active_revision,tombstone.revision,sizeof(pz_active_revision));
             pz_persistent=true;
         }else if(!pz_stage_legacy_migration()){
             config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
