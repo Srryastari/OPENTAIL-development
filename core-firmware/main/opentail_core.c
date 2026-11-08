@@ -354,29 +354,139 @@ static void om_journal_load(void){
         om_persistent=true;
     }
 }
-static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
-    ot_om_output_t old[OT_OM_OUTPUTS];
-    uint16_t old_rev[OT_OM_OUTPUTS],new_rev[OT_OM_OUTPUTS];
-    portENTER_CRITICAL(&state_lock);
-    memcpy(old,om_outputs,sizeof(old));
-    memcpy(old_rev,om_active_revision,sizeof(old_rev));
-    memcpy(new_rev,om_revision,sizeof(new_rev));
-    portEXIT_CRITICAL(&state_lock);
-    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
-        if(memcmp(&old[i],&items[i],sizeof(old[i]))!=0){
-            if(new_rev[i]==UINT16_MAX)return false;
-            new_rev[i]++;
+static esp_err_t pz_journal_read(nvs_handle_t h,const char *key,ot_pz_journal_t *out){
+    size_t n=0;esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+    if(e!=ESP_OK)return e;
+    if(n!=sizeof(*out))return ESP_ERR_INVALID_SIZE;
+    e=nvs_get_blob(h,key,out,&n);
+    return e==ESP_OK&&ot_pz_journal_valid(out)?ESP_OK:ESP_ERR_INVALID_CRC;
+}
+/* state_lock held: keep the old Output Manager view only as a compatibility
+ * projection for the unchanged effects bank and legacy v1 REST/BLE interfaces. */
+static void pz_refresh_legacy_projection_locked(void){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(!ot_pz_to_fx_view(&pz_outputs.outputs[lane],lane,&om_outputs[lane])){
+            ot_om_output_t defaults[OT_OM_OUTPUTS];ot_om_defaults(defaults);
+            om_outputs[lane]=defaults[lane];
         }
     }
-    ot_om_journal_t staged={0};
-    if(!ot_om_journal_build_revisions(&staged,old,items,old_rev,new_rev))
-        return false;
+    memcpy(om_revision,pz_revision,sizeof(om_revision));
+    memcpy(om_active_revision,pz_active_revision,sizeof(om_active_revision));
+    om_persistent=pz_persistent;
+}
+static void pz_load(void){
+    ot_pz_defaults(&pz_outputs);
+    pz_deferred.pending=false;pz_persistent=false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        pz_revision[lane]=pz_active_revision[lane]=1u;
+    if(config_recovery_fault)return;
+    nvs_handle_t h;
+    esp_err_t e=nvs_open("ot_output_cfg",NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND){
+        if(!ot_pz_migrate_legacy(om_outputs,om_persistent,&pz_outputs)){
+            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
+        }
+        pz_persistent=om_persistent;
+        memcpy(pz_revision,om_revision,sizeof(pz_revision));
+        memcpy(pz_active_revision,om_active_revision,sizeof(pz_active_revision));
+    }else if(e!=ESP_OK){
+        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
+    }else{
+        ot_pz_journal_t active={0},stage={0};
+        const esp_err_t a=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active);
+        const esp_err_t b=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage);
+        const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
+        if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
+           (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
+        nvs_close(h);
+        if(config_recovery_fault){
+            ot_pz_defaults(&pz_outputs);pz_deferred.pending=false;pz_persistent=false;
+            return; /* A corrupt v3 record never falls back to v1/v2 bytes. */
+        }
+        if(has_a||has_b){
+            if(!ot_pz_journal_recover(has_a?&active:NULL,has_b?&stage:NULL,
+                 &pz_outputs,&pz_deferred,pz_active_revision,pz_revision)){
+                config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+                pz_deferred.pending=false;pz_persistent=false;return;
+            }
+            pz_persistent=true;
+        }else{
+            /* Read-only migration: v1 profile, v2 profile_v2, and the v2
+             * staged/active journal have already been validated by om_load().
+             * No legacy bytes are overwritten during boot. */
+            if(!ot_pz_migrate_legacy(om_outputs,om_persistent,&pz_outputs)){
+                config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
+            }
+            pz_persistent=om_persistent;
+            memcpy(pz_revision,om_revision,sizeof(pz_revision));
+            memcpy(pz_active_revision,om_active_revision,sizeof(pz_active_revision));
+        }
+    }
+    portENTER_CRITICAL(&state_lock);
+    pz_refresh_legacy_projection_locked();
+    portEXIT_CRITICAL(&state_lock);
+}
+static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
+    if(!candidate||!ot_pz_valid(candidate)||pz_deferred.pending)return false;
+    ot_pz_controller_t previous;
+    uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+    portENTER_CRITICAL(&state_lock);
+    previous=pz_outputs;
+    memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
+    memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
+    portEXIT_CRITICAL(&state_lock);
+    bool changed=false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(memcmp(&previous.outputs[lane],&candidate->outputs[lane],
+                  sizeof(previous.outputs[lane]))==0)continue;
+        if(candidate_revision[lane]==UINT16_MAX)return false;
+        candidate_revision[lane]++;changed=true;
+    }
+    if(!changed)return true;
+    ot_pz_journal_t staged={0};
+    if(!ot_pz_journal_build(&staged,&previous,candidate,
+                            previous_revision,candidate_revision))return false;
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
+    esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
-    return e==ESP_OK;
+    if(e!=ESP_OK)return false; /* No RAM mutation before durable staged commit. */
+    portENTER_CRITICAL(&state_lock);
+    pz_deferred.candidate=*candidate;pz_deferred.pending=true;
+    memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
+    pz_persistent=true;
+    pz_refresh_legacy_projection_locked();
+    portEXIT_CRITICAL(&state_lock);
+    return true;
+}
+/* Legacy output writes are lossless only while the current lane is representable
+ * as one panel with contiguous zones. Complex hierarchy is never silently flattened. */
+static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
+    if(!items)return false;
+    ot_pz_controller_t candidate;
+    portENTER_CRITICAL(&state_lock);candidate=pz_outputs;portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        ot_om_output_t current={0};
+        if(!ot_pz_to_legacy(&candidate.outputs[lane],lane,&current))return false;
+        if(memcmp(&current,&items[lane],sizeof(current))==0)continue;
+        ot_pz_output_t replacement={0};
+        if(!ot_pz_from_legacy_output(&items[lane],lane,&candidate,&replacement))return false;
+        candidate.outputs[lane]=replacement;
+    }
+    return pz_save_controller_locked(&candidate);
+}
+static void pz_sync_from_legacy(void){
+    ot_pz_controller_t migrated;
+    if(!ot_pz_migrate_legacy(om_outputs,true,&migrated)){
+        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);pz_persistent=false;return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    pz_outputs=migrated;pz_deferred.pending=false;pz_persistent=true;
+    memcpy(pz_revision,om_revision,sizeof(pz_revision));
+    memcpy(pz_active_revision,om_active_revision,sizeof(pz_active_revision));
+    pz_refresh_legacy_projection_locked();
+    portEXIT_CRITICAL(&state_lock);
 }
 
 #define OT_SHOW_MAX_MS 60000u
