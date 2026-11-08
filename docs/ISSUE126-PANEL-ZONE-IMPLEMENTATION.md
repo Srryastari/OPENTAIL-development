@@ -4,7 +4,7 @@
 
 - Required starting HEAD: 66c2d9c843a0b434f9399811110e42d7e26c4692
 - Feature branch: firmware/issue126-panel-zone-core-20261108
-- Stacked PR target: firmware/issue113-single-esp-progress-wdt-20261103 (the base of Triggers PR #123)
+- Stacked PR target: triggers/issue121-turn-release-debounce-20261108 (the exact HEAD of Triggers PR #123; required starting commit 66c2d9c843a0b434f9399811110e42d7e26c4692)
 - Hardware target: one ESP32-S3 N16R8. No second MCU.
 - No Android/UI source changes, no merge, and no automatic visual sweep.
 - Android handoff remains blocked until Overseer verifies the firmware contract and exact HEAD.
