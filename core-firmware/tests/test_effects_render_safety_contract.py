@@ -82,8 +82,8 @@ assert "if(cfg->style==OT_FX_OVERLAY_OFF||!effect_brightness)return true;" in ov
 # resetting the remaining zone's effect phase.
 ordered(render,[
     "bool native_rendering=decision.show_requested;",
-    "if(native_rendering && local_fx_enabled){",
-    "for(int z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;",
+    "if(native_rendering&&local_fx_enabled){",
+    "for(unsigned z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;",
     "if(!native_rendering && full_frame){",
     "if(local_stop_generation>stop_render_generation)"
 ])
