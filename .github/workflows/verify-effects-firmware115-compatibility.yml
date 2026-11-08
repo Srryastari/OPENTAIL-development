@@ -105,7 +105,7 @@ jobs:
         run: |
           python3 core-firmware/tests/test_trigger_runtime_contract.py
           python3 core-firmware/tests/test_nvs_finalization_contract.py
-          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
             core-firmware/main/trigger_manager.c \
             core-firmware/main/core_logic.c \
             core-firmware/main/arbitration_logic.c \
