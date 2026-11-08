@@ -2442,7 +2442,12 @@ void app_main(void) {
     if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");
     /* Capture held inputs before RMT can emit its first frame; debounce
      * continues at 10ms independently once the sampler starts. */
-    if(inputs_ready)live_input_mask=tm_gpio_input_mask();
+    if(inputs_ready){
+        /* Timestamp precedes the GPIO baseline: only ISR events newer than
+         * this point are replayed by the turn debouncers. */
+        input_boot_snapshot_us=(uint64_t)esp_timer_get_time();
+        live_input_mask=tm_gpio_input_mask();
+    }
     const bool input_watched=inputs_ready&&ot_sw_idf_watch_inputs();
     if(inputs_ready&&!input_watched)
         ot_st_set_fault("single-ESP input watchdog registration failed");
