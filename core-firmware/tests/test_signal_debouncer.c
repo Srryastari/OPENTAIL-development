@@ -138,6 +138,22 @@ static void restart_hold_after_pulse_between_sampler_wakes(void) {
     assert(sample_us_with_sequence(&d,false,2000u*1000u,2001u*1000u,
                                    future_sequence));
     assert(d.asserted&&d.release_pending);
+
+    /* The GPIO level may become active before its ISR timestamp is published.
+     * Multiple sampler wakes must wait rather than compare a stale falling
+     * timestamp and falsely expire the pending hold. */
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample(&d,false,3000u));
+    const uint32_t rising_sequence=d.last_edge_sequence+2u;
+    assert(sample_us_with_sequence(&d,true,3390u*1000u,3000u*1000u,
+                                   d.last_edge_sequence));
+    assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
+    assert(sample_us_with_sequence(&d,true,3410u*1000u,3000u*1000u,
+                                   d.last_edge_sequence));
+    assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
+    assert(sample_us_with_sequence(&d,true,3410u*1000u,3390u*1000u,
+                                   rising_sequence));
+    assert(d.asserted&&!d.release_pending&&!d.awaiting_edge_record);
 }
 
 static void independent_turns_and_hazards(void) {
