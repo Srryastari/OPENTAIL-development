@@ -84,6 +84,11 @@ def main():
     assert "completed_at - last_feed_ms >= timeout_ms" in stress
     assert "14900u" in stress and "14940u" in stress
     assert "HOST_SIMULATED" in stress
+    for result in ("WAIT_COMPLETED", "WAIT_RETURNED_ERROR", "WAIT_BLOCKED",
+                   "modeled_completion_cycle"):
+        assert result in stress
+    assert "WAIT_COMPLETED,WAIT_BLOCKED" in stress
+    assert "WAIT_BLOCKED,WAIT_COMPLETED" in stress
 
     core = (ROOT / "core-firmware/main/opentail_core.c").read_text()
     bank = (ROOT / "core-firmware/main/fx_zone_bank.c").read_text()
