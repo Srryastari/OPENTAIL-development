@@ -1,0 +1,88 @@
+name: Issue126 Panel/Zone exact-head CORE verification
+on:
+  push:
+    branches:
+      - firmware/issue126-panel-zone-core-20261108
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - triggers/issue121-turn-release-debounce-20261108
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-head-and-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin exact tested HEAD and sequential parent
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor 66c2d9c843a0b434f9399811110e42d7e26c4692 HEAD
+      - name: Verify firmware-only scope and exact Panel/Zone source contract
+        run: |
+          python3 core-firmware/tests/test_panel_zone_runtime_contract.py
+          python3 - <<'PY'
+          import subprocess
+          paths=subprocess.check_output(
+              ["git","diff","--name-only",
+               "66c2d9c843a0b434f9399811110e42d7e26c4692","HEAD"],
+              text=True).splitlines()
+          forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))]
+          assert not forbidden, forbidden
+          print("PASS: no Android or UI source changes")
+          PY
+      - name: Full CORE host regressions — Panel, Trigger, Effects, BLE, STOP and NVS
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  esp-idf-5-5-5:
+    needs: exact-head-and-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert immutable exact HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Compile CORE for ESP32-S3 with ESP-IDF v5.5.5 — NO FLASH
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Verify application and flash manifest
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          build=Path("core-firmware/build")
+          refs=json.loads((build/"flasher_args.json").read_text())["flash_files"]
+          assert len(refs)>=3
+          assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in refs.values())
+          print("PASS: exact-head ESP32-S3 image and flash manifest; no device flashed")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-issue126-bench-build-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/flasher_args.json
+          if-no-files-found: error
+          retention-days: 14
+# Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
+# thermal behavior, vehicle optics, STOP hardware, or road safety.
