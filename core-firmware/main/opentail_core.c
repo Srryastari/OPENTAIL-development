@@ -1982,8 +1982,13 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
     return true;
 }
 static bool strip_init(void){
-    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
-        if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+        /* Fresh/unconfigured output uses the bounded raw-array fallback extent.
+         * This is a runtime buffer budget, never a persisted strip-length claim. */
+        const unsigned pixels=pz_outputs.outputs[ch].active_pixels?
+            pz_outputs.outputs[ch].active_pixels:OT_PZ_MAX_PIXELS;
+        if(!strip_configure_channel(ch,pixels))return false;
+    }
     return true;
 }
 /* Low-priority durable promoter. The independent input sampler never waits
@@ -2681,6 +2686,7 @@ void app_main(void) {
     tm_load();
     om_journal_load();
     tm_journal_load();
+    pz_load(); /* v3 authoritative; read-only v1/v2 migration if no v3 journal */
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     const bool watchdog_ready=ot_sw_idf_configure();
