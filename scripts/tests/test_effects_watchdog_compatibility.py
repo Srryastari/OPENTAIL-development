@@ -65,6 +65,12 @@ def main():
     assert manifest["tertiary_source_proven_modes"] == 13
     assert manifest["tertiary_transport_admitted_modes"] == 13
 
+    stress = (ROOT / "core-firmware/tests/test_effect_watchdog_compat.c").read_text()
+    assert "render_work_ms" in stress
+    assert "completed_at - last_feed_ms >= timeout_ms" in stress
+    assert "14900u" in stress and "14940u" in stress
+    assert "HOST_SIMULATED" in stress
+
     core = (ROOT / "core-firmware/main/opentail_core.c").read_text()
     adapter = (ROOT / "core-firmware/main/ot_single_watchdog_idf.c").read_text()
     policy = (ROOT / "core-firmware/main/ot_single_watchdog.c").read_text()
