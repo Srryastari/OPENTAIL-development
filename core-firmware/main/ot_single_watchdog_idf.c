@@ -30,6 +30,7 @@ static unsigned fault_injected=0u;
 static bool recovery_inhibit=false;
 static bool stable_run=false; /* published atomically; boot policy is render-task-owned */
 static const char *TAG="OT_SW_WDT";
+static uint32_t clock_ms(void);
 
 /* Compile-time-only bench fault injection. Default is disabled and there is
  * no BLE/HTTP command that can activate it. A selected fault fires once after
