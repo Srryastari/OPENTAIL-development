@@ -60,6 +60,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   tests/test_panel_zone_preview.c -o /tmp/ot-panel-zone-preview
 /tmp/ot-panel-zone-preview
 python3 tests/test_panel_zone_runtime_contract.py
+# Request values are 0..255; CORE applies one reported safe ceiling at final RGB output.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain tests/test_brightness_contract.c -o /tmp/ot-brightness-contract
+/tmp/ot-brightness-contract
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \

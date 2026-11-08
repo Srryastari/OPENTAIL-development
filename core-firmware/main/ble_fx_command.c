@@ -13,12 +13,12 @@ ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
   uint16_t id=(uint16_t)p[2]|((uint16_t)p[3]<<8);
   ot_wled_fx_metadata_t meta;
   if(!ot_effects_1d_metadata(id,&meta))return OT_BLE_FX_UNSUPPORTED;
-  if(p[4]==0||(p[4]&~((1u<<OT_OM_OUTPUTS)-1u))!=0||p[5]<1||p[12]>OT_MAX_BRIGHTNESS||!ot_palette_1d_supported(id,p[15])||(continuous?p[16]!=0u:(p[16]<1||p[16]>60)))
+  if(p[4]==0||(p[4]&~((1u<<OT_OM_OUTPUTS)-1u))!=0||p[5]<1||!ot_palette_1d_supported(id,p[15])||(continuous?p[16]!=0u:(p[16]<1||p[16]>60)))
     return OT_BLE_FX_RANGE;
   *out=(ot_ble_fx_packet_t){
     .effect_id=id,.chain_mask=p[4],.zone_mask=p[5],
     .r=p[6],.g=p[7],.b=p[8],.bg_r=p[9],.bg_g=p[10],.bg_b=p[11],
-    .brightness=p[12],.speed=p[13],.intensity=p[14],
+    .brightness=ot_brightness_limit_request(p[12]),.speed=p[13],.intensity=p[14],
     .palette_id=p[15],.ttl_sec=continuous?1u:p[16]
   };
   return OT_BLE_FX_OK;

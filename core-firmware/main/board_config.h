@@ -15,7 +15,10 @@
 // The synthetic layout is only an internal bounds-validity fixture.
 #define OT_CHAIN_PIXELS OT_OM_MAX_PIXELS_PER_OUTPUT
 #define OT_LAYOUT_SECTIONS {OT_OM_MAX_PIXELS_PER_OUTPUT,0,0,0,0,0,0,0}
-#define OT_MAX_BRIGHTNESS 32 // <= 12.5% channel brightness; not a measured current limiter.
+#define OT_MAX_BRIGHTNESS 32 // Conservative software ceiling; NOT a measured current limiter.
+static inline uint8_t ot_brightness_limit_request(uint8_t requested){
+    return requested>OT_MAX_BRIGHTNESS?(uint8_t)OT_MAX_BRIGHTNESS:requested;
+}
 #define OT_DEBOUNCE_TICKS 4 // four 10ms samples
 #define OT_DEMO_MAX_MS 10000
 

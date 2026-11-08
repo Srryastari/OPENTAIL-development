@@ -2806,6 +2806,9 @@ static void led_task(void *p) {
                        }
                        if(decorated)c=ot_om_calibrate(c,output);
                    }
+                   /* One final ratio-preserving ceiling covers solid/show,
+                    * Startup/Shutdown, effects, trigger and diagnostics. */
+                   c=ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS);
                    if(frame_captured[ch])
                        ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
