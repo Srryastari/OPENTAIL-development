@@ -54,8 +54,11 @@ static void preview_lifecycle(void){
     assert(!ot_pz_preview_expire(&preview,UINT32_MAX-1u));
     assert(ot_pz_preview_expire(&preview,999u));
     assert(ot_pz_preview_begin(&preview,&committed,0u,7u,7u,false,5000u));
+    preview.committing=true;
+    assert(!ot_pz_preview_update(&preview,0u,&latest,7u,7u,false,5100u));
+    assert(!ot_pz_preview_expire(&preview,8000u));
     ot_pz_preview_cancel(&preview);
-    assert(!preview.active);
+    assert(!preview.active&&!preview.committing);
 }
 static void activation_quiet_window(void){
     for(unsigned mask=0;mask<256u;mask++){
