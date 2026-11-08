@@ -160,6 +160,8 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
+      - name: Verify the generated Kconfig actually selected the injected build mode
+        run: grep -qx 'CONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=7' core-firmware/sdkconfig
 
   esp-idf555-four-image-bench:
     needs: [full-core-host, independent-trigger-guard, android-unchanged-contract, watchdog-fault-injection-compile]
