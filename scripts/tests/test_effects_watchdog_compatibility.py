@@ -166,6 +166,20 @@ def main():
     assert "if(point==5u)" in adapter and "if(point==6u)" in adapter and "if(point==7u)" in adapter
     assert "ot_sw_idf_fault_inject(3u)" in render
     assert "ot_sw_idf_fault_inject(4u)" in render
+    fault_router = section(adapter, "void ot_sw_idf_fault_inject(unsigned point){",
+                           "void ot_sw_idf_render_cycle(")
+    assert "point>=3u && point<=4u" in fault_router
+    kconfig = (ROOT / "core-firmware/main/Kconfig.projbuild").read_text()
+    assert "config OPENTAIL_WATCHDOG_TEST_FAULT" in kconfig
+    assert "default 0" in kconfig
+    timeline = (ROOT / "core-firmware/tests/test_single_watchdog_timeline.c").read_text()
+    for scenario in ("sampler_deadlock", "rmt_hang", "single_lane_fault",
+                     "idle_starvation", "interrupt_block", "stop_ble_disconnect"):
+        assert f'"{scenario}"' in timeline
+    host_runner = (ROOT / "core-firmware/tests/run-host-tests.sh").read_text()
+    assert "tests/test_single_watchdog_timeline.c" in host_runner
+    fault_workflow = (ROOT / ".github/workflows/verify-single-esp-watchdog113.yml").read_text()
+    assert "CONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=7" in fault_workflow
 
     print(
         "PASS Effects #110 / Firmware #115 exact-source compatibility: "
