@@ -154,7 +154,7 @@ jobs:
           persist-credentials: false
       - name: Compile all bench-only fault branches with mode 7 selected (never execute or package this image)
         run: |
-          printf '\\nCONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=7\\n' >> core-firmware/sdkconfig.defaults
+          printf '\nCONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=7\n' >> core-firmware/sdkconfig.defaults
       - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
