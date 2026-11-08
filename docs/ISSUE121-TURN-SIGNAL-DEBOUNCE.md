@@ -13,7 +13,9 @@ odd/even sequence counter. The sampler takes a bounded seqlock snapshot of
 the raw GPIO level, edge timestamp and sequence, and double-reads the pin
 level around that snapshot; a torn or changing snapshot is discarded and
 does not feed watchdog progress. This prevents a GPIO edge racing the
-timestamp read from creating an impossible future edge time.
+timestamp read from creating an impossible future edge time. If the level
+changes before the ISR has published its timestamp, a pending release waits
+for the coherent ISR edge record rather than classifying a stale timestamp.
 
 The first inactive raw sample starts the timer from its captured falling-edge
 timestamp. A reassertion observed by the sampler uses its captured rising-edge
