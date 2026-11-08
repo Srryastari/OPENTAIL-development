@@ -58,6 +58,16 @@ typedef struct {
     ot_pz_output_t outputs[OT_PZ_OUTPUTS];
 } ot_pz_controller_t;
 
+/* Single-owner volatile arrangement preview; slider updates never write NVS. */
+#define OT_PZ_PREVIEW_LEASE_MS 2000u
+typedef struct {
+    ot_pz_controller_t candidate;
+    uint32_t expires_ms;
+    uint16_t base_revision;
+    uint8_t lane;
+    bool active;
+} ot_pz_preview_t;
+
 typedef struct {
     ot_pz_controller_t candidate;
     bool pending;
@@ -66,6 +76,18 @@ typedef struct {
 void ot_pz_defaults(ot_pz_controller_t *config);
 bool ot_pz_output_valid(const ot_pz_output_t *output,unsigned lane);
 bool ot_pz_valid(const ot_pz_controller_t *config);
+bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
+                                   uint8_t quiet_samples,uint8_t required_samples,
+                                   uint32_t current_epoch,uint32_t expected_epoch);
+bool ot_pz_preview_begin(ot_pz_preview_t *state,
+                         const ot_pz_controller_t *committed,unsigned lane,
+                         uint16_t active_revision,uint16_t base_revision,
+                         bool pending,uint32_t now_ms);
+bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
+                          const ot_pz_output_t *next,uint16_t base_revision,
+                          uint16_t active_revision,bool pending,uint32_t now_ms);
+bool ot_pz_preview_expire(ot_pz_preview_t *state,uint32_t now_ms);
+void ot_pz_preview_cancel(ot_pz_preview_t *state);
 uint16_t ot_pz_zone_pixel_count(const ot_pz_zone_t *zone);
 bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
                           bool legacy_persisted,ot_pz_controller_t *out);

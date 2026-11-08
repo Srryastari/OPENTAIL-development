@@ -135,6 +135,58 @@ bool ot_pz_valid(const ot_pz_controller_t *config){
     }
     return true;
 }
+bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
+                                   uint8_t quiet_samples,uint8_t required_samples,
+                                   uint32_t current_epoch,uint32_t expected_epoch){
+    return instantaneous==0u && debounced==0u &&
+           quiet_samples>=required_samples && current_epoch==expected_epoch;
+}
+bool ot_pz_preview_expire(ot_pz_preview_t *state,uint32_t now_ms){
+    if(!state||!state->active)return false;
+    if((int32_t)(now_ms-state->expires_ms)<0)return false;
+    state->active=false;
+    return true;
+}
+void ot_pz_preview_cancel(ot_pz_preview_t *state){
+    if(state)state->active=false;
+}
+bool ot_pz_preview_begin(ot_pz_preview_t *state,
+                         const ot_pz_controller_t *committed,unsigned lane,
+                         uint16_t active_revision,uint16_t base_revision,
+                         bool pending,uint32_t now_ms){
+    if(!state||!committed||lane>=OT_PZ_OUTPUTS||!active_revision||
+       active_revision!=base_revision||pending||!ot_pz_valid(committed))return false;
+    (void)ot_pz_preview_expire(state,now_ms);
+    if(state->active){
+        if(state->lane!=lane||state->base_revision!=base_revision)return false;
+        state->expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        return true;
+    }
+    state->candidate=*committed;
+    state->lane=(uint8_t)lane;
+    state->base_revision=base_revision;
+    state->expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+    state->active=true;
+    return true;
+}
+bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
+                          const ot_pz_output_t *next,uint16_t base_revision,
+                          uint16_t active_revision,bool pending,uint32_t now_ms){
+    if(!state||!next||!state->active||lane>=OT_PZ_OUTPUTS||
+       state->lane!=lane||state->base_revision!=base_revision||
+       active_revision!=base_revision||pending||
+       (int32_t)(now_ms-state->expires_ms)>=0||
+       !ot_pz_output_valid(next,lane)){
+        if(state)(void)ot_pz_preview_expire(state,now_ms);
+        return false;
+    }
+    ot_pz_controller_t candidate=state->candidate;
+    candidate.outputs[lane]=*next;
+    if(!ot_pz_valid(&candidate))return false;
+    state->candidate=candidate;
+    state->expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+    return true;
+}
 bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
                           bool legacy_persisted,ot_pz_controller_t *out){
     if(!out)return false;

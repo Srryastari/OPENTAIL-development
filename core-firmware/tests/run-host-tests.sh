@@ -54,6 +54,12 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/panel_zone_diag.c tests/test_panel_zone_diag.c -o /tmp/ot-panel-zone-diag
 /tmp/ot-panel-zone-diag
+# Volatile live arrangement preview and activation quiet-window regression.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone_preview.c -o /tmp/ot-panel-zone-preview
+/tmp/ot-panel-zone-preview
+python3 tests/test_panel_zone_runtime_contract.py
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \

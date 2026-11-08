@@ -70,7 +70,9 @@ static void all_input_masks_crash_phases(void){
     assert(ot_pz_journal_build(&primary,&old_cfg,&old_cfg,old_rev,old_rev));
     assert(ot_pz_journal_build(&stage,&old_cfg,&new_cfg,old_rev,new_rev));
     for(unsigned mask=0;mask<256u;mask++){
-        (void)mask; /* Physical quiet-window policy is separately gated in CORE. */
+        const bool can_promote=ot_pz_activation_inputs_quiet(
+            (uint8_t)mask,(uint8_t)mask,4u,4u,55u,55u);
+        assert(can_promote==(mask==0u));
         for(unsigned phase=0;phase<4u;phase++){
             const ot_pz_journal_t *active=phase>=2u?&stage:&primary;
             const ot_pz_journal_t *staged=(phase==1u||phase==2u)?&stage:NULL;
