@@ -187,6 +187,7 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
 }
 /* Revoked owner sessions discard cached output, frame and trigger replies. */
 static void cfg_reset(void);
+static void panel_session_reset(void);
 static void frame_reply_reset(void);
 static uint8_t trigger_last_status=0;
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -236,6 +237,7 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
          * triggers, persistent scenes, or saved configuration profiles. */
         ot_ble_disconnect_show();
         cfg_reset();
+        panel_session_reset();ot_ble_diag_disconnect();
         frame_reply_reset();
         ot_palette_ble_session_reset();
         trigger_last_status=0;
