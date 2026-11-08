@@ -44,4 +44,38 @@ assert "OT_PZ_PREVIEW_LEASE_MS/1000u" in ble
 assert "(uint8_t)OT_MAX_BRIGHTNESS" in ble
 assert "led_strip_" not in ble and "rmt_" not in ble
 
-print("PASS Issue126 static runtime contract")
+# Panel/Zone active/staged records now live in the dedicated namespace.
+pz_load = core.split("static void pz_load(void)", 1)[1].split("static void pz_refresh_legacy_projection_locked", 1)[0]
+pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split("int ot_ble_panel_get(", 1)[0]
+pz_promote = core.split("static void pz_promote(", 1)[1].split("static void om_promote(", 1)[0]
+assert 'nvs_open("ot_zone_map"' in pz_load
+assert 'nvs_open("ot_zone_map"' in pz_save
+assert 'nvs_open("ot_zone_map"' in pz_promote
+assert "pz_stage_legacy_migration" in core
+assert "ot_output_cfg" not in pz_load
+
+# Trigger ISR telemetry is additive to the existing two SPSC turn queues.
+telemetry = (ROOT / "main/input_telemetry.h").read_text()
+for token in ("__atomic_always_lock_free", "input_raw_edges",
+              "input_asserted_edges", "input_deasserted_edges",
+              "turn_edge_high_water", "turn_edge_overflow_count",
+              "input_index>=OT_IN_COUNT", "gpio_ll_get_level"):
+    assert token in core, token
+for token in ("OT_INPUT_DIAG_INPUTS", "OT_INPUT_DIAG_WIRE_BYTES",
+              "ot_input_diag_snapshot_get"):
+    assert token in telemetry or token in ble or token in core, token
+assert "ot_input_diag_uuid" in ble
+assert "input_diag_access" in ble
+assert "conn!=active_conn||!authorized" in ble
+
+# Full 8-bit requests are accepted, then limited once at the final CORE RGB boundary.
+board = (ROOT / "main/board_config.h").read_text()
+output_header = (ROOT / "main/output_manager.h").read_text()
+fx_command = (ROOT / "main/ble_fx_command.c").read_text()
+assert "ot_brightness_limit_request" in board
+assert "ot_brightness_limit_request(p[12])" in fx_command
+assert "ot_om_limit_brightness" in output_header
+assert "ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS)" in core
+assert "auto_sweep" not in core.lower()
+
+print("PASS Issue126 static runtime, namespace, ISR telemetry and brightness contracts")
