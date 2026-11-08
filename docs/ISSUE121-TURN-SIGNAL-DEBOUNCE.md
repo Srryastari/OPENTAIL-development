@@ -6,24 +6,24 @@ This change adds a non-blocking, C-only `ot_signal_debouncer_t` for IN3 / Left
 (GPIO6, mask `0x04`) and IN4 / Right (GPIO7, mask `0x08`). The 10ms input
 sampler and four stable-sample assertion qualification remain unchanged.
 Only turn-signal deassertion is extended: the logical input remains asserted
-until 400ms of continuous inactive samples have elapsed.
+until 400ms of continuous inactive time have elapsed.
 
-The GPIO ISRtimestamps each Left/Right edge with the ESP-IDF monotonic clock.
+The GPIO ISR timestamps each Left/Right edge with the ESP-IDF monotonic clock.
 The first inactive raw sample starts the timer from its captured falling-edge
 timestamp. A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
 release. Reassertion before the 400ms deadline cancels the pending release and
 leaves the logical mask asserted, so the renderer receives no false
 falling/rising edge between flashes. If the signal remains inactive through
- the deadline, the old assertion releases; a later assertion must again pass
+the deadline, the old assertion releases; a later assertion must again pass
 four stable samples.
 
-Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds. The 400,000µs interval is safely shorter than the 32-bit wrap period.
-The existing GPIO edge ISR records the Left/Right transition timestamp so a
-late 10ms sampler wake can distinguish a reassertion just before 400ms from
-one after expiry. The ISR timestamp is read atomically by the sampler.
-Unsigned elapsed subtraction is wrap-safe for the short 400ms interval. No
-Arduino dependency, blocking delay, task, timer callback, NVS field or BLE
+Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds.
+The 400,000µs interval is safely shorter than the 32-bit wrap period (about
+71.6 minutes). The GPIO ISR stores edge timestamps atomically; the sampler
+compares them using unsigned elapsed arithmetic. The ESP-IDF 5.5.5
+`esp_timer_get_time()` implementation is ISR-safe and IRAM-backed. No Arduino
+dependency, blocking delay, extra task, timer callback, NVS field or BLE
 change is introduced. The transient timer state is RAM-only and is seeded
 from the initial GPIO snapshot before the first RMT frame.
 
@@ -49,9 +49,10 @@ The deterministic test uses an injected `uint32_t` clock and covers four
 sample assertion, 100/200/300/399ms flash gaps, 400ms and longer inactivity,
 reassertion before and at expiry, repeated flashes without a logical falling
 edge, independent Left/Right and Hazards, all 256 boot masks, unchanged
-non-turn timing, Brake/Parking and Reverse arbitration, wraparound and
-scheduler jitter. The complete CORE host runner also covers the existing
-Effects, BLE, STOP, NVS and watchdog suites.
+non-turn timing, Brake/Parking and Reverse arbitration, 32-bit microsecond
+rollover and delayed sampler wake using the captured raw-edge timestamp. The
+complete CORE host runner also covers the existing Effects, BLE, STOP, NVS
+and watchdog suites.
 
 ## Acceptance evidence
 
