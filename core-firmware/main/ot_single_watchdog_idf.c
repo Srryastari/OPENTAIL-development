@@ -24,8 +24,7 @@ static esp_task_wdt_user_handle_t input_user=NULL,render_user=NULL;
 static bool watchdog_configured=false;
 static uint32_t input_samples=0,completed_frames=0,handled_fault_cycles=0;
 static uint32_t last_input_ms=0,last_frame_ms=0;
-static uint32_t healthy_since_ms=0;
-static bool healthy_window=false;
+static ot_sw_stability_window_t stable_window={0};
 static unsigned fault_injected=0u;
 static bool recovery_inhibit=false;
 static bool stable_run=false; /* published atomically; boot policy is render-task-owned */
@@ -71,7 +70,7 @@ void ot_sw_idf_boot_record(void){
     const esp_reset_reason_t reason=esp_reset_reason();
     boot=ot_sw_boot_record(&rtc_record,classify(reason));
     __atomic_store_n(&stable_run,false,__ATOMIC_RELEASE);
-    healthy_since_ms=0u;healthy_window=false;fault_injected=0u;
+    stable_window.active=false;stable_window.healthy_since_ms=0u;fault_injected=0u;
     __atomic_store_n(&recovery_inhibit,ot_sw_decorative_inhibited(&boot),__ATOMIC_RELEASE);
     ESP_LOGW(TAG,"single ESP reset=%s (%d) crash_streak=%lu boot_loop=%u; no backup light path",
         ot_sw_reset_name(boot.reset_class),(int)reason,
@@ -121,13 +120,14 @@ void ot_sw_idf_fault_inject(unsigned point){
 }
 void ot_sw_idf_render_cycle(bool all_outputs_completed,bool any_output_completed,
                             bool diagnosed_fault,bool configuration_fault){
-    if(!render_user){healthy_window=false;return;}
+    if(!render_user){uint32_t ignored=0u;(void)ot_sw_stability_window_update(&stable_window,clock_ms(),false,&ignored);return;}
     inject_fault(2u); /* Render task stall after output work, before its feed. */
     inject_fault(5u); /* Starve this core's idle task; IDF TWDT must catch it. */
     inject_fault(6u); /* Block interrupts; IDF interrupt WDT must catch it. */
     inject_fault(7u); /* Panic/reset classification path. */
     if(!ot_sw_render_progress_eligible(all_outputs_completed,any_output_completed)){
-        healthy_window=false;
+        uint32_t ignored=0u;
+        (void)ot_sw_stability_window_update(&stable_window,clock_ms(),false,&ignored);
         return;
     }
     /* RMT completion is the only feed: a loop repeating a latched failure
@@ -150,16 +150,11 @@ void ot_sw_idf_render_cycle(bool all_outputs_completed,bool any_output_completed
     const uint32_t last_input=__atomic_load_n(&last_input_ms,__ATOMIC_ACQUIRE);
     const bool healthy=all_outputs_completed &&
         (uint32_t)(now-last_input)<100u && !diagnosed_fault && !configuration_fault;
-    if(!healthy){
-        healthy_window=false;
+    uint32_t healthy_elapsed_ms=0u;
+    if(!ot_sw_stability_window_update(&stable_window,now,healthy,&healthy_elapsed_ms))
         return;
-    }
-    if(!healthy_window){
-        healthy_since_ms=now;
-        healthy_window=true;
-    }
     if(!__atomic_load_n(&stable_run,__ATOMIC_ACQUIRE) &&
-       ot_sw_mark_stable(&rtc_record,&boot,(uint32_t)(now-healthy_since_ms),
+       ot_sw_mark_stable(&rtc_record,&boot,healthy_elapsed_ms,
            __atomic_load_n(&input_samples,__ATOMIC_RELAXED),
            __atomic_load_n(&completed_frames,__ATOMIC_RELAXED),false,false)){
         __atomic_store_n(&stable_run,true,__ATOMIC_RELEASE);
