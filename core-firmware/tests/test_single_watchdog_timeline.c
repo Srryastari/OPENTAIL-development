@@ -62,6 +62,14 @@ int main(void){
     assert(boot.crash_streak_at_boot==0 &&
            strcmp(ot_sw_reset_name(boot.reset_class),"brownout")==0);
     event(0,"supply_brownout","reset_reason","brownout_not_task_wdt","NOT_RUN");
+    event(5000,"idle_starvation","render_core_busy_loop",
+          "idle_task_TWDT_panic_reset","NOT_RUN");
+    event(5000,"interrupt_block","render_core_interrupts_disabled",
+          "interrupt_WDT_reset","NOT_RUN");
+    event(5000,"software_panic","bench_abort",
+          "panic_reset_reason","NOT_RUN");
+    event(0,"stable_window","partial_frame_or_stale_sampler",
+          "healthy_window_restarts_until_60s_continuous","NOT_RUN");
     event(0,"power_dead","only_mcu_no_supply",
           "watchdog_cannot_produce_oem_brake_fallback","NOT_RUN");
     event(0,"ota_pending","no_stable_full_frame",
