@@ -168,8 +168,8 @@ assert "ot_frame_snapshot_unavailable(" in renderer
 assert "uint16_t longest_pixels=0; /* Only successfully refreshed RMT lanes. */" in renderer
 assert renderer.index("uint16_t longest_pixels=0;") < renderer.index("bool frame_ready[OT_CHAIN_COUNT]")
 completion = renderer.index("if(frame_captured[ch])ot_frame_snapshot_complete(true);")
-assert renderer.index("if(local_outputs[ch].active_pixels>longest_pixels)",completion) > completion
-assert renderer.index("if(local_outputs[ch].active_pixels>longest_pixels)",completion) < renderer.index("ot_fps_pacer_observe(&pacer,work_us,longest_pixels)")
+assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) > completion
+assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) < renderer.index("ot_fps_pacer_observe(&pacer,work_us,longest_pixels)")
 assert "static bool input_init(void)" in core
 assert "boot_enrollment_ready" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
