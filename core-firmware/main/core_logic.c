@@ -46,10 +46,12 @@ void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserte
 }
 
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_us, uint32_t raw_edge_us,
-                                uint32_t raw_edge_sequence, unsigned stable_ticks) {
+                                uint32_t now_us, uint32_t raw_previous_edge_us,
+                                uint32_t raw_edge_us, uint32_t raw_edge_sequence,
+                                unsigned stable_ticks) {
     if (!state) return false;
-    const bool sequence_changed=(raw_edge_sequence!=state->last_edge_sequence);
+    const uint32_t edge_delta=(uint32_t)(raw_edge_sequence-state->last_edge_sequence);
+    const bool sequence_changed=(edge_delta!=0u);
     const bool level_changed=(raw_asserted!=state->last_raw_asserted);
     /* If the GPIO level changed before its ISR timestamp is published, defer
      * classifying the pending release until that edge record arrives. Keep
@@ -103,8 +105,23 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
         state->release_pending=false;
         return false;
     }
-    /* A newer falling edge means the signal reasserted and dropped again
-     * between sampler wakes. Restart the continuous-inactive interval. */
+    /* If multiple edges arrived between sampler wakes, the penultimate
+     * edge is the latest assertion and the final edge is its falling edge.
+     * A pulse that began after the original 400ms deadline cannot resurrect
+     * the old assertion; it must pass the normal four-sample qualification. */
+    if (state->release_pending && new_edge && (edge_delta/2u)>=2u) {
+        const uint32_t assertion_age=(uint32_t)(raw_previous_edge_us-
+                                                state->inactive_since_us);
+        if (assertion_age<0x80000000u &&
+            assertion_age>=OT_TURN_RELEASE_HOLD_US) {
+            state->asserted=false;
+            state->release_pending=false;
+            state->assertion_ticks=0u;
+            return false;
+        }
+    }
+    /* A pre-deadline reassertion followed by a new falling edge starts a
+     * fresh continuous-inactive interval at that latest falling edge. */
     if (!state->release_pending || new_edge) {
         state->release_pending=true;
         state->inactive_since_us=effective_edge_us;
