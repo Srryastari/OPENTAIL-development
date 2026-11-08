@@ -2436,11 +2436,23 @@ static void pz_promote(uint32_t epoch){
     if(staged){
         if(!config_write_panel_active(h,&stage)||
            !config_activation_idle(epoch,true)){nvs_close(h);return;}
-        /* Stage is erased before RAM publication; active retains both images. */
-        if(!config_clear_panel_stage(h)){
+    }
+    uint8_t reset_mask=0u;
+    portENTER_CRITICAL(&state_lock);
+    reset_mask=pz_reset_pending_mask;
+    portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if((reset_mask&(1u<<lane))&&
+           !pz_reset_tombstone_write_handle(h,(uint8_t)lane,
+                                             &stage.candidate,stage.candidate_revision)){
             nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("Panel/Zone v3 journal finalization failed");return;
+            ot_st_set_fault("Panel/Zone reset tombstone commit failed");return;
         }
+    }
+    /* Stage is erased only after active map and any reset tombstone are durable. */
+    if(staged&&!config_clear_panel_stage(h)){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("Panel/Zone v3 journal finalization failed");return;
     }
     if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
     bool applied=false;
@@ -2456,7 +2468,18 @@ static void pz_promote(uint32_t epoch){
         applied=true;
     }
     portEXIT_CRITICAL(&state_lock);
-    if(applied)request_render_refresh();
+    if(applied){
+        if(reset_mask){
+            portENTER_CRITICAL(&state_lock);
+            pz_reset_pending_mask&=(uint8_t)~reset_mask;
+            pz_reset_challenge.active=false;
+            ot_pz_diag_clear(&pz_diag);
+            ot_pz_preview_cancel(&pz_preview);
+            portEXIT_CRITICAL(&state_lock);
+            ot_fx_bank_stop_all(&fx_bank);
+        }
+        request_render_refresh();
+    }
     nvs_close(h);
 }
 static void om_promote(uint32_t epoch){
