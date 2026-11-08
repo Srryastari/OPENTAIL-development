@@ -28,7 +28,8 @@ int main(void){
         assert(peak(limited)==OT_MAX_BRIGHTNESS_LIMIT);
     }
     assert(peak(ot_om_limit_brightness((ot_rgb_t){1u,0u,0u},OT_MAX_BRIGHTNESS_LIMIT))==1u);
-    assert(peak(ot_om_limit_brightness((ot_rgb_t){200u,100u,50u},OT_MAX_BRIGHTNESS_LIMIT))==OT_MAX_BRIGHTNESS_LIMIT);
+    const uint8_t expected_peak=200u<OT_MAX_BRIGHTNESS_LIMIT?200u:OT_MAX_BRIGHTNESS_LIMIT;
+    assert(peak(ot_om_limit_brightness((ot_rgb_t){200u,100u,50u},OT_MAX_BRIGHTNESS_LIMIT))==expected_peak);
     assert(peak(ot_om_limit_brightness((ot_rgb_t){200u,100u,50u},0u))==0u);
 
     const ot_rgb_t trigger=ot_om_trigger_color(OT_OM_BRAKE,OT_SIG_BRAKE,255u);
