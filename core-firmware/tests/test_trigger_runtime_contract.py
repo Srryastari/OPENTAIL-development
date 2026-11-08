@@ -93,7 +93,7 @@ assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1
 assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
 assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL)" in core
 assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_RELEASE)" in core
-assert "raw_edge_sequence!=state->last_edge_sequence" in logic
+assert "edge_delta=(uint32_t)(raw_edge_sequence-state->last_edge_sequence)" in logic
 assert "if (!state->release_pending || new_edge)" in logic
 assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
 assert "if(left)physical|=OT_SIG_LEFT;" in sampler
