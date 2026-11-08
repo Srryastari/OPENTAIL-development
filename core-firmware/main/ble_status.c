@@ -20,6 +20,7 @@
 #include "fx_preset_record.h"
 #include "ble_config.h"
 #include "panel_zone_api.h"
+#include "input_telemetry.h"
 #include "panel_zone_diag.h"
 #include "trigger_manager.h"
 #include "ot_frame_snapshot.h"
@@ -153,6 +154,7 @@ static const ble_uuid128_t ot_panel_caps_uuid=BLE_UUID128_INIT(0x30,0xaf,0x2e,0x
 static const ble_uuid128_t ot_panel_cfg_cmd_uuid=BLE_UUID128_INIT(0x31,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_panel_cfg_rsp_uuid=BLE_UUID128_INIT(0x32,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_pixel_probe_uuid=BLE_UUID128_INIT(0x33,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_input_diag_uuid=BLE_UUID128_INIT(0x34,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
@@ -669,6 +671,43 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     /* NimBLE performs ATT long-read offset and MTU slicing after callback. */
     return os_mbuf_append(ctx->om,p,size)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+
+static void input_diag_put_le32(uint8_t *dst,uint32_t value){
+    dst[0]=(uint8_t)value;dst[1]=(uint8_t)(value>>8);
+    dst[2]=(uint8_t)(value>>16);dst[3]=(uint8_t)(value>>24);
+}
+/* Authenticated, read-only telemetry on the existing OpenTail BLE service.
+ * Wire v1 is fixed 82 bytes; no public HTTP endpoint is added. */
+static int input_diag_access(uint16_t conn,uint16_t handle,
+                             struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if(conn!=active_conn||!authorized)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    ot_input_diag_snapshot_t snap={0};
+    ot_input_diag_snapshot_get(&snap);
+    uint8_t payload[OT_INPUT_DIAG_WIRE_BYTES]={0};
+    payload[0]=OT_INPUT_DIAG_WIRE_VERSION;
+    payload[1]=snap.raw_asserted_mask;
+    payload[2]=snap.debounced_asserted_mask;
+    input_diag_put_le32(&payload[4],snap.edge_epoch);
+    size_t offset=8u;
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.raw_edges[i]);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.asserted_edges[i]);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.deasserted_edges[i]);
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_depth[i];
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_high_water[i];
+    for(unsigned i=0;i<2u;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.turn_queue_overflow_count[i]);
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_overflow_flag[i];
+    return os_mbuf_append(ctx->om,payload,sizeof(payload))==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
 static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(conn!=active_conn||!authorized)
@@ -750,6 +789,7 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_panel_cfg_rsp_uuid.u,.access_cb=panel_cfg_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_pixel_probe_uuid.u,.access_cb=pixel_probe_write,
    .flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_NO_RSP},
+  {.uuid=&ot_input_diag_uuid.u,.access_cb=input_diag_access,.flags=BLE_GATT_CHR_F_READ},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
