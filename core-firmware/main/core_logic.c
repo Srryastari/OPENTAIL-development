@@ -53,22 +53,26 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
     const uint32_t edge_delta=(uint32_t)(raw_edge_sequence-state->last_edge_sequence);
     const bool sequence_changed=(edge_delta!=0u);
     const bool level_changed=(raw_asserted!=state->last_raw_asserted);
-    /* If the GPIO level changed before its ISR timestamp is published, defer
-     * classifying the pending release until that edge record arrives. Keep
-     * deferring across subsequent sampler wakes; do not reuse a stale edge. */
+    /* A GPIO level can change just before its ISR publishes the edge record.
+     * Defer both assertion and release classification until the matching
+     * sequence arrives; never pair a new level with a stale edge timestamp. */
     if (state->awaiting_edge_record) {
-        if (!sequence_changed) {
-            state->last_raw_asserted=raw_asserted;
-            return state->asserted;
-        }
+        if (!sequence_changed) return state->asserted;
         state->awaiting_edge_record=false;
     }
-    if (raw_asserted && state->release_pending && level_changed && !sequence_changed) {
+    if (level_changed && !sequence_changed) {
         state->awaiting_edge_record=true;
-        state->last_raw_asserted=raw_asserted;
         return state->asserted;
     }
-    const uint32_t effective_edge_us=(level_changed&&!sequence_changed)?now_us:raw_edge_us;
+    if (sequence_changed) {
+        const bool expected_raw=state->last_raw_asserted ^ (((edge_delta/2u)&1u)!=0u);
+        if (raw_asserted!=expected_raw) {
+            /* The pin changed again before all corresponding GPIO ISRs ran. */
+            state->awaiting_edge_record=true;
+            return state->asserted;
+        }
+    }
+    const uint32_t effective_edge_us=raw_edge_us;
     /* A mismatched snapshot must never make unsigned elapsed time look huge. */
     const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);
     if (edge_ahead!=0u && edge_ahead<0x80000000u) return state->asserted;
