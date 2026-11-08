@@ -39,6 +39,21 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
 python3 tests/test_failover_runtime_isolation.py
 python3 tests/test_failover_release_evidence.py
 python3 tests/test_ble_gap_recovery_contract.py
+# Issue126: hierarchical Panel/Zone map, multi-range logical zones, legacy
+# migration, lane-aware unassigned fallback, 1,246-pixel and 2,048/lane bounds.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone.c -o /tmp/ot-panel-zone-tests
+/tmp/ot-panel-zone-tests
+# V3 Panel/Zone journal: CRC, monotonic revisions, rollback/power-cut phases.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_journal.c \
+  -o /tmp/ot-panel-zone-journal && /tmp/ot-panel-zone-journal
+# Five-byte authenticated probe and cumulative fill primitive; no RMT calls here.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone_diag.c tests/test_panel_zone_diag.c -o /tmp/ot-panel-zone-diag
+/tmp/ot-panel-zone-diag
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
