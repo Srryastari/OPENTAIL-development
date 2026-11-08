@@ -8,11 +8,11 @@ sampler and four stable-sample assertion qualification remain unchanged.
 Only turn-signal deassertion is extended: the logical input remains asserted
 until 400ms of continuous inactive time have elapsed.
 
-The GPIO ISR timestamps each Left/Right edge and publishes it with an
-odd/even sequence counter. The sampler takes a bounded seqlock snapshot of
-the raw GPIO level, edge timestamp and sequence, and double-reads the pin
-level around that snapshot; a torn or changing snapshot is discarded and
-does not feed watchdog progress. This prevents a GPIO edge racing the
+The GPIO ISR timestamps each Left/Right edge, retains the previous edge time,
+and publishes both with an odd/even sequence counter. The sampler takes a
+bounded seqlock snapshot of the raw GPIO level, previous/current edge
+timestamps and sequence, and double-reads the pin level around that snapshot;
+a torn or changing snapshot is discarded and does not feed watchdog progress. This prevents a GPIO edge racing the
 timestamp read from creating an impossible future edge time. If the level
 changes before the ISR has published its timestamp, a pending release waits
 for the coherent ISR edge record rather than classifying a stale timestamp.
@@ -33,7 +33,7 @@ stable samples.
 
 Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds.
 The 400,000µs interval is safely shorter than the 32-bit wrap period (about
-71.6 minutes). The GPIO ISR stores edge timestamps atomically; the sampler
+71.6 minutes). The GPIO ISR stores previous/current edge timestamps atomically; the sampler
 compares them using unsigned elapsed arithmetic. The ESP-IDF 5.5.5
 `esp_timer_get_time()` implementation is ISR-safe and IRAM-backed. No Arduino
 dependency, blocking delay, extra task, timer callback, NVS field or BLE
