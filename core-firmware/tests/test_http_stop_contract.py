@@ -86,9 +86,19 @@ assert "ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false,NULL)" in start
     "an explicit absent tertiary pointer")
 
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
-literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
-assert literal, "Capabilities must return valid static JSON"
-caps = json.loads(ast.literal_eval(literal.group(1)))
+assert "snprintf(buf,sizeof(buf)" in capabilities
+assert "OT_MAX_BRIGHTNESS_LIMIT" in capabilities
+assert 'return send_json(r,buf);' in capabilities
+literal = re.search(
+    r'snprintf\(buf,sizeof\(buf\),\s*("(?:\\\\.|[^"\\\\])*")\s*,\s*\(unsigned\)OT_MAX_BRIGHTNESS_LIMIT\)',
+    capabilities,
+    re.S,
+)
+assert literal, "Capabilities must format valid JSON with the active configurable ceiling"
+caps = json.loads(ast.literal_eval(literal.group(1)).replace("%u", "32"))
+assert caps["brightness_cap"] == 32
+assert caps["brightness_cap_is_measured_current_limit"] is False
+assert caps["brightness_ceiling_configurable"] is True
 assert "c->color_order=OT_OM_GRB;" in outputs
 assert caps["color_order"] == "GRB", "First-boot color-order claim must match Output Manager"
 assert caps["color_order_configurable"] is True
