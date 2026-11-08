@@ -6,6 +6,7 @@
 
 /* Explicit, backward-compatible hierarchical schema. All pixel coordinates are
  * zero-based and global within the physical output lane; no geometry inference. */
+#define OT_PZ_OUTPUTS OT_OM_OUTPUTS
 #define OT_PZ_SCHEMA_VERSION 3u
 #define OT_PZ_WIRE_VERSION 3u
 #define OT_PZ_MAX_PANELS_PER_OUTPUT 4u
