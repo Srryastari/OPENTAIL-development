@@ -15,6 +15,9 @@ between flashes. At the deadline or later, continuous inactivity releases the
 old assertion; a subsequent assertion must again pass four stable samples.
 
 Timing uses `esp_timer_get_time()/1000LL`, truncated to `uint32_t` milliseconds.
+The existing GPIO edge ISR records the Left/Right transition timestamp so a
+late 10ms sampler wake can distinguish a reassertion just before 400ms from
+one after expiry. The ISR timestamp is read atomically by the sampler.
 Unsigned elapsed subtraction is wrap-safe for the short 400ms interval. No
 Arduino dependency, blocking delay, task, timer callback, NVS field or BLE
 change is introduced. The transient timer state is RAM-only and is seeded
