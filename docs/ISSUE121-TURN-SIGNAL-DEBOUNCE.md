@@ -22,10 +22,12 @@ timestamp (or conservatively from the sample time until a delayed ISR record
 arrives). A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
 release. If a complete reassert-and-drop pulse occurs between sampler wakes,
-the newer falling-edge sequence restarts the continuous-inactive timer.
-Reassertion before the 400ms deadline cancels the pending release and leaves
-the logical mask asserted, so the renderer receives no false falling/rising
-edge between flashes. Left and Right have independent timer state, so one
+the penultimate edge timestamp identifies the last reassertion. A pulse that
+began before the 400ms deadline restarts the timer at its newer falling edge;
+a pulse that began at or after the deadline cannot resurrect the expired
+assertion and must pass the normal four-sample assertion qualification.
+Reassertion before the deadline leaves the logical mask asserted, so the
+renderer receives no false falling/rising edge between flashes. Left and Right have independent timer state, so one
 side can expire while the other continues and hazards resolve only while both
 logical turn inputs are active. If the signal remains inactive through the
 deadline, the old assertion releases; a later assertion must again pass four
