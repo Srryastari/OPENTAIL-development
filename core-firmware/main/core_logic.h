@@ -17,6 +17,21 @@ typedef struct {
     bool pending[OT_IN_COUNT];
     uint8_t ticks[OT_IN_COUNT];
 } ot_inputs_t;
+
+/* Turn-only release hold. now_ms is a monotonic millisecond clock truncated
+ * to uint32_t; unsigned elapsed subtraction remains wrap-safe for this
+ * 400ms interval. Assertion still requires the existing four stable samples. */
+#define OT_TURN_RELEASE_HOLD_MS 400u
+typedef struct {
+    bool asserted;
+    bool release_pending;
+    uint8_t assertion_ticks;
+    uint32_t inactive_since_ms;
+} ot_signal_debouncer_t;
+
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted);
+bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
+                                uint32_t now_ms, unsigned stable_ticks);
 typedef enum { OT_DEMO_OFF=0, OT_DEMO_SOLID=1, OT_DEMO_CHASE=2 } ot_demo_mode_t;
 typedef struct {ot_demo_mode_t mode; ot_rgb_t color; uint8_t brightness; } ot_demo_t;
 
