@@ -35,6 +35,26 @@ assert "ESP_RST_TASK_WDT" in adapter and "ESP_RST_INT_WDT" in adapter
 assert "ESP_RST_BROWNOUT" in adapter and "ESP_RST_CPU_LOCKUP" in adapter
 assert "OT_SW_BOOTLOOP_LIMIT 3u" in head
 assert "OT_SW_STABLE_MS 60000u" in head
+# Stability must be a continuous healthy window, not merely uptime since boot.
+assert "healthy_since_ms" in adapter and "healthy_window" in adapter
+assert "const bool healthy=all_outputs_completed" in adapter
+assert "(uint32_t)(now-last_input)<100u" in adapter
+assert "if(!healthy){\n        healthy_window=false;" in adapter
+assert "now-healthy_since_ms" in adapter
+# Bench fault injection is compile-time only, disabled by default, and has no
+# remote command path. Exercise input, render, RMT submit/completion, IWDT,
+# idle-task starvation and panic fault points.
+kconfig=(root/"main/Kconfig.projbuild").read_text()
+assert 'config OPENTAIL_WATCHDOG_TEST_FAULT' in kconfig
+assert "range 0 7" in kconfig and "default 0" in kconfig
+for token in ("inject_fault(1u)","inject_fault(2u)","inject_fault(5u)",
+              "inject_fault(6u)","inject_fault(7u)","vTaskSuspend(NULL)",
+              "portDISABLE_INTERRUPTS()","abort()"):
+    assert token in adapter,token
+assert "ot_sw_idf_fault_inject(3u)" in core
+assert "ot_sw_idf_fault_inject(4u)" in core
+assert core.index("ot_sw_idf_fault_inject(3u)") < core.index("led_strip_refresh_async(strip[ch])")
+assert core.index("ot_sw_idf_fault_inject(4u)") < core.index("led_strip_refresh_async_done(strip[ch])")
 boot=part(core,"void app_main(void) {","\n}")
 sampler=part(core,"static void input_sampler_task(void *arg){","static void frame_wake_callback")
 render=part(core,"static void led_task(void *p) {","void app_main(void) {")
