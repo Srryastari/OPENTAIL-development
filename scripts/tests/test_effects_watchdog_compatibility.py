@@ -191,7 +191,7 @@ def main():
         "12 renderer files and JNI byte identity; 140-ID/13-RGB3 manifest; "
         "successful async_done before render WDT feed; independent O1/O2 "
         "submission/state; BLE updates preserve phase anchors; "
-        "compile-time fault points 1-7; each-lane stall/no-feed policy; "
+        "compile-time fault points 1-7; returned-error partial progress; O1/O2 blocking async_done no-feed; "
         f"{max_pixels}-pixel 800kHz wire bound {wire_us}us < 15000000us TWDT. "
         "Host/source evidence only; physical RMT/TWDT NOT_RUN."
     )
