@@ -61,16 +61,26 @@ assert "(uint32_t)(raw_edge_us-state->inactive_since_us)" in logic
 assert "(uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US" in logic
 assert "static void input_sampler_task(void *arg){" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
-assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
-assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u," in sampler
+assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u," in sampler
 assert sampler.count("ot_signal_debouncer_update(") == 2
 assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
 assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
 assert "esp_timer_get_time()" in sampler
-assert "__atomic_load_n(&turn_edge_us[0],__ATOMIC_ACQUIRE)" in sampler
-assert "__atomic_load_n(&turn_edge_us[1],__ATOMIC_ACQUIRE)" in sampler
+assert "read_turn_input_snapshot(i,&levels[i]," in sampler
+assert "turn_edge_snapshot_seq[slot]" in sampler
+assert "static bool read_turn_input_snapshot(" in core
+assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
+assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
+assert "if(before==after&&!(after&1u))" in core
+assert "if(!sample_valid)" in sampler
+assert sampler.index("if(!sample_valid)") < sampler.index("ot_sw_idf_input_sampled();")
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
-assert "__atomic_store_n(&turn_edge_us[input_index-2u],edge_us,__ATOMIC_RELAXED)" in core
+assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
+assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL)" in core
+assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_RELEASE)" in core
+assert "raw_edge_sequence!=state->last_edge_sequence" in logic
+assert "if (!state->release_pending || new_edge)" in logic
 assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
 assert "if(left)physical|=OT_SIG_LEFT;" in sampler
 assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
