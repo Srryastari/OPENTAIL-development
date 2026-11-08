@@ -57,6 +57,7 @@ assert "#define OT_TURN_RELEASE_HOLD_MS 400u" in logic_header
 assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
 assert "ot_signal_debouncer_init" in logic
 assert "ot_signal_debouncer_update" in logic
+assert "(uint32_t)(raw_edge_ms-state->inactive_since_ms)" in logic
 assert "(uint32_t)(now_ms-state->inactive_since_ms)>=OT_TURN_RELEASE_HOLD_MS" in logic
 assert "static void input_sampler_task(void *arg){" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
@@ -66,6 +67,10 @@ assert sampler.count("ot_signal_debouncer_update(") == 2
 assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
 assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
 assert "esp_timer_get_time()/1000LL" in sampler
+assert "__atomic_load_n(&turn_edge_ms[0],__ATOMIC_ACQUIRE)" in sampler
+assert "__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE)" in sampler
+assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
+assert "__atomic_store_n(&turn_edge_ms[input_index-2u],edge_ms,__ATOMIC_RELAXED)" in core
 assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
 assert "if(left)physical|=OT_SIG_LEFT;" in sampler
 assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
