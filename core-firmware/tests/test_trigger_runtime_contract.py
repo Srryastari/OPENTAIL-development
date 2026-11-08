@@ -75,6 +75,8 @@ assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUI
 assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
 assert "const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);" in logic
 assert "edge_ahead<0x80000000u" in logic
+assert "if (state->awaiting_edge_record)" in logic
+assert "state->awaiting_edge_record=true;" in logic
 assert "if (raw_asserted && state->release_pending && level_changed && !sequence_changed)" in logic
 assert "const bool new_edge=(sequence_changed||level_changed)" in logic
 assert "if(sample_valid){" in sampler
