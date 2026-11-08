@@ -10,8 +10,9 @@ until 400ms of continuous inactive time have elapsed.
 
 The GPIO ISR timestamps each Left/Right edge and publishes it with an
 odd/even sequence counter. The sampler takes a bounded seqlock snapshot of
-the raw GPIO level, edge timestamp and sequence; a torn snapshot is discarded
-and does not feed watchdog progress. This prevents a GPIO edge racing the
+the raw GPIO level, edge timestamp and sequence, and double-reads the pin
+level around that snapshot; a torn or changing snapshot is discarded and
+does not feed watchdog progress. This prevents a GPIO edge racing the
 timestamp read from creating an impossible future edge time.
 
 The first inactive raw sample starts the timer from its captured falling-edge
