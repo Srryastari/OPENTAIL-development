@@ -2,8 +2,6 @@ name: Issue113 ONE ESP32-S3 progress watchdog exact HEAD and bench package
 on:
   pull_request:
     branches: [codex/issue93-enable-13-tertiary-20261102]
-  push:
-    branches: [triggers/issue121-turn-release-debounce-20261108]
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,8 +30,6 @@ jobs:
             "core-firmware/main/ot_single_watchdog_idf.c",
             "core-firmware/main/ot_single_watchdog_idf.h",
             "core-firmware/main/opentail_core.c",
-            "core-firmware/main/core_logic.c",
-            "core-firmware/main/core_logic.h",
             "core-firmware/main/ot_ota_update.c",
             "core-firmware/main/ot_ota_update.h",
             "core-firmware/main/Kconfig.projbuild",
@@ -44,8 +40,6 @@ jobs:
             "core-firmware/tests/test_watchdog_held_input_boot.c",
             "core-firmware/tests/test_single_watchdog_contract.py",
             "core-firmware/tests/run-host-tests.sh",
-            "core-firmware/tests/test_signal_debouncer.c",
-            "docs/ISSUE121-TURN-SIGNAL-DEBOUNCE.md",
             "core-firmware/tests/test_failover_runtime_isolation.py",
             "core-firmware/tests/test_trigger_runtime_contract.py",
             "core-firmware/tests/test_ota_boot_confirmation_contract.py",
