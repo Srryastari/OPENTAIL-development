@@ -40,6 +40,7 @@
 #include "panel_zone.h"
 #include "panel_zone_diag.h"
 #include "panel_zone_api.h"
+#include "input_telemetry.h"
 #include "config_journal.h"
 #include "trigger_manager.h"
 #include "nvs.h"
@@ -110,6 +111,15 @@ static DRAM_ATTR volatile uint32_t turn_edge_head[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_tail[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]={0u,0u};
+/* Telemetry is additive: keep the existing per-lane SPSC turn queues intact. */
+_Static_assert(__atomic_always_lock_free(sizeof(uint32_t),0),
+               "32-bit ISR telemetry atomics must be lock-free");
+static DRAM_ATTR volatile uint32_t input_raw_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_asserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_deasserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_raw_level_mask __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t turn_edge_high_water[2] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t turn_edge_overflow_count[2] __attribute__((aligned(4)));
 static uint64_t input_boot_snapshot_us=0u;
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
@@ -1976,33 +1986,79 @@ static bool wifi_ap_init(void) {
  * two turn channels so the task can classify edge time despite wake jitter. */
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
+    /* Reject an invalid callback index before any pin/counter/queue lookup. */
+    if(input_index>=OT_IN_COUNT)return;
+    int level=1;
+    bool asserted=false;
+    if(input_index<OT_INPUT_DIAG_INPUTS){
+        /* LL read is IRAM-safe; normalized asserted=1 honors active-low wiring. */
+        level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
+        asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+        __atomic_fetch_add(&input_raw_edges[input_index],1u,__ATOMIC_RELAXED);
+        if(asserted)
+            __atomic_fetch_add(&input_asserted_edges[input_index],1u,__ATOMIC_RELAXED);
+        else
+            __atomic_fetch_add(&input_deasserted_edges[input_index],1u,__ATOMIC_RELAXED);
+        const uint32_t bit=1u<<input_index;
+        if(asserted)__atomic_fetch_or(&input_raw_level_mask,bit,__ATOMIC_RELAXED);
+        else __atomic_fetch_and(&input_raw_level_mask,~bit,__ATOMIC_RELAXED);
+    }
     if(input_index==2u || input_index==3u){
         const unsigned slot=input_index-2u;
         /* Mark the producer active before timestamp capture. The dual-core
          * sampler defers deadline expiry if this edge is not yet published. */
         __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
         const uint64_t edge_time_us=(uint64_t)esp_timer_get_time();
-        /* Use the ESP32-S3 LL register read: gpio_get_level() is not guaranteed
-         * IRAM-safe when this ISR service is installed with ESP_INTR_FLAG_IRAM. */
-        const int level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
-        const bool asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
         const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_RELAXED);
         const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
         if((uint32_t)(head-tail)>=OT_TURN_EDGE_QUEUE_CAPACITY){
-            /* Never overwrite unread history. The sampler detects overflow,
-             * flushes the ambiguous history and requalifies from live GPIO. */
+            /* Preserve the existing SPSC queue; telemetry counts each full-ring edge. */
             __atomic_store_n(&turn_edge_overflow[slot],1u,__ATOMIC_RELEASE);
+            __atomic_fetch_add(&turn_edge_overflow_count[slot],1u,__ATOMIC_RELAXED);
         }else{
             ot_turn_edge_event_t *event=
                 &turn_edge_events[slot][head&OT_TURN_EDGE_QUEUE_MASK];
             event->timestamp_us=edge_time_us;
             event->asserted=asserted;
             __atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE);
+            const uint32_t depth=(uint32_t)(head+1u-tail);
+            uint32_t high=__atomic_load_n(&turn_edge_high_water[slot],__ATOMIC_RELAXED);
+            while(depth>high&&!__atomic_compare_exchange_n(
+                    &turn_edge_high_water[slot],&high,depth,true,
+                    __ATOMIC_RELAXED,__ATOMIC_RELAXED)){}
         }
         __atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE);
     }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
+
+void ot_input_diag_snapshot_get(ot_input_diag_snapshot_t *out){
+    if(!out)return;
+    memset(out,0,sizeof(*out));
+    out->raw_asserted_mask=(uint8_t)__atomic_load_n(&input_raw_level_mask,__ATOMIC_ACQUIRE);
+    portENTER_CRITICAL(&state_lock);
+    out->debounced_asserted_mask=(uint8_t)(live_input_mask&((1u<<OT_INPUT_DIAG_INPUTS)-1u));
+    portEXIT_CRITICAL(&state_lock);
+    out->edge_epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++){
+        out->raw_edges[i]=__atomic_load_n(&input_raw_edges[i],__ATOMIC_RELAXED);
+        out->asserted_edges[i]=__atomic_load_n(&input_asserted_edges[i],__ATOMIC_RELAXED);
+        out->deasserted_edges[i]=__atomic_load_n(&input_deasserted_edges[i],__ATOMIC_RELAXED);
+    }
+    for(unsigned slot=0;slot<2u;slot++){
+        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+        const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
+        const uint32_t depth=(uint32_t)(head-tail);
+        out->turn_queue_depth[slot]=(uint8_t)(depth>UINT8_MAX?UINT8_MAX:depth);
+        const uint32_t high=__atomic_load_n(&turn_edge_high_water[slot],__ATOMIC_RELAXED);
+        out->turn_queue_high_water[slot]=(uint8_t)(high>UINT8_MAX?UINT8_MAX:high);
+        out->turn_queue_overflow_count[slot]=
+            __atomic_load_n(&turn_edge_overflow_count[slot],__ATOMIC_RELAXED);
+        out->turn_queue_overflow_flag[slot]=
+            (uint8_t)(__atomic_load_n(&turn_edge_overflow[slot],__ATOMIC_ACQUIRE)!=0u);
+    }
+}
+
 static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
         input_pin_isr[i]=input_pin[i];
