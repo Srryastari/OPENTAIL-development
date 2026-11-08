@@ -8,16 +8,16 @@
 #define TEST_STABLE_SAMPLES 4u
 
 static bool sample_us_with_sequence(ot_signal_debouncer_t *state, bool raw,
-                                      uint32_t now_us, uint32_t raw_edge_us,
-                                      uint32_t raw_edge_sequence) {
-    return ot_signal_debouncer_update(state,raw,now_us,raw_edge_us,
-                                      raw_edge_sequence,TEST_STABLE_SAMPLES);
+                                      uint32_t now_us, uint32_t raw_previous_edge_us,
+                                      uint32_t raw_edge_us, uint32_t raw_edge_sequence) {
+    return ot_signal_debouncer_update(state,raw,now_us,raw_previous_edge_us,
+                                      raw_edge_us,raw_edge_sequence,TEST_STABLE_SAMPLES);
 }
 static bool sample_us(ot_signal_debouncer_t *state, bool raw,
                       uint32_t now_us, uint32_t raw_edge_us) {
     uint32_t sequence=state->last_edge_sequence;
     if(raw!=state->last_raw_asserted)sequence+=2u;
-    return sample_us_with_sequence(state,raw,now_us,raw_edge_us,sequence);
+    return sample_us_with_sequence(state,raw,now_us,0u,raw_edge_us,sequence);
 }
 static bool sample_at(ot_signal_debouncer_t *state, bool raw,
                       uint32_t now_ms, uint32_t raw_edge_ms) {
@@ -125,17 +125,27 @@ static void restart_hold_after_pulse_between_sampler_wakes(void) {
     ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,1000u)); /* falling edge starts first interval */
     const uint32_t sequence=d.last_edge_sequence+4u; /* unseen rise + fall */
-    assert(sample_us_with_sequence(&d,false,1410u*1000u,1405u*1000u,sequence));
+    assert(sample_us_with_sequence(&d,false,1410u*1000u,1395u*1000u,1405u*1000u,sequence));
     assert(d.inactive_since_us==1405u*1000u);
-    assert(sample_us_with_sequence(&d,false,1804u*1000u,1405u*1000u,sequence));
-    assert(!sample_us_with_sequence(&d,false,1805u*1000u,1405u*1000u,sequence));
+    assert(sample_us_with_sequence(&d,false,1804u*1000u,1395u*1000u,1405u*1000u,sequence));
+    assert(!sample_us_with_sequence(&d,false,1805u*1000u,1395u*1000u,1405u*1000u,sequence));
+
+    /* A pulse that begins after the original deadline cannot resurrect
+     * the old assertion if both edges occur between sampler wakes. */
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample(&d,false,1001u));
+    assert(sample(&d,false,1400u)); /* 399ms: old assertion still held */
+    const uint32_t late_pulse_sequence=d.last_edge_sequence+4u;
+    assert(!sample_us_with_sequence(&d,false,1410u*1000u,1402u*1000u,
+                                    1405u*1000u,late_pulse_sequence));
+    assert(!d.asserted&&!d.release_pending);
 
     /* A timestamp newer than its sample is a torn snapshot and must not
      * turn unsigned subtraction into an immediate false release. */
     ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,2000u));
     const uint32_t future_sequence=d.last_edge_sequence+2u;
-    assert(sample_us_with_sequence(&d,false,2000u*1000u,2001u*1000u,
+    assert(sample_us_with_sequence(&d,false,2000u*1000u,0u,2001u*1000u,
                                    future_sequence));
     assert(d.asserted&&d.release_pending);
 
@@ -145,13 +155,13 @@ static void restart_hold_after_pulse_between_sampler_wakes(void) {
     ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,3000u));
     const uint32_t rising_sequence=d.last_edge_sequence+2u;
-    assert(sample_us_with_sequence(&d,true,3390u*1000u,3000u*1000u,
+    assert(sample_us_with_sequence(&d,true,3390u*1000u,0u,3000u*1000u,
                                    d.last_edge_sequence));
     assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,true,3410u*1000u,3000u*1000u,
+    assert(sample_us_with_sequence(&d,true,3410u*1000u,0u,3000u*1000u,
                                    d.last_edge_sequence));
     assert(d.asserted&&d.release_pending&&d.awaiting_edge_record);
-    assert(sample_us_with_sequence(&d,true,3410u*1000u,3390u*1000u,
+    assert(sample_us_with_sequence(&d,true,3410u*1000u,0u,3390u*1000u,
                                    rising_sequence));
     assert(d.asserted&&!d.release_pending&&!d.awaiting_edge_record);
 }
