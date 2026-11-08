@@ -33,7 +33,10 @@ def main():
     # host-only test may be added on top of the exact Firmware #115 candidate.
     allowed = {
         "core-firmware/tests/test_effect_watchdog_compat.c",
+        "core-firmware/tests/test_continuous_fx.c",
         "scripts/tests/test_effects_watchdog_compatibility.py",
+        ".github/workflows/codex-integrated-software.yml",
+        ".github/workflows/verify-issue103-exact-head.yml",
         "docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md",
         ".github/workflows/verify-effects-firmware115-compatibility.yml",
     }
@@ -52,6 +55,17 @@ def main():
         current = ROOT / "core-firmware/main" / name
         original = fxroot / "core-firmware/main" / name
         assert current.read_bytes() == original.read_bytes(), name
+
+    # The PR115 successor inherits the exact PR112 integration baseline.
+    # Protect the original PR106 lineage and require protected files unchanged
+    # only after PR112; the approved BLE additions from PR112 are not regressions.
+    issue103 = (ROOT / ".github/workflows/verify-issue103-exact-head.yml").read_text()
+    integration_base = "1a300767d985343d060faf344bff2da772dca88f"
+    assert f"git merge-base --is-ancestor {integration_base} HEAD" in issue103
+    assert f"integration_base='{integration_base}'" in issue103
+    assert "git('diff','--name-only',integration_base,'HEAD')" in issue103
+    codex_gate = (ROOT / ".github/workflows/codex-integrated-software.yml").read_text()
+    assert "branches: [firmware/failover-essential-policy-20261031]" in codex_gate
 
     # The pure C Android/JNI renderer is still the same byte-for-byte source
     # as CORE, with the existing SHA256 manifest and 13 supported BLE RGB3 modes.
@@ -72,6 +86,7 @@ def main():
     assert "HOST_SIMULATED" in stress
 
     core = (ROOT / "core-firmware/main/opentail_core.c").read_text()
+    bank = (ROOT / "core-firmware/main/fx_zone_bank.c").read_text()
     adapter = (ROOT / "core-firmware/main/ot_single_watchdog_idf.c").read_text()
     policy = (ROOT / "core-firmware/main/ot_single_watchdog.c").read_text()
     pacer = (ROOT / "core-firmware/main/ot_fps_pacer.c").read_text()
@@ -84,8 +99,36 @@ def main():
     assert "esp_task_wdt_reset_user(render_user)" in adapter
     assert "return all_lanes_completed||any_lane_completed;" in policy
 
+    # BLE GATT updates the zone config and wakes CORE; it never renders pixels
+    # or touches the LED bus. The dedicated render task owns all pixel writes.
+    ble_update = section(core, "static bool ot_ble_apply_fx_internal", "bool ot_ble_apply_fx(")
+    assert "portENTER_CRITICAL(&state_lock)" in ble_update
+    assert "portEXIT_CRITICAL(&state_lock)" in ble_update
+    assert "request_render_refresh();" in ble_update
+    assert "led_strip_" not in ble_update and "ot_effects_1d_render(" not in ble_update
+    assert ble_update.index("portEXIT_CRITICAL(&state_lock)") < ble_update.index("request_render_refresh();")
+    refresh = section(core, "static void request_render_refresh(void){", "/* Latches")
+    assert "xTaskNotifyGive(task)" in refresh
+
+    # Same-effect BLE parameter edits preserve the phase anchor/generation;
+    # a replacement is the only path that increments generation and resets state.
+    same_effect = section(bank, "if(ot_fx_slot_active(slot,now_ms) &&", "uint32_t gen=++bank->next_generation;")
+    assert "slot->request=*request;" in same_effect
+    assert "slot->refreshed_ms=now_ms;" in same_effect
+    assert "continue;" in same_effect
+    assert "slot->started_ms" not in same_effect and "slot->generation" not in same_effect
+    continuous_test = (ROOT / "core-firmware/tests/test_continuous_fx.c").read_text()
+    assert "for(unsigned i=0;i<128u;i++)" in continuous_test
+    assert "generation==gen&&bank.zones[0][0].started_ms==100" in continuous_test
+
     # Production feed is reached only after successful asynchronous completion.
     render = section(core, "static void led_task(void *p) {", "void app_main(void) {")
+    assert "static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];" in render
+    assert render.count("ot_effects_1d_reset(&fx_state[ch][z]")==1
+    reset_guard = section(render, "if(!prior_fx_active[ch][z] ||", "prior_fx_active[ch][z]=true;")
+    assert "prior_fx_generation[ch][z]" in reset_guard
+    assert "prior_fx_offset[ch][z]" in reset_guard
+    assert "prior_fx_length[ch][z]" in reset_guard
     submit = render.index("led_strip_refresh_async(strip[ch])")
     submitted = render.index("frame_submitted[ch]=true;", submit)
     both_submitted = render.index("/* Start both output transfers before waiting")
@@ -117,12 +160,18 @@ def main():
     wire_us = max_pixels * 30 + 300
     assert wire_us < 15_000_000
     assert "ot_sw_idf_render_cycle(full_frame,any_output_completed," in render
+    for point in range(1,8):
+        assert f"inject_fault({point}u)" in adapter
+    assert "if(point==5u)" in adapter and "if(point==6u)" in adapter and "if(point==7u)" in adapter
+    assert "ot_sw_idf_fault_inject(3u)" in render
+    assert "ot_sw_idf_fault_inject(4u)" in render
 
     print(
         "PASS Effects #110 / Firmware #115 exact-source compatibility: "
         "12 renderer files and JNI byte identity; 140-ID/13-RGB3 manifest; "
         "successful async_done before render WDT feed; independent O1/O2 "
-        "submission; one-lane progress vs full-frame stability; "
+        "submission/state; BLE updates preserve phase anchors; "
+        "compile-time fault points 1-7; each-lane stall/no-feed policy; "
         f"{max_pixels}-pixel 800kHz wire bound {wire_us}us < 15000000us TWDT. "
         "Host/source evidence only; physical RMT/TWDT NOT_RUN."
     )
