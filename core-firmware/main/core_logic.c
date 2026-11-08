@@ -50,7 +50,8 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
                                 uint32_t raw_edge_sequence, unsigned stable_ticks) {
     if (!state) return false;
     /* A mismatched snapshot must never make unsigned elapsed time look huge. */
-    if ((int32_t)(raw_edge_us-now_us)>0) return state->asserted;
+    const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);
+    if (edge_ahead!=0u && edge_ahead<0x80000000u) return state->asserted;
     if (stable_ticks<1u) stable_ticks=1u;
     if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
     const bool new_edge=(raw_edge_sequence!=state->last_edge_sequence);
