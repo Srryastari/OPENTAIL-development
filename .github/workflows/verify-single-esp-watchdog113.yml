@@ -143,8 +143,26 @@ jobs:
           node android/qa/test_native_source.cjs
           python3 core-firmware/tests/test_effect_capabilities_manifest.py
 
+  watchdog-fault-injection-compile:
+    needs: exact-source-and-host-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Compile all bench-only fault branches with mode 7 selected (never execute or package this image)
+        run: |
+          printf '\\nCONFIG_OPENTAIL_WATCHDOG_TEST_FAULT=7\\n' >> core-firmware/sdkconfig.defaults
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+
   esp-idf555-four-image-bench:
-    needs: [full-core-host, independent-trigger-guard, android-unchanged-contract]
+    needs: [full-core-host, independent-trigger-guard, android-unchanged-contract, watchdog-fault-injection-compile]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
