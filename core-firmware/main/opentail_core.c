@@ -2002,8 +2002,9 @@ static void input_sampler_task(void *arg){
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
         /* Replay every captured Left/Right transition before evaluating the
-         * absolute release deadlines. Brake, Reverse, Park and AUX remain on
-         * the original four-sample sampler and arbitration path. */
+         * absolute release deadlines. Never clear physical turn history when
+         * Brake is asserted: Brake > Turn is enforced downstream by arbitration,
+         * while preserving turn state lets the signal resume without a reset. */
         const uint64_t now_us=(uint64_t)esp_timer_get_time();
         const bool left=turn_edge_queue_update(0u,&turn_signal[0],now_us,
             input_boot_snapshot_us,levels[2]);
