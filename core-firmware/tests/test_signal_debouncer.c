@@ -287,6 +287,6 @@ int main(void) {
     all_256_boot_masks_and_arbitration();
     non_turn_inputs_keep_existing_four_sample_debounce();
     safety_priorities_remain_unchanged();
-    puts("PASS Issue121 SignalDebouncer: four-sample assertion, 100/200/300/399ms flash gaps, 400ms release, independent turns/hazards, one-side expiry, 256 boot masks, safety arbitration, non-turn timing, wrap and scheduler jitter; HOST_SIMULATED");
+    puts("PASS Issue121 SignalDebouncer: four-sample assertion, 100/200/300/399ms gaps, exact 400ms release, pre/post-deadline unseen pulses, independent turns/hazards, one-side expiry, 256 boot masks, safety arbitration, non-turn timing, wrap and scheduler jitter; HOST_SIMULATED");
     return 0;
 }
