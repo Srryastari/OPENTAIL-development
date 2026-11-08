@@ -122,7 +122,7 @@ static void invalid_maps(void){
     assert(!ot_pz_valid(&bad)); /* wrong output lane */
     bad=cfg;bad.outputs[0].panels[0].zone_count=1;
     assert(!ot_pz_valid(&bad)); /* malformed panel child count */
-    bad=cfg;bad.outputs[0].zones[1].role=OT_PZ_ROLE_UNASSIGNED+1u;
+    bad=cfg;bad.outputs[0].zones[1].role=0xfeu;
     assert(!ot_pz_valid(&bad)); /* invalid role */
     bad=cfg;bad.outputs[0].zones[0].ranges[0].start=UINT16_MAX;
     assert(!ot_pz_valid(&bad)); /* uint16 end overflow/out of bounds */
