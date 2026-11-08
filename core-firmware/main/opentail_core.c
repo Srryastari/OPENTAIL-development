@@ -1896,9 +1896,9 @@ static void config_activation_task(void *unused){
 static void input_sampler_task(void *arg){
     (void)arg;
     ot_inputs_t sampler={0};
-    /* Bootstrap the debouncer from the GPIO snapshot captured BEFORE any
-     * RMT frame. Without this, the first 3 samples would overwrite a held
-     * Brake/Turn/Reverse with zero until the fourth 10ms sample. */
+    ot_signal_debouncer_t turn_signal[2];
+    /* Bootstrap both samplers from the GPIO snapshot captured BEFORE any
+     * RMT frame. A held turn input must not acquire a phantom release timer. */
     const uint8_t boot_physical=live_input_mask;
     for(unsigned i=0;i<OT_IN_COUNT;i++){
         const bool asserted=(boot_physical&(uint8_t)(1u<<i))!=0u;
@@ -1906,6 +1906,8 @@ static void input_sampler_task(void *arg){
         sampler.pending[i]=asserted;
         sampler.ticks[i]=OT_DEBOUNCE_TICKS;
     }
+    ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);
+    ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
@@ -1918,6 +1920,17 @@ static void input_sampler_task(void *arg){
             if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
+        /* Use raw GPIO levels for turn release timing, not the 40ms settled
+         * falling edge. Only IN3/IN4 get the 400ms hold; all other channels
+         * retain the ordinary four-sample debounce above. */
+        const uint32_t sample_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+        const bool left=ot_signal_debouncer_update(&turn_signal[0],levels[2],
+                                                   sample_ms,OT_DEBOUNCE_TICKS);
+        const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
+                                                    sample_ms,OT_DEBOUNCE_TICKS);
+        physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
+        if(left)physical|=OT_SIG_LEFT;
+        if(right)physical|=OT_SIG_RIGHT;
         TaskHandle_t target=NULL;
         portENTER_CRITICAL(&state_lock);
         if(physical!=live_input_mask){live_input_mask=physical;target=render_task_handle;}
