@@ -17,7 +17,8 @@ assert all(x in cmake for x in ('"ot_single_watchdog.c"','"ot_single_watchdog_id
 assert 'test_single_watchdog.c' in host
 for token in ("CONFIG_ESP_TASK_WDT_EN=y","CONFIG_ESP_TASK_WDT_INIT=y",
               "CONFIG_ESP_TASK_WDT_PANIC=y","CONFIG_ESP_INT_WDT=y",
-              "CONFIG_BOOTLOADER_WDT_ENABLE=y",
+              "CONFIG_BOOTLOADER_WDT_ENABLE=y","CONFIG_BOOTLOADER_WDT_TIME_MS=9000",
+              "CONFIG_ESP_INT_WDT_TIMEOUT_MS=300","CONFIG_ESP_BROWNOUT_DET=y",
               "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y"):
     assert token in cfg,token
 assert "esp_task_wdt_reconfigure(&settings)" in adapter
