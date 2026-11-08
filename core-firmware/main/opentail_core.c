@@ -1456,7 +1456,7 @@ static esp_err_t show_start(httpd_req_t *r){
     }
     unsigned ttl=bounded_int(obj,"ttl_ms",15000,1000,OT_SHOW_MAX_MS);
     cfg.color=(ot_rgb_t){bounded_int(obj,"r",255,0,255),bounded_int(obj,"g",0,0,255),bounded_int(obj,"b",0,0,255)};
-    cfg.brightness=bounded_int(obj,"brightness",24,0,OT_MAX_BRIGHTNESS);
+    cfg.brightness=bounded_int(obj,"brightness",24,0,255);
     cfg.speed=bounded_int(obj,"speed",50,0,100);
     if(!ot_show_valid(&cfg,&layout)){cJSON_Delete(obj);return respond_err(r,400,"invalid show settings");}
     cJSON_Delete(obj);
@@ -1529,7 +1529,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
-       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60||
+       req->ttl_sec<1||req->ttl_sec>60||
        !palette_resolved(req->palette_id))
         return false;
     const TickType_t now=xTaskGetTickCount();
@@ -1669,7 +1669,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
     unsigned values[6]={0};
     bool valid=om_number(obj,"effect_id",&id,0,65535)&&
         om_number(obj,"zone_mask",&zone,1,255)&&
-        om_number(obj,"brightness",&bri,0,OT_MAX_BRIGHTNESS)&&
+        om_number(obj,"brightness",&bri,0,255)&&
         om_number(obj,"speed",&speed,0,255)&&
         om_number(obj,"intensity",&intensity,0,255)&&
         om_number(obj,"palette_id",&palette,0,255)&&
@@ -1782,7 +1782,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         .g=(uint8_t)bounded_int(obj,"g",31,0,255),
         .b=(uint8_t)bounded_int(obj,"b",20,0,255),
         .bg_r=0,.bg_g=0,.bg_b=0,
-        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
+        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,255),
         .speed=speed,
         .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
         .palette_id=0,.ttl_sec=6
@@ -1903,7 +1903,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
          fx_bank=replacement;
          /* Diagnostic legacy show fields describe union of targeted zones. */
          native_show=(ot_show_t){.mode=OT_SHOW_SOLID,
-            .color={0,0,0},.brightness=OT_MAX_BRIGHTNESS,.speed=0,
+            .color={0,0,0},.brightness=255u,.speed=0,
             .chain_mask=out_mask,.section_mask=zone_mask};
          /* Only use last stored entry for legacy "current effect" reporting. */
          for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
@@ -2102,7 +2102,7 @@ static esp_err_t demo_post(httpd_req_t *r) {
     else if(!strcmp(str,"chase")) mode=OT_DEMO_CHASE;
     else if(strcmp(str,"off")){cJSON_Delete(obj);return respond_err(r,400,"mode must be solid, chase or off");}
     unsigned rcol=bounded_int(obj,"r",0,0,255),gcol=bounded_int(obj,"g",0,0,255),bcol=bounded_int(obj,"b",0,0,255);
-    unsigned brightness=bounded_int(obj,"brightness",32,0,OT_MAX_BRIGHTNESS);
+    unsigned brightness=bounded_int(obj,"brightness",32,0,255);
     unsigned ttl=bounded_int(obj,"ttl_ms",3000,100,OT_DEMO_MAX_MS);
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);

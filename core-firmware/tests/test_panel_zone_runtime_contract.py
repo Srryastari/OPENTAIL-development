@@ -90,8 +90,12 @@ assert "conn!=active_conn||!authorized" in ble
 board = (ROOT / "main/board_config.h").read_text()
 output_header = (ROOT / "main/output_manager.h").read_text()
 fx_command = (ROOT / "main/ble_fx_command.c").read_text()
-assert "ot_brightness_limit_request" in board
-assert "ot_brightness_limit_request(p[12])" in fx_command
+assert "ot_brightness_limit_request" not in board
+assert ".brightness=p[12]" in fx_command
+assert 'bounded_int(obj,"brightness",24,0,255)' in core
+assert 'bounded_int(obj,"brightness",20,0,255)' in core
+assert 'bounded_int(obj,"brightness",32,0,255)' in core
+assert "req->brightness>OT_MAX_BRIGHTNESS" not in core
 assert "ot_om_limit_brightness" in output_header
 assert "ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS)" in core
 assert "auto_sweep" not in core.lower()

@@ -18,7 +18,7 @@ ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
   *out=(ot_ble_fx_packet_t){
     .effect_id=id,.chain_mask=p[4],.zone_mask=p[5],
     .r=p[6],.g=p[7],.b=p[8],.bg_r=p[9],.bg_g=p[10],.bg_b=p[11],
-    .brightness=ot_brightness_limit_request(p[12]),.speed=p[13],.intensity=p[14],
+    .brightness=p[12],.speed=p[13],.intensity=p[14],
     .palette_id=p[15],.ttl_sec=continuous?1u:p[16]
   };
   return OT_BLE_FX_OK;

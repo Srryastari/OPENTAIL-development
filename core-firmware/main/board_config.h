@@ -27,13 +27,6 @@
 #define OT_MAX_BRIGHTNESS_LIMIT ((uint8_t)CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT)
 /* Preserve the existing symbol while making the safe ceiling Kconfig-controlled. */
 #define OT_MAX_BRIGHTNESS OT_MAX_BRIGHTNESS_LIMIT
-static inline uint8_t ot_brightness_limit_request(uint8_t requested){
-#if CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT < 255
-    return requested>OT_MAX_BRIGHTNESS_LIMIT?OT_MAX_BRIGHTNESS_LIMIT:requested;
-#else
-    return requested;
-#endif
-}
 #define OT_DEBOUNCE_TICKS 4 // four 10ms samples
 #define OT_DEMO_MAX_MS 10000
 

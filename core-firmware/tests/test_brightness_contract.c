@@ -15,11 +15,12 @@ static void same(ot_rgb_t c,uint8_t r,uint8_t g,uint8_t b){
 int main(void){
     const uint8_t requested[]={0u,1u,32u,64u,128u,200u,255u};
     for(unsigned i=0;i<sizeof(requested);i++){
-        uint8_t expected=requested[i];
-#if CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT < 255
-        if(expected>OT_MAX_BRIGHTNESS_LIMIT)expected=OT_MAX_BRIGHTNESS_LIMIT;
-#endif
-        assert(ot_brightness_limit_request(requested[i])==expected);
+        const ot_rgb_t requested_rgb={requested[i],requested[i],requested[i]};
+        const uint8_t expected=requested[i]>OT_MAX_BRIGHTNESS_LIMIT?
+                               OT_MAX_BRIGHTNESS_LIMIT:requested[i];
+        const ot_rgb_t output=ot_om_limit_brightness(requested_rgb,
+                                                       OT_MAX_BRIGHTNESS_LIMIT);
+        assert(peak(output)==expected);
     }
     const ot_rgb_t full[]={{255u,0u,0u},{0u,255u,0u},
                            {0u,0u,255u},{255u,255u,255u}};
