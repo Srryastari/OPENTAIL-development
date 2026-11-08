@@ -42,6 +42,24 @@ ot_sw_boot_t ot_sw_boot_record(ot_sw_rtc_record_t *record,
     record->check=ot_sw_rtc_check(record);
     return boot;
 }
+bool ot_sw_stability_window_update(ot_sw_stability_window_t *window,
+                                   uint32_t now_ms, bool healthy,
+                                   uint32_t *healthy_elapsed_ms){
+    if(!window||!healthy_elapsed_ms)return false;
+    if(!healthy){
+        window->active=false;
+        window->healthy_since_ms=0u;
+        *healthy_elapsed_ms=0u;
+        return false;
+    }
+    if(!window->active){
+        window->active=true;
+        window->healthy_since_ms=now_ms;
+    }
+    /* Unsigned subtraction intentionally handles the 32-bit ms clock wrap. */
+    *healthy_elapsed_ms=(uint32_t)(now_ms-window->healthy_since_ms);
+    return true;
+}
 bool ot_sw_can_mark_stable(uint32_t elapsed_ms, uint32_t sampled_inputs,
                            uint32_t full_frames, bool output_fault,
                            bool config_fault){
