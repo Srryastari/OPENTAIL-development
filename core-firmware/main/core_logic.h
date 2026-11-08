@@ -31,7 +31,8 @@ typedef struct {
 
 void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted);
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_ms, unsigned stable_ticks);
+                                uint32_t now_ms, uint32_t raw_edge_ms,
+                                unsigned stable_ticks);
 typedef enum { OT_DEMO_OFF=0, OT_DEMO_SOLID=1, OT_DEMO_CHASE=2 } ot_demo_mode_t;
 typedef struct {ot_demo_mode_t mode; ot_rgb_t color; uint8_t brightness; } ot_demo_t;
 
