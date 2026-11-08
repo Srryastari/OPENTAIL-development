@@ -12,7 +12,10 @@ The GPIO ISR timestamps each Left/Right edge, retains the previous edge time,
 and publishes both with an odd/even sequence counter. The sampler takes a
 bounded seqlock snapshot of the raw GPIO level, previous/current edge
 timestamps and sequence, and double-reads the pin level around that snapshot;
-a torn or changing snapshot is discarded and does not feed watchdog progress. This prevents a GPIO edge racing the
+a torn or changing snapshot is discarded and does not feed watchdog progress.
+A level/sequence mismatch also withholds progress until the corresponding ISR
+edge record arrives; a persistent mismatch is left to the existing sampler
+watchdog rather than publishing an unverified input state. This prevents a GPIO edge racing the
 timestamp read from creating an impossible future edge time. If the level changes before the ISR has published its timestamp, the
 debouncer defers either assertion or release classification until the
 coherent ISR edge record arrives rather than classifying a stale timestamp.
