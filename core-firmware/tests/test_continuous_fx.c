@@ -10,6 +10,7 @@ int main(void){
  assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,100));
  assert(bank.zones[0][0].continuous&&!bank.zones[0][0].standalone);
  uint32_t gen=bank.zones[0][0].generation;
+ uint32_t gen2=bank.zones[1][0].generation;
  assert(ot_fx_slot_active(&bank.zones[0][0],1000000u));
  ot_fx_bank_stop_temporary(&bank); /* link loss/graceful release */
  assert(ot_fx_slot_active(&bank.zones[0][0],1000000u));
@@ -26,7 +27,7 @@ int main(void){
   req.r=(uint8_t)(i*3u);req.g=(uint8_t)(i*5u);req.b=(uint8_t)(i*7u);
   assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,1000002u+i));
   assert(bank.zones[0][0].generation==gen&&bank.zones[0][0].started_ms==100);
-  assert(bank.zones[1][0].generation==gen&&bank.zones[1][0].started_ms==100);
+  assert(bank.zones[1][0].generation==gen2&&bank.zones[1][0].started_ms==100);
  }
  before=bank;
  req.zone_mask=2;
