@@ -1663,6 +1663,8 @@ static bool wifi_ap_init(void) {
     ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
     return true;
 }
+/* ESP-IDF 5.5.x esp_timer_get_time is ISR-safe/IRAM-backed; capture only the
+ * two turn channels so the task can classify edge time despite wake jitter. */
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     if(input_index==2u || input_index==3u){
