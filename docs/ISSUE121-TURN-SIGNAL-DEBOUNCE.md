@@ -36,8 +36,13 @@ to the current raw level, and requires four stable samples to assert again.
 The overflow is logged. This is an explicit fail-closed recovery path, not
 silent extension of a turn assertion.
 
-No Arduino dependency, blocking delay, new task, timer callback, NVS field,
-BLE protocol change, Effects change or Android change is introduced. The
+Brake priority is deliberately not implemented by clearing the turn queue or
+resetting its debouncer. Brake overrides are applied by the existing downstream
+arbitration; retaining the physical turn history ensures the turn resumes
+correctly when Brake releases. Expired events are consumed in order, and
+deadline expiry clears the pending release state. No Arduino dependency,
+blocking delay, new task, timer callback, NVS field, BLE protocol change,
+Effects change or Android change is introduced. The
 deadline is evaluated against a 64-bit monotonic microsecond clock, so there
 is no 32-bit millisecond rollover arithmetic.
 
