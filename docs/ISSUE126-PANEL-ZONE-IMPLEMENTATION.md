@@ -28,7 +28,9 @@ Controller → Output Lane → Panel → Zone → Pixel Ranges → LEDs.
 - First-boot v1/v2 conversion is staged in ot_zone_map before promotion. Legacy profile bytes in ot_output_cfg are left untouched as migration input.
 - A staged record is recoverable after reboot and promotion is still gated by raw/debounced physical-input quietness and an unchanged edge epoch.
 - The existing ot_output_cfg profile_v2/profile records are still legacy combined records. The separate hardware-only lane record, cross-namespace hardware/map reconciliation, and persistent reset tombstone required by Issue #126 section 2A are NOT YET COMPLETE. The map journal currently carries a combined runtime snapshot for compatibility; it must not be described as the final hardware/map split.
-- The reset tombstone and authenticated two-step reset handshake in section 6C are NOT YET IMPLEMENTED. Until then, do not erase map keys or assume a reset can never re-import legacy zones.
+- Section 6C reset is implemented as a two-step authenticated, revision-bound challenge/confirmation on the existing Panel command characteristic. Request is [v3, FF, AA, lane, revision LE16]; response returns a 32-bit random challenge, revision and 5-second TTL; confirmation is [v3, FF, AB, lane, challenge LE32, revision LE16]. It rejects active physical inputs, Show/Demo/Simulation, diagnostics/preview, pending configuration, a pending STOP render, and watchdog/fault inhibit.
+- Reset clears only the selected lane's Panel/Zone map while preserving its lane hardware fields and saved effect presets. It stops playback references, writes a CRC-protected reset_v3 tombstone atomically with the staged map journal, carries the reset mask through reboot recovery, and reports success only after the active journal and tombstone are re-read and validated.
+- The separate hardware-only lane record and complete cross-namespace hardware/map reconciliation required by section 2A remain NOT YET COMPLETE. The map journal still carries a combined runtime snapshot for compatibility.
 
 ### Commissioning fallback and diagnostics
 
