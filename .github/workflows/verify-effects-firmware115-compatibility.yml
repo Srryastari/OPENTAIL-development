@@ -9,6 +9,8 @@ on:
       - 'scripts/tests/test_effects_watchdog_compatibility.py'
       - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
       - '.github/workflows/verify-effects-firmware115-compatibility.yml'
+      - '.github/workflows/verify-issue103-exact-head.yml'
+      - '.github/workflows/codex-integrated-software.yml'
   workflow_dispatch:
 permissions:
   contents: read
