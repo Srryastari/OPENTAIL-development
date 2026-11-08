@@ -61,7 +61,7 @@ assert "pz_preview_commit_worker_active=false" in config_worker
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
     "static bool om_save(", 1)[0]
 assert "pz_preview.active&&!pz_preview.committing" in pz_save
-assert "else pz_preview.committing=true" in core
+assert "pz_preview.committing=true;" in preview_commit
 panel_save = core.split("int ot_ble_panel_save(", 1)[1].split("bool ot_ble_pixel_probe(", 1)[0]
 assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
