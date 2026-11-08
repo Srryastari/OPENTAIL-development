@@ -196,9 +196,12 @@ static void capacity_cases(void){
     assert(ot_pz_valid(&cfg)); /* 2,048 pixels per output */
     cfg.outputs[0].active_pixels=2048u;cfg.outputs[1].active_pixels=2048u;
     assert(ot_pz_valid(&cfg));
-    cfg.outputs[0].zones[7].ranges[0].start=2047u;
+    cfg.outputs[0].zones[7].ranges[0].start=1791u;
     cfg.outputs[0].zones[7].ranges[0].count=1u;
-    assert(!ot_pz_valid(&cfg)); /* overlaps zone 7? adjacent range ends at 2048; start=2047 overlaps */
+    assert(!ot_pz_valid(&cfg)); /* overlaps zone 6 at physical pixel 1791 */
+    cfg.outputs[0].zones[7].ranges[0].start=2047u;
+    cfg.outputs[0].zones[7].ranges[0].count=2u;
+    assert(!ot_pz_valid(&cfg)); /* exclusive end 2049 exceeds the 2,048-pixel lane */
     ot_pz_defaults(&cfg);
     for(unsigned lane=0;lane<2;lane++){
         ot_pz_output_t *o=&cfg.outputs[lane];make_output(o,lane,623);
