@@ -43,11 +43,20 @@ assert "ot_pz_preview_apply_updates(" in preview_update and "nvs_open(" not in p
 assert "xSemaphoreTake(om_write_mutex,0)" in preview_update
 assert "ot_pz_preview_heartbeat(" in preview_heartbeat and "nvs_open(" not in preview_heartbeat
 assert "ot_pz_wire_encode" in core and "ot_cfg_crc32" in core
-assert "pz_save_controller_locked(&snapshot.candidate)" in preview_commit
+assert "pz_preview_commit_requested=true" in preview_commit
+assert "pz_save_controller_locked(" not in preview_commit
 assert "ot_fx_bank_stop_all" not in preview_begin+preview_update+preview_heartbeat+preview_crc+preview_commit+preview_cancel
 assert "native_show" not in preview_begin+preview_update+preview_heartbeat+preview_crc+preview_commit+preview_cancel
 assert "nvs_open(" not in preview_cancel
 assert "pz_render_revision[ch]=local_active_revision[ch]" in core
+assert "ot_ble_panel_preview_commit_pending" in api
+assert "ot_ble_panel_preview_commit_pending" in ble
+config_worker = core.split("static void config_activation_task(", 1)[1].split(
+    "static void input_sampler_task(", 1)[0]
+assert "pz_preview_commit_requested" in config_worker
+assert "pz_preview_commit_worker_active=true" in config_worker
+assert "pz_save_controller_locked(&preview_candidate)" in config_worker
+assert "pz_preview_commit_worker_active=false" in config_worker
 
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
     "static bool om_save(", 1)[0]
