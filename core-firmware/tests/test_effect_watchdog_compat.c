@@ -25,6 +25,34 @@ typedef struct {
 static guarded_lane_t lane[2];
 static ot_effects_1d_state_t state[2];
 
+typedef enum {
+    WAIT_COMPLETED,
+    WAIT_RETURNED_ERROR,
+    WAIT_BLOCKED
+} modeled_wait_result_t;
+
+/* Production waits for O1 then O2 before it calls render_cycle(). A returned
+ * error advances to the next lane; a blocked async_done never returns, so the
+ * render cycle (and its WDT feed) is not reached, even if O1 already completed. */
+static bool modeled_completion_cycle(modeled_wait_result_t o1,
+                                     modeled_wait_result_t o2,
+                                     bool *full_frame,
+                                     bool *any_completed) {
+    const modeled_wait_result_t result[2] = {o1,o2};
+    bool completed[2] = {false,false};
+    for (unsigned lane_index=0; lane_index<2u; lane_index++) {
+        if (result[lane_index] == WAIT_BLOCKED) {
+            *full_frame = ot_frame_all_submitted(completed,2u);
+            *any_completed = completed[0] || completed[1];
+            return false; /* render_cycle/feed is unreachable */
+        }
+        completed[lane_index] = result[lane_index] == WAIT_COMPLETED;
+    }
+    *full_frame = ot_frame_all_submitted(completed,2u);
+    *any_completed = completed[0] || completed[1];
+    return ot_sw_render_progress_eligible(*full_frame,*any_completed);
+}
+
 static bool modeled_render_feed(uint64_t cycle_start_ms,
                                 uint64_t last_feed_ms,
                                 uint32_t render_work_ms,
@@ -152,26 +180,32 @@ int main(void) {
         }
     }
 
-    /* Exercise both independent completion lanes. In production the
-     * frame_submitted[] flags are cleared for a failed async_done; therefore
-     * these arrays represent successful completions, not queued submissions. */
-    const bool both_completed[2] = {true,true};
-    const bool o1_stalled_o2_done[2] = {false,true};
-    const bool o1_done_o2_stalled[2] = {true,false};
-    const bool both_stalled[2] = {false,false};
-    assert(ot_frame_all_submitted(both_completed,2u));
-    assert(ot_sw_render_progress_eligible(
-        ot_frame_all_submitted(both_completed,2u),true));
-    assert(!ot_frame_all_submitted(o1_stalled_o2_done,2u));
-    assert(ot_sw_render_progress_eligible(false,true));
+    /* Exercise returned errors separately from a blocked async_done call.
+     * The production loop waits O1 then O2 before render_cycle(): a returned
+     * error continues, but a hang on either lane prevents the feed call. */
+    bool full=false, any=false;
+    assert(modeled_completion_cycle(WAIT_COMPLETED,WAIT_COMPLETED,&full,&any));
+    assert(full&&any);
+    /* A returned O1 error followed by successful O2 completion can feed
+     * partial progress, but never counts as a full stable frame. */
+    assert(modeled_completion_cycle(WAIT_RETURNED_ERROR,WAIT_COMPLETED,&full,&any));
+    assert(!full&&any);
     assert(!ot_sw_can_mark_stable(60000u,1000u,1000u,true,false));
-    assert(!ot_frame_all_submitted(o1_done_o2_stalled,2u));
-    assert(ot_sw_render_progress_eligible(false,true));
+    /* A returned O2 error after O1 completed has the same partial result. */
+    assert(modeled_completion_cycle(WAIT_COMPLETED,WAIT_RETURNED_ERROR,&full,&any));
+    assert(!full&&any);
     assert(!ot_sw_can_mark_stable(60000u,1000u,1000u,true,false));
-    /* If async_done hangs before returning, no lane completion is observed:
-     * the render watchdog receives no feed and must expire. */
-    assert(!ot_frame_all_submitted(both_stalled,2u));
-    assert(!ot_sw_render_progress_eligible(false,false));
+    assert(!modeled_completion_cycle(WAIT_RETURNED_ERROR,WAIT_RETURNED_ERROR,&full,&any));
+    assert(!full&&!any);
+    /* A blocked O1 wait prevents reaching O2 and render_cycle(). */
+    assert(!modeled_completion_cycle(WAIT_BLOCKED,WAIT_COMPLETED,&full,&any));
+    assert(!full&&!any);
+    /* If O1 completed but O2 async_done blocks, render_cycle() is still
+     * unreachable; the earlier completion does not falsely feed the WDT. */
+    assert(!modeled_completion_cycle(WAIT_COMPLETED,WAIT_BLOCKED,&full,&any));
+    assert(!full&&any);
+    assert(!modeled_completion_cycle(WAIT_BLOCKED,WAIT_BLOCKED,&full,&any));
+    assert(!full&&!any);
 
     /* Exercise both sides of the deadline boundary. A 14,900ms render
      * plus 62ms completion can feed before 15s; a 14,940ms render plus 62ms
