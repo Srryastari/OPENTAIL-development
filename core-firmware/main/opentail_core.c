@@ -533,14 +533,17 @@ static void pz_load(void){
     portEXIT_CRITICAL(&state_lock);
 }
 static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
-    if(!candidate||!ot_pz_valid(candidate)||pz_deferred.pending)return false;
+    if(!candidate||!ot_pz_valid(candidate))return false;
     ot_pz_controller_t previous;
     uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+    bool busy=false;
     portENTER_CRITICAL(&state_lock);
+    busy=pz_deferred.pending||(pz_preview.active&&!pz_preview.committing);
     previous=pz_outputs;
     memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
     memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
     portEXIT_CRITICAL(&state_lock);
+    if(busy)return false;
     bool changed=false;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         if(memcmp(&previous.outputs[lane],&candidate->outputs[lane],
@@ -579,7 +582,10 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     if(!items)return false;
     ot_pz_controller_t candidate;
-    portENTER_CRITICAL(&state_lock);candidate=pz_outputs;portEXIT_CRITICAL(&state_lock);
+    portENTER_CRITICAL(&state_lock);
+    if(pz_preview.active){portEXIT_CRITICAL(&state_lock);return false;}
+    candidate=pz_outputs;
+    portEXIT_CRITICAL(&state_lock);
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         ot_om_output_t current={0};
         if(!ot_pz_to_legacy(&candidate.outputs[lane],lane,&current))return false;
@@ -833,7 +839,7 @@ static esp_err_t om_post(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || pz_preview.active || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     const ot_pz_controller_t active_panel=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
@@ -883,7 +889,7 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     portENTER_CRITICAL(&state_lock);
     candidate=pz_outputs;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
-        raw_active||live_input_mask||
+        pz_preview.active||raw_active||live_input_mask||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
     stale=pz_revision[index]!=base_revision;
@@ -964,28 +970,36 @@ int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision){
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return 2;
     ot_pz_controller_t candidate;
-    bool accepted=false;
+    bool accepted=false,no_change=false;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     portENTER_CRITICAL(&state_lock);
     const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending;
-    if(!pending&&pz_preview.active&&pz_preview.lane==lane&&
-       pz_preview.base_revision==base_revision&&
-       pz_active_revision[lane]==base_revision&&
-       pz_revision[lane]==base_revision&&
+    if(!pending&&pz_preview.active&&!pz_preview.committing&&
+       pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
+       pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
        (int32_t)(now_ms-pz_preview.expires_ms)<0){
         candidate=pz_preview.candidate;
+        no_change=memcmp(&candidate,&pz_outputs,sizeof(candidate))==0;
+        pz_preview.committing=!no_change;
+        if(no_change)ot_pz_preview_cancel(&pz_preview);
         accepted=true;
     }
     portEXIT_CRITICAL(&state_lock);
     if(!accepted){
         xSemaphoreGive(om_write_mutex);return 3;
     }
+    if(no_change){
+        request_render_refresh();
+        xSemaphoreGive(om_write_mutex);return 0;
+    }
     const bool saved=pz_save_controller_locked(&candidate);
-    if(saved){
+    if(!saved){
         portENTER_CRITICAL(&state_lock);
         if(pz_preview.active&&pz_preview.lane==lane&&
-           pz_preview.base_revision==base_revision)
+           pz_preview.base_revision==base_revision){
+            pz_preview.committing=false;
             pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        }
         portEXIT_CRITICAL(&state_lock);
     }
     xSemaphoreGive(om_write_mutex);
@@ -1155,7 +1169,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     ot_pz_controller_t candidate;bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
     candidate=pz_outputs;
-    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||pz_preview.active||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
     stale=pz_revision[lane]!=base_revision;
@@ -1165,7 +1179,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
     if(memcmp(&candidate.outputs[lane],next,sizeof(*next))==0){
         portENTER_CRITICAL(&state_lock);
-        pz_preview.active=false;
+        ot_pz_preview_cancel(&pz_preview);
         portEXIT_CRITICAL(&state_lock);
         request_render_refresh();
         xSemaphoreGive(om_write_mutex);return 0;
@@ -1175,7 +1189,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     const bool saved=pz_save_controller_locked(&candidate);
     if(saved){
         portENTER_CRITICAL(&state_lock);
-        pz_preview.active=false;
+        ot_pz_preview_cancel(&pz_preview);
         portEXIT_CRITICAL(&state_lock);
         request_render_refresh();
     }
@@ -2631,7 +2645,7 @@ static void pz_promote(uint32_t epoch){
         pz_outputs=stage.candidate;
         memcpy(pz_active_revision,stage.candidate_revision,sizeof(pz_active_revision));
         pz_deferred.pending=false;pz_persistent=true;
-        pz_preview.active=false;
+        ot_pz_preview_cancel(&pz_preview);
         pz_refresh_legacy_projection_locked();
         applied=true;
     }
