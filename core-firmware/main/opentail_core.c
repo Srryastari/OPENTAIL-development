@@ -2016,6 +2016,18 @@ static bool config_clear_stage(nvs_handle_t h){
     size_t n=0;
     return nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
 }
+static bool config_write_panel_active(nvs_handle_t h,const ot_pz_journal_t *record){
+    esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_ACTIVE,record,sizeof(*record));
+    if(e==ESP_OK)e=nvs_commit(h);
+    return e==ESP_OK;
+}
+static bool config_clear_panel_stage(nvs_handle_t h){
+    esp_err_t e=nvs_erase_key(h,OT_PZ_JOURNAL_KEY_STAGED);
+    if(e==ESP_OK)e=nvs_commit(h);
+    if(e!=ESP_OK)return false;
+    size_t n=0;
+    return nvs_get_blob(h,OT_PZ_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
+}
 /* The durable active record retains BOTH the prior and the desired profile.
  * After stage erasure, a concurrent GPIO edge may veto RAM publication.
  * A later promoter retries from active_v3; reboot does likewise. No edge
@@ -2070,6 +2082,56 @@ static void tm_promote(uint32_t epoch){
     if(applied)request_render_refresh();
     nvs_close(h);
 }
+static void pz_promote(uint32_t epoch){
+    nvs_handle_t h;
+    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
+    ot_pz_journal_t stage={0};
+    esp_err_t read=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage);
+    const bool staged=read==ESP_OK;
+    if(read==ESP_ERR_NVS_NOT_FOUND)
+        read=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&stage);
+    if(read!=ESP_OK){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("Panel/Zone v3 journal invalid during promotion");return;
+    }
+    bool matches=false;
+    portENTER_CRITICAL(&state_lock);
+    matches=pz_deferred.pending&&
+        memcmp(pz_revision,stage.candidate_revision,sizeof(pz_revision))==0&&
+        memcmp(pz_active_revision,stage.previous_revision,sizeof(pz_active_revision))==0&&
+        memcmp(&pz_outputs,&stage.previous,sizeof(pz_outputs))==0&&
+        memcmp(&pz_deferred.candidate,&stage.candidate,sizeof(pz_deferred.candidate))==0;
+    portEXIT_CRITICAL(&state_lock);
+    if(!matches){
+        nvs_close(h);config_recovery_fault=true;
+        ot_st_set_fault("Panel/Zone v3 staging revision mismatch");return;
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(staged){
+        if(!config_write_panel_active(h,&stage)||
+           !config_activation_idle(epoch)){nvs_close(h);return;}
+        /* Stage is erased before RAM publication; active retains both images. */
+        if(!config_clear_panel_stage(h)){
+            nvs_close(h);config_recovery_fault=true;
+            ot_st_set_fault("Panel/Zone v3 journal finalization failed");return;
+        }
+    }
+    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    bool applied=false;
+    portENTER_CRITICAL(&state_lock);
+    if(input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+       tm_gpio_input_mask()==0u&&
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
+        pz_outputs=stage.candidate;
+        memcpy(pz_active_revision,stage.candidate_revision,sizeof(pz_active_revision));
+        pz_deferred.pending=false;pz_persistent=true;
+        pz_refresh_legacy_projection_locked();
+        applied=true;
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if(applied)request_render_refresh();
+    nvs_close(h);
+}
 static void om_promote(uint32_t epoch){
     nvs_handle_t h;
     if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
@@ -2114,7 +2176,10 @@ static void om_promote(uint32_t epoch){
                           sizeof(om_active_revision));
     }
     portEXIT_CRITICAL(&state_lock);
-    if(applied)request_render_refresh();
+    if(applied){
+        pz_sync_from_legacy(); /* complete read-only v1/v2 -> v3 migration */
+        request_render_refresh();
+    }
     nvs_close(h);
 }
 static void config_activation_task(void *unused){
@@ -2122,14 +2187,16 @@ static void config_activation_task(void *unused){
     for(;;){
         if(input_sampler_ready&&!config_recovery_fault&&om_write_mutex &&
            xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(1))==pdTRUE){
-            bool trigger_pending,output_pending;
+            bool trigger_pending,output_pending,panel_pending;
             portENTER_CRITICAL(&state_lock);
             trigger_pending=tm_deferred.pending;
             output_pending=om_deferred.pending;
+            panel_pending=pz_deferred.pending;
             portEXIT_CRITICAL(&state_lock);
             const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
             if(config_activation_idle(epoch)){
                 if(trigger_pending)tm_promote(epoch);
+                else if(panel_pending)pz_promote(epoch);
                 else if(output_pending)om_promote(epoch);
             }
             xSemaphoreGive(om_write_mutex);
