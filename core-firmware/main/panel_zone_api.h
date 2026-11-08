@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "panel_zone.h"
 
+#define OT_PZ_RESET_CHALLENGE_TTL_MS 5000u
+
 /* Authenticated NimBLE host callbacks call these CORE state APIs. None owns
  * or writes the LED driver; led_task remains the sole RMT/DMA owner. */
 bool ot_ble_panel_get(uint8_t lane,ot_pz_output_t *out,uint16_t *active_revision,
