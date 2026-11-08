@@ -18,15 +18,18 @@ changes before the ISR has published its timestamp, a pending release waits
 for the coherent ISR edge record rather than classifying a stale timestamp.
 
 The first inactive raw sample starts the timer from its captured falling-edge
-timestamp. A reassertion observed by the sampler uses its captured rising-edge
+timestamp (or conservatively from the sample time until a delayed ISR record
+arrives). A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
 release. If a complete reassert-and-drop pulse occurs between sampler wakes,
 the newer falling-edge sequence restarts the continuous-inactive timer.
 Reassertion before the 400ms deadline cancels the pending release and leaves
 the logical mask asserted, so the renderer receives no false falling/rising
-edge between flashes. If the signal remains inactive through the deadline,
-the old assertion releases; a later assertion must again pass four stable
-samples.
+edge between flashes. Left and Right have independent timer state, so one
+side can expire while the other continues and hazards resolve only while both
+logical turn inputs are active. If the signal remains inactive through the
+deadline, the old assertion releases; a later assertion must again pass four
+stable samples.
 
 Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds.
 The 400,000µs interval is safely shorter than the 32-bit wrap period (about
@@ -58,8 +61,9 @@ bash tests/run-host-tests.sh
 The deterministic test uses an injected `uint32_t` microsecond clock and covers four
 sample assertion, 100/200/300/399ms flash gaps, 400ms and longer inactivity,
 reassertion before and at expiry, repeated flashes without a logical falling
-edge, independent Left/Right and Hazards, all 256 boot masks, unchanged
-non-turn timing, Brake/Parking and Reverse arbitration, 32-bit microsecond
+edge, independent Left/Right and Hazards, one-side expiry while the other
+continues, all 256 boot masks, unchanged non-turn timing, Brake/Parking and
+Reverse arbitration, 32-bit microsecond
 rollover, delayed sampler wake, torn-snapshot rejection and an unseen pulse
 between sampler wakes using captured raw-edge sequence. The
 complete CORE host runner also covers the existing Effects, BLE, STOP, NVS
