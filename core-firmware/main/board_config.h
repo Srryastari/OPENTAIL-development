@@ -1,6 +1,9 @@
 #pragma once
 #include "core_logic.h"
 #include "output_manager.h"
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
 
 // Provisional wiring map: verify pin labels on your exact hiBCTR N16R8 before connecting.
 #define OT_OUT_LEFT_GPIO 16    // pixel output 1 (direct GPIO bench or buffered data stage)
@@ -15,9 +18,17 @@
 // The synthetic layout is only an internal bounds-validity fixture.
 #define OT_CHAIN_PIXELS OT_OM_MAX_PIXELS_PER_OUTPUT
 #define OT_LAYOUT_SECTIONS {OT_OM_MAX_PIXELS_PER_OUTPUT,0,0,0,0,0,0,0}
-#define OT_MAX_BRIGHTNESS 32 // Conservative software ceiling; NOT a measured current limiter.
+#ifndef CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT
+#define CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT 32
+#endif
+#if CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT < 1 || CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT > 255
+#error "OPENTAIL_MAX_BRIGHTNESS_LIMIT must be in the 1..255 RGB channel range"
+#endif
+#define OT_MAX_BRIGHTNESS_LIMIT ((uint8_t)CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT)
+/* Preserve the existing symbol while making the safe ceiling Kconfig-controlled. */
+#define OT_MAX_BRIGHTNESS OT_MAX_BRIGHTNESS_LIMIT
 static inline uint8_t ot_brightness_limit_request(uint8_t requested){
-    return requested>OT_MAX_BRIGHTNESS?(uint8_t)OT_MAX_BRIGHTNESS:requested;
+    return requested>OT_MAX_BRIGHTNESS_LIMIT?OT_MAX_BRIGHTNESS_LIMIT:requested;
 }
 #define OT_DEBOUNCE_TICKS 4 // four 10ms samples
 #define OT_DEMO_MAX_MS 10000
