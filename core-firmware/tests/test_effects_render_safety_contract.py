@@ -22,14 +22,19 @@ def ordered(blob,items):
 # Saved/staged NVS swaps never access live palette data inside FX/LED loops.
 ordered(render,[
     "portENTER_CRITICAL(&state_lock);",
-    "memcpy(local_outputs,om_outputs,sizeof(local_outputs));",
+    "if(pz_preview.active&&physical==0u)",
+    "memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));",
+    "memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));",
     "if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));",
     "portEXIT_CRITICAL(&state_lock);",
+    "ot_om_defaults(default_outputs);",
+    "ot_pz_to_fx_view(&local_panel[ch],ch,&local_outputs[ch])",
     "ot_palette_runtime_snapshot(palette_ids,OT_OM_OUTPUTS*OT_OM_ZONES,",
     "ot_wled_palette_global_tick(",
     "ot_effects_1d_render(",
     "ot_fx_overlay_apply(",
     "ot_om_trigger_overlay(",
+    "ot_om_limit_brightness(",
     "ot_frame_snapshot_pixel(",
     "ot_om_swizzle(",
     "led_strip_set_pixel("
@@ -44,13 +49,15 @@ assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 # The physical safety override is performed after all decorative FX and
 # before logical RGB capture. Decorative calibration must stay strictly
 # inside the branch that applies only when NO physical trigger won.
-pixel_start=render.index("for(unsigned px=0;px<output->active_pixels;++px)")
+pixel_start=render.index("for(unsigned px=0;px<render_pixels[ch];++px)")
 pixel_end=render.index("led_strip_refresh_async(strip[ch])",pixel_start)
 pixel=render[pixel_start:pixel_end]
 ordered(pixel,[
-    "bool trigger_here=ot_om_trigger_overlay(",
+    "bool trigger_here=false;",
+    "ot_om_trigger_overlay(",
     "if(!trigger_here){",
     "if(decorated)c=ot_om_calibrate(c,output);",
+    "ot_om_limit_brightness(",
     "ot_frame_snapshot_pixel(",
     "ot_om_swizzle(",
     "led_strip_set_pixel("
