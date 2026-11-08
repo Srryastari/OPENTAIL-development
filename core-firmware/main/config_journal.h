@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include "trigger_manager.h"
 #include "output_manager.h"
+#include "panel_zone.h"
 #define OT_CFG_JOURNAL_MAGIC 0x4f544a33u
 #define OT_CFG_JOURNAL_VERSION 2u
 #define OT_CFG_JOURNAL_KEY_ACTIVE "active_v3"
@@ -60,3 +61,29 @@ bool ot_om_journal_recover(const ot_om_journal_t *active,
                            const ot_om_journal_t *staged,
                            ot_om_output_t live[OT_OM_OUTPUTS],
                            ot_om_pending_t *pending);
+
+/* Issue #126 hierarchical Panel/Zone journal. Kept in the existing output
+ * namespace and promoter protocol, but on distinct keys and an explicit v3
+ * schema so v1/v2 byte layouts are never reinterpreted. */
+#define OT_PZ_JOURNAL_MAGIC 0x4f54504au
+#define OT_PZ_JOURNAL_VERSION OT_PZ_SCHEMA_VERSION
+#define OT_PZ_JOURNAL_KEY_ACTIVE "panel_active"
+#define OT_PZ_JOURNAL_KEY_STAGED "panel_stage"
+typedef struct {
+    uint32_t magic,version,crc;
+    ot_pz_controller_t previous,candidate;
+    uint16_t previous_revision[OT_PZ_OUTPUTS];
+    uint16_t candidate_revision[OT_PZ_OUTPUTS];
+} ot_pz_journal_t;
+bool ot_pz_journal_build(ot_pz_journal_t *out,
+                         const ot_pz_controller_t *previous,
+                         const ot_pz_controller_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS]);
+bool ot_pz_journal_valid(const ot_pz_journal_t *record);
+bool ot_pz_journal_recover(const ot_pz_journal_t *active,
+                           const ot_pz_journal_t *staged,
+                           ot_pz_controller_t *live,
+                           ot_pz_pending_t *pending,
+                           uint16_t active_revision[OT_PZ_OUTPUTS],
+                           uint16_t staged_revision[OT_PZ_OUTPUTS]);
