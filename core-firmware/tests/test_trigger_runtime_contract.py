@@ -72,7 +72,9 @@ assert "turn_edge_snapshot_seq[slot]" in sampler
 assert "static bool read_turn_input_snapshot(" in core
 assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
 assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
-assert "if(before==after&&!(after&1u))" in core
+assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
+assert "const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);" in logic
+assert "edge_ahead<0x80000000u" in logic
 assert "if(sample_valid){" in sampler
 assert "if(!sample_valid)" not in sampler
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
