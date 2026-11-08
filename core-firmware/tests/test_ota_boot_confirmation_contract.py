@@ -10,7 +10,7 @@ led = core.split("static void led_task(void *p) {", 1)[1].split("void app_main(v
 startup = core.split("void app_main(void) {", 1)[1]
 done = "led_strip_refresh_async_done(strip[ch])"
 all_lanes = "const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT)"
-gate = "if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&"
+gate = "if(full_frame && ot_sw_idf_stable() &&"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
@@ -41,11 +41,11 @@ input_init = core.split("static bool input_init(void) {",1)[1].split(
 assert "ESP_ERROR_CHECK(gpio_config(" not in input_init
 assert "const esp_err_t e=gpio_config(&cfg);" in input_init
 assert "return false;" in input_init and "return true;" in input_init
-assert "const bool inputs_ready=input_init();" in startup
-assert 'if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");' in startup
-assert "const bool sampler_ready=inputs_ready &&" in startup
+assert "const bool inputs_ready=watchdog_ready&&input_init();" in startup
+assert 'if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");' in startup
+assert "const bool sampler_ready=input_watched &&" in startup
 assert "bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();" in startup
-assert startup.index("const bool inputs_ready=input_init();") < startup.index("xTaskCreate(led_task")
+assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < startup.index("xTaskCreate(led_task")
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
 assert "http_startup_ready=wifi_started&&http_start();" in startup
@@ -91,14 +91,23 @@ assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < 
 assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < gap.index("active_conn=BLE_HS_CONN_HANDLE_NONE;")
 assert "boot_frame_verified=true;" not in led, "A failed flash confirmation must retry"
 ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
+sdkconfig = (Path(__file__).resolve().parents[1] / "sdkconfig.defaults").read_text()
+assert "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y" in sdkconfig
 assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
+assert "void ot_ota_watch_boot(void)" in ota
 assert "if(!outputs_ready)return false;" in ota
-assert "return e==ESP_OK;" in ota
-assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;" in ota
-# Factory/non-OTA images have no OTA rollback state: don't poll flash every frame.
-assert "running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0" in ota
-assert "running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;" in ota
-assert ota.index("running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0") < ota.index("esp_ota_get_state_partition(running,&state)")
+assert "esp_ota_mark_app_valid_cancel_rollback()" in ota
+assert "esp_ota_mark_app_invalid_rollback_and_reboot()" in ota
+assert "esp_timer_start_once(boot_guard" in ota
+assert "OTA_BOOT_CONFIRM_DEADLINE_MS 120000u" in (Path(__file__).resolve().parents[1] / "main/ot_ota_update.h").read_text()
+assert "ot_ota_watch_boot();" in startup
+assert startup.index("const bool watchdog_ready=ot_sw_idf_configure();") < startup.index("ot_ota_watch_boot();")
+assert startup.index("ot_ota_watch_boot();") < startup.index("input_init()")
+# Non-OTA, already-valid and NOT_FOUND states are not treated as pending candidates.
+assert "ESP_ERR_NOT_FOUND" in ota
+assert "image_state!=ESP_OTA_IMG_PENDING_VERIFY" in ota
+assert "if(state==OTA_BOOT_EXPIRED)return false;" in ota
+assert "esp_timer_stop(boot_guard)" in ota
 # The HTTP/BLE renderer-ready flag must not be raised during strip creation;
 # it is raised by the render task only after its frame timer exists.
 assert "native_outputs_ready=outputs_ready" not in startup

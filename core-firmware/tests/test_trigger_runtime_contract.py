@@ -35,8 +35,8 @@ assert entry, "Trigger GPIO initializer missing"
 init = core.split(entry, 1)[1].split("/* RMT drivers", 1)[0]
 if "static bool input_init(void)" in core:
     assert "if(e!=ESP_OK)" in init and "return false;" in init
-    assert "const bool inputs_ready=input_init();" in core
-    assert "sampler_ready=inputs_ready &&" in core
+    assert "const bool inputs_ready=watchdog_ready&&input_init();" in core
+    assert "sampler_ready=input_watched &&" in core
 assert ".mode=GPIO_MODE_INPUT" in init
 assert ".pull_up_en=GPIO_PULLUP_ENABLE" in init
 sampler = between(core, "static void input_sampler_task(void *arg){", "static void frame_wake_callback")

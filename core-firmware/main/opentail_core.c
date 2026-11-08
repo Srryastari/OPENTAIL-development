@@ -1,6 +1,6 @@
 /* OpenTail CORE Alpha — universal user-profile pixel counts, hardware-budgeted, not road firmware.
  * ESP-IDF 5.5.x, ESP32-S3, 2x WS2815-compatible 800kHz RMT outputs.
- * No watchdog, fail-safe, independent backup or OEM-bulb fallback. Do not drive on road.
+ * One-ESP progress watchdog; no independent light fallback. Do not drive on road.
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -49,6 +49,7 @@
 #include "ot_fps_pacer.h"
 #include "ot_frame_contract.h"
 #include "ot_frame_snapshot.h"
+#include "ot_single_watchdog_idf.h"
 
 #define OT_FW OT_FW_VERSION
 /* No hard-coded bench-derived FPS: frame rate is constrained by each output's
@@ -1459,14 +1460,16 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used]=0;
     char elf_sha256[65]={0};
     (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
-    char buf[1800];char led_json[384];ot_st_format_json(led_json,sizeof(led_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s}",
+    char buf[2500];char led_json[384],wd_json[420];
+    ot_st_format_json(led_json,sizeof(led_json));
+    ot_sw_idf_status_json(wd_json,sizeof(wd_json));
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
        OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
-       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json);
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json,wd_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
@@ -1893,6 +1896,16 @@ static void config_activation_task(void *unused){
 static void input_sampler_task(void *arg){
     (void)arg;
     ot_inputs_t sampler={0};
+    /* Bootstrap the debouncer from the GPIO snapshot captured BEFORE any
+     * RMT frame. Without this, the first 3 samples would overwrite a held
+     * Brake/Turn/Reverse with zero until the fourth 10ms sample. */
+    const uint8_t boot_physical=live_input_mask;
+    for(unsigned i=0;i<OT_IN_COUNT;i++){
+        const bool asserted=(boot_physical&(uint8_t)(1u<<i))!=0u;
+        sampler.settled[i]=asserted;
+        sampler.pending[i]=asserted;
+        sampler.ticks[i]=OT_DEBOUNCE_TICKS;
+    }
     TickType_t last_wake=xTaskGetTickCount();
     TickType_t period=pdMS_TO_TICKS(10u);
     if(!period)period=1u;
@@ -1914,6 +1927,7 @@ static void input_sampler_task(void *arg){
             if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;
         }else input_quiet_samples=0u;
         portEXIT_CRITICAL(&state_lock);
+        ot_sw_idf_input_sampled(); /* eight real GPIO reads + debounce published */
         if(target)xTaskNotifyGive(target);
         vTaskDelayUntil(&last_wake,period);
     }
@@ -1977,9 +1991,14 @@ static void led_task(void *p) {
         vTaskDelete(NULL);
         return;
     }
+    if(!ot_sw_idf_watch_render()){
+        ot_st_set_fault("single-ESP render watchdog registration failed");
+        (void)esp_timer_delete(frame_timer);
+        vTaskDelete(NULL);return;
+    }
     portENTER_CRITICAL(&state_lock);
     render_task_handle=self;
-    native_outputs_ready=true; /* RMT and frame timer initialized; ready to render. */
+    native_outputs_ready=true; /* RMT, frame timer and WDT initialized. */
     portEXIT_CRITICAL(&state_lock);
     while(1){
        const int64_t frame_started_us=esp_timer_get_time();
@@ -1990,6 +2009,14 @@ static void led_task(void *p) {
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
        portENTER_CRITICAL(&state_lock);
+       /* Repeated reset: no decorative effect replay during recovery.
+        * OEM physical GPIO trigger overlays remain authoritative. */
+       if(ot_sw_idf_decorative_inhibited()){
+           demo.mode=OT_DEMO_OFF;demo_deadline=0;
+           native_show.mode=OT_SHOW_OFF;
+           ble_fx_enabled=false;ble_owns_show=false;
+           ot_fx_bank_stop_all(&fx_bank);
+       }
        physical=live_input_mask;
        memcpy(local_outputs,om_outputs,sizeof(local_outputs));
        local_tm=tm_profile;
@@ -2024,6 +2051,7 @@ static void led_task(void *p) {
            bool frame_ready[OT_CHAIN_COUNT]={false};
            bool frame_submitted[OT_CHAIN_COUNT]={false};
            bool frame_captured[OT_CHAIN_COUNT]={false};
+           bool any_output_completed=false;
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
@@ -2199,6 +2227,7 @@ static void led_task(void *p) {
                }
                if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
                // Hardware driver transmits only this output's configured active length.
+               if(ch==0)ot_sw_idf_fault_inject(3u); /* Bench-only pre-submit stall. */
                esp_err_t e=led_strip_refresh_async(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer submit",e);
@@ -2212,6 +2241,7 @@ static void led_task(void *p) {
             * Wait for both before reusing their pixel buffers on the next frame. */
            for(int ch=0;ch<OT_CHAIN_COUNT;ch++){
                if(!frame_submitted[ch])continue;
+               if(ch==0)ot_sw_idf_fault_inject(4u); /* Bench-only completion-wait stall. */
                esp_err_t e=led_strip_refresh_async_done(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer completion",e);
@@ -2221,6 +2251,7 @@ static void led_task(void *p) {
                    continue;
                }
                if(frame_captured[ch])ot_frame_snapshot_complete(true);
+               any_output_completed=true; /* completed RMT, not queued transfer */
                /* A failed lane must not throttle the surviving vehicle lights. */
                if(local_outputs[ch].active_pixels>longest_pixels)
                    longest_pixels=local_outputs[ch].active_pixels;
@@ -2231,10 +2262,13 @@ static void led_task(void *p) {
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
            const bool full_frame=ot_frame_all_submitted(frame_submitted,OT_CHAIN_COUNT);
+           ot_sw_idf_render_cycle(full_frame,any_output_completed,
+                                  output_runtime_fault_mask!=0u,config_recovery_fault);
            /* A created FreeRTOS task does not prove the image can render.
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
-           if(full_frame && om_write_mutex && ble_startup_ready && http_startup_ready &&
+           if(full_frame && ot_sw_idf_stable() &&
+              om_write_mutex && ble_startup_ready && http_startup_ready &&
               ot_ble_radio_ever_ready() && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
@@ -2291,7 +2325,8 @@ static void led_task(void *p) {
 #error "OpenTail app_main requires at least 8192 bytes of main-task stack"
 #endif
 void app_main(void) {
-    ESP_LOGW(TAG,"CORE %s is BENCH-ONLY. No hardware failover. Do not install as road lights.",OT_FW);
+    ot_sw_idf_boot_record();
+    ESP_LOGW(TAG,"CORE %s BENCH ONLY: one ESP watchdog, NO redundant lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
     ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
@@ -2301,14 +2336,28 @@ void app_main(void) {
     tm_journal_load();
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
+    const bool watchdog_ready=ot_sw_idf_configure();
+    if(!watchdog_ready)ot_st_set_fault("single-ESP watchdog unavailable");
+    /* Start a bounded pending-OTA rollback guard. Confirmation is still
+     * deferred until 60s continuous healthy dual-lane/input progress. */
+    ot_ota_watch_boot();
+    if(ot_sw_idf_boot_loop_seen())
+        ot_st_set_fault("repeated watchdog/panic resets; decorative output inhibited");
     ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
         (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
-    const bool inputs_ready=input_init();
-    if(!inputs_ready)ot_st_set_fault("physical trigger GPIO initialization failed");
-    const bool sampler_ready=inputs_ready &&
+    const bool inputs_ready=watchdog_ready&&input_init();
+    if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");
+    /* Capture held inputs before RMT can emit its first frame; debounce
+     * continues at 10ms independently once the sampler starts. */
+    if(inputs_ready)live_input_mask=tm_gpio_input_mask();
+    const bool input_watched=inputs_ready&&ot_sw_idf_watch_inputs();
+    if(inputs_ready&&!input_watched)
+        ot_st_set_fault("single-ESP input watchdog registration failed");
+    const bool sampler_ready=input_watched &&
         xTaskCreate(input_sampler_task,"ot_inputs",3072,NULL,9,NULL)==pdPASS;
-    if(inputs_ready && !sampler_ready)ot_st_set_fault("physical input sampler could not start");
+    if(input_watched&&!sampler_ready)ot_sw_idf_cancel_inputs();
+    if(input_watched&&!sampler_ready)ot_st_set_fault("physical input sampler could not start");
     input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
     bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();
     /* Do not advertise renderer readiness until led_task initializes its timer. */
