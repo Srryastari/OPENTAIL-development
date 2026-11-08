@@ -222,6 +222,7 @@ int main(void) {
     printf("PASS HOST_SIMULATED Effects/#115 watchdog compatibility: %zu/140 effects, "
            "%u dual-lane frames, Speed/Intensity 0/255, 8/33ms cadence, "
            "synthetic render delay %ums + max(%llums completion, 33ms pacing) < %llums TWDT; "
+           "returned-error partial progress only; O1/O2 blocking async_done no-feed; "
            "14,900+62ms deadline PASS, 14,940+62ms overdue FAIL-CLOSED; "
            "RMT/TWDT hardware NOT_RUN\n",
            count, (unsigned)rendered_frames,
