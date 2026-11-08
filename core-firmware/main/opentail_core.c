@@ -39,6 +39,7 @@
 #include "output_manager.h"
 #include "panel_zone.h"
 #include "panel_zone_diag.h"
+#include "panel_zone_api.h"
 #include "config_journal.h"
 #include "trigger_manager.h"
 #include "nvs.h"
