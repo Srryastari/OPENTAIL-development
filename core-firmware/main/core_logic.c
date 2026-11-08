@@ -49,18 +49,27 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
                                 uint32_t now_us, uint32_t raw_edge_us,
                                 uint32_t raw_edge_sequence, unsigned stable_ticks) {
     if (!state) return false;
+    const bool sequence_changed=(raw_edge_sequence!=state->last_edge_sequence);
+    const bool level_changed=(raw_asserted!=state->last_raw_asserted);
+    /* If the GPIO level changed before its ISR timestamp is published, defer
+     * classifying a pending release until the coherent edge record arrives. */
+    if (raw_asserted && state->release_pending && level_changed && !sequence_changed) {
+        state->last_raw_asserted=raw_asserted;
+        return state->asserted;
+    }
+    const uint32_t effective_edge_us=(level_changed&&!sequence_changed)?now_us:raw_edge_us;
     /* A mismatched snapshot must never make unsigned elapsed time look huge. */
-    const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);
+    const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);
     if (edge_ahead!=0u && edge_ahead<0x80000000u) return state->asserted;
     if (stable_ticks<1u) stable_ticks=1u;
     if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
-    const bool new_edge=(raw_edge_sequence!=state->last_edge_sequence);
+    const bool new_edge=(sequence_changed||level_changed);
     state->last_edge_sequence=raw_edge_sequence;
     state->last_raw_asserted=raw_asserted;
 
     if (raw_asserted) {
         if (state->release_pending) {
-            const uint32_t inactive_us=(uint32_t)(raw_edge_us-state->inactive_since_us);
+            const uint32_t inactive_us=(uint32_t)(effective_edge_us-state->inactive_since_us);
             if (inactive_us>=OT_TURN_RELEASE_HOLD_US) {
                 /* The previous assertion expired; this is a new edge and
                  * must pass the normal assertion qualification again. */
@@ -89,7 +98,7 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
      * between sampler wakes. Restart the continuous-inactive interval. */
     if (!state->release_pending || new_edge) {
         state->release_pending=true;
-        state->inactive_since_us=raw_edge_us;
+        state->inactive_since_us=effective_edge_us;
     }
     if ((uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US) {
         state->asserted=false;
