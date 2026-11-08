@@ -44,7 +44,9 @@ sampler = between(core, "static void input_sampler_task(void *arg){", "static vo
 for token in ("pdMS_TO_TICKS(10u)", "gpio_get_level(input_pin[i])",
               "OT_INPUT_ACTIVE_LOW?(level==0):(level!=0)",
               "ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS)",
-              "live_input_mask=physical", "xTaskNotifyGive(target)",
+              "const uint8_t previous=live_input_mask;",
+              "if(published!=previous){live_input_mask=published;target=render_task_handle;}",
+              "if(target)xTaskNotifyGive(target);",
               "vTaskDelayUntil(&last_wake,period)"):
     assert token in sampler, f"Input sampler contract lost: {token}"
 assert "in->ticks[i]>=stable_ticks" in logic
@@ -108,10 +110,11 @@ assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0
 assert "turn_edge_queue_update(0u,&turn_signal[0]" in sampler
 assert "turn_edge_queue_update(1u,&turn_signal[1]" in sampler
 assert "read_turn_input_snapshot" not in core
-assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
-assert "if(left)physical|=OT_SIG_LEFT;" in sampler
-assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
-assert sampler.index("live_input_mask=physical") < sampler.index("ot_sw_idf_input_sampled();")
+assert "uint8_t published=(uint8_t)(physical&" in sampler
+assert "if(left_valid){\n            if(left)published|=OT_SIG_LEFT;" in sampler
+assert "if(right_valid){\n            if(right)published|=OT_SIG_RIGHT;" in sampler
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert sampler.index("if(published!=previous){live_input_mask=published;target=render_task_handle;}") < sampler.index("ot_sw_idf_input_sampled();")
 assert sampler.index("portEXIT_CRITICAL(&state_lock);") < sampler.index("ot_sw_idf_input_sampled();")
 assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("if(target)xTaskNotifyGive(target);")
 assert "millis()" not in logic and "Arduino.h" not in logic_header
