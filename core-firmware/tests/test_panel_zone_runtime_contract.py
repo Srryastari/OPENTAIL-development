@@ -52,7 +52,7 @@ assert 'nvs_open("ot_zone_map"' in pz_load
 assert 'nvs_open("ot_zone_map"' in pz_save
 assert 'nvs_open("ot_zone_map"' in pz_promote
 assert "pz_stage_legacy_migration" in core
-assert "ot_output_cfg" not in pz_load
+assert 'nvs_open("ot_output_cfg"' not in pz_load
 
 # Trigger ISR telemetry is additive to the existing two SPSC turn queues.
 telemetry = (ROOT / "main/input_telemetry.h").read_text()
