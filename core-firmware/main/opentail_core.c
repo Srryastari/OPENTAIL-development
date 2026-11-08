@@ -751,43 +751,116 @@ static esp_err_t om_post(httpd_req_t *r){
  * Bench-only: STOP all shows and release physical inputs before saving.
  */
 bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
-    if(index>=OT_OM_OUTPUTS||!out||!revision)return false;
+    if(index>=OT_PZ_OUTPUTS||!out||!revision)return false;
+    ot_pz_output_t active;uint16_t staged;
     portENTER_CRITICAL(&state_lock);
-    *out=om_outputs[index];*revision=om_revision[index];
+    active=pz_outputs.outputs[index];staged=pz_revision[index];
+    portEXIT_CRITICAL(&state_lock);
+    if(!ot_pz_to_legacy(&active,index,out))return false;
+    *revision=staged;return true;
+}
+int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
+    if(index>=OT_PZ_OUTPUTS||!next||!ot_om_valid(next))return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    TickType_t now=xTaskGetTickCount();
+    ot_pz_controller_t candidate;ot_om_output_t current={0};bool busy,stale,exhausted;
+    portENTER_CRITICAL(&state_lock);
+    candidate=pz_outputs;
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        raw_active||live_input_mask||
+        (before_deadline(now,sim_deadline)&&sim_mask)||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
+    stale=pz_revision[index]!=base_revision;
+    exhausted=pz_revision[index]==UINT16_MAX;
+    portEXIT_CRITICAL(&state_lock);
+    if(busy){xSemaphoreGive(om_write_mutex);return 2;}
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
+    /* V1 cannot express panel boundaries or multi-range zones. Refuse a
+     * destructive downgrade; simple one-panel contiguous profiles remain
+     * fully writable through the unchanged 261-byte v1 codec. */
+    if(!ot_pz_to_legacy(&candidate.outputs[index],index,&current)){
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    if(memcmp(&current,next,sizeof(current))==0){
+        xSemaphoreGive(om_write_mutex);return 0;
+    }
+    ot_pz_output_t replacement={0};
+    if(!ot_pz_from_legacy_output(next,index,&candidate,&replacement)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    candidate.outputs[index]=replacement;
+    const bool saved=pz_save_controller_locked(&candidate);
+    xSemaphoreGive(om_write_mutex);
+    return saved?0:4;
+}
+/* Versioned authenticated hierarchical Panel/Zone configuration transport. */
+bool ot_ble_panel_get(uint8_t lane,ot_pz_output_t *out,uint16_t *active_revision,
+                      uint16_t *staged_revision,bool *pending,bool *persistent){
+    if(lane>=OT_PZ_OUTPUTS||!out||!active_revision||!staged_revision||
+       !pending||!persistent)return false;
+    portENTER_CRITICAL(&state_lock);
+    *out=pz_outputs.outputs[lane];
+    *active_revision=pz_active_revision[lane];
+    *staged_revision=pz_revision[lane];
+    *pending=pz_deferred.pending||om_deferred.pending;
+    *persistent=pz_persistent;
     portEXIT_CRITICAL(&state_lock);
     return true;
 }
-int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
-    if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
-    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2; /* Cannot activate durable config. */
-    if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
-    /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
+int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     const bool raw_active=tm_gpio_input_mask()!=0;
-    TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
+    const TickType_t now=xTaskGetTickCount();
+    ot_pz_controller_t candidate;bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
-    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    bool stale=om_revision[index]!=base_revision;
-    memcpy(next_all,om_outputs,sizeof(next_all));
+    candidate=pz_outputs;
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        raw_active||live_input_mask||
+        (before_deadline(now,sim_deadline)&&sim_mask)||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
+    stale=pz_revision[lane]!=base_revision;
+    exhausted=pz_revision[lane]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
-    int result=busy?2:(stale||om_revision[index]==UINT16_MAX)?3:0;
-    if(!result){
-        /* A no-op BLE write must not publish a revision absent from NVS. */
-        if(memcmp(&next_all[index],next,sizeof(*next))==0){
-            xSemaphoreGive(om_write_mutex);return 0;
-        }
-        next_all[index]=*next;
-        if(!om_save(next_all))result=4;
-        else{
-            portENTER_CRITICAL(&state_lock);
-            memcpy(om_deferred.outputs,next_all,sizeof(next_all));
-            om_deferred.pending=true;
-            om_persistent=true;om_revision[index]++;
-            portEXIT_CRITICAL(&state_lock);
-        }
+    if(busy){xSemaphoreGive(om_write_mutex);return 2;}
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
+    if(memcmp(&candidate.outputs[lane],next,sizeof(*next))==0){
+        xSemaphoreGive(om_write_mutex);return 0;
     }
+    candidate.outputs[lane]=*next;
+    if(!ot_pz_valid(&candidate)){xSemaphoreGive(om_write_mutex);return 1;}
+    const bool saved=pz_save_controller_locked(&candidate);
     xSemaphoreGive(om_write_mutex);
-    return result;
+    return saved?0:4;
+}
+/* GATT callback supplies the live HMAC and capability-negotiation result.
+ * This function only updates a volatile CORE diagnostic snapshot; RMT/DMA
+ * remains exclusively owned by led_task. */
+bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
+                        bool authenticated,bool capability_seen){
+    uint16_t lengths[OT_PZ_OUTPUTS];bool accepted=false;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    portENTER_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        lengths[lane]=pz_outputs.outputs[lane].active_pixels?
+            pz_outputs.outputs[lane].active_pixels:OT_PZ_MAX_PIXELS;
+    if(native_outputs_ready)
+        accepted=ot_pz_diag_probe(&pz_diag,packet,size,authenticated,
+                                  capability_seen,lengths,now_ms);
+    portEXIT_CRITICAL(&state_lock);
+    if(accepted)request_render_refresh();
+    return accepted;
+}
+void ot_ble_diag_disconnect(void){
+    bool active;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_diag.mode!=OT_PZ_DIAG_NONE;
+    ot_pz_diag_clear(&pz_diag);
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
 }
 
 /* Normalized instantaneous GPIO levels (NOT debounced). Used only for
