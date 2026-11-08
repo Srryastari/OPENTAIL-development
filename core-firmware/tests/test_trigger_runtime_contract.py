@@ -382,10 +382,12 @@ assert "if(!trigger_here){" in renderer
 assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
 assert "if(trigger_here)c=ot_om_calibrate(" not in renderer
 assert "slot->overlay.style" in renderer
-# No universal car/body location assumptions; all output zones use active
-# user-specified lengths, not predetermined left/right or trunk zones.
-assert "ot_om_section_next(output,&zone_cursor,px)" in renderer
-assert "for(unsigned px=0;px<output->active_pixels;++px)" in renderer
+# No universal car/body location assumptions; the authoritative Panel/Zone
+# pixel map determines each physical pixel's logical zone and local index.
+assert "ot_pz_build_pixel_map(&local_panel[ch],pixel_zone_map[ch],pixel_logical_map[ch])" in renderer
+assert "pixel_zone_map[ch][px]" in renderer
+assert "pixel_logical_map[ch][px]" in renderer
+assert "for(unsigned px=0;px<render_pixels[ch];++px)" in renderer
 assert "local_tm=tm_profile;" in renderer
 assert "combined=ot_tm_resolve(&local_tm,physical);" in renderer
 
