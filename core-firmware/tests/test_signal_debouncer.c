@@ -183,6 +183,24 @@ static void independent_turns_and_hazards(void) {
     assert(a.hazards);
 }
 
+static void one_turn_can_expire_while_other_continues(void) {
+    ot_signal_debouncer_t left,right;
+    ot_signal_debouncer_init(&left,true,0u);
+    ot_signal_debouncer_init(&right,true,0u);
+    assert(sample(&left,false,1000u));
+    assert(sample(&right,false,1000u));
+    assert(sample(&left,false,1200u));
+    assert(sample(&right,true,1200u)); /* right flash returns; left stays off */
+    assert(!sample(&left,false,1400u));
+    assert(sample(&right,true,1400u));
+    const uint8_t mask=(sample(&left,false,1410u)?OT_SIG_LEFT:0u) |
+                       (sample(&right,true,1410u)?OT_SIG_RIGHT:0u);
+    assert(mask==OT_SIG_RIGHT); /* no false hazard, right phase continues */
+    assert(sample(&right,false,1420u));
+    assert(sample(&right,false,1819u));
+    assert(!sample(&right,false,1820u));
+}
+
 static void all_256_boot_masks_and_arbitration(void) {
     for(unsigned held=0u;held<256u;held++) {
         ot_inputs_t sampler={0};
@@ -255,9 +273,10 @@ int main(void) {
     timer_wrap_and_scheduler_jitter();
     restart_hold_after_pulse_between_sampler_wakes();
     independent_turns_and_hazards();
+    one_turn_can_expire_while_other_continues();
     all_256_boot_masks_and_arbitration();
     non_turn_inputs_keep_existing_four_sample_debounce();
     safety_priorities_remain_unchanged();
-    puts("PASS Issue121 SignalDebouncer: four-sample assertion, 100/200/300/399ms flash gaps, 400ms release, independent turns/hazards, 256 boot masks, safety arbitration, non-turn timing, wrap and scheduler jitter; HOST_SIMULATED");
+    puts("PASS Issue121 SignalDebouncer: four-sample assertion, 100/200/300/399ms flash gaps, 400ms release, independent turns/hazards, one-side expiry, 256 boot masks, safety arbitration, non-turn timing, wrap and scheduler jitter; HOST_SIMULATED");
     return 0;
 }
