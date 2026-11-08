@@ -93,15 +93,15 @@ int main(void) {
                         assert(ot_sw_render_progress_eligible(true, true));
                         now_ms += transfer_ms > cadences[ci]
                             ? transfer_ms : cadences[ci];
-                        last_feed_ms = now_ms;
                         assert(now_ms - last_feed_ms < twdt_timeout_ms);
+                        last_feed_ms = now_ms;
 
                         /* One-lane fault: a completed surviving lane is genuine
                          * progress, but it cannot satisfy full-frame stability. */
                         assert(ot_sw_render_progress_eligible(false, true));
                         now_ms += transfer_ms;
-                        last_feed_ms = now_ms;
                         assert(now_ms - last_feed_ms < twdt_timeout_ms);
+                        last_feed_ms = now_ms;
 
                         /* Neither transfer completed: queued work is not progress. */
                         assert(!ot_sw_render_progress_eligible(false, false));
