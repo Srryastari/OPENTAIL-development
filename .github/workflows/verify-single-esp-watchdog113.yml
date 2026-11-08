@@ -2,6 +2,8 @@ name: Issue113 ONE ESP32-S3 progress watchdog exact HEAD and bench package
 on:
   pull_request:
     branches: [codex/issue93-enable-13-tertiary-20261102]
+  push:
+    branches: [triggers/issue121-turn-release-debounce-20261108]
   workflow_dispatch:
 permissions:
   contents: read
