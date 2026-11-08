@@ -7,10 +7,17 @@
 
 #define TEST_STABLE_SAMPLES 4u
 
+static bool sample_us_with_sequence(ot_signal_debouncer_t *state, bool raw,
+                                      uint32_t now_us, uint32_t raw_edge_us,
+                                      uint32_t raw_edge_sequence) {
+    return ot_signal_debouncer_update(state,raw,now_us,raw_edge_us,
+                                      raw_edge_sequence,TEST_STABLE_SAMPLES);
+}
 static bool sample_us(ot_signal_debouncer_t *state, bool raw,
                       uint32_t now_us, uint32_t raw_edge_us) {
-    return ot_signal_debouncer_update(state,raw,now_us,raw_edge_us,
-                                      TEST_STABLE_SAMPLES);
+    uint32_t sequence=state->last_edge_sequence;
+    if(raw!=state->last_raw_asserted)sequence+=2u;
+    return sample_us_with_sequence(state,raw,now_us,raw_edge_us,sequence);
 }
 static bool sample_at(ot_signal_debouncer_t *state, bool raw,
                       uint32_t now_ms, uint32_t raw_edge_ms) {
@@ -22,7 +29,7 @@ static bool sample(ot_signal_debouncer_t *state, bool raw, uint32_t now_ms) {
 
 static void assertion_keeps_four_sample_qualification(void) {
     ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,false);
+    ot_signal_debouncer_init(&d,false,0u);
     assert(!sample(&d,true,0u));
     assert(!sample(&d,true,10u));
     assert(!sample(&d,true,20u));
@@ -34,7 +41,7 @@ static void release_hold_bridges_short_gaps(void) {
     const uint32_t gaps[]={100u,200u,300u,399u};
     for(unsigned i=0;i<sizeof(gaps)/sizeof(gaps[0]);i++) {
         ot_signal_debouncer_t d;
-        ot_signal_debouncer_init(&d,true);
+        ot_signal_debouncer_init(&d,true,0u);
         const uint32_t start=1000u+(uint32_t)i*1000u;
         assert(sample(&d,false,start));
         assert(sample(&d,false,start+gaps[i]/2u));
@@ -50,7 +57,7 @@ static void release_hold_bridges_short_gaps(void) {
 
 static void release_occurs_at_400ms_and_reassertion_requalifies(void) {
     ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,2000u));
     assert(sample(&d,false,2100u));
     assert(sample(&d,false,2200u));
@@ -61,21 +68,21 @@ static void release_occurs_at_400ms_and_reassertion_requalifies(void) {
 
     /* A raw return observed at the deadline is not "before" expiry: the old
      * assertion ends, and the new assertion must qualify for four samples. */
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,3000u));
     assert(!sample(&d,true,3400u));
     assert(!sample(&d,true,3410u));
     assert(!sample(&d,true,3420u));
     assert(sample(&d,true,3430u));
 
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,4000u));
     assert(!sample(&d,false,4401u)); /* longer than the release hold */
 }
 
 static void reassertion_before_deadline_cancels_timer(void) {
     ot_signal_debouncer_t d;
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,100u));
     assert(sample(&d,false,200u));
     assert(sample(&d,true,499u)); /* 399ms inactive */
@@ -88,14 +95,14 @@ static void reassertion_before_deadline_cancels_timer(void) {
 static void timer_wrap_and_scheduler_jitter(void) {
     ot_signal_debouncer_t d;
     const uint32_t start=UINT32_MAX-199999u;
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample_us(&d,false,start,start));
     assert(sample_us(&d,false,start+101000u,start));
     assert(sample_us(&d,false,start+250000u,start));
     assert(sample_us(&d,false,start+399000u,start));
     assert(!sample_us(&d,false,start+400000u,start)); /* wrap-safe 400ms */
 
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample(&d,false,500u));
     const uint32_t jittered[]={507u,523u,547u,609u,800u,899u};
     for(unsigned i=0;i<sizeof(jittered)/sizeof(jittered[0]);i++)
@@ -104,19 +111,39 @@ static void timer_wrap_and_scheduler_jitter(void) {
 
     /* The sampler may run after a raw reassertion. Use the ISR edge timestamp
      * to distinguish a 399ms gap from a real 401ms inactive interval. */
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample_at(&d,false,500u,500u));
     assert(sample_at(&d,true,912u,899u)); /* sampled 412ms later; edge was 399ms */
     assert(d.asserted&&!d.release_pending);
-    ot_signal_debouncer_init(&d,true);
+    ot_signal_debouncer_init(&d,true,0u);
     assert(sample_at(&d,false,500u,500u));
     assert(!sample_at(&d,true,912u,901u)); /* edge was 401ms: prior state expired */
 }
 
+static void restart_hold_after_pulse_between_sampler_wakes(void) {
+    ot_signal_debouncer_t d;
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample(&d,false,1000u)); /* falling edge starts first interval */
+    const uint32_t sequence=d.last_edge_sequence+4u; /* unseen rise + fall */
+    assert(sample_us_with_sequence(&d,false,1410u*1000u,1405u*1000u,sequence));
+    assert(d.inactive_since_us==1405u*1000u);
+    assert(sample_us_with_sequence(&d,false,1804u*1000u,1405u*1000u,sequence));
+    assert(!sample_us_with_sequence(&d,false,1805u*1000u,1405u*1000u,sequence));
+
+    /* A timestamp newer than its sample is a torn snapshot and must not
+     * turn unsigned subtraction into an immediate false release. */
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample(&d,false,2000u));
+    const uint32_t future_sequence=d.last_edge_sequence+2u;
+    assert(sample_us_with_sequence(&d,false,2000u*1000u,2001u*1000u,
+                                   future_sequence));
+    assert(d.asserted&&d.release_pending);
+}
+
 static void independent_turns_and_hazards(void) {
     ot_signal_debouncer_t left,right;
-    ot_signal_debouncer_init(&left,true);
-    ot_signal_debouncer_init(&right,true);
+    ot_signal_debouncer_init(&left,true,0u);
+    ot_signal_debouncer_init(&right,true,0u);
     assert(sample(&left,false,1000u));
     assert(sample(&right,false,1000u));
 
@@ -151,8 +178,8 @@ static void all_256_boot_masks_and_arbitration(void) {
             sampler.ticks[i]=TEST_STABLE_SAMPLES;
         }
         ot_signal_debouncer_t left,right;
-        ot_signal_debouncer_init(&left,(held&OT_SIG_LEFT)!=0u);
-        ot_signal_debouncer_init(&right,(held&OT_SIG_RIGHT)!=0u);
+        ot_signal_debouncer_init(&left,(held&OT_SIG_LEFT)!=0u,0u);
+        ot_signal_debouncer_init(&right,(held&OT_SIG_RIGHT)!=0u,0u);
         uint8_t physical=ot_debounce(&sampler,levels,TEST_STABLE_SAMPLES);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
         if(sample(&left,levels[2],100u))physical|=OT_SIG_LEFT;
@@ -210,6 +237,7 @@ int main(void) {
     release_occurs_at_400ms_and_reassertion_requalifies();
     reassertion_before_deadline_cancels_timer();
     timer_wrap_and_scheduler_jitter();
+    restart_hold_after_pulse_between_sampler_wakes();
     independent_turns_and_hazards();
     all_256_boot_masks_and_arbitration();
     non_turn_inputs_keep_existing_four_sample_debounce();
