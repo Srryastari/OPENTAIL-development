@@ -15,6 +15,9 @@ for token in (
 ):
     assert token in core, token
 assert "prior_fx_offset" not in core
+assert "config_activation_idle(epoch)" not in core
+assert "ot_frame_snapshot_begin((uint8_t)ch,\\n                                        render_pixels[ch]" in core
+assert "ot_pz_preview_cancel(&pz_preview)" in core
 for token in ("ot_ble_panel_preview_begin","ot_ble_panel_preview_update",
               "ot_ble_panel_preview_commit","ot_ble_panel_preview_cancel"):
     assert token in core and token in api, token
@@ -30,4 +33,8 @@ for opcode in ("case 0x10u:", "case 0x11u:", "case 0x12u:",
 assert "case 0xabu: /* proposed Fill opcode intentionally not accepted */" in ble
 assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in ble
 assert "panel_caps_seen" in ble and "authorized" in ble
+assert "OT_PZ_PREVIEW_LEASE_MS/1000u" in ble
+assert "(uint8_t)OT_MAX_BRIGHTNESS" in ble
+assert "BLE_GATT_CHR_F_WRITE_NO_RSP" in ble
+assert "led_strip_" not in ble and "rmt_" not in ble
 print("PASS Issue126 static runtime contract")

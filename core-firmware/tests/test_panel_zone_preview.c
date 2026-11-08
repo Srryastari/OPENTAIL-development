@@ -71,6 +71,9 @@ static void activation_quiet_window(void){
 }
 int main(void){
     preview_lifecycle();activation_quiet_window();
+    printf("Issue126 static object sizes: controller=%zu preview=%zu max_pixels_per_lane=%u wire_bytes=%u\\n",
+           sizeof(ot_pz_controller_t),sizeof(ot_pz_preview_t),
+           (unsigned)OT_PZ_MAX_PIXELS,(unsigned)OT_PZ_MAX_WIRE_BYTES);
     puts("PASS Issue126 preview lifecycle, revision checks, coalescing, 2s wrap-safe lease and 256-mask activation quiet gate");
     return 0;
 }

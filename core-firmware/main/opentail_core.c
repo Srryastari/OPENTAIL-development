@@ -905,6 +905,10 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     if(busy){xSemaphoreGive(om_write_mutex);return 2;}
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
     if(memcmp(&candidate.outputs[lane],next,sizeof(*next))==0){
+        portENTER_CRITICAL(&state_lock);
+        pz_preview.active=false;
+        portEXIT_CRITICAL(&state_lock);
+        request_render_refresh();
         xSemaphoreGive(om_write_mutex);return 0;
     }
     candidate.outputs[lane]=*next;
