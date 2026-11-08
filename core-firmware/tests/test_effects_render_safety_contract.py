@@ -43,7 +43,9 @@ assert render.count("ot_palette_runtime_snapshot(")==1
 assert render.count("ot_wled_palette_global_tick(")==1
 assert "750u,true,palette_random_byte,NULL" in render
 assert "ot_fx_slot_active(slot,frame_ms)" in render
-assert "prior_fx_generation[ch][z]!=slot->generation" in render
+assert "const bool same_identity=active&&old_active[z]&&" in render
+assert "prior_fx_generation[ch][z]==slot->generation" in render
+assert "if(!same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
 # The physical safety override is performed after all decorative FX and
