@@ -50,7 +50,9 @@ Source inspection at exact #115 confirms this production order:
 
 ESP-IDF TWDT is configured for 15,000ms with both CPU idle tasks watched (`idle_core_mask=3`); interrupt and boot watchdogs remain enabled. The output task uses the same watchdog progress path for every effect and for non-Show physical output; watchdog progress is not conditional on effect ID or Show Mode.
 
-At the current default 2,048 pixels/output, nominal 800-kHz RGB wire time is approximately 61.74ms per lane including the 300us latch allowance. The two lanes overlap. This is a protocol-derived upper wire-time estimate, **not a measured ESP32 render/DMA completion time**. The 15-second timeout is over 240 times that nominal wire interval; actual MCU timing and idle-task scheduling still require the powered-board test.
+At the current default 2,048 pixels/output, nominal 800-kHz RGB wire time is approximately 61.74ms per lane including the 300us latch allowance. The two lanes overlap. This is a protocol-derived upper wire-time estimate, **not a measured ESP32 render/DMA completion time**. The 15-second timeout is over 240 times that nominal wire interval.
+
+The host-only deadline model now injects a **synthetic 250ms render-work delay** and adds the longer of nominal RMT completion and 8/33ms frame pacing. It verifies a 14,900ms render plus 62ms completion can feed before 15 seconds, while 14,940ms plus 62ms is rejected as overdue; a cycle with no successful lane completion cannot feed. This specifically tests the deadline arithmetic and overdue-feed path. It does **not** measure the actual ESP32 render time, run the ESP-IDF TWDT, monitor idle-task starvation, or execute physical RMT/DMA. Therefore it is not proof of no false watchdog resets on the powered controller; that remains **NOT_RUN** until the bench test.
 
 ## Evidence matrix
 
@@ -68,7 +70,8 @@ Status definitions: PASS = exact-HEAD automated software evidence; NOT_RUN = req
 | 13 third-color consumers / six unsupported roles | PASS | #115 Issue #102 host role tests, 140 catalog and BLE capability manifest; no invented sixth-role support |
 | Brake / Turn / Hazards / Reverse / STOP / zone isolation | PASS (software) | #115 Effects/OEM matrix: 193,536 safety overrides, 165,888 decorative frames, all 256 input masks, six wire orders; Trigger and NVS host regressions |
 | O1/O2 submit/complete ordering and watchdog feed eligibility | PASS (source + host model) | #115 watchdog structural guard and frame-completion contracts; this branch adds an explicit Effects/WDT source-order guard and two-lane 140-effect host simulation |
-| No false TWDT reset during normal heavy Effects playback | PASS (host/source model); physical NOT_RUN | 140-effect max Speed/Intensity/two-lane stress plus 15s progress-policy model; real ESP-IDF TWDT/DMA timing is not simulated by host |
+| Render watchdog deadline policy | PASS (synthetic host model) | 140-effect stress injects 250ms render work plus max(RMT completion, 8/33ms frame pacing); 14,900ms + 62ms completes before deadline, 14,940ms + 62ms is rejected, and no-completion receives no feed. Actual source-order guard ties eligibility to successful async completion. |
+| No false TWDT reset during actual Effects playback | NOT_RUN (hardware) | Host model does not measure ESP32 render duration or execute ESP-IDF TWDT/idle-task monitoring/RMT DMA. Requires powered-board test. |
 | Android JNI source identity and BLE/source contract | PASS | #115 `android-unchanged-contract` and #115 active-source Android tests; this branch adds byte-exact 140 JNI-vs-CORE parity against #110 |
 | Android JUnit / debug APK compile | PASS | #115 exact-HEAD active-source Android job; rerun in this branch's dedicated workflow |
 | ESP-IDF v5.5.5 ESP32-S3 build | PASS | #115 dedicated watchdog workflow exact-head build; rerun in this branch's dedicated workflow |
