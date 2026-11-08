@@ -13,11 +13,16 @@ static void same(ot_rgb_t c,uint8_t r,uint8_t g,uint8_t b){
     assert(c.r==r&&c.g==g&&c.b==b);
 }
 int main(void){
-    const uint8_t requested[]={0u,1u,32u,64u,128u,200u,255u};
-    for(unsigned i=0;i<sizeof(requested);i++){
-        const ot_rgb_t requested_rgb={requested[i],requested[i],requested[i]};
-        const uint8_t expected=requested[i]>OT_MAX_BRIGHTNESS_LIMIT?
-                               OT_MAX_BRIGHTNESS_LIMIT:requested[i];
+    /* Keep test inputs wider than uint8_t so the 255-ceiling build still
+     * exercises the clamp comparison without triggering -Wtype-limits. */
+    const uint16_t requested[]={0u,1u,32u,64u,128u,200u,255u};
+    for(unsigned i=0;i<sizeof(requested)/sizeof(requested[0]);i++){
+        assert(requested[i]<=UINT8_MAX);
+        const uint8_t request=(uint8_t)requested[i];
+        const ot_rgb_t requested_rgb={request,request,request};
+        const uint16_t ceiling=(uint16_t)OT_MAX_BRIGHTNESS_LIMIT;
+        const uint8_t expected=(uint8_t)(requested[i]>ceiling?
+                                         ceiling:requested[i]);
         const ot_rgb_t output=ot_om_limit_brightness(requested_rgb,
                                                        OT_MAX_BRIGHTNESS_LIMIT);
         assert(peak(output)==expected);
