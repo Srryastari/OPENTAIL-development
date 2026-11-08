@@ -1971,10 +1971,7 @@ static void input_sampler_task(void *arg){
             }
             if(levels[i])instantaneous|=(uint8_t)(1u<<i);
         }
-        if(!sample_valid){
-            vTaskDelayUntil(&last_wake,period);
-            continue; /* no watchdog progress from a torn GPIO snapshot */
-        }
+        if(sample_valid){
         uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
         /* Only IN3/IN4 use the 400ms raw-edge release hold. The other six
          * inputs retain the original four-sample assertion/release timing. */
@@ -1998,6 +1995,9 @@ static void input_sampler_task(void *arg){
         portEXIT_CRITICAL(&state_lock);
         ot_sw_idf_input_sampled(); /* eight real GPIO reads + debounce published */
         if(target)xTaskNotifyGive(target);
+        }
+        /* Invalid/torn snapshots intentionally skip progress publication, but
+         * still yield on the sampler's fixed 10ms cadence. */
         vTaskDelayUntil(&last_wake,period);
     }
 }
