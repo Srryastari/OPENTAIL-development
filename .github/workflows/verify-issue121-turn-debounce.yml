@@ -2,6 +2,9 @@ name: Issue121 turn-signal release debouncer exact-head verification
 on:
   push:
     branches: [triggers/issue121-turn-release-debounce-20261108]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [firmware/issue113-single-esp-progress-wdt-20261103]
   workflow_dispatch:
 permissions:
   contents: read
