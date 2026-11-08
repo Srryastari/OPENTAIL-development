@@ -425,7 +425,8 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
         }
         case 3u:{ /* begin durable upload: version/op/lane/length/CRC/base revision */
             if(n!=9u){panel_ack(opcode,lane,1u);break;}
-            if(panel_preview_tx.active||panel_preview_tx.committing){
+            if(panel_preview_tx.active||panel_preview_tx.committing||
+               panel_upload_index!=255u){
                 panel_ack(opcode,lane,2u);break;
             }
             const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
@@ -487,8 +488,8 @@ static void panel_preview_set_error(uint8_t status){
     panel_preview_tx.status=OT_PZ_TX_ERROR;
 }
 static bool panel_preview_session_matches(uint8_t lane,uint32_t session_id){
-    return panel_preview_tx.active&&!panel_preview_tx.committing&&
-        panel_preview_tx.lane==lane&&panel_preview_tx.session_id==session_id;
+    return panel_preview_tx.active&&panel_preview_tx.lane==lane&&
+        panel_preview_tx.session_id==session_id;
 }
 static void panel_preview_expire_if_needed(uint32_t now_ms){
     if(panel_preview_tx.active&&!panel_preview_tx.committing&&
@@ -546,7 +547,8 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
     if(opcode==0x01u){ /* BEGIN: lane, base revision LE16, capacity LE16, schema */
         if(n!=8u||packet[2]>=OT_PZ_OUTPUTS||packet[7]!=OT_PZ_SCHEMA_VERSION)
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-        if(panel_preview_tx.active||panel_preview_tx.committing){
+        if(panel_preview_tx.active||panel_preview_tx.committing||
+           panel_upload_index!=255u){
             panel_preview_set_error(2u);return 0;
         }
         const uint8_t lane=packet[2];
@@ -589,10 +591,12 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
     if(opcode==0x03u){
         if(n!=11u)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }else if(n!=7u)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    if(opcode==0x03u||opcode==0x04u||opcode==0x05u){
-        if(!panel_preview_session_matches(lane,session)){
-            panel_preview_set_error(3u);return 0;
-        }
+    if(!panel_preview_session_matches(lane,session)){
+        panel_preview_set_error(3u);return 0;
+    }
+    if(panel_preview_tx.committing){
+        if(opcode==0x03u){panel_preview_refresh_commit_state();return 0;}
+        panel_preview_set_error(2u);return 0;
     }
     if(opcode==0x03u){ /* COMMIT: append expected canonical controller CRC32 LE */
         const uint32_t expected=(uint32_t)packet[7]|
@@ -628,61 +632,40 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
     if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
        !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     uint8_t packet[43]={0};uint16_t n=0;
-    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
-    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||n<19u||
-       packet[0]!=0xfeu||packet[1]!=0x02u){
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0){
         panel_preview_set_error(1u);return 0;
     }
-    const uint8_t lane=packet[2];
-    const uint32_t session=(uint32_t)packet[3]|
-        ((uint32_t)packet[4]<<8)|((uint32_t)packet[5]<<16)|
-        ((uint32_t)packet[6]<<24);
-    const uint32_t sequence=(uint32_t)packet[7]|
-        ((uint32_t)packet[8]<<8)|((uint32_t)packet[9]<<16)|
-        ((uint32_t)packet[10]<<24);
+    ot_pz_tx_update_packet_t update={0};
     const uint16_t mtu=ble_att_mtu(conn);
-    const size_t max_value=mtu>3u?(size_t)mtu-3u:0u;
-    const size_t descriptor_count=n>=11u?(n-11u)/8u:0u;
-    const size_t max_descriptors=max_value>=11u?(max_value-11u)/8u:0u;
-    if(lane>=OT_PZ_OUTPUTS||sequence==0u||n>max_value||
-       n<11u||(n-11u)%8u!=0u||descriptor_count==0u||
-       descriptor_count>4u||descriptor_count>max_descriptors){
+    if(!ot_pz_tx_parse_update(packet,n,mtu,&update)){
         panel_preview_set_error(1u);return 0;
     }
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     panel_preview_expire_if_needed(now_ms);
-    if(!panel_preview_session_matches(lane,session)){
+    if(!panel_preview_session_matches(update.lane,update.session_id)){
         panel_preview_set_error(3u);return 0;
     }
-    const uint32_t packet_crc=ot_cfg_crc32(packet,n);
-    if(panel_preview_tx.has_sequence){
-        const uint32_t delta=sequence-panel_preview_tx.last_sequence;
-        if(delta==0u){
-            if(packet_crc==panel_preview_tx.last_packet_crc32){
-                panel_preview_tx.status=OT_PZ_TX_ACTIVE; /* idempotent duplicate */
-                panel_preview_tx.last_error=0u;
-            }else panel_preview_set_error(3u);
-            return 0;
-        }
-        if(delta>=0x80000000u){panel_preview_set_error(3u);return 0;}
-    }else if(sequence!=1u){
+    if(panel_preview_tx.committing){
+        panel_preview_set_error(2u);return 0;
+    }
+    const ot_pz_tx_sequence_result_t sequence=ot_pz_tx_sequence_check(
+        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
+        panel_preview_tx.last_packet_crc32,update.sequence,update.packet_crc32);
+    if(sequence==OT_PZ_TX_SEQUENCE_DUPLICATE){
+        panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+        panel_preview_tx.last_error=0u;
+        return 0;
+    }
+    if(sequence!=OT_PZ_TX_SEQUENCE_NEW){
         panel_preview_set_error(3u);return 0;
     }
-    ot_pz_range_update_t updates[4]={0};
-    for(size_t i=0;i<descriptor_count;i++){
-        const uint8_t *p=packet+11u+i*8u;
-        updates[i].panel_id=p[0];updates[i].zone_id=p[1];
-        updates[i].range_id=p[2];
-        updates[i].start=(uint16_t)(p[3]|((uint16_t)p[4]<<8));
-        updates[i].count=(uint16_t)(p[5]|((uint16_t)p[6]<<8));
-        updates[i].role_flags=p[7];
-    }
-    const int rc=ot_ble_panel_preview_update_ranges(lane,
-        panel_preview_tx.base_revision,updates,descriptor_count);
+    const int rc=ot_ble_panel_preview_update_ranges(update.lane,
+        panel_preview_tx.base_revision,update.descriptors,update.descriptor_count);
     if(rc!=0){panel_preview_set_error(rc==2?2u:(rc==3?3u:1u));return 0;}
-    panel_preview_tx.last_sequence=sequence;
-    panel_preview_tx.last_packet_crc32=packet_crc;
+    panel_preview_tx.last_sequence=update.sequence;
+    panel_preview_tx.last_packet_crc32=update.packet_crc32;
     panel_preview_tx.has_sequence=true;
-    if(!ot_ble_panel_preview_crc32(lane,panel_preview_tx.base_revision,
+    if(!ot_ble_panel_preview_crc32(update.lane,panel_preview_tx.base_revision,
                                    &panel_preview_tx.candidate_crc32)){
         panel_preview_set_error(4u);return 0;
     }

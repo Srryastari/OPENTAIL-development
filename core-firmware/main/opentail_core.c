@@ -980,12 +980,14 @@ int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
     ot_pz_preview_t candidate;
     uint16_t active_revision=0u;
     bool pending=false,valid=false;
+    uint16_t staged_revision=0u;
     portENTER_CRITICAL(&state_lock);
     candidate=pz_preview;
     active_revision=pz_active_revision[lane];
+    staged_revision=pz_revision[lane];
     pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending;
     portEXIT_CRITICAL(&state_lock);
-    valid=!pending&&pz_revision[lane]==base_revision&&
+    valid=!pending&&staged_revision==base_revision&&
         active_revision==base_revision&&
         ot_pz_preview_apply_updates(&candidate,lane,updates,count,
                                     base_revision,active_revision,pending,now_ms);
@@ -1054,14 +1056,16 @@ int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
        pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
        pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
        (int32_t)(now_ms-pz_preview.expires_ms)<0;
-    if(accepted)snapshot=pz_preview;
+    if(accepted){
+        snapshot=pz_preview;
+        no_change=memcmp(&snapshot.candidate,&pz_outputs,sizeof(pz_outputs))==0;
+    }
     portEXIT_CRITICAL(&state_lock);
     uint32_t actual_crc32=0u;
     if(!accepted||!pz_controller_wire_crc32(&snapshot.candidate,&actual_crc32)||
        actual_crc32!=expected_crc32){
         xSemaphoreGive(om_write_mutex);return accepted?1:3;
     }
-    no_change=memcmp(&snapshot.candidate,&pz_outputs,sizeof(pz_outputs))==0;
     portENTER_CRITICAL(&state_lock);
     accepted=pz_preview.active&&!pz_preview.committing&&
        pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
@@ -3007,7 +3011,8 @@ static void led_task(void *p) {
            memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));
        else
            memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));
-       memcpy(pz_render_revision,pz_active_revision,sizeof(pz_render_revision));
+       uint16_t local_active_revision[OT_PZ_OUTPUTS];
+       memcpy(local_active_revision,pz_active_revision,sizeof(local_active_revision));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
        combined=ot_tm_resolve(&local_tm,physical);
@@ -3296,6 +3301,7 @@ static void led_task(void *p) {
                    longest_pixels=(uint16_t)render_pixels[ch];
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
+               pz_render_revision[ch]=local_active_revision[ch];
                portEXIT_CRITICAL(&state_lock);
            }
            /* Acknowledged Stop and FPS must represent complete multi-output

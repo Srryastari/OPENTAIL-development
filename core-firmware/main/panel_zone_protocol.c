@@ -15,7 +15,8 @@ bool ot_pz_tx_parse_update(const uint8_t *p,size_t n,uint16_t mtu,
     if(!p||!out||mtu<OT_PZ_TX_MIN_ATT_MTU||
        n<OT_PZ_TX_UPDATE_HEADER_BYTES+OT_PZ_TX_DESCRIPTOR_BYTES||
        n>(size_t)mtu-3u||p[0]!=OT_PZ_TX_MAGIC||p[1]!=OT_PZ_TX_OP_UPDATE||
-       p[2]>=OT_PZ_OUTPUTS||p[3]==0u&&p[4]==0u&&p[5]==0u&&p[6]==0u)
+       p[2]>=OT_PZ_OUTPUTS||
+       (p[3]==0u&&p[4]==0u&&p[5]==0u&&p[6]==0u))
         return false;
     const size_t descriptor_bytes=n-OT_PZ_TX_UPDATE_HEADER_BYTES;
     if(descriptor_bytes%OT_PZ_TX_DESCRIPTOR_BYTES!=0u)return false;
