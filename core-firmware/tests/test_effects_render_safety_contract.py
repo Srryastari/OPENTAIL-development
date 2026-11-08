@@ -49,7 +49,8 @@ assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 # The physical safety override is performed after all decorative FX and
 # before logical RGB capture. Decorative calibration must stay strictly
 # inside the branch that applies only when NO physical trigger won.
-pixel_start=render.index("for(unsigned px=0;px<render_pixels[ch];++px)")
+frame_start=render.index("frame_captured[ch]=ot_frame_snapshot_begin(")
+pixel_start=render.index("for(unsigned px=0;px<render_pixels[ch];++px)",frame_start)
 pixel_end=render.index("led_strip_refresh_async(strip[ch])",pixel_start)
 pixel=render[pixel_start:pixel_end]
 ordered(pixel,[
