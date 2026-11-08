@@ -159,11 +159,7 @@ bool ot_pz_preview_begin(ot_pz_preview_t *state,
        active_revision!=base_revision||pending||!ot_pz_valid(committed)||
        state->committing)return false;
     (void)ot_pz_preview_expire(state,now_ms);
-    if(state->active){
-        if(state->lane!=lane||state->base_revision!=base_revision)return false;
-        state->expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
-        return true;
-    }
+    if(state->active)return false;
     state->candidate=*committed;
     state->lane=(uint8_t)lane;
     state->base_revision=base_revision;
@@ -186,6 +182,154 @@ bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
     candidate.outputs[lane]=*next;
     if(!ot_pz_valid(&candidate))return false;
     state->candidate=candidate;
+    return true;
+}
+static int pz_find_panel(const ot_pz_output_t *out,uint16_t panel_id){
+    for(unsigned i=0;i<out->panel_count;i++)
+        if(out->panels[i].id==panel_id)return (int)i;
+    return -1;
+}
+static int pz_find_zone(const ot_pz_output_t *out,uint16_t zone_id){
+    for(unsigned i=0;i<out->zone_count;i++)
+        if(out->zones[i].id==zone_id)return (int)i;
+    return -1;
+}
+static void pz_recount_panel_zones(ot_pz_output_t *out){
+    for(unsigned p=0;p<out->panel_count;p++){
+        unsigned count=0;
+        for(unsigned z=0;z<out->zone_count;z++)
+            if(out->zones[z].panel_id==out->panels[p].id)count++;
+        out->panels[p].zone_count=(uint8_t)count;
+    }
+}
+static void pz_remove_zone(ot_pz_output_t *out,unsigned index){
+    if(index>=out->zone_count)return;
+    if(index+1u<out->zone_count)
+        memmove(&out->zones[index],&out->zones[index+1u],
+                (out->zone_count-index-1u)*sizeof(out->zones[0]));
+    out->zone_count--;
+    memset(&out->zones[out->zone_count],0,sizeof(out->zones[0]));
+    pz_recount_panel_zones(out);
+}
+static void pz_remove_panel(ot_pz_output_t *out,unsigned index){
+    if(index>=out->panel_count)return;
+    const uint16_t id=out->panels[index].id;
+    for(unsigned z=0;z<out->zone_count;){
+        if(out->zones[z].panel_id==id)pz_remove_zone(out,z);
+        else z++;
+    }
+    if(index+1u<out->panel_count)
+        memmove(&out->panels[index],&out->panels[index+1u],
+                (out->panel_count-index-1u)*sizeof(out->panels[0]));
+    out->panel_count--;
+    memset(&out->panels[out->panel_count],0,sizeof(out->panels[0]));
+}
+static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
+                                const ot_pz_range_update_t *u){
+    if(!out||!u||(u->role_flags&0xc0u)!=0u)return false;
+    const uint8_t role=(uint8_t)(u->role_flags&OT_PZ_TX_ROLE_MASK);
+    const uint8_t action=(uint8_t)((u->role_flags&OT_PZ_TX_ACTION_MASK)>>OT_PZ_TX_ACTION_SHIFT);
+    if(u->panel_id==0u)return false;
+    int panel_index=pz_find_panel(out,u->panel_id);
+    if(action==OT_PZ_TX_DELETE_PANEL){
+        if(u->zone_id!=0u||u->range_id!=0u||u->start!=0u||u->count!=0u||role!=0u||
+           panel_index<0)return false;
+        pz_remove_panel(out,(unsigned)panel_index);
+        return true;
+    }
+    if(u->zone_id==0u)return false;
+    int zone_index=pz_find_zone(out,u->zone_id);
+    if(action==OT_PZ_TX_DELETE_ZONE){
+        if(u->range_id!=0u||u->start!=0u||u->count!=0u||role!=0u||
+           zone_index<0||out->zones[zone_index].panel_id!=u->panel_id)return false;
+        pz_remove_zone(out,(unsigned)zone_index);
+        panel_index=pz_find_panel(out,u->panel_id);
+        if(panel_index>=0&&out->panels[panel_index].zone_count==0u)
+            pz_remove_panel(out,(unsigned)panel_index);
+        return true;
+    }
+    if(action==OT_PZ_TX_DELETE_RANGE){
+        if(u->start!=0u||u->count!=0u||role!=0u||zone_index<0||
+           out->zones[zone_index].panel_id!=u->panel_id||
+           u->range_id>=out->zones[zone_index].range_count)return false;
+        ot_pz_zone_t *zone=&out->zones[zone_index];
+        if(u->range_id+1u<zone->range_count)
+            memmove(&zone->ranges[u->range_id],&zone->ranges[u->range_id+1u],
+                    (zone->range_count-u->range_id-1u)*sizeof(zone->ranges[0]));
+        zone->range_count--;
+        memset(&zone->ranges[zone->range_count],0,sizeof(zone->ranges[0]));
+        if(zone->range_count==0u){
+            pz_remove_zone(out,(unsigned)zone_index);
+            panel_index=pz_find_panel(out,u->panel_id);
+            if(panel_index>=0&&out->panels[panel_index].zone_count==0u)
+                pz_remove_panel(out,(unsigned)panel_index);
+        }
+        return true;
+    }
+    if(action!=OT_PZ_TX_UPSERT||u->count==0u||
+       !(role<=OT_OM_DECORATIVE||role==OT_PZ_ROLE_UNASSIGNED)||
+       u->range_id>=OT_PZ_MAX_RANGES_PER_ZONE)return false;
+    if(panel_index<0){
+        if(out->panel_count>=OT_PZ_MAX_PANELS_PER_OUTPUT)return false;
+        panel_index=(int)out->panel_count++;
+        ot_pz_panel_t *panel=&out->panels[panel_index];
+        memset(panel,0,sizeof(*panel));panel->id=u->panel_id;
+        panel->lane=(uint8_t)lane;
+        (void)snprintf(panel->name,sizeof(panel->name),"Panel %u",(unsigned)u->panel_id);
+    }
+    if(zone_index<0){
+        if(out->zone_count>=OT_PZ_MAX_ZONES_PER_OUTPUT)return false;
+        zone_index=(int)out->zone_count++;
+        ot_pz_zone_t *zone=&out->zones[zone_index];
+        memset(zone,0,sizeof(*zone));zone->id=u->zone_id;
+        zone->panel_id=u->panel_id;zone->role=role;
+        (void)snprintf(zone->name,sizeof(zone->name),"Zone %u",(unsigned)u->zone_id);
+        pz_recount_panel_zones(out);
+    }else if(out->zones[zone_index].panel_id!=u->panel_id)return false;
+    ot_pz_zone_t *zone=&out->zones[zone_index];
+    if(u->range_id>zone->range_count)return false;
+    if(u->range_id==zone->range_count){
+        if(zone->range_count>=OT_PZ_MAX_RANGES_PER_ZONE)return false;
+        zone->range_count++;
+    }
+    zone->role=role;zone->flags=0u;
+    zone->ranges[u->range_id]=(ot_pz_range_t){u->start,u->count};
+    return true;
+}
+bool ot_pz_preview_apply_updates(ot_pz_preview_t *state,unsigned lane,
+                          const ot_pz_range_update_t *updates,size_t update_count,
+                          uint16_t base_revision,uint16_t active_revision,
+                          bool pending,uint32_t now_ms){
+    if(!state||!updates||update_count==0u||update_count>4u||
+       !state->active||state->committing||lane>=OT_PZ_OUTPUTS||
+       state->lane!=lane||state->base_revision!=base_revision||
+       active_revision!=base_revision||pending||
+       (int32_t)(now_ms-state->expires_ms)>=0){
+        if(state)(void)ot_pz_preview_expire(state,now_ms);
+        return false;
+    }
+    for(size_t i=0;i<update_count;i++)
+        for(size_t j=0;j<i;j++)
+            if(updates[i].panel_id==updates[j].panel_id&&
+               updates[i].zone_id==updates[j].zone_id&&
+               updates[i].range_id==updates[j].range_id)return false;
+    ot_pz_preview_t candidate=*state;
+    ot_pz_output_t *out=&candidate.candidate.outputs[lane];
+    for(size_t i=0;i<update_count;i++)
+        if(!pz_apply_one_update(out,lane,&updates[i]))return false;
+    if(!ot_pz_valid(&candidate.candidate))return false;
+    candidate.expires_ms=state->expires_ms; /* UPDATE does not extend the lease. */
+    *state=candidate;
+    return true;
+}
+bool ot_pz_preview_heartbeat(ot_pz_preview_t *state,unsigned lane,
+                          uint16_t base_revision,uint32_t now_ms){
+    if(!state||!state->active||state->committing||lane>=OT_PZ_OUTPUTS||
+       state->lane!=lane||state->base_revision!=base_revision||
+       (int32_t)(now_ms-state->expires_ms)>=0){
+        if(state)(void)ot_pz_preview_expire(state,now_ms);
+        return false;
+    }
     state->expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
     return true;
 }

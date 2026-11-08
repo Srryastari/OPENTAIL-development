@@ -59,7 +59,7 @@ typedef struct {
 } ot_pz_controller_t;
 
 /* Single-owner volatile arrangement preview; slider updates never write NVS. */
-#define OT_PZ_PREVIEW_LEASE_MS 2000u
+#define OT_PZ_PREVIEW_LEASE_MS 5000u
 typedef struct {
     ot_pz_controller_t candidate;
     uint32_t expires_ms;
@@ -68,6 +68,26 @@ typedef struct {
     bool active;
     bool committing; /* Freeze preview edits/lease while its journal commit is pending. */
 } ot_pz_preview_t;
+
+/* 0xFE geometry UPDATE descriptor. range_id is the current zero-based range
+ * slot within its Zone. role_flags: bits 0..3 role, bits 4..5 action,
+ * bits 6..7 reserved. Actions: 0 upsert range, 1 delete range,
+ * 2 delete Zone, 3 delete Panel. */
+#define OT_PZ_TX_ROLE_MASK 0x0fu
+#define OT_PZ_TX_ACTION_MASK 0x30u
+#define OT_PZ_TX_ACTION_SHIFT 4u
+#define OT_PZ_TX_UPSERT 0u
+#define OT_PZ_TX_DELETE_RANGE 1u
+#define OT_PZ_TX_DELETE_ZONE 2u
+#define OT_PZ_TX_DELETE_PANEL 3u
+typedef struct {
+    uint8_t panel_id;
+    uint8_t zone_id;
+    uint8_t range_id;
+    uint16_t start;
+    uint16_t count;
+    uint8_t role_flags;
+} ot_pz_range_update_t;
 
 typedef struct {
     ot_pz_controller_t candidate;
@@ -87,6 +107,12 @@ bool ot_pz_preview_begin(ot_pz_preview_t *state,
 bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
                           const ot_pz_output_t *next,uint16_t base_revision,
                           uint16_t active_revision,bool pending,uint32_t now_ms);
+bool ot_pz_preview_apply_updates(ot_pz_preview_t *state,unsigned lane,
+                          const ot_pz_range_update_t *updates,size_t update_count,
+                          uint16_t base_revision,uint16_t active_revision,
+                          bool pending,uint32_t now_ms);
+bool ot_pz_preview_heartbeat(ot_pz_preview_t *state,unsigned lane,
+                          uint16_t base_revision,uint32_t now_ms);
 bool ot_pz_preview_expire(ot_pz_preview_t *state,uint32_t now_ms);
 void ot_pz_preview_cancel(ot_pz_preview_t *state);
 uint16_t ot_pz_zone_pixel_count(const ot_pz_zone_t *zone);
