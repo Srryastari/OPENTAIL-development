@@ -266,6 +266,175 @@ static void cfg_reset(void){
     cfg_read_index=255;cfg_upload_index=255;
     memset(cfg_received,0,sizeof(cfg_received));cfg_ack(0x7f,0,5);
 }
+static void panel_session_reset(void){
+    panel_caps_seen=false;panel_response_len=0;
+    panel_read_index=255;panel_upload_index=255;
+    panel_upload_crc=0;panel_upload_revision=0;
+    memset(panel_response,0,sizeof(panel_response));
+    memset(panel_snapshot,0,sizeof(panel_snapshot));
+    memset(panel_upload,0,sizeof(panel_upload));
+    memset(panel_received,0,sizeof(panel_received));
+}
+static void panel_ack(uint8_t opcode,uint8_t lane,uint8_t status){
+    panel_response[0]=OT_PZ_WIRE_VERSION;
+    panel_response[1]=(uint8_t)(0x80u|opcode);
+    panel_response[2]=lane;panel_response[3]=status;
+    panel_response_len=4u;
+}
+static int panel_caps_read(uint16_t conn,uint16_t handle,
+                           struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
+    if(conn!=active_conn||!authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    /* [transport/schema,max panels,zones,ranges,active BLE features,
+     *  max payload LE16,chunk bytes,reserved]. Fill exists as a CORE
+     *  primitive but its proposed BLE opcode is deliberately not enabled. */
+    const uint8_t caps[11]={
+        OT_PZ_WIRE_VERSION,OT_PZ_SCHEMA_VERSION,
+        OT_PZ_MAX_PANELS_PER_OUTPUT,OT_PZ_MAX_ZONES_PER_OUTPUT,
+        OT_PZ_MAX_RANGES_PER_ZONE,0x01u,
+        (uint8_t)OT_PZ_MAX_WIRE_BYTES,(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8),
+        15u,0u,0u
+    };
+    if(os_mbuf_append(ctx->om,caps,sizeof(caps))!=0)
+        return BLE_ATT_ERR_INSUFFICIENT_RES;
+    panel_caps_seen=true;
+    return 0;
+}
+static int panel_cfg_read(uint16_t conn,uint16_t handle,
+                          struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
+    if(conn!=active_conn||!authorized||!panel_caps_seen)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    return os_mbuf_append(ctx->om,panel_response,panel_response_len)==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static uint8_t panel_save_status(int rc){
+    switch(rc){
+        case 0:return 0u;
+        case 1:return 7u; /* invalid model */
+        case 2:return 2u; /* busy / active trigger / promoter unavailable */
+        case 3:return 3u; /* stale revision or legacy downgrade unsupported */
+        default:return 4u; /* durable NVS write failure */
+    }
+}
+static int panel_cfg_write(uint16_t conn,uint16_t handle,
+                           struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn)
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[OT_CFG_PACKET_BYTES];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||n<3u||
+       packet[0]!=OT_PZ_WIRE_VERSION){
+        panel_ack(0x7fu,0u,1u);return 0;
+    }
+    const uint8_t opcode=packet[1],lane=packet[2];
+    panel_ack(opcode,lane,0u);
+    if(!authorized||!panel_caps_seen){panel_ack(opcode,lane,5u);return 0;}
+    if(lane>=OT_PZ_OUTPUTS){panel_ack(opcode,lane,1u);return 0;}
+    switch(opcode){
+        case 1u:{ /* immutable active snapshot */
+            if(n!=3u){panel_ack(opcode,lane,1u);break;}
+            ot_pz_output_t output={0};uint16_t active_rev=0,staged_rev=0;
+            bool pending=false,persistent=false;
+            if(!ot_ble_panel_get(lane,&output,&active_rev,&staged_rev,
+                                 &pending,&persistent)||
+               !ot_pz_wire_encode(&output,lane,panel_snapshot)){
+                panel_ack(opcode,lane,7u);break;
+            }
+            panel_read_index=lane;
+            const uint16_t crc=ot_cfg_crc16(panel_snapshot,OT_PZ_MAX_WIRE_BYTES);
+            panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0x81u;
+            panel_response[2]=lane;panel_response[3]=0u;
+            panel_response[4]=(uint8_t)OT_PZ_MAX_WIRE_BYTES;
+            panel_response[5]=(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8);
+            panel_response[6]=(uint8_t)crc;panel_response[7]=(uint8_t)(crc>>8);
+            panel_response[8]=(uint8_t)active_rev;
+            panel_response[9]=(uint8_t)(active_rev>>8);
+            panel_response[10]=(uint8_t)staged_rev;
+            panel_response[11]=(uint8_t)(staged_rev>>8);
+            panel_response[12]=pending?1u:0u;
+            panel_response[13]=persistent?1u:0u;
+            panel_response_len=14u;break;
+        }
+        case 2u:{ /* read chunk: max 15 payload bytes */
+            if(n!=5u||panel_read_index!=lane){panel_ack(opcode,lane,1u);break;}
+            const uint16_t off=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            if(off>=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            unsigned count=OT_PZ_MAX_WIRE_BYTES-off;
+            if(count>15u)count=15u;
+            panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0x82u;
+            panel_response[2]=lane;panel_response[3]=packet[3];panel_response[4]=packet[4];
+            memcpy(panel_response+5,panel_snapshot+off,count);
+            panel_response_len=(uint8_t)(5u+count);break;
+        }
+        case 3u:{ /* begin upload: version/op/lane/length/CRC/base revision */
+            if(n!=9u){panel_ack(opcode,lane,1u);break;}
+            const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            panel_upload_crc=(uint16_t)(packet[5]|((uint16_t)packet[6]<<8));
+            panel_upload_revision=(uint16_t)(packet[7]|((uint16_t)packet[8]<<8));
+            panel_upload_index=lane;
+            memset(panel_upload,0,sizeof(panel_upload));
+            memset(panel_received,0,sizeof(panel_received));break;
+        }
+        case 4u:{ /* upload chunk, 1..15 bytes; duplicate bytes must match */
+            if(n<6u||panel_upload_index!=lane){panel_ack(opcode,lane,1u);break;}
+            const uint16_t off=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            const unsigned count=n-5u;
+            if(count>15u||off>=OT_PZ_MAX_WIRE_BYTES||
+               (uint32_t)off+count>OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            bool conflict=false;
+            for(unsigned i=0;i<count;i++){
+                const unsigned pos=(unsigned)off+i;
+                if(panel_received[pos]&&panel_upload[pos]!=packet[5u+i]){
+                    conflict=true;break;
+                }
+            }
+            if(conflict){panel_ack(opcode,lane,1u);break;}
+            for(unsigned i=0;i<count;i++){
+                const unsigned pos=(unsigned)off+i;
+                panel_upload[pos]=packet[5u+i];panel_received[pos]=true;
+            }
+            break;
+        }
+        case 5u:{ /* validate complete immutable upload, then stage CORE config */
+            if(n!=3u||panel_upload_index!=lane){panel_ack(opcode,lane,1u);break;}
+            for(unsigned i=0;i<OT_PZ_MAX_WIRE_BYTES;i++){
+                if(!panel_received[i]){panel_ack(opcode,lane,8u);panel_upload_index=255;return 0;}
+            }
+            if(ot_cfg_crc16(panel_upload,OT_PZ_MAX_WIRE_BYTES)!=panel_upload_crc){
+                panel_ack(opcode,lane,6u);panel_upload_index=255;break;
+            }
+            ot_pz_output_t output={0};
+            if(!ot_pz_wire_decode(panel_upload,lane,&output)){
+                panel_ack(opcode,lane,7u);panel_upload_index=255;break;
+            }
+            panel_ack(opcode,lane,panel_save_status(
+                ot_ble_panel_save(lane,&output,panel_upload_revision)));
+            panel_upload_index=255;break;
+        }
+        case 6u: /* cancel */
+            if(n!=3u){panel_ack(opcode,lane,1u);break;}
+            panel_upload_index=255;memset(panel_received,0,sizeof(panel_received));break;
+        case 0xabu: /* proposed Fill opcode intentionally not accepted */
+            panel_ack(opcode,lane,9u);break;
+        default:panel_ack(opcode,lane,1u);break;
+    }
+    return 0;
+}
+static int pixel_probe_write(uint16_t conn,uint16_t handle,
+                             struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
+       !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[OT_PZ_DIAG_PACKET_BYTES];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
+       n!=OT_PZ_DIAG_PACKET_BYTES)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    return ot_ble_pixel_probe(packet,n,true,panel_caps_seen)?
+           0:BLE_ATT_ERR_UNLIKELY;
+}
 static int cfg_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
