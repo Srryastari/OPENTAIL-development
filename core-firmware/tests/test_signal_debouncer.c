@@ -220,6 +220,22 @@ static void non_turn_inputs_keep_existing_four_sample_debounce(void) {
     }
 }
 
+static void brake_priority_does_not_discard_turn_history(void) {
+    ot_signal_debouncer_t left;
+    ot_signal_debouncer_init(&left,true);
+    edge(&left,false,MS(1000u));
+    edge(&left,true,MS(1100u)); /* turn flash bridges before expiry */
+    assert(sample_ms(&left,1110u));
+    const ot_arbitration_t during_brake=
+        ot_arbitrate((uint8_t)(OT_SIG_LEFT|OT_SIG_BRAKE),false,false);
+    assert(during_brake.signals==(uint8_t)(OT_SIG_LEFT|OT_SIG_BRAKE));
+    assert(left.asserted&&!left.release_pending); /* arbitration is not input reset */
+
+    edge(&left,false,MS(1200u));
+    assert(sample_ms(&left,1599u));
+    assert(!sample_ms(&left,1600u)); /* real turn expiry remains exact */
+}
+
 static void safety_priorities_remain_unchanged(void) {
     const uint8_t mask=(uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT|OT_SIG_BRAKE|
                                  OT_SIG_PARK|OT_SIG_REVERSE);
@@ -242,7 +258,8 @@ int main(void) {
     one_turn_can_expire_while_other_continues();
     all_256_boot_masks_and_arbitration();
     non_turn_inputs_keep_existing_four_sample_debounce();
+    brake_priority_does_not_discard_turn_history();
     safety_priorities_remain_unchanged();
-    puts("PASS Issue121 SignalDebouncer: ISR transition history, multiple inter-sample pulses, absolute 400ms deadline, strict equality expiry, four-sample requalification, independent Left/Right, hazards, 256 boot masks, unchanged non-turn inputs, overflow resync and arbitration; HOST_SIMULATED");
+    puts("PASS Issue121 SignalDebouncer: ISR transition history, multiple inter-sample pulses, absolute 400ms deadline, strict equality expiry, four-sample requalification, independent Left/Right, hazards, 256 boot masks, unchanged non-turn inputs, overflow resync, Brake-priority history isolation and arbitration; HOST_SIMULATED");
     return 0;
 }
