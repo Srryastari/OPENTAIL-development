@@ -76,7 +76,8 @@ assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
 assert "const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);" in logic
 assert "edge_ahead<0x80000000u" in logic
 assert "if(sample_valid){" in sampler
-assert "if(!sample_valid)" not in sampler
+assert sampler.index("if(sample_valid){") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("vTaskDelayUntil(last_wake,period);")
 assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
 assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
 assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL)" in core
