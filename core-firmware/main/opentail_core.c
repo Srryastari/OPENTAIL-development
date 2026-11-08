@@ -420,7 +420,7 @@ static bool pz_reset_tombstone_valid(const ot_pz_reset_tombstone_t *record){
     const uint32_t expected=copy.crc32;copy.crc32=0u;
     return expected==ot_cfg_crc32(&copy,sizeof(copy));
 }
-static bool pz_reset_tombstone_write_handle(nvs_handle_t h,uint8_t lane,
+static bool pz_reset_tombstone_set_handle(nvs_handle_t h,uint8_t lane,
         const ot_pz_controller_t *controller,const uint16_t revision[OT_PZ_OUTPUTS]){
     if(lane>=OT_PZ_OUTPUTS||!controller||!revision)return false;
     ot_pz_reset_tombstone_t record={0};
@@ -435,9 +435,12 @@ static bool pz_reset_tombstone_write_handle(nvs_handle_t h,uint8_t lane,
     memcpy(record.revision,revision,sizeof(record.revision));
     record.controller=*controller;
     record.crc32=0u;record.crc32=ot_cfg_crc32(&record,sizeof(record));
-    e=nvs_set_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,sizeof(record));
-    if(e==ESP_OK)e=nvs_commit(h);
-    return e==ESP_OK;
+    return nvs_set_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,sizeof(record))==ESP_OK;
+}
+static bool pz_reset_tombstone_write_handle(nvs_handle_t h,uint8_t lane,
+        const ot_pz_controller_t *controller,const uint16_t revision[OT_PZ_OUTPUTS]){
+    if(!pz_reset_tombstone_set_handle(h,lane,controller,revision))return false;
+    return nvs_commit(h)==ESP_OK;
 }
 static bool pz_stage_legacy_migration(void){
     ot_pz_controller_t previous,candidate;
@@ -511,6 +514,9 @@ static void pz_load(void){
                 config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
                 pz_deferred.pending=false;pz_persistent=false;return;
             }
+            if(has_b&&has_tombstone&&
+               memcmp(&stage.candidate,&tombstone.controller,sizeof(stage.candidate))==0)
+                pz_reset_pending_mask=tombstone.reset_mask;
             pz_persistent=true;
         }else if(has_tombstone){
             /* A reset tombstone is authoritative if the active map key was
@@ -550,6 +556,14 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     nvs_handle_t h;
     if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK)return false;
     esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
+    uint8_t reset_mask=0u;
+    portENTER_CRITICAL(&state_lock);
+    reset_mask=pz_reset_pending_mask;
+    portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;e==ESP_OK&&lane<OT_PZ_OUTPUTS;lane++)
+        if(reset_mask&(1u<<lane))
+            if(!pz_reset_tombstone_set_handle(h,(uint8_t)lane,candidate,candidate_revision))
+                e=ESP_ERR_NVS_INVALID_STATE;
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     if(e!=ESP_OK)return false; /* No RAM mutation before durable staged commit. */
