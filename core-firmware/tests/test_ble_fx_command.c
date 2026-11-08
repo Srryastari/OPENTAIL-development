@@ -17,7 +17,8 @@ int main(void){
   cmd[2]=186;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_UNSUPPORTED);
   cmd[2]=3;cmd[5]=0;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   cmd[5]=1;cmd[15]=1;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
-  cmd[15]=0;cmd[12]=33;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
+  cmd[15]=0;cmd[12]=255;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
+  assert(v.brightness==OT_MAX_BRIGHTNESS);
   cmd[12]=32;cmd[16]=61;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_RANGE);
   cmd[16]=15;cmd[2]=23;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
   cmd[2]=0;cmd[3]=128;assert(ot_ble_fx_parse(cmd,sizeof(cmd),true,&v)==OT_BLE_FX_OK);
