@@ -94,7 +94,6 @@ static ot_rgb_t scaled(unsigned r,unsigned g,unsigned b,unsigned v){
     return (ot_rgb_t){(uint8_t)((r*v+127)/255),(uint8_t)((g*v+127)/255),(uint8_t)((b*v+127)/255)};
 }
 ot_rgb_t ot_om_trigger_color(uint8_t role,uint8_t mask,uint8_t brightness){
-    if(brightness>OT_MAX_BRIGHTNESS)brightness=OT_MAX_BRIGHTNESS;
     switch(role){
         case OT_OM_PARK_BRAKE:
             if(mask&OT_SIG_BRAKE)return scaled(255,0,0,brightness);
@@ -152,9 +151,8 @@ ot_rgb_t ot_om_calibrate(ot_rgb_t c,const ot_om_output_t *cfg){
     for(unsigned i=0;i<3;i++){
         unsigned n=(v[i]*cfg->rgb_gain[i]+127u)/255u;
         if(neutral)n=(n*cfg->white_gain[i]+127u)/255u;
-        if(cfg->gamma_enabled){ /* mild gamma approximation, bounded and monotonic */
-            n=(n*n+OT_MAX_BRIGHTNESS/2u)/OT_MAX_BRIGHTNESS;
-            if(n>OT_MAX_BRIGHTNESS)n=OT_MAX_BRIGHTNESS;
+        if(cfg->gamma_enabled){ /* 8-bit gamma; final safety ceiling is applied later. */
+            n=(n*n+127u)/255u;
         }
         v[i]=(uint8_t)n;
     }
