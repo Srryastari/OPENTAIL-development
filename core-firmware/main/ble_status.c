@@ -525,12 +525,14 @@ static void panel_preview_refresh_commit_state(void){
     }
     if(!pending&&active_revision==panel_preview_tx.base_revision&&
        staged_revision==panel_preview_tx.base_revision){
-        /* The durable stage disappeared without promotion; retain UNKNOWN
-         * rather than claiming success or retrying COMMIT automatically. */
+        if(ot_ble_panel_preview_commit_pending(panel_preview_tx.lane,
+                                               panel_preview_tx.base_revision)){
+            panel_preview_tx.status=OT_PZ_TX_COMMITTING;return;
+        }
         panel_preview_tx.status=OT_PZ_TX_ERROR;
         panel_preview_tx.last_error=4u;
         panel_preview_tx.committing=false;
-        panel_preview_tx.active=false;
+        /* Keep the live shadow candidate available for an explicit retry. */
     }
 }
 static int panel_preview_control_write(uint16_t conn,uint16_t handle,

@@ -24,6 +24,7 @@ int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision);
 bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *crc32);
 int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
                                 uint32_t expected_crc32);
+bool ot_ble_panel_preview_commit_pending(uint8_t lane,uint16_t base_revision);
 uint16_t ot_ble_panel_render_revision(uint8_t lane);
 void ot_ble_panel_preview_cancel(void);
 
