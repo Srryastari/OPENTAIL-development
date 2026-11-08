@@ -2237,7 +2237,7 @@ static void tm_promote(uint32_t epoch){
     if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     if(staged){
         if(!config_write_active(h,&stage,sizeof(stage))||
-           !config_activation_idle(epoch)){nvs_close(h);return;}
+           !config_activation_idle(epoch,false)){nvs_close(h);return;}
         /* CRITICAL ORDER: erase staged recovery marker BEFORE publishing
          * to active RAM, never after; active_v3 itself keeps prior recovery. */
         if(!config_clear_stage(h)){
@@ -2287,7 +2287,7 @@ static void pz_promote(uint32_t epoch){
     if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
     if(staged){
         if(!config_write_panel_active(h,&stage)||
-           !config_activation_idle(epoch)){nvs_close(h);return;}
+           !config_activation_idle(epoch,true)){nvs_close(h);return;}
         /* Stage is erased before RAM publication; active retains both images. */
         if(!config_clear_panel_stage(h)){
             nvs_close(h);config_recovery_fault=true;
@@ -2338,7 +2338,7 @@ static void om_promote(uint32_t epoch){
     if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     if(staged){
         if(!config_write_active(h,&stage,sizeof(stage))||
-           !config_activation_idle(epoch)){nvs_close(h);return;}
+           !config_activation_idle(epoch,false)){nvs_close(h);return;}
         if(!config_clear_stage(h)){
             nvs_close(h);config_recovery_fault=true;
             ot_st_set_fault("output journal finalization failed");return;
