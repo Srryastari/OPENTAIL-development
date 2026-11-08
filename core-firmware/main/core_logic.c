@@ -34,6 +34,55 @@ uint8_t ot_debounce(ot_inputs_t *in, const bool levels[OT_IN_COUNT], unsigned st
     for (int i=0;i<OT_IN_COUNT;++i) if(in->settled[i]) mask|=(1u<<i);
     return mask;
 }
+
+void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted) {
+    if (!state) return;
+    *state=(ot_signal_debouncer_t){.asserted=initial_asserted};
+}
+
+bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
+                                uint32_t now_ms, unsigned stable_ticks) {
+    if (!state) return false;
+    if (stable_ticks<1u) stable_ticks=1u;
+    if (stable_ticks>UINT8_MAX) stable_ticks=UINT8_MAX;
+
+    if (raw_asserted) {
+        if (state->release_pending) {
+            const uint32_t inactive_ms=(uint32_t)(now_ms-state->inactive_since_ms);
+            if (inactive_ms>=OT_TURN_RELEASE_HOLD_MS) {
+                /* The previous assertion has expired. This is a new edge and
+                 * must pass the normal assertion qualification again. */
+                state->asserted=false;
+                state->assertion_ticks=0u;
+            } else {
+                /* Reassertion before the deadline bridges the flash gap and
+                 * never publishes a false falling edge to the renderer. */
+                state->release_pending=false;
+                return state->asserted;
+            }
+            state->release_pending=false;
+        }
+        if (state->asserted) return true;
+        if (state->assertion_ticks<(uint8_t)stable_ticks) state->assertion_ticks++;
+        if (state->assertion_ticks>=(uint8_t)stable_ticks) state->asserted=true;
+        return state->asserted;
+    }
+
+    state->assertion_ticks=0u;
+    if (!state->asserted) {
+        state->release_pending=false;
+        return false;
+    }
+    if (!state->release_pending) {
+        state->release_pending=true;
+        state->inactive_since_ms=now_ms;
+    }
+    if ((uint32_t)(now_ms-state->inactive_since_ms)>=OT_TURN_RELEASE_HOLD_MS) {
+        state->asserted=false;
+        state->release_pending=false;
+    }
+    return state->asserted;
+}
 ot_rgb_t ot_pixel_color(const ot_layout_t *cfg, int chain, unsigned pixel, uint8_t signal_mask,
                         const ot_demo_t *demo, uint32_t tick) {
     const ot_rgb_t off={0,0,0};
