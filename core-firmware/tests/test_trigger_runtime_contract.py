@@ -50,57 +50,43 @@ for token in ("pdMS_TO_TICKS(10u)", "gpio_get_level(input_pin[i])",
 assert "in->ticks[i]>=stable_ticks" in logic
 assert "in->settled[i]=in->pending[i]" in logic
 
-# Issue121: only raw IN3/IN4 feed independent 400ms release-hold states.
-# Assertion remains four stable 10ms samples; monotonic uint32 elapsed math
-# is wrap-safe. The other six channels remain on the original ot_debounce.
-assert "#define OT_TURN_RELEASE_HOLD_US 400000u" in logic_header
-assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
+# Issue121: ISR-published transition queues feed only Left/Right release holds.
+# Absolute uint64 monotonic deadlines remove sampler-tick drift and edge aliasing.
+assert "#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)" in logic_header
 assert "ot_signal_debouncer_init" in logic
-assert "ot_signal_debouncer_update" in logic
-assert "raw_previous_edge_us" in logic_header
-assert "(uint32_t)(effective_edge_us-state->inactive_since_us)" in logic
-assert "(edge_delta/2u)>=2u" in logic
-assert "raw_previous_edge_us-" in logic
-assert "state->inactive_since_us" in logic
-assert "(uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US" in logic
-assert "static void input_sampler_task(void *arg){" in core
+assert "ot_signal_debouncer_transition" in logic
+assert "ot_signal_debouncer_sample" in logic
+assert "ot_signal_debouncer_resync" in logic
+assert "uint64_t release_deadline_us;" in logic_header
+assert "edge_time_us>=state->release_deadline_us" in logic
+assert "now_us>=state->release_deadline_us" in logic
+assert "state->release_deadline_us=edge_time_us+OT_TURN_RELEASE_HOLD_US;" in logic
+assert "static DRAM_ATTR ot_turn_edge_event_t turn_edge_events[2][OT_TURN_EDGE_QUEUE_CAPACITY]" in core
+assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 32u" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_head[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_tail[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]" in core
+assert "event->timestamp_us=edge_time_us;" in core
+assert "event->asserted=asserted;" in core
+assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
+assert "__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE)" in core
+assert "__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE)" in core
+assert "__atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE)" in core
+assert "turn_edge_overflow[slot]" in core
+assert "gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])" in core
+assert "static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT]" in core
+assert "input_pin_isr[i]=input_pin[i];" in core
+assert "input_boot_snapshot_us=(uint64_t)esp_timer_get_time();" in core
+assert "static bool turn_edge_queue_update(" in core
+assert "ot_signal_debouncer_transition(state,event.asserted,event.timestamp_us)" in core
+assert "ot_signal_debouncer_resync(state,current_raw);" in core
+assert "ot_signal_debouncer_sample(state,now_us,OT_DEBOUNCE_TICKS)" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
-assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u," in sampler
-assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u," in sampler
-assert sampler.count("ot_signal_debouncer_update(") == 2
-assert "ot_signal_debouncer_update(&turn_signal[0],levels[2]," in sampler
-assert "ot_signal_debouncer_update(&turn_signal[1],levels[3]," in sampler
-assert "esp_timer_get_time()" in core[core.index("static bool read_turn_input_snapshot"):core.index("/* RMT drivers") ]
-assert "read_turn_input_snapshot(i,&levels[i]," in sampler
-assert "turn_previous_edge_snapshot_us[slot]" in sampler
-assert "turn_edge_snapshot_seq[slot]" in sampler
-assert "static DRAM_ATTR volatile uint32_t turn_prev_edge_us[2]" in core
-assert "__atomic_store_n(&turn_prev_edge_us[slot],previous_edge_us,__ATOMIC_RELAXED)" in core
-assert "__atomic_load_n(&turn_prev_edge_us[slot],__ATOMIC_RELAXED)" in core
-assert "static bool read_turn_input_snapshot(" in core
-assert "const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
-assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);" in core
-assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
-assert "const uint32_t edge_ahead=(uint32_t)(effective_edge_us-now_us);" in logic
-assert "edge_ahead<0x80000000u" in logic
-assert "if (state->awaiting_edge_record)" in logic
-assert "state->awaiting_edge_record=true;" in logic
-assert "if (level_changed && !sequence_changed)" in logic
-assert "const bool expected_raw=state->last_raw_asserted" in logic
-assert "raw_asserted!=expected_raw" in logic
-assert "const bool new_edge=(sequence_changed||level_changed)" in logic
-assert "if(sample_valid){" in sampler
-assert "if(!turn_signal[0].awaiting_edge_record &&" in sampler
-assert "!turn_signal[1].awaiting_edge_record" in sampler
-assert sampler.index("if(sample_valid){") < sampler.index("ot_sw_idf_input_sampled();")
-assert sampler.index("ot_sw_idf_input_sampled();") > sampler.index("!turn_signal[1].awaiting_edge_record")
-assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("vTaskDelayUntil(&last_wake,period);")
-assert "gpio_isr_handler_add(input_pin[i],input_edge_isr,(void *)(uintptr_t)(i+1u))" in core
-assert "__atomic_store_n(&turn_edge_us[slot],edge_us,__ATOMIC_RELAXED)" in core
-assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_ACQ_REL)" in core
-assert "__atomic_add_fetch(&turn_edge_seq[slot],1u,__ATOMIC_RELEASE)" in core
-assert "edge_delta=(uint32_t)(raw_edge_sequence-state->last_edge_sequence)" in logic
-assert "if (!state->release_pending || new_edge)" in logic
+assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
+assert "turn_edge_queue_update(0u,&turn_signal[0]" in sampler
+assert "turn_edge_queue_update(1u,&turn_signal[1]" in sampler
+assert "read_turn_input_snapshot" not in core
 assert "physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));" in sampler
 assert "if(left)physical|=OT_SIG_LEFT;" in sampler
 assert "if(right)physical|=OT_SIG_RIGHT;" in sampler
