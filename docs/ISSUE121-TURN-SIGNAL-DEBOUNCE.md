@@ -30,10 +30,21 @@ cannot represent that history.
 
 The boot GPIO baseline is timestamped before the physical input snapshot.
 Queued events at or before that baseline are ignored; later events are replayed.
-The ring never overwrites unread events. If a lane's queue overflows, the
-sampler flushes the ambiguous history, clears the held assertion, resynchronizes
-to the current raw level, and requires four stable samples to assert again.
-The overflow is logged. This is an explicit fail-closed recovery path, not
+The ring never overwrites unread events. The ISR marks each lane's producer
+active before capturing its timestamp and clears the marker only after the
+event is published. After draining a queue, the sampler verifies that no
+producer is in flight and that the head did not advance; otherwise it defers
+that lane's sample and watchdog progress until the next 10ms tick. This closes
+the dual-core race where an edge timestamp was captured before a deadline but
+its queue head was published afterward.
+
+If a lane's queue overflows, the sampler establishes a coherent recovery
+boundary: it checks the writer marker, snapshots the queue head, samples the
+GPIO level, then verifies the writer marker and head are unchanged before
+discarding the old queue and resynchronizing the state. If the producer moved
+during that operation, resynchronization is deferred. The held assertion is
+cleared and the current raw input must pass four stable samples to assert
+again. Overflow is logged. This is an explicit fail-closed recovery path, not
 silent extension of a turn assertion.
 
 Brake priority is deliberately not implemented by clearing the turn queue or
