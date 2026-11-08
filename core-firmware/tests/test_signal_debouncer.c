@@ -140,6 +140,16 @@ static void restart_hold_after_pulse_between_sampler_wakes(void) {
                                     1405u*1000u,late_pulse_sequence));
     assert(!d.asserted&&!d.release_pending);
 
+    /* A single published edge with a GPIO level that has already toggled
+     * twice is a partial ISR history. Wait for the matching second edge before
+     * accepting the raw level/timestamp pair. */
+    ot_signal_debouncer_init(&d,true,0u);
+    assert(sample_us_with_sequence(&d,true,1010u*1000u,0u,1000u*1000u,2u));
+    assert(d.asserted&&d.awaiting_edge_record);
+    assert(sample_us_with_sequence(&d,true,1020u*1000u,1000u*1000u,
+                                   1010u*1000u,4u));
+    assert(d.asserted&&!d.awaiting_edge_record);
+
     /* A timestamp newer than its sample is a torn snapshot and must not
      * turn unsigned subtraction into an immediate false release. */
     ot_signal_debouncer_init(&d,true,0u);
