@@ -98,3 +98,42 @@ Workflow `.github/workflows/verify-effects-firmware115-compatibility.yml` runs o
 - Android source/JUnit/debug APK build, independent Trigger regressions, ESP-IDF v5.5.5 build and four-image ZIP verification.
 
 **Final team sign-off is conditional on that new exact-head workflow and independent review completing successfully.** No physical, phone, optical or vehicle-release result will be inferred from these jobs.
+
+
+## P0 single-ESP integration follow-up — 2026-11-08
+
+### Exact PR115 CI failure triage
+
+All three requested historical runs used exact Firmware #115 SHA `f97bceec7445a958f735df17ca0842b97bf8e062`.
+
+| Run | Actual failure | Classification | Corrective disposition |
+|---|---|---|---|
+| [42455015203](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42455015203) | `check_integrated_candidate.py` compared the whole Android tree against the old matrix's Android #87 tree (`b22351238110add38191aa5e146bc9b4b2e97e88)); actual #115 Android tree was `0b898c6e5e60b9a50ddfd1541ce6db403e8a2d0f`. The matrix is pinned to PR87/Effects80/Triggers83/Firmware84 for PR88, not to the later PR112→PR115 lineage. | Inherited integration-provenance workflow applied to the wrong candidate lineage; not an Effects renderer failure. | `codex-integrated-software.yml` is now scoped to PR88's actual base branch `firmware/failover-essential-policy-20261031`. Its source matrix and checks remain intact for that intended candidate. |
+| [42455015233](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42455015233) | Issue103's protected-path assertion diffed from Android #106 (`db7bcd...`) and treated PR112's approved Java BLE/third-color additions as new forbidden changes. | Stale integration baseline, not an Effects defect. | The gate still requires #106 ancestry, and now also requires exact PR112 (`1a300767d985343d060faf344bff2da772dca88f`) ancestry. Protected paths are checked for changes **after PR112**, while exact Effects #110 CORE/JNI blobs and Firmware #96 packaging source checks remain unchanged. |
+| [42455015157](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42455015157) | All six software jobs passed. Only `release-evidence-gate` failed: 22 physical cases were UNVERIFIED and `effects-release-evidence.json` containing signed golden-frame/physical results was absent. The Effects audit reported 120 source-derived modes, zero approximated modes, and 19 registered original IDs plus Embers. | Intentional physical/golden release-evidence block; not a source-parity defect. | Gate deliberately remains fail-closed. No physical evidence was fabricated and no check was bypassed. |
+
+### Additional exact-source tests
+
+The no-production-code successor adds host/source evidence for:
+
+- Both output states are separate `fx_state[output][zone]` instances; rendering one lane does not mutate the other lane's state.
+- Both asynchronous RMT submissions precede the completion-wait loop. A lane receives completion credit only after its own `led_strip_refresh_async_done()` returns `ESP_OK`.
+- Independent O1-stalled/O2-completed and O1-completed/O2-stalled cases may feed progress from the surviving completed lane, but neither can satisfy full-frame stability. A dual stall/no-completion case receives no feed.
+- BLE GATT effect updates only mutate the zone-bank configuration under the state lock and notify the render task. The GATT handler does not call the pixel renderer or LED-strip driver.
+- Same-effect BLE parameter edits preserve each output's own generation and `started_ms`; a replacement is the event that advances generation and resets that zone's renderer state. The host burst test applies 128 successive parameter updates and checks both independent anchors.
+- Compile-time fault injection points 1–7 are present and source-guarded. Existing PR115 CI compiles the bench-only fault-injection configuration; host timeline tests exercise the watchdog policy. Neither is claimed as a live hardware fault run.
+
+An initial version of the added BLE-burst test incorrectly assumed the two output slots shared one generation number. The full host suite caught that test-fixture mistake. The test was corrected to retain and independently verify each output's generation; no product code was changed.
+
+### Latest exact-head revalidation
+
+- PR120 current head: `cd2bab16473b36a1cf103d9f9466a6f5f1305854`.
+- [Effects exact-head workflow 42469848537](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42469848537): **4/4 PASS** — exact source guard, complete 140-effect CORE suite, 3,360 dual-lane stress frames, watchdog deadline/stall policy, independent Trigger safety, JNI 140/140 parity, Android JUnit/debug APK, ESP-IDF v5.5.5 and four-image package verification.
+- [Issue103 exact-head workflow 42469848535](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42469848535): source/140 CORE job PASS, JNI 140/140 job PASS, ESP-IDF v5.5.5 package build PASS; downloaded-package integrity recheck was still running when this report was updated.
+- [Active-source workflow 42469848587](https://github.com/Srryastari/OPENTAIL-development/actions/runs/42469848587): CORE host, Studio and change-impact jobs PASS. Its separate Android JUnit attempt hit an external Maven/JetBrains artifact HTTP 504 while fetching `kotlin-compiler-embeddable:2.0.21`; the independent PR120 Android JUnit/APK job passed in 42469848537. Its physical release gate remains intentionally separate.
+
+### Physical acceptance boundary remains unchanged
+
+**NOT_RUN:** powered ESP32-S3 RMT completion timing, live 15-second TWDT behavior under real maximum-load animation, idle-task starvation timing, execution of compile-time injected faults, live BLE throughput/stutter, physical O1/O2 synchronization, optical Blink/Strobe/Breathe/Fade/Fireworks quality, all 22 mandatory hardware checks, owner-phone acceptance and vehicle release.
+
+The synthetic host render delay and RMT wire-time bound are not measurements of ESP32 execution. No host test substitutes for a physical bench run. No firmware/renderer/JNI/UI/BLE/NVS/trigger production source, firmware version, partition or release gate was changed. PR #115 and PR #120 remain draft and unmerged.
