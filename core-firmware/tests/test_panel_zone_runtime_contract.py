@@ -41,9 +41,14 @@ assert "ot_fx_bank_stop_all" not in preview_begin+preview_update+preview_commit+
 assert "native_show" not in preview_begin+preview_update+preview_commit+preview_cancel
 assert "nvs_open(" not in preview_cancel
 
+pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
+    "static bool om_save(", 1)[0]
+assert "pz_preview.active&&!pz_preview.committing" in pz_save
+assert "pz_preview.committing=!no_change" in core
 panel_save = core.split("int ot_ble_panel_save(", 1)[1].split("bool ot_ble_pixel_probe(", 1)[0]
 assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
+assert "pz_preview.active" in panel_save
 assert "is_show_mode_active" not in panel_save
 
 for opcode in ("case 0x10u:", "case 0x11u:", "case 0x12u:",
