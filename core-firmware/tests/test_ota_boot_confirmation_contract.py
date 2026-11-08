@@ -91,6 +91,8 @@ assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < 
 assert gap.index("if(ev->disconnect.conn.conn_handle!=active_conn)return 0;") < gap.index("active_conn=BLE_HS_CONN_HANDLE_NONE;")
 assert "boot_frame_verified=true;" not in led, "A failed flash confirmation must retry"
 ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
+sdkconfig = (Path(__file__).resolve().parents[1] / "sdkconfig.defaults").read_text()
+assert "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y" in sdkconfig
 assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
 assert "if(!outputs_ready)return false;" in ota
 assert "return e==ESP_OK;" in ota
