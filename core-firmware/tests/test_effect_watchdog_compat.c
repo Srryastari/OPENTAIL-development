@@ -8,6 +8,7 @@
  */
 #include <assert.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include "effects_1d.h"
@@ -27,6 +28,7 @@ static bool modeled_render_feed(uint64_t cycle_start_ms,
                                 uint64_t last_feed_ms,
                                 uint32_t render_work_ms,
                                 uint32_t completion_wait_ms,
+                                uint32_t frame_pacing_ms,
                                 bool all_lanes_completed,
                                 bool any_lane_completed,
                                 uint64_t timeout_ms,
@@ -34,10 +36,12 @@ static bool modeled_render_feed(uint64_t cycle_start_ms,
     if (!feed_at_ms ||
         !ot_sw_render_progress_eligible(all_lanes_completed, any_lane_completed))
         return false;
-    /* Render work happens before the async completion wait. The model adds
-     * both delays, intentionally not assuming RMT overlaps all CPU work. */
+    /* Render work happens before the wait. Use the longer of the RMT wait
+     * and frame pacing delay, then add it to the injected render budget. */
+    const uint32_t wait_ms = completion_wait_ms > frame_pacing_ms
+        ? completion_wait_ms : frame_pacing_ms;
     const uint64_t completed_at =
-        cycle_start_ms + (uint64_t)render_work_ms + completion_wait_ms;
+        cycle_start_ms + (uint64_t)render_work_ms + wait_ms;
     if (completed_at - last_feed_ms >= timeout_ms)
         return false;
     *feed_at_ms = completed_at;
@@ -115,7 +119,7 @@ int main(void) {
                         uint64_t next_feed_ms = 0u;
                         assert(modeled_render_feed(now_ms,last_feed_ms,
                             injected_render_work_ms,(uint32_t)transfer_ms,
-                            true,true,twdt_timeout_ms,&next_feed_ms));
+                            cadences[ci],true,true,twdt_timeout_ms,&next_feed_ms));
                         assert(next_feed_ms - last_feed_ms < twdt_timeout_ms);
                         now_ms = next_feed_ms;
                         last_feed_ms = next_feed_ms;
@@ -125,7 +129,7 @@ int main(void) {
                          * requires all outputs and fresh inputs. */
                         assert(modeled_render_feed(now_ms,last_feed_ms,
                             injected_render_work_ms,(uint32_t)transfer_ms,
-                            false,true,twdt_timeout_ms,&next_feed_ms));
+                            cadences[ci],false,true,twdt_timeout_ms,&next_feed_ms));
                         assert(next_feed_ms - last_feed_ms < twdt_timeout_ms);
                         now_ms = next_feed_ms;
                         last_feed_ms = next_feed_ms;
@@ -133,7 +137,7 @@ int main(void) {
                         /* Neither transfer completed: no feed, even when the
                          * modeled render + wait interval reaches the deadline. */
                         assert(!modeled_render_feed(now_ms,last_feed_ms,
-                            15000u,0u,false,false,twdt_timeout_ms,&next_feed_ms));
+                            15000u,0u,0u,false,false,twdt_timeout_ms,&next_feed_ms));
                         rendered_frames++;
                     }
                 }
@@ -145,17 +149,17 @@ int main(void) {
      * plus 62ms completion can feed before 15s; a 14,940ms render plus 62ms
      * completion is overdue and must be rejected. Neither result is hardware. */
     uint64_t boundary_feed = 0u;
-    assert(modeled_render_feed(0u,0u,14900u,(uint32_t)transfer_ms,
+    assert(modeled_render_feed(0u,0u,14900u,(uint32_t)transfer_ms,33u,
                                true,true,twdt_timeout_ms,&boundary_feed));
     assert(boundary_feed == 14900u + transfer_ms);
-    assert(!modeled_render_feed(0u,0u,14940u,(uint32_t)transfer_ms,
+    assert(!modeled_render_feed(0u,0u,14940u,(uint32_t)transfer_ms,33u,
                                 true,true,twdt_timeout_ms,&boundary_feed));
-    assert(!modeled_render_feed(0u,0u,15000u,0u,false,false,
+    assert(!modeled_render_feed(0u,0u,15000u,0u,0u,false,false,
                                 twdt_timeout_ms,&boundary_feed));
 
     printf("PASS HOST_SIMULATED Effects/#115 watchdog compatibility: %zu/140 effects, "
            "%u dual-lane frames, Speed/Intensity 0/255, 8/33ms cadence, "
-           "synthetic render delay %ums + %llums completion < %llums TWDT; "
+           "synthetic render delay %ums + max(%llums completion, 33ms pacing) < %llums TWDT; "
            "14,900+62ms deadline PASS, 14,940+62ms overdue FAIL-CLOSED; "
            "RMT/TWDT hardware NOT_RUN\n",
            count, (unsigned)rendered_frames,
