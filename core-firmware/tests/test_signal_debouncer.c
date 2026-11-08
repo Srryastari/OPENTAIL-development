@@ -5,8 +5,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define TEST_STABLE_SAMPLES 4u
+
 static bool sample(ot_signal_debouncer_t *state, bool raw, uint32_t now_ms) {
-    return ot_signal_debouncer_update(state,raw,now_ms,OT_DEBOUNCE_TICKS);
+    return ot_signal_debouncer_update(state,raw,now_ms,TEST_STABLE_SAMPLES);
 }
 
 static void assertion_keeps_four_sample_qualification(void) {
@@ -127,12 +129,12 @@ static void all_256_boot_masks_and_arbitration(void) {
             levels[i]=(held&(1u<<i))!=0u;
             sampler.settled[i]=levels[i];
             sampler.pending[i]=levels[i];
-            sampler.ticks[i]=OT_DEBOUNCE_TICKS;
+            sampler.ticks[i]=TEST_STABLE_SAMPLES;
         }
         ot_signal_debouncer_t left,right;
         ot_signal_debouncer_init(&left,(held&OT_SIG_LEFT)!=0u);
         ot_signal_debouncer_init(&right,(held&OT_SIG_RIGHT)!=0u);
-        uint8_t physical=ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS);
+        uint8_t physical=ot_debounce(&sampler,levels,TEST_STABLE_SAMPLES);
         physical=(uint8_t)(physical&(uint8_t)~(OT_SIG_LEFT|OT_SIG_RIGHT));
         if(sample(&left,levels[2],100u))physical|=OT_SIG_LEFT;
         if(sample(&right,levels[3],100u))physical|=OT_SIG_RIGHT;
@@ -162,13 +164,13 @@ static void non_turn_inputs_keep_existing_four_sample_debounce(void) {
         bool levels[OT_IN_COUNT]={false};
         const unsigned bit=channels[c];
         levels[bit]=true;
-        for(unsigned i=0;i<OT_DEBOUNCE_TICKS-1u;i++)
-            assert((ot_debounce(&d,levels,OT_DEBOUNCE_TICKS)&(1u<<bit))==0u);
-        assert((ot_debounce(&d,levels,OT_DEBOUNCE_TICKS)&(1u<<bit))!=0u);
+        for(unsigned i=0;i<TEST_STABLE_SAMPLES-1u;i++)
+            assert((ot_debounce(&d,levels,TEST_STABLE_SAMPLES)&(1u<<bit))==0u);
+        assert((ot_debounce(&d,levels,TEST_STABLE_SAMPLES)&(1u<<bit))!=0u);
         levels[bit]=false;
-        for(unsigned i=0;i<OT_DEBOUNCE_TICKS-1u;i++)
-            assert((ot_debounce(&d,levels,OT_DEBOUNCE_TICKS)&(1u<<bit))!=0u);
-        assert((ot_debounce(&d,levels,OT_DEBOUNCE_TICKS)&(1u<<bit))==0u);
+        for(unsigned i=0;i<TEST_STABLE_SAMPLES-1u;i++)
+            assert((ot_debounce(&d,levels,TEST_STABLE_SAMPLES)&(1u<<bit))!=0u);
+        assert((ot_debounce(&d,levels,TEST_STABLE_SAMPLES)&(1u<<bit))==0u);
     }
 }
 
