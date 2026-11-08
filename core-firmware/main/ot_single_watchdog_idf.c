@@ -1,6 +1,9 @@
 #include "ot_single_watchdog_idf.h"
 #include "ot_single_watchdog.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 #include "esp_attr.h"
 #include "esp_err.h"
@@ -21,9 +24,31 @@ static esp_task_wdt_user_handle_t input_user=NULL,render_user=NULL;
 static bool watchdog_configured=false;
 static uint32_t input_samples=0,completed_frames=0,handled_fault_cycles=0;
 static uint32_t last_input_ms=0,last_frame_ms=0;
+static uint32_t healthy_since_ms=0;
+static bool healthy_window=false;
+static unsigned fault_injected=0u;
 static bool recovery_inhibit=false;
 static bool stable_run=false; /* published atomically; boot policy is render-task-owned */
 static const char *TAG="OT_SW_WDT";
+
+/* Compile-time-only bench fault injection. Default is disabled and there is
+ * no BLE/HTTP command that can activate it. A selected fault fires once after
+ * 5s, then the normal IDF watchdog/boot-loop policy must recover the MCU.
+ */
+static void inject_fault(unsigned point){
+#if CONFIG_OPENTAIL_WATCHDOG_TEST_FAULT > 0
+    if(CONFIG_OPENTAIL_WATCHDOG_TEST_FAULT!=(int)point ||
+       ot_sw_idf_boot_loop_seen() || clock_ms()<5000u ||
+       __atomic_exchange_n(&fault_injected,1u,__ATOMIC_ACQ_REL))return;
+    ESP_LOGE(TAG,"BENCH ONLY watchdog fault injection point=%u",point);
+    if(point==5u){for(;;){__asm__ volatile("nop");}}
+    if(point==6u){portDISABLE_INTERRUPTS();for(;;){__asm__ volatile("nop");}}
+    if(point==7u)abort();
+    vTaskSuspend(NULL);
+#else
+    (void)point;
+#endif
+}
 
 static ot_sw_reset_class_t classify(esp_reset_reason_t reason){
     switch(reason){
@@ -45,6 +70,7 @@ void ot_sw_idf_boot_record(void){
     const esp_reset_reason_t reason=esp_reset_reason();
     boot=ot_sw_boot_record(&rtc_record,classify(reason));
     __atomic_store_n(&stable_run,false,__ATOMIC_RELEASE);
+    healthy_since_ms=0u;healthy_window=false;fault_injected=0u;
     __atomic_store_n(&recovery_inhibit,ot_sw_decorative_inhibited(&boot),__ATOMIC_RELEASE);
     ESP_LOGW(TAG,"single ESP reset=%s (%d) crash_streak=%lu boot_loop=%u; no backup light path",
         ot_sw_reset_name(boot.reset_class),(int)reason,
@@ -84,32 +110,60 @@ void ot_sw_idf_input_sampled(void){
     /* Called ONLY after ALL eight physical GPIOs were read/debounced and the
      * sampler published the settled and instantaneous trigger state. */
     if(!input_user)return;
+    inject_fault(1u); /* Suspend after sampling, before the input-user feed. */
     __atomic_add_fetch(&input_samples,1u,__ATOMIC_RELAXED);
     __atomic_store_n(&last_input_ms,clock_ms(),__ATOMIC_RELAXED);
     (void)esp_task_wdt_reset_user(input_user);
 }
+void ot_sw_idf_fault_inject(unsigned point){
+    if(point>=3u && point<=4u)inject_fault(point);
+}
 void ot_sw_idf_render_cycle(bool all_outputs_completed,bool any_output_completed,
                             bool diagnosed_fault,bool configuration_fault){
-    if(!render_user ||
-       !ot_sw_render_progress_eligible(all_outputs_completed,any_output_completed))return;
+    if(!render_user){healthy_window=false;return;}
+    inject_fault(2u); /* Render task stall after output work, before its feed. */
+    inject_fault(5u); /* Starve this core's idle task; IDF TWDT must catch it. */
+    inject_fault(6u); /* Block interrupts; IDF interrupt WDT must catch it. */
+    inject_fault(7u); /* Panic/reset classification path. */
+    if(!ot_sw_render_progress_eligible(all_outputs_completed,any_output_completed)){
+        healthy_window=false;
+        return;
+    }
     /* RMT completion is the only feed: a loop repeating a latched failure
      * without any successful physical driver transfer must NOT feed TWDT.
      * Unfinished DMA/async_done never reaches here and times out. */
+    const uint32_t now=clock_ms();
     if(all_outputs_completed){
         __atomic_add_fetch(&completed_frames,1u,__ATOMIC_RELAXED);
-        __atomic_store_n(&last_frame_ms,clock_ms(),__ATOMIC_RELAXED);
+        __atomic_store_n(&last_frame_ms,now,__ATOMIC_RELAXED);
     }else{
         __atomic_add_fetch(&handled_fault_cycles,1u,__ATOMIC_RELAXED);
     }
     (void)esp_task_wdt_reset_user(render_user);
+
+    /* "Stable" means 60 seconds of uninterrupted full two-lane completions
+     * AND fresh eight-input sampling, not merely 60 seconds since boot.
+     * A partial lane, stale sampler, diagnosed output fault or NVS fault
+     * restarts this window without starving the surviving lane's WDT feed.
+     */
+    const uint32_t last_input=__atomic_load_n(&last_input_ms,__ATOMIC_ACQUIRE);
+    const bool healthy=all_outputs_completed &&
+        (uint32_t)(now-last_input)<100u && !diagnosed_fault && !configuration_fault;
+    if(!healthy){
+        healthy_window=false;
+        return;
+    }
+    if(!healthy_window){
+        healthy_since_ms=now;
+        healthy_window=true;
+    }
     if(!__atomic_load_n(&stable_run,__ATOMIC_ACQUIRE) &&
-       ot_sw_mark_stable(&rtc_record,&boot,clock_ms(),
+       ot_sw_mark_stable(&rtc_record,&boot,(uint32_t)(now-healthy_since_ms),
            __atomic_load_n(&input_samples,__ATOMIC_RELAXED),
-           __atomic_load_n(&completed_frames,__ATOMIC_RELAXED),
-           diagnosed_fault,configuration_fault)){
+           __atomic_load_n(&completed_frames,__ATOMIC_RELAXED),false,false)){
         __atomic_store_n(&stable_run,true,__ATOMIC_RELEASE);
         __atomic_store_n(&recovery_inhibit,false,__ATOMIC_RELEASE);
-        ESP_LOGI(TAG,"one ESP has 60s observed input + full RMT progress; boot streak cleared in RTC, no flash write");
+        ESP_LOGI(TAG,"one ESP has 60s continuous input + full RMT progress; boot streak cleared in RTC, no flash write");
     }
 }
 bool ot_sw_idf_decorative_inhibited(void){
