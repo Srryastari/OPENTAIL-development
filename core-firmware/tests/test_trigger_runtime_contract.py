@@ -57,7 +57,7 @@ assert "#define OT_TURN_RELEASE_HOLD_US 400000u" in logic_header
 assert "typedef struct {" in logic_header and "ot_signal_debouncer_t;" in logic_header
 assert "ot_signal_debouncer_init" in logic
 assert "ot_signal_debouncer_update" in logic
-assert "(uint32_t)(raw_edge_us-state->inactive_since_us)" in logic
+assert "(uint32_t)(effective_edge_us-state->inactive_since_us)" in logic
 assert "(uint32_t)(now_us-state->inactive_since_us)>=OT_TURN_RELEASE_HOLD_US" in logic
 assert "static void input_sampler_task(void *arg){" in core
 assert "ot_signal_debouncer_t turn_signal[2];" in sampler
@@ -75,6 +75,8 @@ assert "const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUI
 assert "if(before==after&&!(after&1u)&&level_before==level_after)" in core
 assert "const uint32_t edge_ahead=(uint32_t)(raw_edge_us-now_us);" in logic
 assert "edge_ahead<0x80000000u" in logic
+assert "if (raw_asserted && state->release_pending && level_changed && !sequence_changed)" in logic
+assert "const bool new_edge=(sequence_changed||level_changed)" in logic
 assert "if(sample_valid){" in sampler
 assert sampler.index("if(sample_valid){") < sampler.index("ot_sw_idf_input_sampled();")
 assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("vTaskDelayUntil(last_wake,period);")
