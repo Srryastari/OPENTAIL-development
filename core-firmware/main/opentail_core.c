@@ -2555,9 +2555,13 @@ static void led_task(void *p) {
            ot_pz_preview_cancel(&pz_preview);
            ot_fx_bank_stop_all(&fx_bank);
        }
+       const uint32_t render_now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       (void)ot_pz_preview_expire(&pz_preview,render_now_ms);
        physical=live_input_mask;
-       memcpy(local_outputs,om_outputs,sizeof(local_outputs));
-       memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));
+       if(pz_preview.active&&physical==0u)
+           memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));
+       else
+           memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
        combined=ot_tm_resolve(&local_tm,physical);
@@ -2574,6 +2578,11 @@ static void led_task(void *p) {
            if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
+       ot_om_output_t default_outputs[OT_OM_OUTPUTS];
+       ot_om_defaults(default_outputs);
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+           if(!ot_pz_to_fx_view(&local_panel[ch],ch,&local_outputs[ch]))
+               local_outputs[ch]=default_outputs[ch];
        /* One immutable snapshot of every requested custom palette per frame.
         * No locks or NVS access occur in the per-pixel/FX draw loops. */
        uint8_t palette_ids[OT_OM_OUTPUTS*OT_OM_ZONES];
