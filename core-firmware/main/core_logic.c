@@ -52,8 +52,17 @@ bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
     const bool sequence_changed=(raw_edge_sequence!=state->last_edge_sequence);
     const bool level_changed=(raw_asserted!=state->last_raw_asserted);
     /* If the GPIO level changed before its ISR timestamp is published, defer
-     * classifying a pending release until the coherent edge record arrives. */
+     * classifying the pending release until that edge record arrives. Keep
+     * deferring across subsequent sampler wakes; do not reuse a stale edge. */
+    if (state->awaiting_edge_record) {
+        if (!sequence_changed) {
+            state->last_raw_asserted=raw_asserted;
+            return state->asserted;
+        }
+        state->awaiting_edge_record=false;
+    }
     if (raw_asserted && state->release_pending && level_changed && !sequence_changed) {
+        state->awaiting_edge_record=true;
         state->last_raw_asserted=raw_asserted;
         return state->asserted;
     }
