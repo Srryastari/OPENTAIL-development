@@ -128,3 +128,82 @@ bool ot_om_journal_recover(const ot_om_journal_t *active,
         memcmp(r->previous,r->candidate,sizeof(r->previous))!=0;
     return true;
 }
+
+static uint32_t pz_crc(const ot_pz_journal_t *record){
+    ot_pz_journal_t copy=*record;copy.crc=0u;
+    return ot_cfg_crc32(&copy,sizeof(copy));
+}
+bool ot_pz_journal_build(ot_pz_journal_t *out,
+                         const ot_pz_controller_t *previous,
+                         const ot_pz_controller_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS]){
+    if(!out||!previous||!candidate||!previous_revision||!candidate_revision||
+       !ot_pz_valid(previous)||!ot_pz_valid(candidate))return false;
+    ot_pz_journal_t next={0};
+    next.magic=OT_PZ_JOURNAL_MAGIC;next.version=OT_PZ_JOURNAL_VERSION;
+    next.previous=*previous;next.candidate=*candidate;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(previous_revision[lane]==0u||
+           candidate_revision[lane]<previous_revision[lane]||
+           (memcmp(&previous->outputs[lane],&candidate->outputs[lane],
+                   sizeof(previous->outputs[lane]))!=0&&
+            candidate_revision[lane]<=previous_revision[lane]))return false;
+        next.previous_revision[lane]=previous_revision[lane];
+        next.candidate_revision[lane]=candidate_revision[lane];
+    }
+    next.crc=pz_crc(&next);*out=next;return true;
+}
+bool ot_pz_journal_valid(const ot_pz_journal_t *record){
+    if(!record||record->magic!=OT_PZ_JOURNAL_MAGIC||
+       record->version!=OT_PZ_JOURNAL_VERSION||
+       pz_crc(record)!=record->crc||
+       !ot_pz_valid(&record->previous)||!ot_pz_valid(&record->candidate))return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(record->previous_revision[lane]==0u||
+           record->candidate_revision[lane]<record->previous_revision[lane]||
+           (memcmp(&record->previous.outputs[lane],
+                   &record->candidate.outputs[lane],
+                   sizeof(record->previous.outputs[lane]))!=0&&
+            record->candidate_revision[lane]<=record->previous_revision[lane]))
+            return false;
+    }
+    return true;
+}
+bool ot_pz_journal_recover(const ot_pz_journal_t *active,
+                           const ot_pz_journal_t *staged,
+                           ot_pz_controller_t *live,
+                           ot_pz_pending_t *pending,
+                           uint16_t active_revision[OT_PZ_OUTPUTS],
+                           uint16_t staged_revision[OT_PZ_OUTPUTS]){
+    if(!live||!pending||!active_revision||!staged_revision||
+       (active&&!ot_pz_journal_valid(active))||
+       (staged&&!ot_pz_journal_valid(staged)))return false;
+    if(active&&staged){
+        /* A newer staged transaction must be based on the last fully written
+         * active candidate; reject cross-revision or torn journal pairs. */
+        if(memcmp(&active->candidate,&staged->previous,sizeof(active->candidate))!=0||
+           memcmp(active->candidate_revision,staged->previous_revision,
+                  sizeof(active->candidate_revision))!=0)return false;
+    }
+    const ot_pz_journal_t *record=staged?staged:active;
+    if(!record){
+        ot_pz_defaults(live);memset(&pending->candidate,0,sizeof(pending->candidate));
+        pending->pending=false;
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+            active_revision[lane]=staged_revision[lane]=1u;
+        return true;
+    }
+    /* The previous image remains authoritative until the quiet-window
+     * promoter completes. If stage was erased just before a reset, the active
+     * record still carries both images and recovery safely retries promotion. */
+    *live=record->previous;
+    pending->candidate=record->candidate;
+    pending->pending=staged!=NULL||
+        memcmp(&record->previous,&record->candidate,sizeof(record->previous))!=0;
+    memcpy(active_revision,record->previous_revision,sizeof(record->previous_revision));
+    memcpy(staged_revision,record->candidate_revision,sizeof(record->candidate_revision));
+    if(!pending->pending)
+        memcpy(active_revision,staged_revision,sizeof(record->candidate_revision));
+    return true;
+}
