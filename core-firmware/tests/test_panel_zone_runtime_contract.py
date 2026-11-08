@@ -45,7 +45,7 @@ assert "(uint8_t)OT_MAX_BRIGHTNESS" in ble
 assert "led_strip_" not in ble and "rmt_" not in ble
 
 # Panel/Zone active/staged records now live in the dedicated namespace.
-pz_load = core.split("static void pz_load(void)", 1)[1].split("static void pz_refresh_legacy_projection_locked", 1)[0]
+pz_load = core.split("static void pz_load(void)", 1)[1].split("static bool pz_save_controller_locked(", 1)[0]
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split("int ot_ble_panel_get(", 1)[0]
 pz_promote = core.split("static void pz_promote(", 1)[1].split("static void om_promote(", 1)[0]
 assert 'nvs_open("ot_zone_map"' in pz_load
