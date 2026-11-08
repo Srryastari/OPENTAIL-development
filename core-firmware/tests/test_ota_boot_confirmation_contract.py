@@ -94,13 +94,20 @@ ota = (Path(__file__).resolve().parents[1] / "main/ot_ota_update.c").read_text()
 sdkconfig = (Path(__file__).resolve().parents[1] / "sdkconfig.defaults").read_text()
 assert "CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y" in sdkconfig
 assert "bool ot_ota_confirm_boot(bool outputs_ready)" in ota
+assert "void ot_ota_watch_boot(void)" in ota
 assert "if(!outputs_ready)return false;" in ota
-assert "return e==ESP_OK;" in ota
-assert "if(state!=ESP_OTA_IMG_PENDING_VERIFY)return true;" in ota
-# Factory/non-OTA images have no OTA rollback state: don't poll flash every frame.
-assert "running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0" in ota
-assert "running->subtype>ESP_PARTITION_SUBTYPE_APP_OTA_15)return true;" in ota
-assert ota.index("running->subtype<ESP_PARTITION_SUBTYPE_APP_OTA_0") < ota.index("esp_ota_get_state_partition(running,&state)")
+assert "esp_ota_mark_app_valid_cancel_rollback()" in ota
+assert "esp_ota_mark_app_invalid_rollback_and_reboot()" in ota
+assert "esp_timer_start_once(boot_guard" in ota
+assert "OTA_BOOT_CONFIRM_DEADLINE_MS 120000u" in (Path(__file__).resolve().parents[1] / "main/ot_ota_update.h").read_text()
+assert "ot_ota_watch_boot();" in startup
+assert startup.index("const bool watchdog_ready=ot_sw_idf_configure();") < startup.index("ot_ota_watch_boot();")
+assert startup.index("ot_ota_watch_boot();") < startup.index("input_init()")
+# Non-OTA, already-valid and NOT_FOUND states are not treated as pending candidates.
+assert "ESP_ERR_NOT_FOUND" in ota
+assert "image_state!=ESP_OTA_IMG_PENDING_VERIFY" in ota
+assert "if(state==OTA_BOOT_EXPIRED)return false;" in ota
+assert "esp_timer_stop(boot_guard)" in ota
 # The HTTP/BLE renderer-ready flag must not be raised during strip creation;
 # it is raised by the render task only after its frame timer exists.
 assert "native_outputs_ready=outputs_ready" not in startup
