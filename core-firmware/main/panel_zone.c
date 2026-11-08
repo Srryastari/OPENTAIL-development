@@ -180,6 +180,69 @@ bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
     }
     return ot_pz_valid(out);
 }
+static bool pz_id_used(const ot_pz_controller_t *cfg,unsigned skip_lane,uint16_t id){
+    if(!cfg)return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(lane==skip_lane)continue;
+        const ot_pz_output_t *o=&cfg->outputs[lane];
+        for(unsigned p=0;p<o->panel_count;p++)if(o->panels[p].id==id)return true;
+        for(unsigned z=0;z<o->zone_count;z++)if(o->zones[z].id==id)return true;
+    }
+    return false;
+}
+static uint16_t pz_allocate_id(const ot_pz_controller_t *cfg,unsigned lane,
+                               const ot_pz_output_t *built,uint16_t seed){
+    for(uint32_t step=0;step<UINT16_MAX;step++){
+        uint16_t id=(uint16_t)(seed+step);
+        if(id==0u)continue;
+        bool used=pz_id_used(cfg,lane,id);
+        if(built){
+            for(unsigned p=0;p<built->panel_count;p++)if(built->panels[p].id==id)used=true;
+            for(unsigned z=0;z<built->zone_count;z++)if(built->zones[z].id==id)used=true;
+        }
+        if(!used)return id;
+    }
+    return 0u;
+}
+bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
+                              const ot_pz_controller_t *existing,
+                              ot_pz_output_t *out){
+    if(!legacy||!out||lane>=OT_PZ_OUTPUTS||!ot_om_valid(legacy))return false;
+    ot_pz_output_t next={0};
+    memcpy(next.name,legacy->name,OT_PZ_NAME_LEN);
+    next.active_pixels=legacy->active_pixels;next.color_order=legacy->color_order;
+    memcpy(next.rgb_gain,legacy->rgb_gain,sizeof(next.rgb_gain));
+    memcpy(next.white_gain,legacy->white_gain,sizeof(next.white_gain));
+    next.gamma_enabled=legacy->gamma_enabled;
+    next.panel_count=1u;next.zone_count=legacy->zone_count;
+    const uint16_t panel_id=pz_allocate_id(existing,lane,&next,(uint16_t)(0x8001u+lane));
+    if(!panel_id)return false;
+    next.panels[0].id=panel_id;next.panels[0].lane=(uint8_t)lane;
+    (void)snprintf(next.panels[0].name,sizeof(next.panels[0].name),"Panel %u",lane+1u);
+    next.panels[0].zone_count=legacy->zone_count;
+    uint32_t offset=0u;
+    for(unsigned z=0;z<legacy->zone_count;z++){
+        ot_pz_zone_t *zone=&next.zones[z];
+        zone->id=pz_allocate_id(existing,lane,&next,
+            (uint16_t)(0x4001u+lane*OT_PZ_MAX_ZONES_PER_OUTPUT+z));
+        if(!zone->id)return false;
+        zone->panel_id=panel_id;zone->role=legacy->zones[z].role;
+        memcpy(zone->name,legacy->zones[z].name,OT_PZ_NAME_LEN);
+        if(legacy->zones[z].pixels==0u){
+            zone->flags=OT_PZ_ZONE_FLAG_LEGACY_EMPTY;
+        }else{
+            zone->range_count=1u;
+            zone->ranges[0]=(ot_pz_range_t){(uint16_t)offset,legacy->zones[z].pixels};
+        }
+        offset+=legacy->zones[z].pixels;
+    }
+    if(offset!=legacy->active_pixels||!ot_pz_output_valid(&next,lane))return false;
+    if(existing){
+        ot_pz_controller_t check=*existing;check.outputs[lane]=next;
+        if(!ot_pz_valid(&check))return false;
+    }
+    *out=next;return true;
+}
 bool ot_pz_to_legacy(const ot_pz_output_t *src,unsigned lane,
                      ot_om_output_t *dst){
     if(!src||!dst||lane>=OT_PZ_OUTPUTS||
