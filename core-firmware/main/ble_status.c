@@ -20,6 +20,7 @@
 #include "fx_preset_record.h"
 #include "ble_config.h"
 #include "panel_zone_api.h"
+#include "panel_zone_protocol.h"
 #include "input_telemetry.h"
 #include "panel_zone_diag.h"
 #include "trigger_manager.h"

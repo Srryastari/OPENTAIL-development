@@ -59,6 +59,12 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/panel_zone.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
   tests/test_panel_zone_preview.c -o /tmp/ot-panel-zone-preview
 /tmp/ot-panel-zone-preview
+# 0xFE live geometry UPDATE framing, MTU sizing, sequence replay and reorder rejection.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/panel_zone_protocol.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_protocol.c \
+  -o /tmp/ot-panel-zone-protocol
+/tmp/ot-panel-zone-protocol
 python3 tests/test_panel_zone_runtime_contract.py
 # Request values are 0..255; CORE applies one reported safe ceiling at final RGB output.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
