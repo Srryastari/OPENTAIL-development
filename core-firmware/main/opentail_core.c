@@ -94,7 +94,7 @@ static void request_render_refresh(void){
 static bool input_sampler_ready=false;
 /* GPIO any-edge ISR records transitions even during a slow NVS write.
  * A quiet debounced window + unchanged epoch is required to promote. */
-static volatile uint32_t input_edge_epoch=0u;
+static DRAM_ATTR volatile uint32_t input_edge_epoch __attribute__((aligned(4)))=0u;
 /* GPIO ISR transition history. A sampler tick never has to infer whether
  * one or more turn edges happened between reads. Each lane is an SPSC ring:
  * ISR publishes head with release semantics; sampler consumes through tail. */
@@ -2403,9 +2403,12 @@ static void IRAM_ATTR input_edge_isr(void *arg){
             __atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE);
             const uint32_t depth=(uint32_t)(head+1u-tail);
             uint32_t high=__atomic_load_n(&turn_edge_high_water[slot],__ATOMIC_RELAXED);
-            while(depth>high&&!__atomic_compare_exchange_n(
-                    &turn_edge_high_water[slot],&high,depth,true,
-                    __ATOMIC_RELAXED,__ATOMIC_RELAXED)){}
+            /* One bounded best-effort high-water update; the existing ISR is
+             * the sole producer for this lane. A racing update may under-report
+             * the diagnostic maximum, but it can never extend ISR latency. */
+            if(depth>high)(void)__atomic_compare_exchange_n(
+                &turn_edge_high_water[slot],&high,depth,true,
+                __ATOMIC_RELAXED,__ATOMIC_RELAXED);
         }
         __atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE);
     }

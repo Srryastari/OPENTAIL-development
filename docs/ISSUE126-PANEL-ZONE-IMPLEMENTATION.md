@@ -87,7 +87,7 @@ No automatic visual sweep is implemented. The cumulative Fill-to-Index BLE comma
 - The ISR now rejects invalid input indices before pin/counter lookup and uses the existing IRAM-safe GPIO LL read.
 - Aligned DRAM 32-bit atomics count raw, normalized asserted and deasserted edges for IN1–IN5.
 - IN3/IN4 queue depth, high-water, overflow flag and cumulative overflow count are exposed through an authenticated read-only characteristic in the existing BLE service (UUID suffix 0x34). There is no new unauthenticated HTTP endpoint.
-- A compile-time lock-free assertion guards 32-bit ISR atomics. ESP32-S3 disassembly/IRAM-map confirmation remains a CI evidence gate.
+- A compile-time lock-free assertion guards 32-bit ISR atomics. The high-water update uses one bounded compare/exchange attempt (best-effort under contention) rather than an unbounded ISR retry loop. ESP32-S3 disassembly/IRAM-map confirmation remains a CI evidence gate.
 
 ### Brightness contract and bench protocol (Issue #126 section 6B)
 

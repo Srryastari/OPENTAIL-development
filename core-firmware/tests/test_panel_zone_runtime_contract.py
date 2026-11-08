@@ -101,7 +101,8 @@ assert 'nvs_open("ot_output_cfg"' not in pz_load
 
 # Trigger ISR telemetry is additive to the existing two SPSC turn queues.
 telemetry = (ROOT / "main/input_telemetry.h").read_text()
-for token in ("__atomic_always_lock_free", "input_raw_edges",
+for token in ("__atomic_always_lock_free", "input_edge_epoch __attribute__((aligned(4)))",
+              "input_raw_edges",
               "input_asserted_edges", "input_deasserted_edges",
               "turn_edge_high_water", "turn_edge_overflow_count",
               "input_index>=OT_IN_COUNT", "gpio_ll_get_level"):
@@ -112,6 +113,9 @@ for token in ("OT_INPUT_DIAG_INPUTS", "OT_INPUT_DIAG_WIRE_BYTES",
 assert "ot_input_diag_uuid" in ble
 assert "input_diag_access" in ble
 assert "conn!=active_conn||!authorized" in ble
+assert "while(depth>high" not in core
+assert "if(depth>high)(void)__atomic_compare_exchange_n" in core
+assert "DRAM_ATTR volatile uint32_t input_edge_epoch" in core
 
 # Full 8-bit requests are accepted, then limited once at the final CORE RGB boundary.
 board = (ROOT / "main/board_config.h").read_text()
