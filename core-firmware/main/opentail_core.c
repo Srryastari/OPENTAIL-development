@@ -1716,11 +1716,12 @@ static bool read_turn_input_snapshot(unsigned input_index,bool *asserted,
         const uint32_t before=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);
         if(before&1u)continue;
         const uint32_t now=(uint32_t)esp_timer_get_time();
-        const int level=gpio_get_level(input_pin[input_index]);
+        const int level_before=gpio_get_level(input_pin[input_index]);
         const uint32_t edge=__atomic_load_n(&turn_edge_us[slot],__ATOMIC_RELAXED);
+        const int level_after=gpio_get_level(input_pin[input_index]);
         const uint32_t after=__atomic_load_n(&turn_edge_seq[slot],__ATOMIC_ACQUIRE);
-        if(before==after&&!(after&1u)){
-            *asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+        if(before==after&&!(after&1u)&&level_before==level_after){
+            *asserted=OT_INPUT_ACTIVE_LOW?(level_after==0):(level_after!=0);
             *sample_us=now;
             *edge_us=edge;
             *edge_sequence=after;
