@@ -7,8 +7,13 @@
 
 #define TEST_STABLE_SAMPLES 4u
 
+static bool sample_at(ot_signal_debouncer_t *state, bool raw,
+                      uint32_t now_ms, uint32_t raw_edge_ms) {
+    return ot_signal_debouncer_update(state,raw,now_ms,raw_edge_ms,
+                                      TEST_STABLE_SAMPLES);
+}
 static bool sample(ot_signal_debouncer_t *state, bool raw, uint32_t now_ms) {
-    return ot_signal_debouncer_update(state,raw,now_ms,TEST_STABLE_SAMPLES);
+    return sample_at(state,raw,now_ms,now_ms);
 }
 
 static void assertion_keeps_four_sample_qualification(void) {
@@ -90,8 +95,18 @@ static void timer_wrap_and_scheduler_jitter(void) {
     assert(sample(&d,false,500u));
     const uint32_t jittered[]={507u,523u,547u,609u,800u,899u};
     for(unsigned i=0;i<sizeof(jittered)/sizeof(jittered[0]);i++)
-        assert(sample(&d,false,jittered[i]));
-    assert(!sample(&d,false,900u));
+        assert(sample_at(&d,false,jittered[i],500u));
+    assert(!sample_at(&d,false,900u,500u));
+
+    /* The sampler may run after a raw reassertion. Use the ISR edge timestamp
+     * to distinguish a 399ms gap from a real 401ms inactive interval. */
+    ot_signal_debouncer_init(&d,true);
+    assert(sample_at(&d,false,500u,500u));
+    assert(sample_at(&d,true,912u,899u)); /* sampled 412ms later; edge was 399ms */
+    assert(d.asserted&&!d.release_pending);
+    ot_signal_debouncer_init(&d,true);
+    assert(sample_at(&d,false,500u,500u));
+    assert(!sample_at(&d,true,912u,901u)); /* edge was 401ms: prior state expired */
 }
 
 static void independent_turns_and_hazards(void) {
