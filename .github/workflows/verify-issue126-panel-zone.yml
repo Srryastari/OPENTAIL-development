@@ -27,7 +27,9 @@ jobs:
           git merge-base --is-ancestor 66c2d9c843a0b434f9399811110e42d7e26c4692 HEAD
       - name: Verify firmware-only scope and exact Panel/Zone source contract
         run: |
-          python3 core-firmware/tests/test_panel_zone_runtime_contract.py
+          cd core-firmware
+          python3 tests/test_panel_zone_runtime_contract.py
+          cd ..
           python3 - <<'PY'
           import subprocess
           paths=subprocess.check_output(
