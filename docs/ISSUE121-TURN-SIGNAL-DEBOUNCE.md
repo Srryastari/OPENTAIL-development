@@ -8,15 +8,22 @@ sampler and four stable-sample assertion qualification remain unchanged.
 Only turn-signal deassertion is extended: the logical input remains asserted
 until 400ms of continuous inactive time have elapsed.
 
-The GPIO ISR timestamps each Left/Right edge with the ESP-IDF monotonic clock.
+The GPIO ISR timestamps each Left/Right edge and publishes it with an
+odd/even sequence counter. The sampler takes a bounded seqlock snapshot of
+the raw GPIO level, edge timestamp and sequence; a torn snapshot is discarded
+and does not feed watchdog progress. This prevents a GPIO edge racing the
+timestamp read from creating an impossible future edge time.
+
 The first inactive raw sample starts the timer from its captured falling-edge
 timestamp. A reassertion observed by the sampler uses its captured rising-edge
 timestamp, so scheduler delay cannot turn a 399ms inactive gap into a false
-release. Reassertion before the 400ms deadline cancels the pending release and
-leaves the logical mask asserted, so the renderer receives no false
-falling/rising edge between flashes. If the signal remains inactive through
-the deadline, the old assertion releases; a later assertion must again pass
-four stable samples.
+release. If a complete reassert-and-drop pulse occurs between sampler wakes,
+the newer falling-edge sequence restarts the continuous-inactive timer.
+Reassertion before the 400ms deadline cancels the pending release and leaves
+the logical mask asserted, so the renderer receives no false falling/rising
+edge between flashes. If the signal remains inactive through the deadline,
+the old assertion releases; a later assertion must again pass four stable
+samples.
 
 Timing uses the low 32 bits of `esp_timer_get_time()` as monotonic microseconds.
 The 400,000µs interval is safely shorter than the 32-bit wrap period (about
@@ -45,12 +52,13 @@ python3 tests/test_trigger_runtime_contract.py
 bash tests/run-host-tests.sh
 ```
 
-The deterministic test uses an injected `uint32_t` clock and covers four
+The deterministic test uses an injected `uint32_t` microsecond clock and covers four
 sample assertion, 100/200/300/399ms flash gaps, 400ms and longer inactivity,
 reassertion before and at expiry, repeated flashes without a logical falling
 edge, independent Left/Right and Hazards, all 256 boot masks, unchanged
 non-turn timing, Brake/Parking and Reverse arbitration, 32-bit microsecond
-rollover and delayed sampler wake using the captured raw-edge timestamp. The
+rollover, delayed sampler wake, torn-snapshot rejection and an unseen pulse
+between sampler wakes using captured raw-edge sequence. The
 complete CORE host runner also covers the existing Effects, BLE, STOP, NVS
 and watchdog suites.
 
