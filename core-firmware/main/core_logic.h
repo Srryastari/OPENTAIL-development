@@ -20,19 +20,19 @@ typedef struct {
 
 /* Turn-only release hold. now_ms is the sampler's monotonic millisecond
  * clock; raw_edge_ms is the latest GPIO edge timestamp captured in the ISR.
- * Both are uint32_t milliseconds, so short elapsed intervals remain wrap-safe.
+ * Both are uint32_t microseconds, so short elapsed intervals remain wrap-safe.
  * Assertion still requires the existing four stable samples. */
-#define OT_TURN_RELEASE_HOLD_MS 400u
+#define OT_TURN_RELEASE_HOLD_US 400000u
 typedef struct {
     bool asserted;
     bool release_pending;
     uint8_t assertion_ticks;
-    uint32_t inactive_since_ms;
+    uint32_t inactive_since_us;
 } ot_signal_debouncer_t;
 
 void ot_signal_debouncer_init(ot_signal_debouncer_t *state, bool initial_asserted);
 bool ot_signal_debouncer_update(ot_signal_debouncer_t *state, bool raw_asserted,
-                                uint32_t now_ms, uint32_t raw_edge_ms,
+                                uint32_t now_us, uint32_t raw_edge_us,
                                 unsigned stable_ticks);
 typedef enum { OT_DEMO_OFF=0, OT_DEMO_SOLID=1, OT_DEMO_CHASE=2 } ot_demo_mode_t;
 typedef struct {ot_demo_mode_t mode; ot_rgb_t color; uint8_t brightness; } ot_demo_t;
