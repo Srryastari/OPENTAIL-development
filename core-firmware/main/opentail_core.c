@@ -594,15 +594,16 @@ oom:
     return NULL;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_pz_controller_t panel_copy;
+    ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
     uint16_t active_revisions[OT_OM_OUTPUTS],staged_revisions[OT_OM_OUTPUTS];
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
-    memcpy(active_revisions,om_active_revision,sizeof(active_revisions));
-    memcpy(staged_revisions,om_revision,sizeof(staged_revisions));
-    persistent=om_persistent&&!config_pending;tm=tm_profile;
+    panel_copy=pz_outputs;config_pending=pz_deferred.pending||om_deferred.pending;
+    memcpy(active_revisions,pz_active_revision,sizeof(active_revisions));
+    memcpy(staged_revisions,pz_revision,sizeof(staged_revisions));
+    persistent=pz_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -617,9 +618,13 @@ static esp_err_t om_get(httpd_req_t *r){
         }
     }
     portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(!ot_pz_to_legacy(&panel_copy.outputs[lane],lane,&copy[lane]))
+            return respond_err(r,409,"hierarchical Panel/Zone map cannot be represented by legacy Output v1");
     cJSON *obj=cJSON_CreateObject();
     if(!obj)return respond_err(r,500,"out of memory");
     if(!cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION) ||
+       !cJSON_AddNumberToObject(obj,"panel_zone_schema",OT_PZ_SCHEMA_VERSION) ||
        !cJSON_AddBoolToObject(obj,"saved_on_device",persistent) ||
        !cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending) ||
        !cJSON_AddBoolToObject(obj,"bench_only",true) ||
@@ -634,8 +639,8 @@ static esp_err_t om_get(httpd_req_t *r){
        !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
         cJSON_Delete(obj);return respond_err(r,500,"out of memory");
     }
-    /* Schema revision stays 2; these arrays expose per-output durable edit
-     * revisions, with outputs[] reflecting ONLY the active geometry. */
+    /* Legacy outputs[] is emitted only when the active v3 model can be
+     * represented losslessly as one contiguous panel per physical output. */
     cJSON *rev_active=cJSON_AddArrayToObject(obj,"active_config_revisions");
     cJSON *rev_staged=cJSON_AddArrayToObject(obj,"config_revisions");
     if(!rev_active||!rev_staged){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
@@ -714,14 +719,20 @@ static esp_err_t om_post(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    memcpy(next_all,om_outputs,sizeof(next_all));
+    const ot_pz_controller_t active_panel=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(!ot_pz_to_legacy(&active_panel.outputs[lane],lane,&next_all[lane])){
+            xSemaphoreGive(om_write_mutex);
+            return respond_err(r,409,"legacy Output v1 cannot modify a multi-panel or multi-range mapping");
+        }
+    }
     if(busy){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stop shows and release all 12V triggers before saving output mapping");}
     portENTER_CRITICAL(&state_lock);
-    const bool stale=om_revision[index]!=(uint16_t)expected_rev;
-    const bool exhausted=om_revision[index]==UINT16_MAX;
+    const bool stale=pz_revision[index]!=(uint16_t)expected_rev;
+    const bool exhausted=pz_revision[index]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stale or exhausted output edit revision");}
     /* Idempotent REST save is a readback, not a new configuration revision. */
@@ -731,11 +742,6 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
-    portENTER_CRITICAL(&state_lock);
-    memcpy(om_deferred.outputs,next_all,sizeof(next_all));
-    om_deferred.pending=true;
-    om_persistent=true;om_revision[index]++;
-    portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return om_get(r);
 }
