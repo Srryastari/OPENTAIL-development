@@ -147,6 +147,7 @@ static ot_ble_fx_packet_t ble_fx_request={0};
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for unchanged FX/v1 code. */
 static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v3. */
 static ot_pz_pending_t pz_deferred;
+static ot_pz_preview_t pz_preview;
 static ot_pz_diag_state_t pz_diag;
 static bool pz_persistent=false;
 static uint16_t pz_revision[OT_PZ_OUTPUTS]={1u,1u};
@@ -2077,16 +2078,19 @@ static bool strip_init(void){
 /* Low-priority durable promoter. The independent input sampler never waits
  * for NVS. While staged exists, boot always restores its previous configuration
  * even when active_v3 has been written and power is cut during promotion. */
-static bool config_activation_idle(uint32_t epoch){
-    if(tm_gpio_input_mask()!=0u ||
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch)return false;
+static bool config_activation_idle(uint32_t epoch,bool allow_show){
+    const uint8_t instantaneous=tm_gpio_input_mask();
+    const uint32_t observed_epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    if(instantaneous!=0u||observed_epoch!=epoch)return false;
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    const bool idle=input_quiet_samples>=OT_DEBOUNCE_TICKS &&
-        live_input_mask==0u &&
+    const bool quiet=ot_pz_activation_inputs_quiet(
+        instantaneous,live_input_mask,input_quiet_samples,OT_DEBOUNCE_TICKS,
+        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE),epoch);
+    const bool idle=quiet &&
         !(before_deadline(now,sim_deadline)&&sim_mask!=0u) &&
         !(before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) &&
-        !show_window(now);
+        (allow_show||!show_window(now));
     portEXIT_CRITICAL(&state_lock);
     return idle&&tm_gpio_input_mask()==0u &&
         __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch;
@@ -2144,7 +2148,7 @@ static void tm_promote(uint32_t epoch){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("trigger staging revision mismatch");return;
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     if(staged){
         if(!config_write_active(h,&stage,sizeof(stage))||
            !config_activation_idle(epoch)){nvs_close(h);return;}
@@ -2157,7 +2161,7 @@ static void tm_promote(uint32_t epoch){
     }
     /* GPIO can change during NVS erase; no RAM swap occurs unless the
      * complete durable boundary and the original edge epoch remain quiet. */
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
@@ -2194,7 +2198,7 @@ static void pz_promote(uint32_t epoch){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("Panel/Zone v3 staging revision mismatch");return;
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
     if(staged){
         if(!config_write_panel_active(h,&stage)||
            !config_activation_idle(epoch)){nvs_close(h);return;}
@@ -2204,7 +2208,7 @@ static void pz_promote(uint32_t epoch){
             ot_st_set_fault("Panel/Zone v3 journal finalization failed");return;
         }
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
@@ -2213,6 +2217,7 @@ static void pz_promote(uint32_t epoch){
         pz_outputs=stage.candidate;
         memcpy(pz_active_revision,stage.candidate_revision,sizeof(pz_active_revision));
         pz_deferred.pending=false;pz_persistent=true;
+        pz_preview.active=false;
         pz_refresh_legacy_projection_locked();
         applied=true;
     }
@@ -2244,7 +2249,7 @@ static void om_promote(uint32_t epoch){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("output staging revision mismatch");return;
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     if(staged){
         if(!config_write_active(h,&stage,sizeof(stage))||
            !config_activation_idle(epoch)){nvs_close(h);return;}
@@ -2253,7 +2258,7 @@ static void om_promote(uint32_t epoch){
             ot_st_set_fault("output journal finalization failed");return;
         }
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
@@ -2282,10 +2287,12 @@ static void config_activation_task(void *unused){
             panel_pending=pz_deferred.pending;
             portEXIT_CRITICAL(&state_lock);
             const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
-            if(config_activation_idle(epoch)){
-                if(trigger_pending)tm_promote(epoch);
-                else if(panel_pending)pz_promote(epoch);
-                else if(output_pending)om_promote(epoch);
+            if(trigger_pending){
+                if(config_activation_idle(epoch,false))tm_promote(epoch);
+            }else if(panel_pending){
+                if(config_activation_idle(epoch,true))pz_promote(epoch);
+            }else if(output_pending){
+                if(config_activation_idle(epoch,false))om_promote(epoch);
             }
             xSemaphoreGive(om_write_mutex);
         }
