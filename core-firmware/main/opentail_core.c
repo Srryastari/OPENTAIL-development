@@ -90,7 +90,7 @@ static bool input_sampler_ready=false;
  * A quiet debounced window + unchanged epoch is required to promote. */
 static volatile uint32_t input_edge_epoch=0u;
 /* ISR-captured timestamps distinguish a real late reassertion from sampler jitter. */
-static DRAM_ATTR volatile uint32_t turn_edge_ms[2]={0u,0u};
+static DRAM_ATTR volatile uint32_t turn_edge_us[2]={0u,0u};
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
 static bool config_promotion_ready=false;
@@ -1668,8 +1668,8 @@ static bool wifi_ap_init(void) {
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     if(input_index==2u || input_index==3u){
-        const uint32_t edge_ms=(uint32_t)(esp_timer_get_time()/1000LL);
-        __atomic_store_n(&turn_edge_ms[input_index-2u],edge_ms,__ATOMIC_RELAXED);
+        const uint32_t edge_us=(uint32_t)esp_timer_get_time();
+        __atomic_store_n(&turn_edge_ms[input_index-2u],edge_us,__ATOMIC_RELAXED);
     }
     (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
 }
@@ -1931,9 +1931,9 @@ static void input_sampler_task(void *arg){
         /* Use raw GPIO levels for turn release timing, not the 40ms settled
          * falling edge. Only IN3/IN4 get the 400ms hold; all other channels
          * retain the ordinary four-sample debounce above. */
-        const uint32_t sample_ms=(uint32_t)(esp_timer_get_time()/1000LL);
-        const uint32_t left_edge_ms=__atomic_load_n(&turn_edge_ms[0],__ATOMIC_ACQUIRE);
-        const uint32_t right_edge_ms=__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE);
+        const uint32_t sample_us=(uint32_t)esp_timer_get_time();
+        const uint32_t left_edge_us=__atomic_load_n(&turn_edge_ms[0],__ATOMIC_ACQUIRE);
+        const uint32_t right_edge_us=__atomic_load_n(&turn_edge_ms[1],__ATOMIC_ACQUIRE);
         const bool left=ot_signal_debouncer_update(&turn_signal[0],levels[2],
             sample_ms,left_edge_ms,OT_DEBOUNCE_TICKS);
         const bool right=ot_signal_debouncer_update(&turn_signal[1],levels[3],
