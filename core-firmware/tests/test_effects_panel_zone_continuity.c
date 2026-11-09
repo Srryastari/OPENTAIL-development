@@ -425,8 +425,7 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(memcmp(&delete_reference.state[0][1],&probe->state[0][0],
                   sizeof(probe->state[0][0]))==0);
     assert(probe->prior_zone_id[0][0]==original_zone0);
-    assert(probe->resolved_bank_index[0][0]==0u||
-           probe->resolved_bank_index[0][0]==1u);
+    assert(probe->resolved_bank_index[0][0]==0u);
 }
 
 static void test_committing_and_sync_fault_admission(
@@ -508,6 +507,6 @@ int main(void){
     test_committing_and_sync_fault_admission(&active);
     test_stop_and_physical_priority(&bank);
 
-    puts("PASS FX-PZ-01..10: independent zone/output renderer state, discontiguous logical ranges, repeated preview updates, simulated commit/cancel phase continuity, unaffected reference frames, COMMITTING/sync-fault rejection, STOP and physical trigger priority (host simulated; no NVS/RMT/optics)");
+    puts("PASS FX-PZ: independent zone/output state, discontiguous ranges, live preview, stable identity bank/state migration through reorder/delete/cancel, COMMITTING/sync-fault rejection, STOP and physical priority (host simulated; no NVS/RMT/optics)");
     return 0;
 }
