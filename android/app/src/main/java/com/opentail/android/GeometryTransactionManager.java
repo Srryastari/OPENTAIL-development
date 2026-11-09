@@ -189,7 +189,8 @@ final class GeometryTransactionManager {
             targetRevision=-1;syncUncertain=false;lastError=null;state=State.READY;
             return true;
         }
-        if(state==State.COMMIT_REQUESTED||state==State.COMMITTING)return false;
+        if(status.state==PanelPreviewProtocol.STATE_ACTIVE &&
+           (state==State.COMMIT_REQUESTED||state==State.COMMITTING))return false;
         lastConfirmed=copy(authoritative);
         candidate=null;pendingPacket=null;pendingSequence=0;sessionId=0;
         targetRevision=-1;syncUncertain=false;lastError=null;state=State.READY;

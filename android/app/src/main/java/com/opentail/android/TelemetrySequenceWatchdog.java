@@ -104,6 +104,15 @@ final class TelemetrySequenceWatchdog {
         return decision(last);
     }
 
+    synchronized Decision markReconciliationFailed(String why) {
+        warning=true;
+        message=why==null?"Authoritative geometry reconciliation did not match CORE status":why;
+        if(last!=null && last.state==PanelPreviewProtocol.STATE_ACTIVE && last.sessionId!=0) {
+            hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId;
+        }
+        return decision(last);
+    }
+
     /**
      * Clear only after a stable, verified authoritative map/status read.
      * Hard faults cannot be cleared on the same session that latched them.

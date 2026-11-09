@@ -1700,14 +1700,19 @@ final class BleDiscovery {
                 snapshot.activeRevision==current.renderRevision&&
                 snapshot.stagedRevision==current.stagedRevision&&
                 snapshot.pending==current.configPending;
-            boolean reconciled=stable&&panelWatchdog.reconcile(current,true);
+            boolean managerReconciled=true;
             if(stable) {
                 GeometryTransactionManager manager=panelGeometryManagers[current.lane];
                 GeometryTransactionManager.Snapshot confirmed=new GeometryTransactionManager.Snapshot(
                     snapshot.lane,snapshot.activeRevision,snapshot.wire);
                 if(manager==null)panelGeometryManagers[current.lane]=new GeometryTransactionManager(confirmed);
-                else manager.reconcile(current,confirmed);
+                else managerReconciled=manager.reconcile(current,confirmed);
             }
+            boolean reconciled=stable&&managerReconciled&&panelWatchdog.reconcile(current,true);
+            TelemetrySequenceWatchdog.Decision reconciliationFailure=null;
+            if(stable&&!managerReconciled)
+                reconciliationFailure=panelWatchdog.markReconciliationFailed(
+                    "CORE telemetry sequence/candidate CRC does not match the authoritative geometry snapshot");
             panelReconciliationPending=false;
             panelReconciliationSnapshotVerified=false;
             if(reconciled) {
@@ -1717,6 +1722,10 @@ final class BleDiscovery {
                 panelReconciliationAttempts++;
                 panelReconciliationPending=true;
                 panelSnapshotQueuedLane=current.lane;
+            } else if(reconciliationFailure!=null) {
+                panelNotify(current,reconciliationFailure);
+                if(reconciliationFailure.hardFault)
+                    panelBeginReconciliation(owner,current,reconciliationFailure);
             }
             pumpQueue();return;
         }

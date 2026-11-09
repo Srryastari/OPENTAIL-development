@@ -115,6 +115,20 @@ public class GeometryTransactionManagerTest {
         assertTrue(manager.syncUncertain());
     }
 
+    @Test public void cancelledTerminalSnapshotReconcilesOutstandingCommitRequest() {
+        byte[] original={1,2,3};
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,original));
+        assertTrue(manager.requestBegin());
+        PanelPreviewProtocol.Status active=status(1,94,0,0x10,7,7,7,0,0,0);
+        assertTrue(manager.acceptBegin(active));
+        assertNotNull(manager.requestCommit(active));
+        assertEquals(GeometryTransactionManager.State.COMMIT_REQUESTED,manager.state());
+        PanelPreviewProtocol.Status cancelled=status(4,94,0,0x10,7,7,7,0,0,0);
+        assertTrue(manager.reconcile(cancelled,new GeometryTransactionManager.Snapshot(0,7,original)));
+        assertEquals(GeometryTransactionManager.State.READY,manager.state());
+    }
+
     @Test public void committingRejectDoesNotAbortOrDemoteActiveCommit() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1}));

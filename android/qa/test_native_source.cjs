@@ -1145,6 +1145,7 @@ assert(panelWatchdog.includes('missingCount>last.missingCount') &&
        panelWatchdog.includes('reconcile(') &&
        panelWatchdog.includes('hardFaultSession') &&
        panelWatchdog.includes('markMalformedTelemetry') &&
+       panelWatchdog.includes('markReconciliationFailed') &&
        panelWatchdog.includes('hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId'),
        'Telemetry watchdog must detect sequence anomalies and require authoritative reconciliation');
 for (const state of ['READY','BEGINNING','ACTIVE','UPDATE_PENDING','COMMIT_REQUESTED','COMMITTING','RECONCILING','ERROR']) {
