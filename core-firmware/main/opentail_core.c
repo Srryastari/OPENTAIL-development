@@ -1001,7 +1001,7 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     ot_pz_controller_t candidate;ot_om_output_t current={0};bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
     candidate=pz_outputs;
-    busy=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
         pz_preview.active||raw_active||live_input_mask||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
@@ -1063,7 +1063,7 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool accepted=false;
     portENTER_CRITICAL(&state_lock);
-    const bool pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     const bool capacity_ok=pz_outputs.outputs[lane].active_pixels==pixel_capacity;
     accepted=!pending&&!pz_preview.active&&capacity_ok&&
         pz_revision[lane]==base_revision&&pz_active_revision[lane]==base_revision&&
@@ -1088,7 +1088,7 @@ int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
     candidate=pz_preview;
     active_revision=pz_active_revision[lane];
     staged_revision=pz_revision[lane];
-    pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     portEXIT_CRITICAL(&state_lock);
     valid=!pending&&staged_revision==base_revision&&
         active_revision==base_revision&&
@@ -1115,7 +1115,7 @@ int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision){
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool valid=false;
     portENTER_CRITICAL(&state_lock);
-    const bool pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     valid=!pending&&pz_revision[lane]==base_revision&&
         pz_active_revision[lane]==base_revision&&
         ot_pz_preview_heartbeat(&pz_preview,lane,base_revision,now_ms);
@@ -1165,7 +1165,7 @@ int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
     bool accepted=false,no_change=false;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     portENTER_CRITICAL(&state_lock);
-    const bool pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
         pz_preview_commit_requested||pz_preview_commit_worker_active;
     accepted=!pending&&pz_preview.active&&!pz_preview.committing&&
        pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
@@ -1356,7 +1356,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     ot_pz_controller_t candidate;bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
     candidate=pz_outputs;
-    busy=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||pz_preview.active||
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||pz_preview.active||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
     stale=pz_revision[lane]!=base_revision;
