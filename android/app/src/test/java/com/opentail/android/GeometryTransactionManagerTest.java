@@ -140,4 +140,19 @@ public class GeometryTransactionManagerTest {
         assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
         assertArrayEquals(new byte[]{1},manager.lastConfirmed().wire);
     }
+
+    @Test public void committingRejectionDoesNotMaskTerminalCommitStatus() {
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,95,0,0x55,7,7,7,0,0,0)));
+        assertNotNull(manager.requestCommit(status(1,95,0,0x55,7,7,7,0,0,0)));
+        manager.observeStatus(status(2,95,0,0x55,7,8,7,5,1,5));
+        assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
+        // Firmware retains the last rejection diagnostic after COMMITTING.
+        // A stale error must not mask the authoritative terminal COMMITTED state.
+        manager.observeStatus(status(3,95,0,0x55,8,8,8,5,1,5));
+        assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
+        assertArrayEquals(new byte[]{1,2,3},manager.lastConfirmed().wire);
+    }
 }
