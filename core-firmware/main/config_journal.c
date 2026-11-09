@@ -216,12 +216,17 @@ static bool pz_pair_revisions_valid(
     const uint16_t previous[OT_PZ_OUTPUTS],
     const uint16_t candidate[OT_PZ_OUTPUTS]){
     if(!previous||!candidate)return false;
-    bool changed=false;
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         if(previous[lane]==0u||candidate[lane]<previous[lane])return false;
-        if(candidate[lane]>previous[lane])changed=true;
-    }
-    return changed;
+    return true;
+}
+static bool pz_pair_has_revision_change(
+    const uint16_t previous[OT_PZ_OUTPUTS],
+    const uint16_t candidate[OT_PZ_OUTPUTS]){
+    if(!previous||!candidate)return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(candidate[lane]>previous[lane])return true;
+    return false;
 }
 static uint32_t pz_map_journal_crc(const ot_pz_map_journal_t *record){
     ot_pz_map_journal_t copy=*record;copy.crc=0u;
@@ -316,7 +321,8 @@ bool ot_pz_pair_intent_build(ot_pz_pair_intent_t *out,uint32_t transaction_id,
                          const uint16_t previous_revision[OT_PZ_OUTPUTS],
                          const uint16_t candidate_revision[OT_PZ_OUTPUTS]){
     if(!out||!transaction_id||
-       !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
+       !pz_pair_revisions_valid(previous_revision,candidate_revision)||
+       !pz_pair_has_revision_change(previous_revision,candidate_revision))return false;
     ot_pz_pair_intent_t next={0};
     next.magic=OT_PZ_PAIR_INTENT_MAGIC;
     next.version=OT_PZ_PAIR_SCHEMA_VERSION;
@@ -329,7 +335,8 @@ bool ot_pz_pair_intent_valid(const ot_pz_pair_intent_t *record){
     return record&&record->magic==OT_PZ_PAIR_INTENT_MAGIC&&
         record->version==OT_PZ_PAIR_SCHEMA_VERSION&&record->transaction_id!=0u&&
         pz_pair_intent_crc(record)==record->crc&&
-        pz_pair_revisions_valid(record->previous_revision,record->candidate_revision);
+        pz_pair_revisions_valid(record->previous_revision,record->candidate_revision)&&
+        pz_pair_has_revision_change(record->previous_revision,record->candidate_revision);
 }
 static const ot_pz_map_journal_t *pz_select_map_transaction(
     const ot_pz_map_journal_t *active,const ot_pz_map_journal_t *staged,
