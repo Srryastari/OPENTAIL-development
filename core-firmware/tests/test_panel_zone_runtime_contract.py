@@ -89,15 +89,65 @@ assert "ot_pz_tx_parse_update" in protocol
 assert "OT_PZ_PREVIEW_LEASE_MS 5000u" in (ROOT / "main/panel_zone.h").read_text()
 assert "OT_PZ_TX_OP_HEARTBEAT" in protocol_header
 
-# Panel/Zone active/staged records now live in the dedicated namespace.
-pz_load = core.split("static void pz_load(void)", 1)[1].split("static bool pz_save_controller_locked(", 1)[0]
-pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split("int ot_ble_panel_get(", 1)[0]
-pz_promote = core.split("static void pz_promote(", 1)[1].split("static void om_promote(", 1)[0]
-assert 'nvs_open("ot_zone_map"' in pz_load
-assert 'nvs_open("ot_zone_map"' in pz_save
-assert 'nvs_open("ot_zone_map"' in pz_promote
-assert "pz_stage_legacy_migration" in core
-assert 'nvs_open("ot_output_cfg"' not in pz_load
+# Runtime v4 pair storage: hardware-only lanes in ot_output_cfg and map-only
+# Panel/Zone geometry in ot_zone_map. The same portable state machine is called
+# by CORE and fault-injected by the host suite.
+assert '#include "panel_zone_pair_store.h"' in core
+pz_load = core.split("static void pz_load(void)", 1)[1].split(
+    "static bool pz_save_controller_locked(", 1)[0]
+for token in ("ot_pz_pair_store_snapshot", "ot_pz_pair_store_recover",
+              "ot_pz_pair_store_begin", "pz_load_legacy_snapshot",
+              "pz_pair_commit_pending", "om_deferred.pending=false"):
+    assert token in pz_load, token
+legacy_load = core.split("static bool pz_load_legacy_snapshot(", 1)[1].split(
+    "static void pz_load(void)", 1)[0]
+assert 'nvs_open("ot_zone_map",NVS_READONLY' in legacy_load
+assert "ot_pz_journal_recover(" in legacy_load
+assert "pz_reset_tombstone_valid" in legacy_load
+assert "OT_PZ_RESET_TOMBSTONE_KEY" in legacy_load
+assert "nvs_set_blob(" not in legacy_load and "nvs_commit(" not in legacy_load
+
+pair_store = (ROOT / "main/panel_zone_pair_store.c").read_text()
+pair_header = (ROOT / "main/panel_zone_pair_store.h").read_text()
+for token in ("ot_pz_pair_store_begin", "ot_pz_pair_store_finish",
+              "ot_pz_pair_store_recover", "ot_pz_pair_store_mark_reset",
+              "OT_PZ_LANE_KEY_STAGED", "OT_PZ_MAP_KEY_STAGED",
+              "OT_PZ_PAIR_INTENT_KEY", "OT_PZ_LANE_KEY_ACTIVE",
+              "OT_PZ_MAP_KEY_ACTIVE"):
+    assert token in pair_store or token in pair_header, token
+assert pair_store.index("OT_PZ_LANE_KEY_STAGED") < pair_store.index(
+    "OT_PZ_MAP_KEY_STAGED") < pair_store.index("OT_PZ_PAIR_INTENT_KEY")
+assert pair_store.index("OT_PZ_LANE_KEY_ACTIVE") < pair_store.index(
+    "OT_PZ_MAP_KEY_ACTIVE") < pair_store.index("OT_PZ_LANE_KEY_STAGED)")
+for phase in range(1, 9):
+    assert f"phase_context,{phase}u" in pair_store or f"phase_context,{phase}u" in pair_store
+
+pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
+    "/* Legacy output writes", 1)[0]
+assert "ot_pz_pair_store_begin" in pz_save
+assert "pz_pair_commit_pending" in pz_save
+assert "reset_mask" in pz_save
+assert "nvs_open(" not in pz_save and "nvs_set_blob(" not in pz_save
+panel_promotion = core.split("static void pz_promote(uint32_t epoch){", 1)[1].split(
+    "static void om_promote(uint32_t epoch){", 1)[0]
+for token in ("ot_pz_pair_store_finish", "ot_pz_pair_store_snapshot",
+              "ot_pz_pair_store_recover", "ot_pz_join",
+              "config_activation_idle(epoch,true)",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "live_input_mask==0u", "tm_gpio_input_mask()==0u",
+              "input_edge_epoch,__ATOMIC_ACQUIRE", "pz_outputs=recovered_pending.candidate"):
+    assert token in panel_promotion, token
+assert "config_recovery_fault=true" in panel_promotion
+assert "nvs_open(" not in panel_promotion
+
+# Phase telemetry is observable for a hardware relay/logger; this is a marker,
+# not a claim that the physical endurance test has been run.
+assert "PZ_PAIR_PHASE phase=%u transaction=%08lx" in core
+status_endpoint = core.split("static esp_err_t status_get(", 1)[1].split(
+    "static esp_err_t caps_get(", 1)[0]
+for token in ("config_commit_phase", "config_commit_transaction_id",
+              "config_commit_pending"):
+    assert token in status_endpoint, token
 
 # Trigger ISR telemetry is additive to the existing two SPSC turn queues.
 telemetry = (ROOT / "main/input_telemetry.h").read_text()
@@ -140,10 +190,12 @@ for token in ("opcode==0xffu&&lane==0xaau", "opcode==0xffu&&lane==0xabu",
               "ot_ble_panel_reset_challenge", "ot_ble_panel_reset_confirm"):
     assert token in ble, token
 for token in ("OT_PZ_RESET_TOMBSTONE_KEY", "pz_reset_tombstone_valid",
-              "pz_reset_tombstone_set_handle", "pz_reset_pending_mask",
-              "pz_reset_challenge.expires_ms", "readback.candidate_revision"):
+              "pz_reset_pending_mask", "pz_reset_challenge.expires_ms",
+              "ot_pz_pair_store_mark_reset", "readback.map_active.reset_mask"):
     assert token in core, token
 assert "reset_v3" in core
+assert "pz_reset_tombstone_set_handle" not in core
+assert "pz_reset_tombstone_write_handle" not in core
 
 print("PASS Issue126 static runtime, namespace, ISR telemetry, brightness and reset contracts")
 
