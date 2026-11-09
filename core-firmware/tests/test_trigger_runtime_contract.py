@@ -73,25 +73,37 @@ assert "static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]" in core
 # A stale pre-guard GPIO read paired with a new timestamp can cross 400ms.
 isr = between(core, "static void IRAM_ATTR input_edge_isr(void *arg){",
               "void ot_input_diag_snapshot_get(")
-guard = isr.index("__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)")
+guard = isr.index("ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u)")
 clock = isr.index("const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;")
 gpio = isr.index("level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])")
 payload_time = isr.index("event->timestamp_us=edge_time_us;")
 payload_gpio = isr.index("event->asserted=asserted;")
-publish = isr.index("__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)")
-unguard = isr.index("__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)")
+publish = isr.index("ot_isr_dram_store_release(&turn_edge_head[slot],head+1u)")
+unguard = isr.index("ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u)")
 assert guard < clock < gpio < payload_time < payload_gpio < publish < unguard
+# Unlike IDF's general __atomic_* fallback with external PSRAM enabled,
+# this ISR must use only force-inlined native S32C1I on DRAM_ATTR words.
+assert '#include "xt_utils.h"' in core
+assert "xt_utils_compare_and_set(word,previous,next)" in core
+assert "static inline __attribute__((always_inline))" in core
+assert "ot_isr_dram_fence();" in core
+assert "__atomic_" not in isr, "ISR cannot call PSRAM-aware libc atomic fallbacks"
+for helper in ("ot_isr_dram_fetch_add","ot_isr_dram_fetch_or",
+               "ot_isr_dram_fetch_and","ot_isr_dram_store_release",
+               "ot_isr_dram_load_acquire","ot_isr_dram_cas"):
+    assert helper in isr or helper=="ot_isr_dram_cas",helper
+
 assert "if(is_turn)" in isr
 assert "event->timestamp_us=edge_time_us;" in core
 assert "event->asserted=asserted;" in core
-assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
+assert "ot_isr_dram_store_release(&turn_edge_head[slot],head+1u)" in core
 assert "__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE)" in core
 assert "__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE)" in core
 assert "__atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE)" in core
 assert "turn_edge_overflow[slot]" in core
 assert "gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])" in core
-assert "__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)" in core
-assert "__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)" in core
+assert "ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u)" in core
+assert "ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u)" in core
 assert "static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT]" in core
 assert "input_pin_isr[i]=input_pin[i];" in core
 assert "input_boot_snapshot_us=(uint64_t)esp_timer_get_time();" in core
