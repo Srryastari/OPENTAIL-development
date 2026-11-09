@@ -81,13 +81,17 @@ int main(void){
   * current logical zones. Saving must project owners back to current zone
   * indices, not serialize transient bank-slot indices. */
  ot_om_output_t outputs[OT_OM_OUTPUTS]={0};
- ot_fx_scene_output_identity_t identity_panels[OT_OM_OUTPUTS]={0};
+ ot_pz_output_t live_panels[OT_OM_OUTPUTS]={0};
+ ot_fx_scene_output_identity_t scene_identities[OT_OM_OUTPUTS]={0};
  outputs[0].zone_count=2u;outputs[0].active_pixels=2u;
  outputs[0].zones[0].pixels=1u;outputs[0].zones[0].role=OT_OM_LEFT;
  outputs[0].zones[1].pixels=1u;outputs[0].zones[1].role=OT_OM_BRAKE;
- identity_panels[0].zone_count=2u;
- identity_panels[0].zones[0].panel_id=100u;identity_panels[0].zones[0].zone_id=200u;
- identity_panels[0].zones[1].panel_id=100u;identity_panels[0].zones[1].zone_id=201u;
+ live_panels[0].zone_count=2u;
+ live_panels[0].zones[0].panel_id=100u;live_panels[0].zones[0].id=200u;
+ live_panels[0].zones[1].panel_id=100u;live_panels[0].zones[1].id=201u;
+ scene_identities[0].zone_count=2u;
+ scene_identities[0].zones[0].panel_id=100u;scene_identities[0].zones[0].zone_id=200u;
+ scene_identities[0].zones[1].panel_id=100u;scene_identities[0].zones[1].zone_id=201u;
  ot_fx_zone_bank_t identity_bank;
  ot_fx_bank_reset(&identity_bank);
  ot_ble_fx_packet_t second_zone={0};
@@ -95,16 +99,16 @@ int main(void){
  second_zone.g=40u;second_zone.b=3u;second_zone.palette_id=4u;
  second_zone.brightness=255u;second_zone.ttl_sec=60u;
  assert(ot_fx_bank_apply_configured_identity(&identity_bank,&second_zone,
-     outputs,identity_panels,100u,false));
+     outputs,live_panels,100u,false));
  assert(identity_bank.zones[0][0].owner_zone_id==201u);
  ot_ble_fx_packet_t first_zone={0};
  first_zone.effect_id=3u;first_zone.chain_mask=1u;first_zone.zone_mask=1u;
  first_zone.r=255u;first_zone.brightness=20u;first_zone.ttl_sec=60u;
  assert(ot_fx_bank_apply_configured_identity(&identity_bank,&first_zone,
-     outputs,identity_panels,200u,false));
+     outputs,live_panels,200u,false));
  assert(identity_bank.zones[0][0].owner_zone_id==201u);
  assert(identity_bank.zones[0][1].owner_zone_id==200u);
- assert(ot_fx_scene_pack(&scene,&identity_bank,identity_panels,300u));
+ assert(ot_fx_scene_pack(&scene,&identity_bank,scene_identities,300u));
  assert(ot_fx_scene_valid(&scene));
  assert(scene.active_mask==3u);
  assert(scene.effect[0][0].effect_id==3u);
