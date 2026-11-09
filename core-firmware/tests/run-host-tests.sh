@@ -50,6 +50,12 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_journal.c \
   -o /tmp/ot-panel-zone-journal && /tmp/ot-panel-zone-journal
+# V4 cross-namespace pair journal: lane-only ot_output_cfg + map-only
+# ot_zone_map, durable intent, mixed active/staged recovery and crash boundaries.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_pair_journal.c \
+  -o /tmp/ot-panel-zone-pair-journal && /tmp/ot-panel-zone-pair-journal
 # Five-byte authenticated probe and cumulative fill primitive; no RMT calls here.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/panel_zone_diag.c tests/test_panel_zone_diag.c -o /tmp/ot-panel-zone-diag
