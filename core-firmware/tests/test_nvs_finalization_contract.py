@@ -36,6 +36,24 @@ for token in ("input_quiet_samples>=OT_DEBOUNCE_TICKS",
               "config_recovery_fault=true","stage.candidate_revision",
               "stage.previous_revision","OT_CFG_JOURNAL_KEY_ACTIVE"):
     assert token in trigger_promotion,token
+# Approved physical input/debounce policy is a separate versioned record
+# in ot_trig_cfg. Old profiles migrate only the policy defaults; live timers,
+# ISR timestamps and debouncer state are never serialized.
+policy_load=between("static bool tm_policy_load(",
+                    "/* Size/version-aware reader")
+for token in ('nvs_open("ot_trig_cfg",NVS_READWRITE',
+              "OT_TM_POLICY_KEY","ESP_ERR_NVS_NOT_FOUND",
+              "nvs_set_blob(h,OT_TM_POLICY_KEY","nvs_commit(h)",
+              "ot_tm_policy_valid(&stored)","memcmp(&stored,&expected",
+              "OT_INPUT_ACTIVE_LOW","OT_DEBOUNCE_TICKS","10u",
+              "OT_TURN_RELEASE_HOLD_US"):
+    assert token in policy_load,token
+assert "if(!tm_policy_load())" in core
+assert core.index("if(!tm_policy_load())") < core.index("tm_journal_load();")
+assert "#define OT_TM_POLICY_VERSION 1u" in header
+assert '#define OT_TM_POLICY_KEY "policy_v1"' in header
+assert "ot_tm_policy_build" in journal and "ot_tm_policy_valid" in journal
+assert "turn_release_hold_us" in header and "assertion_samples" in header
 # The legacy v3 combined record is read-only migration input. The authoritative
 # v4 runtime joins a lane-only output_cfg journal and map-only zone_map journal.
 pz_load=between("static void pz_load(void){",
