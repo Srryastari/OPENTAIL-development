@@ -1337,9 +1337,9 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         portEXIT_CRITICAL(&state_lock);
         if(still_pending){xSemaphoreGive(om_write_mutex);return 5;}
     }else{
-        if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,&pz_pair_workspace,lane)){
-            xSemaphoreGive(om_write_mutex);return 4;
-        }
+        /* pz_save_controller_locked() already persisted the reset bit through
+         * mark_reset() when the lane was unchanged. Do not write the same
+         * map-active record a second time after the successful save. */
         portENTER_CRITICAL(&state_lock);
         pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
         pz_reset_challenge.active=false;
