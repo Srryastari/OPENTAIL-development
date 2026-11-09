@@ -42,7 +42,9 @@ jobs:
                     '.github/workflows/verify-core-tertiary-ble.yml'):
               assert git('rev-parse','HEAD:'+p)==git('rev-parse',fw+':'+p),p
           protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
+          # Owner continuation also applies issue #122's 2000-pixel board limit.
           owner_p0_java={
+              'android/app/src/main/java/com/opentail/android/BleConfigCodec.java',
               'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
               'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
               'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',

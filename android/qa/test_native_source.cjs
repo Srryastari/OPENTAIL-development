@@ -383,13 +383,13 @@ assert(!/WLED firmware|WLED UI/.test(compose),'End-user Compose UI must be OpenT
 assert(bleSource.includes('pairWithBoot()') && bleSource.includes('authorizeStored()') &&
        bleSource.includes('HmacSHA256') && bleSource.includes('canControl()'),
   'BLE owner authorization regression');
-assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 65535') &&
+assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 2000') &&
        codec.includes('pixels>MAX_LEDS_PER_OUTPUT') &&
        codec.includes('length>MAX_LEDS_PER_OUTPUT') &&
        codec.includes('if(sum!=pixelCount)') &&
        !codec.includes('index==0?16:17') &&
        !hardware.includes('623'),
-  'BLE uint16 geometry must be universal and not invent physical pins');
+  'BLE geometry must enforce the approved 2000-pixel budget without inventing physical pins');
 assert(model.includes('data = previous; // a failed disk commit') &&
        model.includes('pixel>=zone(zoneIndex).optInt("length",0)'),
        'Project import must be atomic and pixel editing must respect zone bounds');

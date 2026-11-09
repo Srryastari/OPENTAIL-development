@@ -88,7 +88,7 @@
     },
     {
       "pr": 32,
-      "title": "Hardware: dual-ESP32 Rev B electrical architecture, 623×2 GS400 mapping and acceptance gates",
+      "title": "Hardware: dual-ESP32 Rev B electrical architecture, 623\u00d72 GS400 mapping and acceptance gates",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/32",
       "disposition": "hardware gate"
     },
@@ -208,7 +208,7 @@
     },
     {
       "pr": 51,
-      "title": "Firmware: final four-owner software candidate — CORE #49 + Triggers #48 + Effects #50 + native Android #21",
+      "title": "Firmware: final four-owner software candidate \u2014 CORE #49 + Triggers #48 + Effects #50 + native Android #21",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/51",
       "disposition": "not selected; open history/alternative"
     },
@@ -238,7 +238,7 @@
     },
     {
       "pr": 58,
-      "title": "Android P0: fix Connect requiring OS unpair — bonded CORE GATT reuse and timeout recovery",
+      "title": "Android P0: fix Connect requiring OS unpair \u2014 bonded CORE GATT reuse and timeout recovery",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/58",
       "disposition": "not selected; open history/alternative"
     },
@@ -262,7 +262,7 @@
     },
     {
       "pr": 21,
-      "title": "Android v0.2.0-alpha1 — replace WebView with fully native OpenTail designer",
+      "title": "Android v0.2.0-alpha1 \u2014 replace WebView with fully native OpenTail designer",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/21",
       "disposition": "not selected; open history/alternative"
     },
@@ -292,7 +292,7 @@
     },
     {
       "pr": 39,
-      "title": "Effects: integration-ready candidate — 120 effects, overlays, palettes, harmonic RNG, gamma (#26–#35)",
+      "title": "Effects: integration-ready candidate \u2014 120 effects, overlays, palettes, harmonic RNG, gamma (#26\u2013#35)",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/39",
       "disposition": "not selected; open history/alternative"
     },
@@ -328,7 +328,7 @@
     },
     {
       "pr": 20,
-      "title": "Studio v0.19.120 + Android v0.1.30 — approved UI parity and offline authoring",
+      "title": "Studio v0.19.120 + Android v0.1.30 \u2014 approved UI parity and offline authoring",
       "url": "https://github.com/Srryastari/OPENTAIL-development/pull/20",
       "disposition": "not selected; open history/alternative"
     },
@@ -448,6 +448,7 @@
       "android/app/src/main/cpp/preview.h",
       "android/app/src/main/cpp/preview_jni.c",
       "android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt",
+      "android/app/src/main/java/com/opentail/android/BleConfigCodec.java",
       "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
       "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
       "android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java",
@@ -461,6 +462,7 @@
       "android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java",
       "android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java",
       "android/app/src/test/java/com/opentail/android/ApprovedWledEffectsMetadataTest.kt",
+      "android/app/src/test/java/com/opentail/android/BleConfigCodecTest.java",
       "android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java",
       "android/app/src/test/java/com/opentail/android/NativePaletteMetadataTest.kt",
       "android/app/src/test/java/com/opentail/android/OfflinePreviewPalettePolicyTest.kt",
@@ -499,17 +501,19 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_trees": {
-    "android": "85781d95e818dab153cdcd04e9d1db451157b64d",
+    "android": "e9c4b78b429908f91d0c3d7fd5fc250d4574e621",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
   },
   "owner_mandated_p0_addendum": {
     "base_sha": "1a9cfc4b25ef57bda38a7861ac5548c3747d9605",
     "allowed_changes": [
+      "android/app/src/main/java/com/opentail/android/BleConfigCodec.java",
       "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
       "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
       "android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java",
       "android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java",
       "android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java",
+      "android/app/src/test/java/com/opentail/android/BleConfigCodecTest.java",
       "android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java",
       "android/app/src/test/java/com/opentail/android/PanelPreviewProtocolTest.java",
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
@@ -522,7 +526,8 @@
       "committing_locked_error": 5,
       "gatt_status_long_read": true
     },
-    "physical_release_gate": "BLOCKED — 100/100 controlled brownout cycles have not been physically evidenced",
-    "ui_scope": "Conditional Settings → System synchronization warning only; six-screen UI remains owner-locked"
+    "physical_release_gate": "BLOCKED \u2014 100/100 controlled brownout cycles have not been physically evidenced",
+    "ui_scope": "Conditional Settings \u2192 System synchronization warning only; six-screen UI remains owner-locked",
+    "continuation": "2026-11-09: owner requested all Android followups; this increment enforces issue122 board capacity only. Geometry wiring, Wi-Fi integration and renderer synchronization remain pending."
   }
 }
