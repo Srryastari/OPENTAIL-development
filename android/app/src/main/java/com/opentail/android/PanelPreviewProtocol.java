@@ -12,6 +12,9 @@ final class PanelPreviewProtocol {
     static final int STATUS_BYTES = 61;
     static final int MAP_BYTES = 667;
     static final int TX_MIN_ATT_MTU = 23;
+    // Firmware's four-bit UPDATE role sentinel for OT_PZ_ROLE_UNASSIGNED.
+    // PR #127 must normalize 0x0f to 0xff before accepting/storing the role.
+    static final int ROLE_UNASSIGNED_WIRE = 0x0f;
     static final int OP_BEGIN = 0x01, OP_UPDATE = 0x02, OP_COMMIT = 0x03,
                      OP_CANCEL = 0x04, OP_HEARTBEAT = 0x05;
     static final int ERR_COMMITTING_LOCKED = 5, ERR_SEQUENCE_GAP = 6,
