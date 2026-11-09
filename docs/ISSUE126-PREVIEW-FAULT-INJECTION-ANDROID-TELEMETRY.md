@@ -56,17 +56,19 @@ UPDATE is written to UUID `0x36`:
 - `role_flags` bits 0–3 are the role; bits 4–5 are the action (0 upsert, 1 delete range, 2 delete zone, 3 delete panel); bits 6–7 are reserved and must be zero.
 - Delete actions require zero start/count. Invalid identifiers, action combinations, overlapping ranges, invalid endpoints and cross-panel moves must not mutate the existing shadow candidate.
 
-Sequence starts at 1. A newer modular 32-bit sequence is accepted. The same sequence and identical packet is an idempotent duplicate. The same sequence with different bytes, stale sequence, or out-of-order sequence is rejected. A retry after an uncertain Write Without Response must resend the exact same bytes and sequence; never reuse a sequence for modified content.
+Sequence starts at 1 and **only the contiguous next nonzero 32-bit sequence** is accepted. Sequence zero is reserved; wrap is UINT32_MAX -> 1. A forward gap is rejected and counted as missing sequence numbers. Stale/out-of-order packets and same-sequence/different-payload conflicts are rejected. An identical same-sequence/same-packet duplicate is observed and counted but never reapplied.
 
-UPDATE does **not** renew the lease. Only a matching HEARTBEAT renews the 5,000 ms lease. Pixel Probe remains a separate 2,000 ms diagnostic lease.
+A duplicate raises a synchronization warning but does not by itself freeze the session: Android must read status and reconcile the accepted sequence and candidate CRC before proceeding. A forward gap, out-of-order packet or sequence conflict latches sequence_sync_fault; subsequent UPDATE and COMMIT are rejected until the client CANCELs the volatile preview, reloads authoritative committed geometry, and begins a new session. No sequence gap is silently skipped.
+
+A Write Without Response has no ATT acknowledgement. Android must not silently retry or blindly commit when status is uncertain. Any retry must be followed by status reconciliation; a duplicate is reported in telemetry. UPDATE does **not** renew the lease. Only a matching HEARTBEAT renews the 5,000 ms lease. Pixel Probe remains a separate 2,000 ms diagnostic lease.
 
 ### 1.3 Status readback
 
-UUID `0x37` returns a 35-byte version-1 status value. Use GATT long-read behavior when the negotiated ATT MTU is smaller than the value; do not manually apply the read offset twice.
+UUID `0x37` returns a **61-byte version-2** status value. The first 35 bytes retain the version-1 field offsets; byte 0 is now 2. Use GATT long-read behavior when the negotiated ATT MTU is smaller than the value; do not manually apply the read offset twice. The Panel capability feature-flags byte now advertises bit 3 for the v2 transaction-sequence diagnostics.
 
 | Offset | Size | Field |
 |---:|---:|---|
-| 0 | 1 | Status format version (1) |
+| 0 | 1 | Status format version (2) |
 | 1 | 1 | State: 0 IDLE, 1 ACTIVE, 2 COMMITTING, 3 COMMITTED, 4 CANCELLED, 5 EXPIRED, 6 ERROR |
 | 2 | 1 | Lane |
 | 3 | 1 | Panel schema version |
@@ -83,6 +85,32 @@ UUID `0x37` returns a 35-byte version-1 status value. Use GATT long-read behavio
 | 29 | 1 | Persistent configuration flag |
 | 30 | 1 | Last error: 0 none, 1 invalid packet/model, 2 busy, 3 stale/session/sequence conflict, 4 internal or durable-write failure |
 | 31 | 4 | Remaining preview lease in milliseconds |
+| 35 | 4 | Last rejected UPDATE sequence |
+| 39 | 1 | Last rejected reason |
+| 40 | 4 | Cumulative missing-sequence count (saturating LE32) |
+| 44 | 4 | Cumulative out-of-order count (saturating LE32) |
+| 48 | 4 | Cumulative duplicate count (saturating LE32) |
+| 52 | 4 | Cumulative same-sequence/different-payload conflict count (saturating LE32) |
+| 56 | 4 | Cumulative UPDATE/control rejections during COMMITTING (saturating LE32) |
+| 60 | 1 | Sequence flags: bit 0 warning observed, bit 1 hard sync fault latched, bit 2 at least one UPDATE accepted |
+
+The active transaction identity is the pair (lane, session_id) at offsets 2 and 4. Last accepted UPDATE sequence remains at offset 14. The last rejected UPDATE sequence and reason are at offsets 35 and 39.
+
+**Transaction error codes** (offset 30 last_error, and offset 39 last_rejected_reason when the rejection is an UPDATE):
+
+| Code | Meaning | Required client action |
+|---:|---|---|
+| 0 | No error | Normal state handling |
+| 1 | Invalid packet/model | Reload status; correct the model/packet |
+| 2 | Busy | Do not queue another mutation; reconcile status |
+| 3 | Stale session/revision | Reload authoritative state |
+| 4 | Internal/durable failure | Do not retry blindly; reconcile durable state |
+| 5 | COMMITTING_LOCKED | Mutation rejected; preserve and continue observing the active commit |
+| 6 | SEQUENCE_GAP | Hard synchronization fault; cancel preview and reload committed map |
+| 7 | SEQUENCE_OUT_OF_ORDER | Hard synchronization fault; cancel preview and reload committed map |
+| 8 | SEQUENCE_DUPLICATE | Warning; read status and verify accepted sequence/CRC |
+| 9 | SEQUENCE_CONFLICT | Hard synchronization fault; cancel preview and reload committed map |
+| 10 | SYNC_REQUIRED | Hard synchronization fault remains latched; no UPDATE/COMMIT |
 
 A COMMIT is complete only when CORE reports state COMMITTED and the active and render revisions both equal the target revision. A successful BLE write response alone is not commit confirmation.
 
@@ -97,7 +125,7 @@ This is a client behavior contract only. Preserve the approved six-screen Native
 | ACTIVE | Matching session and base revision confirmed | Slider edits, UPDATE, heartbeat, cancel, save | UPDATE pending, cancel, commit, expiry, disconnect |
 | UPDATE_PENDING | Write Without Response queued | Retry identical bytes only; read status | Status last sequence acknowledges packet or reports error |
 | COMMIT_REQUESTED | Candidate sequence acknowledged; candidate CRC read | Send COMMIT with CORE-reported CRC | Status shows COMMITTING or ERROR |
-| COMMITTING | Durable save/promotion in progress | Read status; do not send UPDATE or CANCEL | COMMITTED, ERROR, or disconnect |
+| COMMITTING | Durable save/promotion in progress | Read status; do not send UPDATE, CANCEL, HEARTBEAT, BEGIN, legacy panel writes or a conflicting COMMIT | COMMITTED, ERROR, or disconnect |
 | COMMITTED | Active revision and render revision equal target | Reload authoritative snapshot; close transaction | READY |
 | CANCELLED / EXPIRED | CORE confirms terminal state | Discard local candidate; reload committed snapshot | READY |
 | RECONCILING | BLE disconnect/reconnect or uncertain commit outcome | Re-authenticate; read authoritative revisions and map | READY or new BEGIN |
@@ -117,6 +145,9 @@ This is a client behavior contract only. Preserve the approved six-screen Native
 10. On disconnect, discard the volatile session ID and enter RECONCILING. After re-authentication, read the authoritative map and revisions. A commit may have continued after the BLE session ended; never assume disconnect means rollback.
 11. If the base revision changed, reload and require a fresh user edit session. Never overwrite a newer revision silently.
 12. While Show Mode is running, geometry preview must not stop, restart, or reset the active effect. CORE owns frame-boundary snapshotting and physical-trigger priority. The UI must not claim a physical output frame used preview geometry while a physical safety input owns that frame.
+13. A newly observed change in duplicate, gap, out-of-order, conflict, or COMMITTING-rejection telemetry must immediately raise a synchronization warning in the existing **Settings -> System** area. Preserve the approved six-screen UI exactly 1:1; add no screen, card redesign or new visual language.
+14. On any warning, read the full v2 status and compare lane/session_id, last accepted/rejected sequence, counters, flags, and candidate CRC. If the duplicate is confirmed as an already accepted identical packet and the authoritative readback agrees, the client may resume only after explicit reconciliation. If the hard-sync-fault flag is set, stop UPDATE/COMMIT, CANCEL the still-volatile preview if possible, read the committed map and revisions, then begin a new session. Never blindly retry or commit.
+15. If an UPDATE is rejected with COMMITTING_LOCKED, keep the UI's last confirmed configuration, do not send another geometry mutation, and continue polling the same transaction until terminal state. Do not attempt CANCEL after COMMITTING.
 
 ### 2.2 Reconciliation rules
 
@@ -152,6 +183,12 @@ Host tests are software evidence only. The matrix below separates currently test
 | PV-18 | Power loss after staged write, active write, stage erase and before RAM publication | Reboot restores previous image and defers candidate until the quiet-window promoter can safely retry |
 | PV-19 | Reset challenge expires, revision changes, input asserts, or reset write/readback is interrupted | Reset cannot bypass challenge/revision/input gates; no partial lane reset is reported as success |
 | PV-20 | Telemetry queue saturation and simultaneous Left/Right edges | Existing SPSC queue remains bounded; overflow is counted and latched; ISR has no unbounded retry loop |
+| PV-21 | Two UPDATE callbacks race with COMMIT acceptance | Exactly one order wins at the CORE mutex/critical-section boundary; after COMMITTING is visible, every later UPDATE is rejected before shadow mutation |
+| PV-22 | Delayed pre-COMMIT Write Without Response arrives after COMMITTING | Rejected with error 5; COMMITTING status, immutable candidate and durable journal remain unchanged |
+| PV-23 | Identical duplicate UPDATE arrives during COMMITTING | Rejected with error 5 and committing-reject telemetry increments; no sequence or candidate mutation |
+| PV-24 | Out-of-order, forward-gap or same-sequence/different-payload UPDATE arrives during COMMITTING | Rejected with error 5 before sequence classification; commit remains protected and no NVS mutation is initiated |
+| PV-25 | Duplicate UPDATE while ACTIVE | Candidate is not applied twice; duplicate counter and warning advance; client reconciles status/CRC |
+| PV-26 | Forward sequence gap, stale packet or changed payload reuses a sequence while ACTIVE | Packet is rejected; hard sync fault latches; further UPDATE/COMMIT blocked until CANCEL and new authoritative session |
 
 ### 3.1 Required additional crash matrix after namespace split (section 2A)
 
@@ -212,3 +249,8 @@ Software preview acceptance requires all of the following on one exact commit:
 - Physical bench tests confirm actual RMT timing, trigger arbitration, reconnect behavior and optical output. Host tests do not replace these checks.
 
 No software PASS, CI receipt or generated APK constitutes physical or road certification. The firmware remains bench-only until the owner-approved hardware acceptance is complete.
+
+
+## 6. Owner-mandated 100-cycle brownout endurance gate
+
+See [ISSUE126-BROWNOUT-100-CYCLE-ACCEPTANCE.md](ISSUE126-BROWNOUT-100-CYCLE-ACCEPTANCE.md). This is a mandatory physical Firmware + Hardware + QA release gate: 100/100 controlled power-cut/recovery cycles under the measured full-white 944-pixel WS2815 load. The eight durable commit phases must be injected at randomized points after the final cross-namespace journal is implemented. The test has **not been run** and no cycle is credited by CI or host simulation.
