@@ -334,7 +334,7 @@ assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
 # in their dedicated namespaces. The legacy Output Manager is a compatibility
 # projection; accepted geometry saves stage the real cross-namespace pair first.
 assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
-assert "ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,previous,candidate," in core
+assert "ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,\n        previous,candidate," in core
 assert "ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id," in core
 assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and '"ot_zone_map"' in core
 assert "pz_save_controller_locked(&candidate)" in core
