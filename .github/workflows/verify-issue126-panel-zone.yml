@@ -61,9 +61,12 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
       - name: Verify application and flash manifest
         run: |
           test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/opentail_core_alpha.elf
+          test -s core-firmware/build/opentail_core_alpha.map
           test -s core-firmware/build/bootloader/bootloader.bin
           test -s core-firmware/build/partition_table/partition-table.bin
           test -s core-firmware/build/flasher_args.json
@@ -81,6 +84,8 @@ jobs:
           name: opentail-issue126-bench-build-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/opentail_core_alpha.elf
+            core-firmware/build/opentail_core_alpha.map
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
             core-firmware/build/flasher_args.json
