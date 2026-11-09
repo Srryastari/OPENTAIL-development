@@ -51,7 +51,7 @@ assert "fx_state[ch][z]=prior_fx_state[prior_index]" in render
 assert "old_z==(uint8_t)prior_index" in render
 assert "fx_bank_owner_zone_id" in render and "fx_bank_owner_panel_id" in render
 assert "resolved_fx_bank_index" in render
-assert "if(!same_identity)" not in render
+assert "if(same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
 # The physical safety override is performed after all decorative FX and
@@ -96,7 +96,7 @@ ordered(render,[
 assert "if(frame_captured[ch])ot_frame_snapshot_complete(false);" in render
 assert "frame_submitted[ch]=false;" in render
 assert "ot_arbitrate(combined," in render
-assert "ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms)" in render
+assert "ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],frame_ms)" in render
 # FX-PZ continuity: stable Panel/Zone identity owns both effect slots and
 # renderer phase across index shifts, while the old pixel map gates frame carry.
 assert "old_zone_id[old_z]==zone_cfg->id" in render
@@ -106,7 +106,7 @@ assert "fx_bank_owner_zone_id[ch][bank_z]=owner_zone" in render
 assert "const uint8_t old_z=prior_pixel_zone_map[ch][px];" in render
 assert "fx_zone_scratch[logical]=fx_frame[ch][px];" in render
 reset_pos=render.index("ot_effects_1d_reset(&fx_state[ch][z],")
-assert render.index("if(!same_identity)") < reset_pos
+assert render.index("if(same_identity)") < reset_pos
 prior_map_copy=render.index("memcpy(prior_pixel_zone_map[ch],pixel_zone_map[ch],")
 assert prior_map_copy > render.index("if(frame_captured[ch])ot_frame_snapshot_complete(true);")
 print("PASS: corrected #49 Effects frame ownership, palette -> FX -> overlays -> OEM override -> logical RGB -> wire; physical colors bypass gamma, show/STOP and zone guards (source contract)")
