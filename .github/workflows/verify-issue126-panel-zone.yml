@@ -57,12 +57,16 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$PIN"
       - name: Compile CORE for ESP32-S3 with ESP-IDF v5.5.5 — NO FLASH
         uses: espressif/esp-idf-ci-action@v1
+        env:
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         with:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
-          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf && chmod a+rwx build
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
       - name: Verify application and flash manifest
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test -s core-firmware/build/opentail_core_alpha.bin
           test -s core-firmware/build/opentail_core_alpha.elf
@@ -92,7 +96,7 @@ jobs:
           }
           assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in required)
           evidence={
-              "commit":os.environ["GITHUB_SHA"],
+              "commit":os.environ["PIN"],
               "target":"esp32s3",
               "esp_idf_version":"v5.5.5",
               "files":{name:hashlib.sha256((build/name).read_bytes()).hexdigest()
