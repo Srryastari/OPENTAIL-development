@@ -527,6 +527,7 @@ int main(void){
     test_identity_state_survives_reorder_delete_and_cancel(&active,&bank,&probe);
     test_committing_and_sync_fault_admission(&active);
     test_stop_and_physical_priority(&bank);
+    release_render_probe(&probe);
 
     puts("PASS FX-PZ: independent zone/output state, discontiguous ranges, live preview, stable identity bank/state migration through reorder/delete/cancel, COMMITTING/sync-fault rejection, STOP and physical priority (host simulated; no NVS/RMT/optics)");
     return 0;
