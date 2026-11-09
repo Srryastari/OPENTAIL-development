@@ -53,10 +53,16 @@ final class TelemetrySequenceWatchdog {
         if(current.lastAcceptedSequence!=last.lastAcceptedSequence) {
             long expected=next(last.lastAcceptedSequence);
             if(current.lastAcceptedSequence!=expected) {
-                if(current.lastAcceptedSequence>expected) {
-                    long lastMissing=current.lastAcceptedSequence-1L;
-                    String range=expected==lastMissing?Long.toString(expected):
-                        expected+"–"+lastMissing;
+                long distance=forwardDistance(expected,current.lastAcceptedSequence);
+                if(distance>0 && distance<=0x7fffffffL) {
+                    long lastMissing=previous(current.lastAcceptedSequence);
+                    String range;
+                    if(current.lastAcceptedSequence>expected) {
+                        range=expected==lastMissing?Long.toString(expected):
+                            expected+"–"+lastMissing;
+                    } else {
+                        range=expected+"–4294967295, 1–"+lastMissing+" (wrap)";
+                    }
                     latchHard("Accepted geometry sequence gap; missing sequence "+range);
                 } else {
                     latchHard("Accepted geometry sequence moved backwards or violated wrap ordering");
@@ -169,6 +175,10 @@ final class TelemetrySequenceWatchdog {
         return new Decision(warning,hardFault,warning,s==null?message:message,s);
     }
     private static long next(long seq) { return seq==0xffffffffL?1L:seq+1L; }
+    private static long previous(long seq) { return seq==1L?0xffffffffL:seq-1L; }
+    private static long forwardDistance(long from,long to) {
+        return to>=from?to-from:(0xffffffffL-from)+to;
+    }
     private static String reason(PanelPreviewProtocol.Status s) {
         if(s==null)return "Panel telemetry unavailable";
         switch(s.lastRejectedReason) {
