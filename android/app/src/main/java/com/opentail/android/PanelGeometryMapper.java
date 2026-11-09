@@ -52,7 +52,8 @@ final class PanelGeometryMapper {
         final List<Zone> zones;
         Lane(int id,int activePixels,List<Panel> panels,List<Zone> zones) {
             this.id=id;this.activePixels=activePixels;
-            this.panels=List.copyOf(panels);this.zones=List.copyOf(zones);
+            this.panels=java.util.Collections.unmodifiableList(new ArrayList<>(panels));
+            this.zones=java.util.Collections.unmodifiableList(new ArrayList<>(zones));
         }
         PanelPreviewProtocol.UpdateDescriptor[] descriptors() {
             PanelPreviewProtocol.UpdateDescriptor[] out=
