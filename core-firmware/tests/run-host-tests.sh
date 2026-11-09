@@ -234,3 +234,15 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/co
 
 # Explicit continuous controller command semantics; no hardware certification.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_continuous_fx.c -o /tmp/ot-continuous-fx-tests && /tmp/ot-continuous-fx-tests
+
+
+# FX-PZ-01..10: real Panel/Zone mapper + real per-zone effect renderer continuity.
+# Preview promotion is simulated; this does not claim ESP NVS, BLE, RMT or optics.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/panel_zone_protocol.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c main/fx_zone_bank.c \
+  main/fx_overlay_engine.c main/effects_1d.c main/ot_auto_effects.c \
+  main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c \
+  main/wled_1d.c tests/test_effects_panel_zone_continuity.c \
+  -o /tmp/ot-effects-panel-zone-continuity -lm
+/tmp/ot-effects-panel-zone-continuity
