@@ -357,6 +357,78 @@ static void test_preview_phase_commit_cancel_and_unaffected_zone(
     assert(bank->zones[0][0].started_ms==started);
 }
 
+static void test_identity_state_survives_reorder_delete_and_cancel(
+        ot_pz_controller_t *active,const ot_fx_zone_bank_t *bank,
+        render_probe_t *probe){
+    const uint16_t original_zone0=active->outputs[0].zones[0].id;
+    const uint16_t original_zone1=active->outputs[0].zones[1].id;
+    const uint16_t panel_id=active->outputs[0].zones[0].panel_id;
+    assert(original_zone0!=original_zone1);
+
+    /* Reorder through the real preview candidate and commit promotion. */
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,active,0u,9u,9u,false,1150u));
+    ot_pz_zone_t swap=preview.candidate.outputs[0].zones[0];
+    preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
+    preview.candidate.outputs[0].zones[1]=swap;
+    assert(ot_pz_valid(&preview.candidate));
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone1);
+    assert(preview.candidate.outputs[0].zones[1].id==original_zone0);
+    preview.committing=true;
+    *active=preview.candidate;
+    ot_pz_preview_cancel(&preview);
+
+    render_probe_t reordered_reference=*probe;
+    assert(render_probe_frame(&reordered_reference,active,bank,1158u));
+    assert(render_probe_frame(probe,active,bank,1158u));
+    assert(memcmp(&reordered_reference.state[0][0],&probe->state[0][0],
+                  sizeof(probe->state[0][0]))==0);
+    assert(memcmp(&reordered_reference.state[0][1],&probe->state[0][1],
+                  sizeof(probe->state[0][1]))==0);
+
+    /* A subsequent reorder is cancelled. The committed mapping and both
+     * animation clocks must remain unchanged and continue on the next frame. */
+    const ot_pz_controller_t committed=*active;
+    assert(ot_pz_preview_begin(&preview,active,0u,10u,10u,false,1160u));
+    swap=preview.candidate.outputs[0].zones[0];
+    preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
+    preview.candidate.outputs[0].zones[1]=swap;
+    assert(ot_pz_valid(&preview.candidate));
+    ot_pz_preview_cancel(&preview);
+    assert(memcmp(active,&committed,sizeof(committed))==0);
+    render_probe_t cancel_reference=*probe;
+    assert(render_probe_frame(&cancel_reference,active,bank,1168u));
+    assert(render_probe_frame(probe,active,bank,1168u));
+    assert(memcmp(&cancel_reference.state[0][0],&probe->state[0][0],
+                  sizeof(probe->state[0][0]))==0);
+    assert(memcmp(&cancel_reference.state[0][1],&probe->state[0][1],
+                  sizeof(probe->state[0][1]))==0);
+
+    /* Delete the first ordered zone. The other zone shifts from index 1 to 0;
+     * its renderer state and its bank-owned effect slot must follow its IDs. */
+    render_probe_t delete_reference=*probe;
+    assert(render_probe_frame(&delete_reference,active,bank,1176u));
+    const ot_pz_range_update_t delete_first={
+        .panel_id=panel_id,.zone_id=original_zone1,.range_slot=0u,
+        .start=0u,.count=0u,
+        .role_flags=(uint8_t)(OT_PZ_TX_DELETE_ZONE<<OT_PZ_TX_ACTION_SHIFT)
+    };
+    assert(ot_pz_preview_begin(&preview,active,0u,10u,10u,false,1170u));
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_first,1u,
+        10u,10u,false,1172u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
+    preview.committing=true;
+    *active=preview.candidate;
+    ot_pz_preview_cancel(&preview);
+    assert(render_probe_frame(probe,active,bank,1176u));
+    assert(memcmp(&delete_reference.state[0][1],&probe->state[0][0],
+                  sizeof(probe->state[0][0]))==0);
+    assert(probe->prior_zone_id[0][0]==original_zone0);
+    assert(probe->resolved_bank_index[0][0]==0u||
+           probe->resolved_bank_index[0][0]==1u);
+}
+
 static void test_committing_and_sync_fault_admission(
         const ot_pz_controller_t *active){
     ot_pz_preview_t preview={0};
@@ -432,6 +504,7 @@ int main(void){
 
     test_zone_independence_and_discontiguous_ranges(&active,&bank,&probe);
     test_preview_phase_commit_cancel_and_unaffected_zone(&active,&bank,&probe);
+    test_identity_state_survives_reorder_delete_and_cancel(&active,&bank,&probe);
     test_committing_and_sync_fault_admission(&active);
     test_stop_and_physical_priority(&bank);
 
