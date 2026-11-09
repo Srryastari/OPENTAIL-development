@@ -310,6 +310,7 @@ final class BleDiscovery {
     private volatile int panelReadQueued=0; // 1=capabilities, 2=status
     private volatile boolean panelReadPending=false;
     private volatile int panelReadKind=0,panelReadWatchLease=0;
+    private volatile int panelStatusExpectedLane=-1;
     private volatile int panelSnapshotQueuedLane=-1;
     private volatile boolean panelSnapshotBusy=false,panelSnapshotWaitingWrite=false,
                              panelSnapshotWaitingRead=false,panelSnapshotAbortForStop=false;
@@ -523,6 +524,7 @@ final class BleDiscovery {
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
         panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
+        panelStatusExpectedLane=-1;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
         panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
         panelSnapshotWatchLease++;panelCancelQueued=false;
@@ -1815,6 +1817,13 @@ final class BleDiscovery {
             panelNotify(null,malformed);
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());pumpQueue();return;
         }
+        if(panelStatusExpectedLane>=0&&current.lane!=panelStatusExpectedLane) {
+            panelStatusFresh[panelStatusExpectedLane]=false;
+            panelStatusExpectedLane=-1;
+            notifyStatus("CORE Panel status lane did not match the requested snapshot/transaction lane");
+            pumpQueue();return;
+        }
+        panelStatusExpectedLane=-1;
         panelLastStatus=current;
         panelStatuses[current.lane]=current;
         panelStatusFresh[current.lane]=true;
@@ -2086,6 +2095,11 @@ final class BleDiscovery {
         }
         if(status!=BluetoothGatt.GATT_SUCCESS)
             notifyStatus("CORE Panel control write failed: "+status);
+        if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
+        if(status==BluetoothGatt.GATT_SUCCESS&&action==PANEL_CONTROL_COMMIT) {
+            panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
+            panelStatusFresh[0]=false;panelStatusFresh[1]=false;
+        }
         panelReadQueued=2;pumpQueue();
     }
 
@@ -2099,6 +2113,7 @@ final class BleDiscovery {
             notifyStatus("CORE Panel UPDATE write failed: "+status);
         }
         // ATT write completion is not an application ACK. Always read status-v2.
+        if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
         panelReadQueued=2;pumpQueue();
     }
 
@@ -2110,7 +2125,10 @@ final class BleDiscovery {
         if(status!=BluetoothGatt.GATT_SUCCESS) {
             notifyStatus("CORE Panel preview CANCEL write failed: "+status);
             if(panelLastStatus!=null)panelSnapshotQueuedLane=panelLastStatus.lane;
-        } else panelReadQueued=2;
+        } else {
+            if(panelLastStatus!=null)panelStatusExpectedLane=panelLastStatus.lane;
+            panelReadQueued=2;
+        }
         pumpQueue();
     }
 
@@ -2217,6 +2235,7 @@ final class BleDiscovery {
             }
             // Every fresh lane map is paired with a fresh status-v2 read before
             // it can authorize a new preview transaction.
+            panelStatusExpectedLane=panelSnapshotLane;
             panelReadQueued=2;
             pumpQueue();
         } catch(IllegalArgumentException ex) {
