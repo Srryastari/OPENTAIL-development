@@ -5,20 +5,23 @@
 static void tm_policy_case(void){
     ot_tm_policy_record_t policy={0};
     assert(ot_tm_policy_build(&policy,1u,4u,10u,
+                              OT_TM_TURN_RELEASE_INPUT_MASK,
                               (uint32_t)OT_TURN_RELEASE_HOLD_US));
     assert(ot_tm_policy_valid(&policy));
     assert(policy.input_active_low==1u&&policy.assertion_samples==4u);
     assert(policy.sample_period_ms==10u&&
            policy.turn_release_hold_us==400000u);
+    assert(policy.turn_release_input_mask==0x0cu);
     for(size_t i=0;i<sizeof(policy);i++){
         ot_tm_policy_record_t corrupt=policy;
         ((uint8_t*)&corrupt)[i]^=0x01u;
         assert(!ot_tm_policy_valid(&corrupt));
     }
-    assert(!ot_tm_policy_build(&policy,2u,4u,10u,400000u));
-    assert(!ot_tm_policy_build(&policy,1u,0u,10u,400000u));
-    assert(!ot_tm_policy_build(&policy,1u,4u,0u,400000u));
-    assert(!ot_tm_policy_build(&policy,1u,4u,10u,0u));
+    assert(!ot_tm_policy_build(&policy,2u,4u,10u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,0u,10u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,0u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,10u,0u,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,10u,0x80u,400000u));
 }
 static void tm_case(void){
     ot_tm_profile_t a={0},b={0};ot_tm_defaults(&a);b=a;
