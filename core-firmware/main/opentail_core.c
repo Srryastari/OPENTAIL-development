@@ -3278,7 +3278,11 @@ static void led_task(void *p) {
                    memcpy(old_panel_id,prior_fx_panel_id[ch],sizeof(old_panel_id));
                    memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation));
                    memcpy(old_active,prior_fx_active[ch],sizeof(old_active));
+                   /* Renderer states may own WLED scratch allocations. Transfer
+                    * ownership into the snapshot, clear the old bank, then move
+                    * each retained state exactly once into its new zone index. */
                    memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state));
+                   memset(fx_state[ch],0,sizeof(fx_state[ch]));
                    for(unsigned z=0;z<output->zone_count;z++){
                        const unsigned len=output->zones[z].pixels;
                        const ot_pz_zone_t *zone_cfg=&local_panel[ch].zones[z];
@@ -3294,8 +3298,9 @@ static void led_task(void *p) {
                        const bool same_identity=prior_index>=0;
                        if(active&&len<=OT_PZ_MAX_PIXELS){
                            if(same_identity){
-                               if((unsigned)prior_index!=z)
-                                   fx_state[ch][z]=prior_fx_state[prior_index];
+                               fx_state[ch][z]=prior_fx_state[prior_index];
+                               memset(&prior_fx_state[prior_index],0,
+                                      sizeof(prior_fx_state[prior_index]));
                            }else{
                                ot_effects_1d_reset(&fx_state[ch][z],
                                    0x1234u+ch*97u+z*19u+slot->generation);
@@ -3361,6 +3366,10 @@ static void led_task(void *p) {
                    }
                    for(unsigned z=output->zone_count;z<OT_OM_ZONES;z++)
                        prior_fx_active[ch][z]=false;
+                   /* Deleted/inactive zones did not transfer their state.
+                    * Release any source-owned scratch exactly once. */
+                   for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)
+                       ot_effects_1d_reset(&prior_fx_state[old_z],0u);
                }else{
                    for(unsigned z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
