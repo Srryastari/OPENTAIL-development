@@ -30,7 +30,7 @@ for operation,begin,end,ram in (
     body=between(begin,end)
     assert body.index("config_write_active(h,")<body.index("config_clear_stage(h)"),operation
     assert body.index("config_clear_stage(h)")<body.index(ram),operation
-    assert body.rfind("config_activation_idle(epoch)")<body.index(ram),operation
+    assert body.rfind("config_activation_idle(epoch,false)")<body.index(ram),operation
     assert body.index("tm_gpio_input_mask()==0u")<body.index(ram),operation
     assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in body
     assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in body
