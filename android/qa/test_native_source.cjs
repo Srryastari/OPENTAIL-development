@@ -1193,6 +1193,11 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('panelStatusFresh[i]') &&
        bleSource.includes('BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE') &&
        bleSource.includes('panelStatusExpectedLane=panelSnapshotLane') &&
+       bleSource.includes('private void startPanelControl()') &&
+       bleSource.includes('private void startPanelUpdate()') &&
+       bleSource.includes('panelControlWritten(connection,status)') &&
+       bleSource.includes('panelUpdateWritten(connection,status)') &&
+       bleSource.includes('manager.commitWriteCompleted()') &&
        bleSource.includes('Panel UPDATE write completion timed out') &&
        bleSource.includes('panelSnapshotAbortForStop=true') &&
        bleSource.includes('Panel snapshot aborted to prioritize STOP'),
