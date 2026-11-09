@@ -378,6 +378,32 @@ public class GeometryTransactionManagerTest {
         return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
     }
 
+    private static PanelPreviewProtocol.LaneSnapshot panelSnapshotWithTwo(
+            int lane,int pixels,int[] panelIds,int[] zoneIds,int[] parentIds) {
+        if(panelIds.length!=2||zoneIds.length!=2||parentIds.length!=2)
+            throw new IllegalArgumentException("Two map identities required");
+        byte[] wire=new byte[PanelPreviewProtocol.MAP_BYTES];
+        wire[0]=3;wire[1]=(byte)lane;put16(wire,2,pixels);wire[37]=2;wire[38]=2;
+        for(int i=0;i<2;i++) {
+            int panelAt=39+i*29;
+            put16(wire,panelAt,panelIds[i]);wire[panelAt+2]=(byte)lane;
+            putName(wire,panelAt+3,"Panel "+i);wire[panelAt+28]=1;
+            int zoneAt=155+i*64;
+            put16(wire,zoneAt,zoneIds[i]);put16(wire,zoneAt+2,parentIds[i]);
+            putName(wire,zoneAt+4,"Zone "+i);wire[zoneAt+29]=0;
+            wire[zoneAt+30]=0;wire[zoneAt+31]=1;
+            put16(wire,zoneAt+32,i*10);put16(wire,zoneAt+34,10);
+        }
+        byte[] header=new byte[14];
+        header[0]=3;header[1]=(byte)0x81;header[2]=(byte)lane;
+        put16(header,4,PanelPreviewProtocol.MAP_BYTES);
+        put16(header,6,PanelPreviewProtocol.crc16(wire));
+        put16(header,8,7);put16(header,10,7);header[13]=1;
+        PanelPreviewProtocol.SnapshotHeader parsed=PanelPreviewProtocol.SnapshotHeader.parse(header,lane);
+        parsed.verify(wire,lane);
+        return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
+    }
+
     private static PanelPreviewProtocol.Status idlePanelStatus(int lane,int revision,int pixels) {
         byte[] b=new byte[61];b[0]=2;b[1]=0;b[2]=(byte)lane;b[3]=3;
         put16(b,8,revision);put16(b,10,pixels);put16(b,12,5000);
@@ -673,4 +699,78 @@ public class GeometryTransactionManagerTest {
         try { lane.descriptorBatches(22);fail("below minimum ATT MTU"); }
         catch(IllegalArgumentException expected) {}
     }
+    @Test public void migratedSixteenBitIdsAreReadBackAndPreviewedThroughAliases() {
+        PanelPreviewProtocol.LaneSnapshot migrated=panelSnapshot(
+            0,20,0x8001,"Panel 1",0x4001,0x8001,"Migrated Top",0,20,0);
+        GeometryTransactionManager.MappedLane local=new GeometryTransactionManager.MappedLane(
+            0,20,java.util.Collections.singletonList(
+                new GeometryTransactionManager.MappedPanel(1,0,"Panel 1",1)),
+            java.util.Collections.singletonList(
+                new GeometryTransactionManager.MappedZone(129,1,0,1,19,"Migrated Top",0)));
+        GeometryTransactionManager.MappedLane resolved=local.withRolesFromSnapshot(migrated);
+        assertEquals(0x8001,resolved.panels.get(0).id);
+        assertEquals(0x4001,resolved.zones.get(0).id);
+        assertEquals(0x8001,resolved.zones.get(0).panelId);
+        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=resolved.descriptorBatches(migrated,23);
+        assertEquals(1,batches.size());
+        byte[] packet=PanelPreviewProtocol.update(0,77,1,batches.get(0),23);
+        assertEquals(1,packet[11]&255);
+        assertEquals(1,packet[12]&255);
+        assertEquals(0,packet[13]&255);
+        assertEquals(1,packet[14]&255);
+        assertEquals(19,packet[16]&255);
+        GeometryTransactionManager.MappedLane redraft=new GeometryTransactionManager.MappedLane(
+            0,20,java.util.Collections.singletonList(
+                new GeometryTransactionManager.MappedPanel(1,0,"Panel 1",1)),
+            java.util.Collections.singletonList(
+                new GeometryTransactionManager.MappedZone(129,1,0,2,18,"Migrated Top",0)))
+            .withRolesFrom(resolved);
+        assertEquals(0x8001,redraft.panels.get(0).id);
+        assertEquals(0x4001,redraft.zones.get(0).id);
+    }
+
+    @Test public void ambiguousPanelAndZoneLowByteAliasesFailClosed() {
+        PanelPreviewProtocol.LaneSnapshot ambiguousPanels=panelSnapshotWithTwo(
+            0,20,new int[]{0x8001,0x8101},new int[]{0x4001,0x4002},
+            new int[]{0x8001,0x8101});
+        try {
+            PanelPreviewProtocol.MapIdentity.parse(ambiguousPanels);
+            fail("duplicate Panel low-byte aliases must be rejected");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Ambiguous Panel low-byte alias"));
+        }
+        PanelPreviewProtocol.LaneSnapshot ambiguousZones=panelSnapshotWithTwo(
+            0,20,new int[]{0x8001,0x8002},new int[]{0x4001,0x4101},
+            new int[]{0x8001,0x8002});
+        try {
+            PanelPreviewProtocol.MapIdentity.parse(ambiguousZones);
+            fail("duplicate Zone low-byte aliases must be rejected");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Ambiguous Zone low-byte alias"));
+        }
+    }
+
+    @Test public void migratedZonePanelMoveDeletesThenRecreatesUsingTheSameFullZoneId() {
+        PanelPreviewProtocol.LaneSnapshot migrated=panelSnapshot(
+            0,20,0x8001,"Panel 1",0x4001,0x8001,"Migrated Trunk",0,20,0);
+        GeometryTransactionManager.MappedLane local=new GeometryTransactionManager.MappedLane(
+            0,20,java.util.Arrays.asList(
+                new GeometryTransactionManager.MappedPanel(1,0,"Housing",0),
+                new GeometryTransactionManager.MappedPanel(2,0,"Trunk",1)),
+            java.util.Collections.singletonList(
+                new GeometryTransactionManager.MappedZone(129,2,4,0,20,"Migrated Trunk",0)));
+        GeometryTransactionManager.MappedLane resolved=local.withRolesFromSnapshot(migrated);
+        assertEquals(0x8002,resolved.panels.get(1).id);
+        assertEquals(0x4001,resolved.zones.get(0).id);
+        assertEquals(0x8002,resolved.zones.get(0).panelId);
+        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=resolved.descriptorBatches(migrated,23);
+        assertEquals(2,batches.size());
+        byte[] delete=PanelPreviewProtocol.update(0,77,1,batches.get(0),23);
+        byte[] upsert=PanelPreviewProtocol.update(0,77,2,batches.get(1),23);
+        assertEquals(1,delete[11]&255);assertEquals(1,delete[12]&255);
+        assertEquals(0x20,delete[18]&255);
+        assertEquals(2,upsert[11]&255);assertEquals(1,upsert[12]&255);
+        assertEquals(0,upsert[18]&255);
+    }
+
 }

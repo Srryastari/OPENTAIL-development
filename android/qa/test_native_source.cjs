@@ -7,6 +7,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
+const firmwareSourceDir=process.env.OPENTAIL_FIRMWARE_SOURCE_DIR || 'core-firmware/main';
+const effectsSourceDir=process.env.OPENTAIL_EFFECTS_SOURCE_DIR || 'core-firmware/main';
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
@@ -1043,9 +1045,9 @@ assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOper
        frameClient.includes('byte[] complete=pixels;'), 'Bound snapshot timers and hand off owned RGB');
 
 const tertiaryCommand=fs.readFileSync('android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java','utf8');
-const bleCommand=fs.readFileSync('core-firmware/main/ble_fx_command.c','utf8');
-const bleHeader=fs.readFileSync('core-firmware/main/ble_fx_command.h','utf8');
-const bleStatus=fs.readFileSync('core-firmware/main/ble_status.c','utf8');
+const bleCommand=fs.readFileSync(path.join(firmwareSourceDir,'ble_fx_command.c'),'utf8');
+const bleHeader=fs.readFileSync(path.join(firmwareSourceDir,'ble_fx_command.h'),'utf8');
+const bleStatus=fs.readFileSync(path.join(firmwareSourceDir,'ble_status.c'),'utf8');
 assert(tertiaryCommand.includes('fx-tertiary13-v1') &&
        tertiaryCommand.includes('supportedForFirmware') &&
        bleCommand.includes('return ot_wled_fx_tertiary_supported(id);') &&
@@ -1058,32 +1060,39 @@ const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8')
 const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
 /* Issue103: actual SHA256 and byte-identity checks, not a stale source
  * comment claiming parity. Only reviewed pure renderer sources are repinned. */
-assert(nativeManifest.source_commit==='76e24c69b935a94228b2e11b0efb8483c0276da5' &&
+assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
        nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
+       nativeManifest.core_identity_source_commit==='97f4e2fd29df5aa9249292cee2649404fc98ed48' &&
+       JSON.stringify(nativeManifest.core_identity_files)===JSON.stringify(['effects_1d.c','effects_1d.h']) &&
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
        nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
        nativeManifest.tertiary_source_proven_modes===13 &&
        nativeManifest.tertiary_transport_admitted_modes===13 &&
        nativeManifest.tertiary_legacy_transport_modes===11 &&
        nativeManifest.tertiary_transport_capability==='fx-tertiary13-v1' &&
-       nativeManifest.firmware127_ble_contract_head==='29a729cdeaf17e58d500ede944b8188e07de2fab',
+       nativeManifest.firmware127_ble_contract_head==='97f4e2fd29df5aa9249292cee2649404fc98ed48',
        'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
 for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
     const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));
     assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),expectedHash,
                  'JNI source manifest mismatch: '+file);
 }
-for(const file of ['wled_fx_compat.c','wled_fx_compat.h',
-                   'ot_auto_effects.c','effects_1d.c','effects_1d.h']){
+for(const file of ['effects_1d.c','effects_1d.h']){
     assert.deepEqual(
         fs.readFileSync(path.join('android/app/src/main/cpp/core',file)),
-        fs.readFileSync(path.join('core-firmware/main',file)),
-        'JNI/CORE renderer divergence: '+file);
+        fs.readFileSync(path.join(firmwareSourceDir,file)),
+        'JNI/Firmware #127 stable-state source divergence: '+file);
+}
+for(const file of ['wled_fx_compat.c','wled_fx_compat.h','ot_auto_effects.c','ot_auto_effects.h']){
+    assert.deepEqual(
+        fs.readFileSync(path.join('android/app/src/main/cpp/core',file)),
+        fs.readFileSync(path.join(effectsSourceDir,file)),
+        'JNI/Effects #110 renderer divergence: '+file);
 }
 assert(fs.readFileSync('android/app/src/main/cpp/core/wled_fx_compat.c','utf8')
          .includes('bool ot_wled_fx_tertiary_supported(uint16_t id)') &&
-       nativeManifest.source_commit==='76e24c69b935a94228b2e11b0efb8483c0276da5' &&
+       nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
        nativePreview.includes('ot_wled_palette_global_tick('),
        'All effects must use the pinned authoritative registry and palette producer');
@@ -1096,9 +1105,12 @@ assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
        fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt','utf8')
            .includes('NativeEffectParameters.forId(effectId)?.palette == true'),
        'Scoped parameter edits must update native preview and reject stale palettes for non-palette effects');
+const onStopBlock=(compose.split('override fun onStop() {')[1]||'').split('override fun onDestroy()')[0];
 assert(manifest.includes('android.permission.RECORD_AUDIO') &&
        compose.includes('val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value') &&
-       compose.includes('override fun onStop() {\n        localMicrophone.stop()') &&
+       onStopBlock.includes('localMicrophone.stop()') &&
+       onStopBlock.includes('super.onStop()') &&
+       onStopBlock.indexOf('localMicrophone.stop()')<onStopBlock.indexOf('super.onStop()') &&
        !fs.readFileSync('android/app/src/main/java/com/opentail/android/MicAudioPeak.java','utf8').includes('.join('),
        'Owner-approved microphone must remain local, foreground-only and off the UI thread');
 

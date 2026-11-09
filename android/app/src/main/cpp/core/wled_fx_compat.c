@@ -3228,7 +3228,11 @@ static void popcorn_frame(const ot_wled_fx_config_t *cfg,
     }
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
-    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    /* Match WLED: an authored third color clears Popcorn to black; the
+     * legacy two-color path retains its configured background. */
+    const ot_wled_rgb_t clear=cfg->tertiary_set?
+        (ot_wled_rgb_t){0u,0u,0u}:bg;
+    for(size_t i=0;i<count;i++)pixels[i]=clear;
     float gravity=-0.0001f-(float)cfg->speed/200000.0f;
     gravity*=(float)count;
     unsigned num_popcorn=(unsigned)cfg->intensity*max_popcorn/255u;

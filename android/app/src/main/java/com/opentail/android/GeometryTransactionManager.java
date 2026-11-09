@@ -66,6 +66,19 @@ final class GeometryTransactionManager {
         final List<MappedZone> zones;
         MappedLane(int lane,int activePixels,List<MappedPanel> panels,List<MappedZone> zones) {
             this.lane=lane;this.activePixels=activePixels;
+            Set<Integer> panelAliases=new HashSet<>(),zoneAliases=new HashSet<>(),fullIds=new HashSet<>(),panelIds=new HashSet<>();
+            for(MappedPanel panel:panels) {
+                int alias=panel.id&0xff;
+                if(panel.id<0||panel.id>65535||alias==0||!panelAliases.add(alias)||
+                   !fullIds.add(panel.id)||!panelIds.add(panel.id))
+                    throw new IllegalArgumentException("Mapped Panel IDs have an invalid or ambiguous low-byte alias");
+            }
+            for(MappedZone zone:zones) {
+                int alias=zone.id&0xff;
+                if(zone.id<0||zone.id>65535||alias==0||!zoneAliases.add(alias)||
+                   !fullIds.add(zone.id)||!panelIds.contains(zone.panelId))
+                    throw new IllegalArgumentException("Mapped Zone IDs have an invalid or ambiguous low-byte alias");
+            }
             this.panels=Collections.unmodifiableList(new ArrayList<>(panels));
             this.zones=Collections.unmodifiableList(new ArrayList<>(zones));
         }
@@ -113,34 +126,129 @@ final class GeometryTransactionManager {
             }
             return Collections.unmodifiableList(batches);
         }
-        /** Preserve CORE-assigned trigger roles while changing only pixel geometry. */
+        private static PanelPreviewProtocol.MapPanel findUniquePanelByName(
+                List<PanelPreviewProtocol.MapPanel> panels,String name) {
+            if(name==null||name.trim().isEmpty())return null;
+            PanelPreviewProtocol.MapPanel found=null;
+            for(PanelPreviewProtocol.MapPanel panel:panels)if(panel.name.equalsIgnoreCase(name.trim())) {
+                if(found!=null&&found.id!=panel.id)
+                    throw new IllegalArgumentException("Ambiguous Panel name in authoritative map");
+                found=panel;
+            }
+            return found;
+        }
+        private static PanelPreviewProtocol.MapZone findUniqueZoneByName(
+                List<PanelPreviewProtocol.MapZone> zones,String name) {
+            if(name==null||name.trim().isEmpty())return null;
+            PanelPreviewProtocol.MapZone found=null;
+            for(PanelPreviewProtocol.MapZone zone:zones)if(zone.name.equalsIgnoreCase(name.trim())) {
+                if(found!=null&&found.id!=zone.id)
+                    throw new IllegalArgumentException("Ambiguous Zone name in authoritative Panel map");
+                found=zone;
+            }
+            return found;
+        }
+        private static MappedZone findUniqueMappedZoneByName(List<MappedZone> zones,String name) {
+            if(name==null||name.trim().isEmpty())return null;
+            MappedZone found=null;
+            for(MappedZone zone:zones)if(zone.name.equalsIgnoreCase(name.trim())) {
+                if(found!=null&&found.id!=zone.id)
+                    throw new IllegalArgumentException("Ambiguous Zone name in previous Layout map");
+                found=zone;
+            }
+            return found;
+        }
+        private static MappedPanel findUniqueMappedPanelByName(List<MappedPanel> panels,String name) {
+            if(name==null||name.trim().isEmpty())return null;
+            MappedPanel found=null;
+            for(MappedPanel panel:panels)if(panel.name.equalsIgnoreCase(name.trim())) {
+                if(found!=null&&found.id!=panel.id)
+                    throw new IllegalArgumentException("Ambiguous Panel name in previous Layout map");
+                found=panel;
+            }
+            return found;
+        }
+        /** Resolve local low-byte aliases to authoritative full IDs and roles. */
         MappedLane withRolesFromSnapshot(PanelPreviewProtocol.LaneSnapshot snapshot) {
             if(snapshot==null||snapshot.lane!=lane)
                 throw new IllegalArgumentException("Authoritative role snapshot lane mismatch");
             PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(snapshot);
-            Map<Integer,PanelPreviewProtocol.MapZone> byId=new HashMap<>();
-            for(PanelPreviewProtocol.MapZone zone:current.zones)byId.put(zone.id,zone);
-            List<MappedZone> copy=new ArrayList<>();
-            for(MappedZone zone:zones) {
-                PanelPreviewProtocol.MapZone prior=byId.get(zone.id);
-                int role=prior!=null&&prior.panelId==zone.panelId?wireRole(prior.role):zone.roleFlags;
-                copy.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
+            Map<Integer,PanelPreviewProtocol.MapPanel> panelsByAlias=new HashMap<>();
+            Map<Integer,PanelPreviewProtocol.MapZone> zonesByAlias=new HashMap<>();
+            for(PanelPreviewProtocol.MapPanel panel:current.panels)
+                panelsByAlias.put(panel.id&0xff,panel);
+            for(PanelPreviewProtocol.MapZone zone:current.zones)
+                zonesByAlias.put(zone.id&0xff,zone);
+
+            List<MappedPanel> resolvedPanels=new ArrayList<>();
+            Map<Integer,Integer> panelIdsByLocalId=new HashMap<>();
+            for(MappedPanel panel:panels) {
+                int alias=panel.id&0xff;
+                PanelPreviewProtocol.MapPanel byAlias=panelsByAlias.get(alias);
+                PanelPreviewProtocol.MapPanel byName=findUniquePanelByName(current.panels,panel.name);
+                if(byAlias!=null&&byName!=null&&byAlias.id!=byName.id)
+                    throw new IllegalArgumentException("Layout Panel alias and name resolve to different CORE identities");
+                PanelPreviewProtocol.MapPanel prior=byAlias!=null?byAlias:byName;
+                int fullId=prior==null?(0x8000|alias):prior.id;
+                panelIdsByLocalId.put(panel.id,fullId);
+                resolvedPanels.add(new MappedPanel(fullId,panel.lane,panel.name,panel.zoneCount));
             }
-            return new MappedLane(lane,activePixels,panels,copy);
+            List<MappedZone> resolvedZones=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                int alias=zone.id&0xff;
+                PanelPreviewProtocol.MapZone byAlias=zonesByAlias.get(alias);
+                PanelPreviewProtocol.MapZone byName=findUniqueZoneByName(current.zones,zone.name);
+                if(byAlias!=null&&byName!=null&&byAlias.id!=byName.id)
+                    throw new IllegalArgumentException("Layout Zone alias and name resolve to different CORE identities");
+                PanelPreviewProtocol.MapZone prior=byAlias!=null?byAlias:byName;
+                int fullId=prior==null?(0x4000|alias):prior.id;
+                Integer panelId=panelIdsByLocalId.get(zone.panelId);
+                if(panelId==null)
+                    throw new IllegalArgumentException("Layout Zone references a missing local Panel identity");
+                int role=prior==null?zone.roleFlags:wireRole(prior.role);
+                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.start,
+                    zone.count,zone.name,role));
+            }
+            return new MappedLane(lane,activePixels,resolvedPanels,resolvedZones);
         }
-        /** Preserve roles across successive live Layout drafts by stable CORE Zone ID. */
+        /** Preserve full identities and CORE roles across successive live Layout drafts. */
         MappedLane withRolesFrom(MappedLane previous) {
             if(previous==null||previous.lane!=lane)
                 throw new IllegalArgumentException("Previous geometry lane mismatch");
-            Map<Integer,MappedZone> byId=new HashMap<>();
-            for(MappedZone zone:previous.zones)byId.put(zone.id,zone);
-            List<MappedZone> copy=new ArrayList<>();
-            for(MappedZone zone:zones) {
-                MappedZone prior=byId.get(zone.id);
-                int role=prior==null?zone.roleFlags:prior.roleFlags;
-                copy.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
+            Map<Integer,MappedPanel> panelsByAlias=new HashMap<>();
+            Map<Integer,MappedZone> zonesByAlias=new HashMap<>();
+            for(MappedPanel panel:previous.panels)panelsByAlias.put(panel.id&0xff,panel);
+            for(MappedZone zone:previous.zones)zonesByAlias.put(zone.id&0xff,zone);
+            List<MappedPanel> resolvedPanels=new ArrayList<>();
+            Map<Integer,Integer> panelIdsByLocalId=new HashMap<>();
+            for(MappedPanel panel:panels) {
+                int alias=panel.id&0xff;
+                MappedPanel byAlias=panelsByAlias.get(alias);
+                MappedPanel byName=findUniqueMappedPanelByName(previous.panels,panel.name);
+                if(byAlias!=null&&byName!=null&&byAlias.id!=byName.id)
+                    throw new IllegalArgumentException("Layout Panel alias and name resolve to different CORE identities");
+                MappedPanel prior=byAlias!=null?byAlias:byName;
+                int fullId=prior==null?(0x8000|alias):prior.id;
+                panelIdsByLocalId.put(panel.id,fullId);
+                resolvedPanels.add(new MappedPanel(fullId,panel.lane,panel.name,panel.zoneCount));
             }
-            return new MappedLane(lane,activePixels,panels,copy);
+            List<MappedZone> resolvedZones=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                int alias=zone.id&0xff;
+                MappedZone byAlias=zonesByAlias.get(alias);
+                MappedZone byName=findUniqueMappedZoneByName(previous.zones,zone.name);
+                if(byAlias!=null&&byName!=null&&byAlias.id!=byName.id)
+                    throw new IllegalArgumentException("Layout Zone alias and name resolve to different CORE identities");
+                MappedZone prior=byAlias!=null?byAlias:byName;
+                int fullId=prior==null?(0x4000|alias):prior.id;
+                Integer panelId=panelIdsByLocalId.get(zone.panelId);
+                if(panelId==null)
+                    throw new IllegalArgumentException("Layout Zone references a missing local Panel identity");
+                int role=prior==null?zone.roleFlags:prior.roleFlags;
+                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.start,
+                    zone.count,zone.name,role));
+            }
+            return new MappedLane(lane,activePixels,resolvedPanels,resolvedZones);
         }
         /** Initial preview diff; CORE Zones not represented by the draft are preserved. */
         List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(
@@ -150,18 +258,25 @@ final class GeometryTransactionManager {
             PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(snapshot);
             Map<Integer,ExistingZone> old=new HashMap<>();
             Map<Integer,PanelPreviewProtocol.MapZone> currentById=new HashMap<>();
+            List<PanelPreviewProtocol.UpdateDescriptor> deletes=new ArrayList<>();
             for(PanelPreviewProtocol.MapZone zone:current.zones)currentById.put(zone.id,zone);
             for(MappedZone zone:zones) {
                 PanelPreviewProtocol.MapZone prior=currentById.get(zone.id);
                 if(prior==null)continue;
-                if(prior.panelId!=zone.panelId||prior.ranges.size()>1||
-                   (prior.ranges.isEmpty()&&prior.flags!=1))
+                if(prior.ranges.size()>1||(prior.ranges.isEmpty()&&prior.flags!=1))
                     throw new IllegalArgumentException("Existing CORE Zone cannot be represented by this single-range Layout");
                 int start=prior.ranges.isEmpty()?-1:prior.ranges.get(0).start;
                 int count=prior.ranges.isEmpty()?0:prior.ranges.get(0).count;
+                if(prior.panelId!=zone.panelId) {
+                    /* Explicitly represented Panel moves are delete-then-upserted
+                     * with the same authoritative Zone ID, never a guessed identity. */
+                    deletes.add(new PanelPreviewProtocol.UpdateDescriptor(
+                        prior.panelId,prior.id,0,0,0,0x20));
+                    continue;
+                }
                 old.put(zone.id,new ExistingZone(prior.panelId,wireRole(prior.role),start,count));
             }
-            return buildBatches(old,Collections.emptyList(),mtu);
+            return buildBatches(old,deletes,mtu);
         }
         /** Live draft diff: only explicitly removed/moved local IDs are deleted. */
         List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(MappedLane previous,int mtu) {
@@ -434,8 +549,8 @@ final class GeometryTransactionManager {
                     throw new IllegalArgumentException("Proposed Zone ID collides with an existing Panel ID");
                 PanelPreviewProtocol.MapZone prior=currentZones.get(zone.id);
                 if(prior!=null) {
-                    if(zoneLanes.get(zone.id)!=lane||prior.panelId!=zone.panelId||
-                       prior.ranges.size()>1||(prior.ranges.isEmpty()&&prior.flags!=1))
+                    if(zoneLanes.get(zone.id)!=lane||prior.ranges.size()>1||
+                       (prior.ranges.isEmpty()&&prior.flags!=1))
                         throw new IllegalArgumentException("Existing Zone ID has a different Panel or unsupported multi-range geometry");
                 }
                 long end=(long)zone.start+zone.count;

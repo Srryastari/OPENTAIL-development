@@ -91,4 +91,15 @@ public class PanelPreviewProtocolTest {
     @Test public void crc16MatchesCcittFalseKnownVector() {
         assertEquals(0x29b1,PanelPreviewProtocol.crc16("123456789".getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
     }
+    @Test public void fullSixteenBitIdsEncodeOnlyTheirLowByteAliases() {
+        PanelPreviewProtocol.UpdateDescriptor descriptor=
+            new PanelPreviewProtocol.UpdateDescriptor(0x8001,0x4001,0,0x1234,0x0020,0x05);
+        byte[] encoded=descriptor.encode();
+        assertEquals(0x01,encoded[0]&255);
+        assertEquals(0x01,encoded[1]&255);
+        assertEquals(0x34,encoded[3]&255);
+        assertEquals(0x12,encoded[4]&255);
+        assertEquals(0x20,encoded[5]&255);
+    }
+
 }

@@ -45,16 +45,23 @@ jobs:
       - name: Checkout reconciled Effects #110 authoritative CORE source (all 140)
         uses: actions/checkout@v4
         with:
-          ref: 76e24c69b935a94228b2e11b0efb8483c0276da5
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
           path: pinned-effects110
+      - name: Checkout exact Firmware #127 Panel/Zone and BLE contract
+        uses: actions/checkout@v4
+        with:
+          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          path: pinned-firmware127
       - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
-        run: python3 android/qa/check_pinned_core49_contract.py
+        run: |
+          python3 android/qa/check_pinned_core49_contract.py
+          python3 android/qa/check_pinned_firmware127_contract.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - name: All 140 local preview effects against immutable CORE oracle
-        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects110 --continuity-dir pinned-effects110 --color-dir pinned-effects110 > offline-preview-140.json
+        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects110 --continuity-dir pinned-effects110 --color-dir pinned-effects110 --state-dir pinned-firmware127 > offline-preview-140.json
       - name: Preserve authoritative proprietary loop goldens and seven one-shot endpoints
         working-directory: pinned-effects110/core-firmware
         run: |
@@ -74,7 +81,11 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - name: Native Compose, BLE v3 and UI contracts
+        env:
+          OPENTAIL_FIRMWARE_SOURCE_DIR: pinned-firmware127/core-firmware/main
+          OPENTAIL_EFFECTS_SOURCE_DIR: pinned-effects110/core-firmware/main
         run: |
+          python3 android/qa/check_pinned_firmware127_contract.py
           node --check android/qa/test_native_source.cjs
           node android/qa/test_native_source.cjs
           node android/qa/test_live_edit.cjs

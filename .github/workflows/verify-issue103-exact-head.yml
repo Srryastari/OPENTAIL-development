@@ -21,6 +21,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Checkout reviewed Effects #110 renderer
+        uses: actions/checkout@v4
+        with:
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
+          path: pinned-effects110
+          persist-credentials: false
+      - name: Checkout exact Firmware #127 geometry and BLE contract
+        uses: actions/checkout@v4
+        with:
+          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          path: pinned-firmware127
+          persist-credentials: false
       - name: Exact HEAD, frozen 106 lineage, immutable renderer and firmware ZIP provenance
         env:
           PIN: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -31,11 +43,18 @@ jobs:
           import subprocess
           def git(*args):
               return subprocess.check_output(['git',*args],text=True).strip()
-          fx='76e24c69b935a94228b2e11b0efb8483c0276da5'
+          def pin_git(path,*args):
+              return subprocess.check_output(['git','-C',path,*args],text=True).strip()
+          fx='601155a196a692792e60fd399505fdc676dc57d9'
           fw='df27209b9876630b2b10f3a189f36817a2764009'
-          for p in ('ot_auto_effects.c','wled_fx_compat.c','wled_fx_compat.h'):
-              want=git('rev-parse',fx+':core-firmware/main/'+p)
-              assert git('rev-parse','HEAD:core-firmware/main/'+p)==want
+          fw127='97f4e2fd29df5aa9249292cee2649404fc98ed48'
+          assert pin_git('pinned-effects110','rev-parse','HEAD')==fx
+          assert pin_git('pinned-firmware127','rev-parse','HEAD')==fw127
+          for p in ('ot_auto_effects.c','ot_auto_effects.h','wled_fx_compat.c','wled_fx_compat.h'):
+              want=pin_git('pinned-effects110','rev-parse','HEAD:core-firmware/main/'+p)
+              assert git('rev-parse','HEAD:android/app/src/main/cpp/core/'+p)==want
+          for p in ('effects_1d.c','effects_1d.h'):
+              want=pin_git('pinned-firmware127','rev-parse','HEAD:core-firmware/main/'+p)
               assert git('rev-parse','HEAD:android/app/src/main/cpp/core/'+p)==want
           for p in ('scripts/package_core_flash.py',
                     'scripts/tests/test_core_flash_package.py',
@@ -65,10 +84,9 @@ jobs:
               'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
               'core-firmware/main/ot_version.')) for p in protected)
           # Pin the admitted 13-mode capability to the verified Firmware #127 contract.
-          fw127='29a729cdeaf17e58d500ede944b8188e07de2fab'
-          fw127_header=git('show',fw127+':core-firmware/main/ble_fx_command.h')
-          fw127_parser=git('show',fw127+':core-firmware/main/ble_fx_command.c')
-          fw127_status=git('show',fw127+':core-firmware/main/ble_status.c')
+          fw127_header=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_fx_command.h')
+          fw127_parser=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_fx_command.c')
+          fw127_status=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_status.c')
           assert 'OT_BLE_FX_TERTIARY13_CAPABILITY "fx-tertiary13-v1"' in fw127_header
           assert 'return ot_wled_fx_tertiary_supported(id);' in fw127_parser
           assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in fw127_parser
@@ -80,6 +98,8 @@ jobs:
           assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in local_status
           print('PASS: exact Effects #110 CORE+JNI, Firmware #127 13-mode BLE contract, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
           PY
+      - name: Verify exact Firmware #127 Panel/Zone and BLE contract
+        run: python3 android/qa/check_pinned_firmware127_contract.py
       - name: All 140 CORE host golden, speed, third roles, palette, stop, independent original/regression
         run: cd core-firmware && bash tests/run-host-tests.sh
       - name: Firmware #96 flash package unit regression, including missing OTA fail-closed
@@ -96,15 +116,24 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 76e24c69b935a94228b2e11b0efb8483c0276da5
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
           path: pinned-effects110
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          path: pinned-firmware127
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - name: JNI file SHA256, locked UI architecture and Android source checks
+        env:
+          OPENTAIL_FIRMWARE_SOURCE_DIR: pinned-firmware127/core-firmware/main
+          OPENTAIL_EFFECTS_SOURCE_DIR: pinned-effects110/core-firmware/main
         run: |
+          python3 android/qa/check_pinned_firmware127_contract.py
           node android/qa/test_native_source.cjs
           node android/qa/test_live_edit.cjs
           python3 android/qa/check_release.py
@@ -113,7 +142,8 @@ jobs:
           python3 android/qa/test_full_offline_preview.py \
             --core-dir pinned-effects110 \
             --continuity-dir pinned-effects110 \
-            --color-dir pinned-effects110 > issue103-jni-140-parity.json
+            --color-dir pinned-effects110 \
+            --state-dir pinned-firmware127 > issue103-jni-140-parity.json
       - uses: actions/upload-artifact@v4
         with:
           name: issue103-jni-140-oracle-${{ github.event.pull_request.head.sha || github.sha }}

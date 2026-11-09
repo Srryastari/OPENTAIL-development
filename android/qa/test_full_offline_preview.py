@@ -2,7 +2,7 @@
 """All 140 IDs: real Java/JNI frames vs independent exact CORE source build.
 
 Host renderer timings are NOT Android display FPS or radio measurements.
-Usage: JAVA_HOME=... python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50
+Usage: JAVA_HOME=... python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects110 --state-dir pinned-firmware127
 """
 import argparse
 import ctypes as C
@@ -18,11 +18,13 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 CPP=ROOT/'android/app/src/main/cpp'
 JAVA=ROOT/'android/app/src/main/java/com/opentail/android'
-PIN='76e24c69b935a94228b2e11b0efb8483c0276da5'
+PIN='601155a196a692792e60fd399505fdc676dc57d9'
 CONTINUITY_PIN=PIN
 COLOR_PIN=PIN
-COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h','effects_1d.c','effects_1d.h'}
-CONTINUITY_FILES={'effects_1d.c','effects_1d.h','ot_auto_effects.c','ot_auto_effects.h'}
+STATE_PIN='97f4e2fd29df5aa9249292cee2649404fc98ed48'
+COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h'}
+CONTINUITY_FILES={'ot_auto_effects.c','ot_auto_effects.h'}
+STATE_FILES={'effects_1d.c','effects_1d.h'}
 SOURCES=['wled_fx_compat.c','effects_1d.c','wled_1d.c','palette_1d.c','particle_system_1d.c','ot_auto_effects.c']
 
 ORACLE=r'''
@@ -139,23 +141,28 @@ def run(args,**kw):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--core-dir',type=Path,default=ROOT/'pinned-effects50')
-    parser.add_argument('--continuity-dir',type=Path,default=ROOT/'pinned-effects80')
-    parser.add_argument('--color-dir',type=Path,default=ROOT/'pinned-effects95')
+    parser.add_argument('--core-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--continuity-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--color-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--state-dir',type=Path,default=ROOT/'pinned-firmware127')
     args=parser.parse_args();core=args.core_dir.resolve()
     continuity=args.continuity_dir.resolve()
     colored=args.color_dir.resolve()
+    state=args.state_dir.resolve()
     assert run(['git','-C',core,'rev-parse','HEAD'],text=True).strip()==PIN
     assert run(['git','-C',continuity,'rev-parse','HEAD'],text=True).strip()==CONTINUITY_PIN
     assert run(['git','-C',colored,'rev-parse','HEAD'],text=True).strip()==COLOR_PIN
+    assert run(['git','-C',state,'rev-parse','HEAD'],text=True).strip()==STATE_PIN
     manifest=json.loads((CPP/'core/SOURCE.json').read_text())
     assert manifest['source_commit']==PIN
     assert manifest['seamless_loop_source_commit']==CONTINUITY_PIN
     assert set(manifest['seamless_loop_files'])==CONTINUITY_FILES
     assert manifest['color_slot_source_commit']==COLOR_PIN
     assert set(manifest['color_slot_files'])==COLOR_FILES
+    assert manifest['core_identity_source_commit']==STATE_PIN
+    assert set(manifest['core_identity_files'])==STATE_FILES
     for name,digest in manifest['files'].items():
-        original_dir=colored if name in COLOR_FILES else (continuity if name in CONTINUITY_FILES else core)
+        original_dir=state if name in STATE_FILES else (colored if name in COLOR_FILES else (continuity if name in CONTINUITY_FILES else core))
         local=(CPP/'core'/name).read_bytes()
         original=(original_dir/'core-firmware/main'/name).read_bytes()
         assert local==original and hashlib.sha256(local).hexdigest()==digest,name
@@ -302,7 +309,7 @@ def main():
         for row in rows:
             row['jni_timing']=timings[str(row['id'])]
             row['host_renderer_only_fps']=round(1e9/row['jni_timing']['mean_ns'],1)
-        report={'core_commit':PIN,'seamless_loop_commit':CONTINUITY_PIN,'color_slot_commit':COLOR_PIN,'candidate_commit':run(['git','rev-parse','HEAD'],text=True).strip(),
+        report={'core_commit':PIN,'seamless_loop_commit':CONTINUITY_PIN,'color_slot_commit':COLOR_PIN,'core_identity_commit':STATE_PIN,'candidate_commit':run(['git','rev-parse','HEAD'],text=True).strip(),
                 'tracked_android_dirty':bool(run(['git','diff','--name-only','HEAD','--','android'],text=True).strip()),
                 'effects':len(rows),'source_adapters':sum(r['source_adapter'] for r in rows),
                 'frames':count,'argb_bytes':len(expected),'parity':'byte-exact JNI vs independent pinned CORE build',

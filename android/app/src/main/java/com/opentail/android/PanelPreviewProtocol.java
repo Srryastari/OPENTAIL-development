@@ -3,6 +3,8 @@ package com.opentail.android;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 
 /** Exact, little-endian client codec for the Issue #126 Panel/Zone BLE contract. */
@@ -210,6 +212,8 @@ final class PanelPreviewProtocol {
                 throw new IllegalArgumentException("Panel map counts or active pixel length are invalid");
             List<MapPanel> panels=new ArrayList<>();
             List<MapZone> zones=new ArrayList<>();
+            Map<Integer,Integer> panelAliases=new HashMap<>();
+            Map<Integer,Integer> zoneAliases=new HashMap<>();
             int panelBase=39;
             for(int i=0;i<4;i++) {
                 int at=panelBase+i*29,id=u16(b,at),lane=u8(b[at+2]);
@@ -224,6 +228,9 @@ final class PanelPreviewProtocol {
                     throw new IllegalArgumentException("Malformed Panel identity in authoritative map");
                 for(MapPanel prior:panels)if(prior.id==id)
                     throw new IllegalArgumentException("Duplicate Panel ID in authoritative map");
+                int alias=id&0xff;
+                if(alias==0||panelAliases.put(alias,id)!=null)
+                    throw new IllegalArgumentException("Ambiguous Panel low-byte alias in authoritative map");
                 panels.add(new MapPanel(id,lane,name,count));
             }
             int zoneBase=155;
@@ -244,6 +251,9 @@ final class PanelPreviewProtocol {
                     throw new IllegalArgumentException("Malformed Zone identity in authoritative map");
                 for(MapZone prior:zones)if(prior.id==id)
                     throw new IllegalArgumentException("Duplicate Zone ID in authoritative map");
+                int alias=id&0xff;
+                if(alias==0||zoneAliases.put(alias,id)!=null)
+                    throw new IllegalArgumentException("Ambiguous Zone low-byte alias in authoritative map");
                 int panelIndex=-1;
                 for(int j=0;j<panels.size();j++)if(panels.get(j).id==panelId)panelIndex=j;
                 if(panelIndex<0)throw new IllegalArgumentException("Zone references missing Panel identity");
@@ -295,17 +305,22 @@ final class PanelPreviewProtocol {
     }
 
     static final class UpdateDescriptor {
+        /* IDs remain authoritative uint16 values in Android. The eight-byte
+         * UPDATE wire carries only each ID's unique low-byte alias. */
         final int panelId,zoneId,rangeSlot,start,count,roleFlags;
         UpdateDescriptor(int panelId,int zoneId,int rangeSlot,int start,int count,int roleFlags) {
-            if(panelId<0||panelId>255||zoneId<0||zoneId>255||rangeSlot<0||rangeSlot>255||
+            if(panelId<0||panelId>65535||zoneId<0||zoneId>65535||rangeSlot<0||rangeSlot>255||
                start<0||start>65535||count<0||count>65535||roleFlags<0||roleFlags>255)
                 throw new IllegalArgumentException("Panel UPDATE descriptor value out of range");
             if((roleFlags&0xc0)!=0)throw new IllegalArgumentException("Reserved role/action bits must be zero");
+            int action=(roleFlags&0x30)>>>4;
+            if((panelId&0xff)==0||(action==3?zoneId!=0:(zoneId&0xff)==0))
+                throw new IllegalArgumentException("Panel UPDATE identity has a reserved zero low-byte alias");
             this.panelId=panelId;this.zoneId=zoneId;this.rangeSlot=rangeSlot;
             this.start=start;this.count=count;this.roleFlags=roleFlags;
         }
         byte[] encode() {
-            return new byte[]{(byte)panelId,(byte)zoneId,(byte)rangeSlot,
+            return new byte[]{(byte)(panelId&0xff),(byte)(zoneId&0xff),(byte)rangeSlot,
                 (byte)start,(byte)(start>>>8),(byte)count,(byte)(count>>>8),(byte)roleFlags};
         }
     }
