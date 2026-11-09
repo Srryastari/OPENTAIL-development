@@ -329,7 +329,8 @@ assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
 assert "if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;" in sampler
 assert "config_activation_task" in core and "input_edge_isr" in core
-assert "config_activation_idle(epoch)" in core
+assert "config_activation_idle(epoch,false)" in core
+assert "config_activation_idle(epoch,true)" in core
 assert "ot_tm_journal_recover(" in core and "ot_om_journal_recover(" in core
 assert "xSemaphoreGive(om_write_mutex)" in save
 assert "require_revision&&tm_revision!=expected" in save
@@ -429,7 +430,7 @@ for kind,operation,helper in (
 ):
     active_write=operation.index("config_write_active(h,")
     stage_erase=operation.index("config_clear_stage(h)")
-    after_erase_idle=operation.index("config_activation_idle(epoch)",stage_erase)
+    after_erase_idle=operation.index("config_activation_idle(epoch,false)",stage_erase)
     ram_apply=operation.index(helper)
     assert active_write < stage_erase < after_erase_idle < ram_apply, (
         f"{kind}: RAM publication must follow durable stage erasure and "
