@@ -306,7 +306,11 @@ static void pz_remove_panel(ot_pz_output_t *out,unsigned index){
 static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
                                 const ot_pz_range_update_t *u){
     if(!out||!u||(u->role_flags&0xc0u)!=0u)return false;
-    const uint8_t role=(uint8_t)(u->role_flags&OT_PZ_TX_ROLE_MASK);
+    const uint8_t wire_role=(uint8_t)(u->role_flags&OT_PZ_TX_ROLE_MASK);
+    /* The four-bit wire value 0x0f is the only representable UNASSIGNED
+     * sentinel; normalize it before validation/storage. Role 0 remains OFF. */
+    const uint8_t role=(wire_role==OT_PZ_TX_ROLE_MASK)?
+        OT_PZ_ROLE_UNASSIGNED:wire_role;
     const uint8_t action=(uint8_t)((u->role_flags&OT_PZ_TX_ACTION_MASK)>>OT_PZ_TX_ACTION_SHIFT);
     if(u->panel_id==0u)return false;
     int panel_index=pz_find_panel(out,u->panel_id);
