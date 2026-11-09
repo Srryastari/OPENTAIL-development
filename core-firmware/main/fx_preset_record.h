@@ -32,5 +32,7 @@ typedef struct {
  ot_ble_fx_packet_t effect[OT_OM_OUTPUTS][OT_OM_ZONES];
 } ot_fx_scene_record_t;
 bool ot_fx_scene_pack(ot_fx_scene_record_t *record,
-                      const ot_fx_zone_bank_t *bank,uint32_t now_ms);
+                      const ot_fx_zone_bank_t *bank,
+                      const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],
+                      uint32_t now_ms);
 bool ot_fx_scene_valid(const ot_fx_scene_record_t *record);
