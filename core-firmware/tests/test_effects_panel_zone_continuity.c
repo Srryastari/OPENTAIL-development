@@ -167,6 +167,7 @@ static bool render_probe_frame(render_probe_t *probe,
         memcpy(old_generation,probe->prior_generation[lane],sizeof(old_generation));
         memcpy(old_active,probe->prior_active[lane],sizeof(old_active));
         memcpy(old_state,probe->state[lane],sizeof(old_state));
+        memset(probe->state[lane],0,sizeof(probe->state[lane]));
 
         for(unsigned zone=0;zone<output.zone_count;zone++){
             const unsigned len=output.zones[zone].pixels;
@@ -183,8 +184,8 @@ static bool render_probe_frame(render_probe_t *probe,
             const bool same_identity=prior_index>=0;
             if(active&&len<=OT_PZ_MAX_PIXELS&&len<=TEST_PIXELS){
                 if(same_identity){
-                    if((unsigned)prior_index!=zone)
-                        probe->state[lane][zone]=old_state[prior_index];
+                    probe->state[lane][zone]=old_state[prior_index];
+                    memset(&old_state[prior_index],0,sizeof(old_state[prior_index]));
                 }else{
                     ot_effects_1d_reset(&probe->state[lane][zone],
                         0x1234u+lane*97u+zone*19u+slot->generation);
@@ -236,6 +237,8 @@ static bool render_probe_frame(render_probe_t *probe,
         }
         for(unsigned zone=output.zone_count;zone<OT_OM_ZONES;zone++)
             probe->prior_active[lane][zone]=false;
+        for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)
+            ot_effects_1d_reset(&old_state[old_z],0u);
         memcpy(probe->prior_pixel_zone_map[lane],zone_map,
                OT_PZ_MAX_PIXELS*sizeof(zone_map[0]));
     }
