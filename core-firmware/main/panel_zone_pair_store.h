@@ -67,7 +67,7 @@ bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
                             bool allow_empty_active,
                             ot_pz_pair_phase_hook_t phase_hook,void *phase_context);
 
-/* Completes phases 4..8 idempotently. It can resume from any durable cut
+/* Completes phases 4..9 idempotently. It can resume from any durable cut
  * while the pair intent remains present. */
 bool ot_pz_pair_store_finish(const ot_pz_pair_store_io_t *io,
                              uint32_t transaction_id,
