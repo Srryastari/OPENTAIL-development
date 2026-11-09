@@ -209,8 +209,14 @@ assert "live_input_mask=" not in simulate
 assert "#define OT_SIM_MAX_MS 15000u" in core
 stop = between(core, "static esp_err_t stop_post(httpd_req_t *r) {",
                "extern const uint8_t ot_dev_console_start[]")
-assert "sim_mask=0;" in stop
-assert "live_input_mask=" not in stop
+stop_core = between(core, "static void core_stop_all_sources(void){",
+                    "void ot_ble_stop_show(void){")
+assert "core_stop_all_sources();" in stop
+assert "sim_mask=0u;" in stop_core
+assert "live_input_mask=" not in stop_core
+assert "tm_gpio_input_mask" not in stop_core
+assert "gpio_set_level" not in stop_core
+assert "geometry_commit_active" in stop_core
 status = between(core, "static esp_err_t status_get(httpd_req_t *r) {",
                  "static esp_err_t")
 assert "ot_tm_resolve(&tm,physical)" in status
