@@ -16,7 +16,7 @@ static bool panel_has_identity(const ot_pz_output_t *panel,
             return true;
     return false;
 }
-bool ot_fx_bank_resolve_zone_identity(ot_pz_output_t *panel_output,
+bool ot_fx_bank_resolve_zone_identity(const ot_pz_output_t *panel_output,
  ot_fx_zone_bank_t *bank,unsigned output,uint32_t now_ms,
  uint8_t resolved_indices[OT_OM_ZONES]){
  if(!panel_output||!bank||!resolved_indices||output>=OT_OM_OUTPUTS||
@@ -151,7 +151,7 @@ static bool resolve_requested_slots(ot_fx_zone_bank_t *bank,
  if(!bank||!output_cfg||!panel_cfg||!bank_mask||!resolved||
     output>=OT_OM_OUTPUTS||output_cfg->zone_count>OT_OM_ZONES||
     panel_cfg->zone_count>OT_OM_ZONES)return false;
- if(!ot_fx_bank_resolve_zone_identity((ot_pz_output_t *)panel_cfg,bank,
+ if(!ot_fx_bank_resolve_zone_identity(panel_cfg,bank,
                                       output,now_ms,resolved))return false;
  *bank_mask=0u;
  for(unsigned zone=0;zone<output_cfg->zone_count;zone++){
@@ -160,7 +160,7 @@ static bool resolve_requested_slots(ot_fx_zone_bank_t *bank,
      output_cfg->zones[zone].role==OT_OM_OFF)continue;
   unsigned bank_z=resolved[zone];
   if(bank_z>=OT_OM_ZONES){
-   if(require_active)return false;
+   if(require_active)continue;
    bool found=false;
    for(unsigned candidate=0;candidate<OT_OM_ZONES;candidate++){
     if(*bank_mask&(1u<<candidate))continue;
@@ -242,8 +242,11 @@ bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
  }
  if(!any)return false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++)
-  if(bank->zones[o][z].continuous&&!(masks[o]&(1u<<z)))
+  if(bank->zones[o][z].continuous&&!(masks[o]&(1u<<z))){
    bank->zones[o][z].configured=false;
+   bank->zones[o][z].owner_panel_id=0u;
+   bank->zones[o][z].owner_zone_id=0u;
+  }
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!masks[o])continue;
   ot_ble_fx_packet_t effective=*request;
@@ -271,7 +274,7 @@ bool ot_fx_bank_set_overlay_identity(ot_fx_zone_bank_t *bank,
       zone_mask,now_ms,true,&mask,resolved))continue;
   any=true;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if(mask&(1u<<resolved[z]))
+   if((zone_mask&(1u<<z))&&resolved[z]<OT_OM_ZONES)
     bank->zones[o][resolved[z]].overlay=*overlay;
  }
  return any;
@@ -300,7 +303,13 @@ void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank){
     if(!bank)return;
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
         for(unsigned z=0;z<OT_OM_ZONES;z++)
-            if(!bank->zones[o][z].standalone&&!bank->zones[o][z].continuous)bank->zones[o][z].configured=false;
+            if(!bank->zones[o][z].standalone&&!bank->zones[o][z].continuous){
+                {bank->zones[o][z].configured=false;
+             bank->zones[o][z].owner_panel_id=0u;
+             bank->zones[o][z].owner_zone_id=0u;}
+                bank->zones[o][z].owner_panel_id=0u;
+                bank->zones[o][z].owner_zone_id=0u;
+            }
 }
 void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank){
     if(!bank)return;
@@ -358,7 +367,11 @@ bool ot_fx_bank_apply_continuous(ot_fx_zone_bank_t *bank,
 void ot_fx_bank_stop_continuous(ot_fx_zone_bank_t *bank){
  if(!bank)return;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++)
-  if(bank->zones[o][z].continuous)bank->zones[o][z].configured=false;
+  if(bank->zones[o][z].continuous){
+   bank->zones[o][z].configured=false;
+   bank->zones[o][z].owner_panel_id=0u;
+   bank->zones[o][z].owner_zone_id=0u;
+  }
 }
 
 void ot_fx_bank_prune_expired(ot_fx_zone_bank_t *bank,uint32_t now_ms){
@@ -366,6 +379,8 @@ void ot_fx_bank_prune_expired(ot_fx_zone_bank_t *bank,uint32_t now_ms){
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
   ot_fx_zone_slot_t *slot=&bank->zones[o][z];
   if(slot->configured&&!slot->standalone&&!slot->continuous&&
-     !ot_fx_slot_active(slot,now_ms))slot->configured=false;
+     !ot_fx_slot_active(slot,now_ms)){
+   slot->configured=false;slot->owner_panel_id=0u;slot->owner_zone_id=0u;
+  }
  }
 }
