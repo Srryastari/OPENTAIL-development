@@ -41,9 +41,9 @@ for token in ("input_quiet_samples>=OT_DEBOUNCE_TICKS",
 pz_load=between("static void pz_load(void){",
                 "static bool pz_save_controller_locked(")
 pair_store=(root/"main/panel_zone_pair_store.c").read_text()
-assert "const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||" in core
+assert "const bool v4_authoritative=snapshot->has_marker||snapshot->has_intent||" in core
 assert "!s->has_intent&&s->has_map_active&&!s->has_marker" in pair_store
-assert "snapshot.has_map_active||snapshot.has_lane_active;" in core
+assert "snapshot->has_map_active||snapshot->has_lane_active;" in core
 for token in ("ot_pz_pair_store_snapshot", "ot_pz_pair_store_recover",
               "ot_pz_pair_store_begin", "pz_load_legacy_snapshot",
               "om_deferred.pending=false"):
@@ -73,7 +73,7 @@ assert "nvs_open(" not in pz_save and "nvs_set_blob(" not in pz_save
 # accepted edits through the same v4 pair store and may not write the old
 # combined profile/journal keys.
 legacy_output_save=between("static bool om_save(","#define OT_SHOW_MAX_MS")
-assert "pz_save_controller_locked(&candidate)" in legacy_output_save
+assert "pz_save_controller_locked(candidate)" in legacy_output_save
 assert "nvs_open(" not in legacy_output_save
 assert "nvs_set_blob(" not in legacy_output_save
 assert "static void om_promote(" not in core
@@ -87,9 +87,22 @@ assert "config_recovery_fault" not in legacy_om_load
 assert "om_legacy_journal_fault=true" in legacy_om_load
 pz_load=between("static void pz_load(void){",
                 "static bool pz_save_controller_locked(")
-assert "snapshot.has_marker||snapshot.has_intent" in pz_load
+assert "snapshot->has_marker||snapshot->has_intent" in pz_load
 assert pz_load.index("if(v4_authoritative)") < pz_load.index(
     "if(om_legacy_journal_fault)")
+# Multi-kilobyte pair/journal records live in one bounded static workspace,
+# never as nested local snapshots on the 5,120-byte activation task stack.
+store_header=(root/"main/panel_zone_pair_store.h").read_text()
+assert "ot_pz_pair_store_workspace_t" in store_header
+assert "static ot_pz_pair_store_workspace_t pz_pair_workspace;" in core
+assert "sizeof(pz_pair_workspace)<=16u*1024u" in core
+assert "ot_pz_pair_store_snapshot_t snapshot" not in core
+assert "ot_pz_pair_store_snapshot_t s;" not in pair_store
+assert "ot_pz_controller_t previous,candidate;" not in journal.split(
+    "bool ot_pz_pair_journal_recover(",1)[1]
+assert "ot_cfg_crc32_zeroed" in journal and "ot_cfg_crc32_zeroed" in header
+assert "ot_pz_journal_t active={0},stage={0}" not in legacy_load
+assert "ot_pz_reset_tombstone_t tombstone={0}" not in legacy_load
 assert "__atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u" in pz_load
 
 # The exact same portable v4 store used by CORE implements all nine durable
@@ -138,7 +151,7 @@ for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
               "input_quiet_samples>=OT_DEBOUNCE_TICKS",
               "live_input_mask==0u","tm_gpio_input_mask()==0u",
               "input_edge_epoch,__ATOMIC_ACQUIRE",
-              "pz_outputs=recovered_pending.candidate",
+              "pz_outputs=workspace->pending.candidate",
               "config_recovery_fault=true"):
     assert token in panel_promotion,token
 assert "nvs_open(" not in panel_promotion
