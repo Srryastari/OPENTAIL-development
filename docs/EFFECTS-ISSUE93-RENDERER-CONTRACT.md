@@ -25,9 +25,11 @@ These are **local renderer inputs**, not an existing BLE wire extension. Old des
 | 34 | Colorful | 1 / 2 / 3 | Optional third in high-intensity authored three-color mode |
 | 78 | Railway (Colors 1 & 2) | 1 / 2 | Second is not a fabricated background role |
 
-**Additional proven third-slot bindings (legacy defaults unchanged):** Chase ID28, Chase Random ID29, Two Dots ID50, Running Dual ID52 and Glitter ID87. These join Chase 3, Tri Fade, Tri Wipe, Solid Glitter, Solid Pattern Tri and Colorful: **11 independently authored tertiary consumers**. They all retain their original first/second colors when `tertiary_set=false`.
+**Additional proven third-slot bindings (legacy defaults unchanged):** Chase ID28, Chase Random ID29, Two Dots ID50, Running Dual ID52 and Glitter ID87. These join Chase 3, Tri Fade, Tri Wipe, Solid Glitter, Solid Pattern Tri and Colorful. Issue #102 additionally source-proved Aurora ID38 (only when an explicitly selected three-color palette consumes Color 3) and Popcorn ID95 (preserving its source RNG slot selection): **13 independently authored tertiary consumers**. All 13 retain their original behavior when `tertiary_set=false`.
 
-**Remaining declared third-slot responses are NOT VERIFIED:** Scan IDs10/11, Aurora ID38, Scanner IDs40/60, Rolling Balls ID48, Bouncing Balls ID91 and Popcorn ID95. These need a source-specific proof of whether the third role is used for base RGB, optional overlay or palette rather than a broad invented third-color substitution. The 140-row CSV explicitly marks each. The third circle's appearance must never be used as proof that CORE consumes it.
+**Six metadata-declared third slots remain NOT SUPPORTED in the accepted isolated 1D profile:** Scan IDs10/11, Scanner IDs40/60, Rolling Balls ID48 and Bouncing Balls ID91. Their third metadata positions describe unimplemented source options or overlays, not a verified third RGB paint path. The 140-row CSV marks these separately. A visible third editor circle is never proof that CORE consumes it.
+
+**Explicit black regression:** `tertiary_set=true, tertiary=#000000` is a valid authored third color. Aurora palette ID5 must retain a black third stop instead of inferring presence from nonzero RGB; Popcorn and Solid Glitter must emit exact black for their third-color particle/glitter slot. Legacy unset behavior remains unchanged.
 
 **No additive highlight:** `#000000` remains zero; pixel backgrounds/off slots stay unchanged unless the effect's *authored source* fills them.
 
