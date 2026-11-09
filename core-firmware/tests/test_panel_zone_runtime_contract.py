@@ -129,7 +129,7 @@ assert "pz_pair_commit_pending" in pz_save
 assert "reset_mask" in pz_save
 assert "nvs_open(" not in pz_save and "nvs_set_blob(" not in pz_save
 panel_promotion = core.split("static void pz_promote(uint32_t epoch){", 1)[1].split(
-    "static void om_promote(uint32_t epoch){", 1)[0]
+    "static void config_activation_task(void *unused){", 1)[0]
 for token in ("ot_pz_pair_store_finish", "ot_pz_pair_store_snapshot",
               "ot_pz_pair_store_recover", "ot_pz_join",
               "config_activation_idle(epoch,true)",
