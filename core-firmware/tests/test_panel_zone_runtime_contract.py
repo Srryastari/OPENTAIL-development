@@ -146,3 +146,49 @@ for token in ("OT_PZ_RESET_TOMBSTONE_KEY", "pz_reset_tombstone_valid",
 assert "reset_v3" in core
 
 print("PASS Issue126 static runtime, namespace, ISR telemetry, brightness and reset contracts")
+
+
+# Owner P0 acceptance addendum: COMMITTING is a protected, immutable boundary.
+protocol_header = (ROOT / "main/panel_zone_protocol.h").read_text()
+protocol = (ROOT / "main/panel_zone_protocol.c").read_text()
+assert "OT_PZ_TX_ERROR_COMMITTING_LOCKED 5u" in protocol_header
+assert "OT_PZ_TX_STATUS_V2_BYTES 61u" in protocol_header
+assert "OT_PZ_TX_ERROR_SYNC_REQUIRED 10u" in protocol_header
+assert "OT_PZ_TX_UPDATE_REJECT_COMMITTING" in protocol
+assert "OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED" in protocol
+assert "OT_PZ_TX_SEQUENCE_GAP" in protocol
+assert "OT_PZ_TX_SEQUENCE_OUT_OF_ORDER" in protocol
+
+update_handler = ble.split("static int panel_preview_update_write(", 1)[1].split(
+    "static int panel_preview_status_read(", 1)[0]
+assert update_handler.index("if(panel_preview_tx.committing)") < update_handler.index(
+    "ot_ble_panel_preview_update_ranges(")
+assert "OT_PZ_TX_ERROR_COMMITTING_LOCKED" in update_handler
+assert "panel_preview_reject_update(update.sequence" in update_handler
+assert "panel_preview_tx.sequence_sync_fault" in update_handler
+
+control_handler = ble.split("static int panel_preview_control_write(", 1)[1].split(
+    "static int panel_preview_update_write(", 1)[0]
+assert control_handler.index("if(panel_preview_tx.committing)") < control_handler.index(
+    "ot_ble_panel_preview_commit(")
+assert "command.candidate_crc32==panel_preview_tx.candidate_crc32" in control_handler
+assert "OT_PZ_TX_ERROR_SYNC_REQUIRED" in control_handler
+
+legacy_panel_write = ble.split("static int panel_cfg_write(", 1)[1].split(
+    "static void panel_preview_set_error(", 1)[0]
+assert "panel_preview_tx.committing" in legacy_panel_write
+assert "OT_PZ_TX_ERROR_COMMITTING_LOCKED" in legacy_panel_write
+
+status_handler = ble.split("static int panel_preview_status_read(", 1)[1].split(
+    "static int pixel_probe_write(", 1)[0]
+assert "OT_PZ_TX_STATUS_V2_BYTES" in status_handler
+assert "OT_PZ_TX_STATUS_V2_VERSION" in status_handler
+for token in ("last_rejected_sequence", "missing_sequence_count",
+              "out_of_order_count", "duplicate_count", "conflict_count",
+              "committing_reject_count", "sequence_sync_fault"):
+    assert token in status_handler, token
+assert "OT_PZ_TX_STATUS_V2_VERSION 2u" in protocol_header
+assert "OT_PZ_TX_STATUS_V2_BYTES 61u" in protocol_header
+assert "OT_PZ_MAX_RANGES_PER_ZONE,0x0fu" in ble
+
+print("PASS Owner P0 protected-COMMITTING and sequence-watchdog source contracts")
