@@ -203,6 +203,9 @@ static uint16_t pz_active_revision[OT_PZ_OUTPUTS]={1u,1u};
 static uint16_t pz_render_revision[OT_PZ_OUTPUTS]={0u,0u};
 static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
+/* The old combined Output Manager journal is migration input only. A bad
+ * legacy journal must not veto a valid authoritative v4 lane/map pair. */
+static bool om_legacy_journal_fault=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS]; /* latest durably staged edit token */
 static uint16_t om_active_revision[OT_OM_OUTPUTS]; /* currently rendered geometry */
@@ -384,18 +387,21 @@ static void om_journal_load(void){
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_output_cfg",NVS_READONLY,&h);
     if(e==ESP_ERR_NVS_NOT_FOUND)return;
-    if(e!=ESP_OK){config_recovery_fault=true;return;}
+    if(e!=ESP_OK){om_legacy_journal_fault=true;return;}
     ot_om_journal_t active={0},stage={0};
     const esp_err_t a=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active);
     const esp_err_t b=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
     const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
     if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
-       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
+       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))om_legacy_journal_fault=true;
     nvs_close(h);
-    if(!config_recovery_fault&&!ot_om_journal_recover(
+    if(!om_legacy_journal_fault&&!ot_om_journal_recover(
         has_a?&active:NULL,has_b?&stage:NULL,om_outputs,&om_deferred))
-        config_recovery_fault=true;
-    if(config_recovery_fault){ot_om_defaults(om_outputs);om_persistent=false;return;}
+        om_legacy_journal_fault=true;
+    if(om_legacy_journal_fault){
+        ot_om_defaults(om_outputs);om_deferred.pending=false;
+        om_persistent=false;return;
+    }
     if(has_a||has_b){
         const ot_om_journal_t *r=has_b?&stage:&active;
         memcpy(om_active_revision,r->previous_revision,sizeof(om_active_revision));
@@ -570,9 +576,9 @@ static void pz_load(void){
         config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
         ot_st_set_fault("v4 lane/map pair journal invalid");return;
     }
-    /* The durable marker is written with map-active in phase 5. Its
-     * presence alone proves v4 ownership: if either active journal is missing,
-     * recovery must fail closed rather than resurrect stale v3 geometry. */
+    /* The durable marker is written in phase 6 after map-active. Its presence
+     * alone proves v4 ownership: if either active journal is missing, recovery
+     * must fail closed rather than resurrect stale v3 geometry. */
     const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||
         snapshot.has_map_active||snapshot.has_lane_active;
     if(v4_authoritative){
@@ -584,12 +590,17 @@ static void pz_load(void){
             ot_st_set_fault("v4 lane/map pair recovery mismatch");return;
         }
         __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
-        __atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:8u,__ATOMIC_RELEASE);
+        __atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u,__ATOMIC_RELEASE);
         __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
         __atomic_store_n(&pz_pair_commit_pending,intent_pending,__ATOMIC_RELEASE);
         pz_reset_pending_mask=reset_mask;
         pz_persistent=true;
     }else{
+        if(om_legacy_journal_fault){
+            config_recovery_fault=true;
+            ot_st_set_fault("legacy output journal invalid; no authoritative v4 pair");
+            return;
+        }
         ot_pz_controller_t legacy_previous,legacy_candidate;
         uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
         uint8_t reset_mask=0u;
