@@ -70,6 +70,16 @@ assert pz_save.index("ot_pz_pair_store_begin") < pz_save.index(
 assert "pz_pair_commit_pending" in pz_save
 assert "nvs_open(" not in pz_save and "nvs_set_blob(" not in pz_save
 
+# Legacy Output v1/HTTP and BLE codecs are projections only. They must route
+# accepted edits through the same v4 pair store and may not write the old
+# combined profile/journal keys.
+legacy_output_save=between("static bool om_save(","#define OT_SHOW_MAX_MS")
+assert "pz_save_controller_locked(&candidate)" in legacy_output_save
+assert "nvs_open(" not in legacy_output_save
+assert "nvs_set_blob(" not in legacy_output_save
+assert "static void om_promote(" not in core
+assert "static void pz_sync_from_legacy(" not in core
+
 # The exact same portable v4 store used by CORE implements all eight durable
 # write boundaries and is exercised by test_panel_zone_pair_store.c.
 store=(root/"main/panel_zone_pair_store.c").read_text()
