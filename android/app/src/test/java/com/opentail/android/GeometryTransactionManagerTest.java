@@ -447,7 +447,7 @@ public class GeometryTransactionManagerTest {
         PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(1,623,1,"Other",
             200,1,"Other Zone",300,10);
         try {
-            validateSnapshots(mapping,panelCollision,empty);
+            validateSnapshots(mapping,empty,panelCollision);
             fail("conflicting existing Panel identity must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("conflicts with authoritative Panel"));
@@ -501,7 +501,7 @@ public class GeometryTransactionManagerTest {
         assertNotNull(manager.requestCommit(status(1,88,1,0x20,7,7,7,0,0,4)));
         manager.observeStatus(status(2,88,1,0x20,7,7,7,0,0,4));
         assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
-        PanelPreviewProtocol.Status committed=status(3,88,1,0x20,7,8,8,0,0,4);
+        PanelPreviewProtocol.Status committed=status(3,88,1,0x20,8,8,8,0,0,4);
         manager.observeStatus(committed);
         assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
         assertFalse(manager.reconcile(committed,
