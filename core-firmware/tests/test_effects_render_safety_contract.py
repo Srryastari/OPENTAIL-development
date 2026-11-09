@@ -81,7 +81,10 @@ assert "ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs)" in core
 assert "bool ot_fx_bank_apply_configured_identity(" in fxbank
 assert "bool ot_fx_bank_apply_continuous_tertiary_identity(" in fxbank
 assert "bool ot_fx_bank_set_overlay_identity(" in fxbank
+assert "bool ot_fx_bank_set_spark_identity(" in fxbank
 assert "void ot_fx_bank_prune_orphans(" in fxbank
+continuous_identity=fxbank[fxbank.index("bool ot_fx_bank_apply_continuous_tertiary_identity("):fxbank.index("bool ot_fx_bank_set_overlay_identity(")]
+assert "bank->zones[o][z].configured=false" not in continuous_identity
 
 # The physical safety override is performed after all decorative FX and
 # before logical RGB capture. Decorative calibration must stay strictly
