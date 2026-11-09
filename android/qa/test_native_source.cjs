@@ -1186,6 +1186,11 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('boolean commitPanelPreview(') &&
        bleSource.includes('boolean heartbeatPanelPreview(') &&
        bleSource.includes('boolean cancelPanelPreview(') &&
+       bleSource.includes('GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,snapshots,statuses)') &&
+       bleSource.includes('manager.requestBegin()') &&
+       bleSource.includes('manager.queueUpdate(candidateWire,descriptors,negotiatedMtu)') &&
+       bleSource.includes('manager.requestCommit(status)') &&
+       bleSource.includes('panelStatusFresh[i]') &&
        bleSource.includes('BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE') &&
        bleSource.includes('panelStatusExpectedLane=panelSnapshotLane') &&
        bleSource.includes('Panel UPDATE write completion timed out') &&
