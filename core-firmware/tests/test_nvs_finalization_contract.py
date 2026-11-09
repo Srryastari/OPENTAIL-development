@@ -13,6 +13,7 @@ journal=(root/"main/config_journal.c").read_text()
 header=(root/"main/config_journal.h").read_text()
 board=(root/"main/board_config.h").read_text()
 logic_header=(root/"main/core_logic.h").read_text()
+implementation_doc=(root.parent/"docs/ISSUE126-PANEL-ZONE-IMPLEMENTATION.md").read_text()
 
 
 def between(start,end):
@@ -55,6 +56,15 @@ assert core.index("if(!tm_policy_load())") < core.index("tm_journal_load();")
 assert "#define OT_TM_POLICY_VERSION 1u" in header
 assert '#define OT_TM_POLICY_KEY "policy_v1"' in header
 assert "ot_tm_policy_build" in journal and "ot_tm_policy_valid" in journal
+# The handoff document must describe the actual v4 split and must not
+# repeat the stale "not yet complete" combined-journal status.
+for token in ("lane_active_v4","map_active_v4","policy_v1",
+              "turn_release_input_mask","immediate ISR assertion",
+              "cross-namespace hardware/map migration",
+              "100-cycle physical power-cut/recovery"):
+    assert token in implementation_doc,token
+assert "NOT YET COMPLETE" not in implementation_doc
+assert "The map journal currently carries a combined runtime snapshot" not in implementation_doc
 assert "turn_release_hold_us" in header and "assertion_samples" in header
 assert "turn_release_input_mask" in header and "reserved[3]" in header
 assert "#define OT_TM_TURN_RELEASE_INPUT_MASK 0x0cu" in header
