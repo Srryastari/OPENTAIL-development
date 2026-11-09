@@ -30,6 +30,33 @@ static uint32_t om_crc(const ot_om_journal_t *p){
     return ot_cfg_crc32_zeroed(p,sizeof(*p),
         offsetof(ot_om_journal_t,crc),sizeof(p->crc));
 }
+static uint32_t tm_policy_crc(const ot_tm_policy_record_t *p){
+    return ot_cfg_crc32_zeroed(p,sizeof(*p),
+        offsetof(ot_tm_policy_record_t,crc),sizeof(p->crc));
+}
+bool ot_tm_policy_build(ot_tm_policy_record_t *out,uint8_t input_active_low,
+                        uint8_t assertion_samples,uint16_t sample_period_ms,
+                        uint32_t turn_release_hold_us){
+    if(!out||input_active_low>1u||assertion_samples==0u||
+       assertion_samples>16u||sample_period_ms==0u||sample_period_ms>100u||
+       turn_release_hold_us==0u||turn_release_hold_us>1000000u)return false;
+    memset(out,0,sizeof(*out));
+    out->magic=OT_TM_POLICY_MAGIC;out->version=OT_TM_POLICY_VERSION;
+    out->input_active_low=input_active_low;
+    out->assertion_samples=assertion_samples;
+    out->sample_period_ms=sample_period_ms;
+    out->turn_release_hold_us=turn_release_hold_us;
+    out->crc=tm_policy_crc(out);return true;
+}
+bool ot_tm_policy_valid(const ot_tm_policy_record_t *record){
+    return record&&record->magic==OT_TM_POLICY_MAGIC&&
+        record->version==OT_TM_POLICY_VERSION&&record->input_active_low<=1u&&
+        record->assertion_samples>0u&&record->assertion_samples<=16u&&
+        record->sample_period_ms>0u&&record->sample_period_ms<=100u&&
+        record->turn_release_hold_us>0u&&
+        record->turn_release_hold_us<=1000000u&&
+        record->crc==tm_policy_crc(record);
+}
 static bool outputs_valid(const ot_om_output_t a[OT_OM_OUTPUTS]){
     if(!a)return false;
     for(unsigned i=0;i<OT_OM_OUTPUTS;i++)if(!ot_om_valid(&a[i]))return false;
