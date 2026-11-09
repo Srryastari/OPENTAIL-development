@@ -248,7 +248,8 @@ static void tm_load(void){
 static bool tm_policy_load(void){
     ot_tm_policy_record_t expected={0},stored={0};
     if(!ot_tm_policy_build(&expected,(uint8_t)(OT_INPUT_ACTIVE_LOW?1u:0u),
-        (uint8_t)OT_DEBOUNCE_TICKS,10u,(uint32_t)OT_TURN_RELEASE_HOLD_US))
+        (uint8_t)OT_DEBOUNCE_TICKS,10u,OT_TM_TURN_RELEASE_INPUT_MASK,
+        (uint32_t)OT_TURN_RELEASE_HOLD_US))
         return false;
     nvs_handle_t h;
     if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
