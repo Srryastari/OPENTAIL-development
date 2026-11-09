@@ -95,8 +95,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c test
 # or trigger implementation changes. Physically verified output stays gated.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/output_manager.c main/core_logic.c main/arbitration_logic.c \
-  main/fx_overlay_engine.c tests/test_effects_oem_safety_matrix.c \
-  -o /tmp/ot-effects-oem-safety && /tmp/ot-effects-oem-safety
+  main/fx_overlay_engine.c main/wled_fx_compat.c \
+  tests/test_effects_oem_safety_matrix.c \
+  -o /tmp/ot-effects-oem-safety -lm && /tmp/ot-effects-oem-safety
 python3 tests/test_effects_render_safety_contract.py
 # The same corrected NVS recovery journal must preserve independently
 # assigned FX zones and never auto-play a saved show after reboot.
