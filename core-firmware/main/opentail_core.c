@@ -2069,7 +2069,7 @@ static bool fx_slot_key(uint8_t slot,char key[8]){
 bool ot_ble_save_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
  ot_fx_zone_bank_t snapshot={0};
- ot_pz_output_t panel_snapshot[OT_OM_OUTPUTS]={0};
+ ot_fx_scene_output_identity_t identity_snapshot[OT_OM_OUTPUTS]={0};
  bool active;
  const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
  TickType_t now=xTaskGetTickCount();
@@ -2077,11 +2077,19 @@ bool ot_ble_save_fx_preset(uint8_t slot){
  active=native_outputs_ready&&ble_fx_enabled&&show_window(now);
  if(active){
   memcpy(&snapshot,&fx_bank,sizeof(snapshot));
-  memcpy(panel_snapshot,pz_outputs.outputs,sizeof(panel_snapshot));
+  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+   const uint8_t count=pz_outputs.outputs[o].zone_count;
+   identity_snapshot[o].zone_count=count;
+   if(count>OT_OM_ZONES)continue;
+   for(unsigned z=0;z<count;z++){
+    identity_snapshot[o].zones[z].panel_id=pz_outputs.outputs[o].zones[z].panel_id;
+    identity_snapshot[o].zones[z].zone_id=pz_outputs.outputs[o].zones[z].id;
+   }
+  }
  }
  portEXIT_CRITICAL(&state_lock);
  ot_fx_scene_record_t record;
- if(!active||!ot_fx_scene_pack(&record,&snapshot,panel_snapshot,now_ms))return false;
+ if(!active||!ot_fx_scene_pack(&record,&snapshot,identity_snapshot,now_ms))return false;
  nvs_handle_t h;
  if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
  esp_err_t e=nvs_set_blob(h,key,&record,sizeof(record));
