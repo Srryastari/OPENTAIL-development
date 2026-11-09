@@ -60,7 +60,7 @@ assert "#define OT_INPUT_ACTIVE_LOW 1" in board
 assert "#define OT_DEBOUNCE_TICKS 4" in board
 assert "#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)" in logic_header
 input_sampler=core.split("static void input_sampler_task(",1)[1].split(
-    "static void render_task(",1)[0]
+    "static void frame_wake_callback(",1)[0]
 assert "pdMS_TO_TICKS(10u)" in input_sampler
 assert "ot_signal_debouncer" not in header.split(
     "} ot_tm_policy_record_t",1)[0].split("typedef struct {")[-1]
