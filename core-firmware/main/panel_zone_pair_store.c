@@ -44,13 +44,14 @@ static bool pair_marker_valid(const ot_pz_pair_store_marker_t *record){
 static bool write_pair_verified(const ot_pz_pair_store_io_t *io,
         ot_pz_pair_namespace_t ns,const char *key_a,const void *data_a,size_t size_a,
         const char *key_b,const void *data_b,size_t size_b){
-    if(!io->write_batch_commit||
-       !io->write_batch_commit(io->context,ns,key_a,data_a,size_a,
-                               key_b,data_b,size_b))return false;
     union {
         ot_pz_map_journal_t map;
         ot_pz_pair_store_marker_t marker;
     } map_readback,marker_readback;
+    if(!io->write_batch_commit||!key_a||!key_b||!data_a||!data_b||
+       size_a>sizeof(map_readback)||size_b>sizeof(marker_readback)||
+       !io->write_batch_commit(io->context,ns,key_a,data_a,size_a,
+                               key_b,data_b,size_b))return false;
     return read_exact(io,ns,key_a,&map_readback,size_a)==OT_PZ_PAIR_IO_OK&&
         memcmp(&map_readback,data_a,size_a)==0&&
         read_exact(io,ns,key_b,&marker_readback,size_b)==OT_PZ_PAIR_IO_OK&&
@@ -111,6 +112,7 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
         if(!s->has_intent)return false;
         s->has_marker=false;memset(&s->marker,0,sizeof(s->marker));
     }
+    if(!s->has_intent&&s->has_map_active&&!s->has_marker)return false;
     if(s->has_marker&&!s->has_intent&&
        (!s->has_map_active||
         s->marker.transaction_id!=s->map_active.transaction_id))return false;
