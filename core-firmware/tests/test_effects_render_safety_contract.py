@@ -47,13 +47,15 @@ assert "ot_fx_slot_active(slot,frame_ms)" in render
 assert "static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES]" in render
 assert "memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state))" in render
 assert "memset(fx_state[ch],0,sizeof(fx_state[ch]))" in render
-assert "memset(&prior_fx_state[prior_index],0" in render
+assert "ot_effects_1d_move_state(&fx_state[ch][z]" in render
 assert "ot_effects_1d_reset(&prior_fx_state[old_z],0u)" in render
 assert "for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)" in render
 assert "memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation))" in render
 assert "ot_effects_1d_find_prior_zone_state(" in render
 assert "fx_state[ch][z]=prior_fx_state[prior_index]" in render
 assert "int ot_effects_1d_find_prior_zone_state(" in effects
+assert "void ot_effects_1d_move_state(" in effects
+assert "memset(source,0,sizeof(*source))" in effects
 assert "prior_panel_ids[i]==panel_id" in effects
 assert "prior_zone_ids[i]==zone_id" in effects
 assert "prior_generations[i]==generation" in effects
