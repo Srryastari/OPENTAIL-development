@@ -3046,6 +3046,11 @@ static void led_task(void *p) {
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     /* Reused per-output snapshot prevents in-place overwrite during zone reorder. */
     static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
+    /* Keep each indexed FX slot attached to its stable logical identity. */
+    static uint32_t fx_bank_seen_generation[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static uint16_t fx_bank_owner_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static uint16_t fx_bank_owner_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static uint8_t resolved_fx_bank_index[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static uint16_t prior_fx_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
@@ -3141,12 +3146,56 @@ static void led_task(void *p) {
        for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
            if(!ot_pz_to_fx_view(&local_panel[ch],ch,&local_outputs[ch]))
                local_outputs[ch]=default_outputs[ch];
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+           memset(resolved_fx_bank_index[ch],0xff,sizeof(resolved_fx_bank_index[ch]));
+           if(!local_fx_enabled)continue;
+           for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+               const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][bank_z];
+               if(!ot_fx_slot_active(slot,render_now_ms)){
+                   fx_bank_seen_generation[ch][bank_z]=slot->generation;
+                   fx_bank_owner_zone_id[ch][bank_z]=0u;
+                   fx_bank_owner_panel_id[ch][bank_z]=0u;
+                   continue;
+               }
+               if(fx_bank_seen_generation[ch][bank_z]!=slot->generation||
+                  fx_bank_owner_zone_id[ch][bank_z]==0u||
+                  fx_bank_owner_panel_id[ch][bank_z]==0u){
+                   const uint16_t owner_zone=bank_z<local_panel[ch].zone_count?
+                       local_panel[ch].zones[bank_z].id:0u;
+                   const uint16_t owner_panel=bank_z<local_panel[ch].zone_count?
+                       local_panel[ch].zones[bank_z].panel_id:0u;
+                   for(unsigned other=0;other<OT_OM_ZONES;other++){
+                       if(other==bank_z)continue;
+                       if(fx_bank_owner_zone_id[ch][other]==owner_zone&&
+                          fx_bank_owner_panel_id[ch][other]==owner_panel){
+                           fx_bank_owner_zone_id[ch][other]=0u;
+                           fx_bank_owner_panel_id[ch][other]=0u;
+                       }
+                   }
+                   fx_bank_seen_generation[ch][bank_z]=slot->generation;
+                   fx_bank_owner_zone_id[ch][bank_z]=owner_zone;
+                   fx_bank_owner_panel_id[ch][bank_z]=owner_panel;
+               }
+           }
+           for(unsigned z=0;z<local_panel[ch].zone_count;z++){
+               const ot_pz_zone_t *zone=&local_panel[ch].zones[z];
+               for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+                   if(fx_bank_owner_zone_id[ch][bank_z]==zone->id&&
+                      fx_bank_owner_panel_id[ch][bank_z]==zone->panel_id&&
+                      ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],render_now_ms)){
+                       resolved_fx_bank_index[ch][z]=(uint8_t)bank_z;break;
+                   }
+               }
+           }
+       }
        /* One immutable snapshot of every requested custom palette per frame.
         * No locks or NVS access occur in the per-pixel/FX draw loops. */
        uint8_t palette_ids[OT_OM_OUTPUTS*OT_OM_ZONES];
        ot_palette_entry_t frame_palettes[OT_OM_OUTPUTS*OT_OM_ZONES];
        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
-           const uint8_t id=local_fx_bank.zones[o][z].request.palette_id;
+           const uint8_t bank_z=resolved_fx_bank_index[o][z];
+           const uint8_t id=bank_z<OT_OM_ZONES?
+               local_fx_bank.zones[o][bank_z].request.palette_id:255u;
            palette_ids[o*OT_OM_ZONES+z]=(id>=73u&&id<=200u)?
                                         (uint8_t)(200u-id):255u;
        }
@@ -3227,8 +3276,10 @@ static void led_task(void *p) {
                    for(unsigned z=0;z<output->zone_count;z++){
                        const unsigned len=output->zones[z].pixels;
                        const ot_pz_zone_t *zone_cfg=&local_panel[ch].zones[z];
-                       const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
-                       const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&
+                       const uint8_t bank_z=resolved_fx_bank_index[ch][z];
+                       const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
+                           &local_fx_bank.zones[ch][bank_z]:NULL;
+                       const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
                            ot_fx_slot_active(slot,frame_ms);
                        int prior_index=-1;
                        if(active){
@@ -3326,9 +3377,11 @@ static void led_task(void *p) {
                                   (int)pixel_zone_map[ch][px]:-1;
                    const uint8_t role=zone>=0?local_panel[ch].zones[zone].role:
                                                OT_PZ_ROLE_UNASSIGNED;
+                   const uint8_t bank_z=zone>=0?
+                       resolved_fx_bank_index[ch][(unsigned)zone]:0xffu;
                    const bool fx_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
-                       local_fx_enabled&&
-                       ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms);
+                       local_fx_enabled&&bank_z<OT_OM_ZONES&&
+                       ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],frame_ms);
                    const bool legacy_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
                        !local_fx_enabled&&(local_show.chain_mask&(1u<<ch))&&
                        (local_show.section_mask&(1u<<zone));
@@ -3358,7 +3411,8 @@ static void led_task(void *p) {
                                                  pixel_logical_map[ch][px];
                        if(fx_here){
                            const ot_wled_rgb_t fx=fx_frame[ch][px];
-                           const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][zone];
+                           const uint8_t bank_z=resolved_fx_bank_index[ch][(unsigned)zone];
+                           const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][bank_z];
                            const uint16_t progress=ot_transition_progress(
                                (uint32_t)(frame_ms-slot->started_ms),
                                OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
