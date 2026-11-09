@@ -46,6 +46,8 @@
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
 #include "hal/gpio_ll.h"
 #include "esp_random.h"
 #include "esp_attr.h"
@@ -3099,6 +3101,7 @@ static void led_task(void *p) {
     render_task_handle=self;
     native_outputs_ready=true; /* RMT, frame timer and WDT initialized. */
     portEXIT_CRITICAL(&state_lock);
+    ESP_LOGI(TAG,"Renderer task READY: frame timer and single-ESP render watchdog registered");
     while(1){
        const int64_t frame_started_us=esp_timer_get_time();
        TickType_t now=xTaskGetTickCount();
@@ -3520,12 +3523,46 @@ static void led_task(void *p) {
 #if CONFIG_ESP_MAIN_TASK_STACK_SIZE < 8192
 #error "OpenTail app_main requires at least 8192 bytes of main-task stack"
 #endif
+#if !defined(CONFIG_SPIRAM) || !defined(CONFIG_SPIRAM_MODE_OCT) || !defined(CONFIG_SPIRAM_USE_MALLOC)
+#error "OpenTail N16R8 requires initialized octal PSRAM in the malloc capability heap"
+#endif
+#if defined(CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM) && CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM
+#error "OpenTail FreeRTOS stacks must stay in internal RAM for flash/NVS safety"
+#endif
+#define OT_N16R8_PSRAM_BYTES (8u * 1024u * 1024u)
+#define OT_RENDER_TASK_STACK_BYTES 8192u
+/* These heap capability measurements are essential to distinguish internal
+ * allocation failure from PSRAM initialization and post-radio fragmentation.
+ * A successful PSRAM total is NOT evidence of enough internal stack memory. */
+static void ot_boot_heap_snapshot(const char *phase){
+    const uint32_t internal_caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG,"BOOT heap %s internal free=%u largest=%u min_ever=%u; PSRAM free=%u largest=%u min_ever=%u",
+        phase,
+        (unsigned)heap_caps_get_free_size(internal_caps),
+        (unsigned)heap_caps_get_largest_free_block(internal_caps),
+        (unsigned)heap_caps_get_minimum_free_size(internal_caps),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+}
+static bool ot_boot_psram_ready(void){
+    const bool initialized=esp_psram_is_initialized();
+    const size_t capacity=initialized?esp_psram_get_size():0u;
+    const bool ready=initialized && capacity>=OT_N16R8_PSRAM_BYTES;
+    ESP_LOGI(TAG,"N16R8 octal PSRAM initialized=%u capacity=%u required=%u",
+        (unsigned)initialized,(unsigned)capacity,(unsigned)OT_N16R8_PSRAM_BYTES);
+    if(!ready)
+        ESP_LOGE(TAG,"N16R8 PSRAM missing or undersized; physical output stays inhibited");
+    return ready;
+}
 void app_main(void) {
     core_boot_id=esp_random();
     if(core_boot_id==0u)core_boot_id=1u;
     ESP_LOGI(TAG,"CORE boot identity: %08lx",(unsigned long)core_boot_id);
     ot_sw_idf_boot_record();
     ESP_LOGW(TAG,"CORE %s BENCH ONLY: one ESP watchdog, NO redundant lights.",OT_FW);
+    const bool psram_ready=ot_boot_psram_ready();
+    ot_boot_heap_snapshot("early-boot");
     ESP_ERROR_CHECK(nvs_flash_init());
     ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
@@ -3550,6 +3587,7 @@ void app_main(void) {
     ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
         (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
+    if(!psram_ready)ot_st_set_fault("N16R8 PSRAM unavailable; renderer inhibited");
     const bool inputs_ready=watchdog_ready&&input_init();
     if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");
     /* Capture held inputs before RMT can emit its first frame; debounce
@@ -3568,13 +3606,32 @@ void app_main(void) {
     if(input_watched&&!sampler_ready)ot_sw_idf_cancel_inputs();
     if(input_watched&&!sampler_ready)ot_st_set_fault("physical input sampler could not start");
     input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
-    bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();
-    /* Do not advertise renderer readiness until led_task initializes its timer. */
-    const bool wifi_started=wifi_ap_init();
-    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
+    const bool outputs_ready=sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init();
+    /* Critical hardware path gets its original 8192-byte INTERNAL stack
+     * before Wi-Fi, BLE, HTTP and config-worker heap allocations. This task
+     * does not depend on those services. Do not move it behind radio startup. */
+    ot_boot_heap_snapshot("pre-render-task");
+    if(outputs_ready){
+        const BaseType_t created=xTaskCreate(
+            led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL);
+        if(created!=pdPASS){
+            ot_boot_heap_snapshot("render-create-failed");
+            portENTER_CRITICAL(&state_lock);
+            native_outputs_ready=false;
+            portEXIT_CRITICAL(&state_lock);
+            ESP_LOGE(TAG,"Renderer internal stack/TCB allocation failed (stack=%u bytes); inspect pre-render internal largest block",
+                (unsigned)OT_RENDER_TASK_STACK_BYTES);
+            ot_st_set_fault("render task could not start");
+        }else{
+            ESP_LOGI(TAG,"Renderer task created with %u-byte internal stack; waiting for timer/WDT and first frame",
+                (unsigned)OT_RENDER_TASK_STACK_BYTES);
+            ot_boot_heap_snapshot("post-render-task");
+        }
+        /* OTA validation remains deferred until led_task finishes its first full frame. */
+    }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
+    /* Networking and configuration workers must never starve the safety
+     * renderer's contiguous internal task-stack allocation during boot. */
     om_write_mutex=xSemaphoreCreateMutex();
-    /* Configuration writes already reject a missing mutex. Keep local
-     * trigger-driven rendering alive rather than rebooting on this fault. */
     if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
     else{
         config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
@@ -3582,13 +3639,13 @@ void app_main(void) {
         if(!config_promotion_ready)
             ot_st_set_fault("durable configuration promoter failed to start");
     }
+    const bool wifi_started=wifi_ap_init();
+    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
+    ot_boot_heap_snapshot("post-wifi");
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
+    ot_boot_heap_snapshot("post-ble");
     http_startup_ready=wifi_started&&http_start();
     if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
-    if(outputs_ready){
-        BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
-        if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
-        /* OTA validation is deferred until led_task finishes its first full frame. */
-    }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
+    ot_boot_heap_snapshot("post-http");
 }
