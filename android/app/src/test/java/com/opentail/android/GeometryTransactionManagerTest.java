@@ -301,6 +301,106 @@ public class GeometryTransactionManagerTest {
         }
     }
 
+    private static void putName(byte[] wire,int at,String value) {
+        byte[] bytes=value.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        System.arraycopy(bytes,0,wire,at,Math.min(bytes.length,24));
+    }
+    private static PanelPreviewProtocol.LaneSnapshot panelSnapshot(int lane,int pixels,
+            int panelId,String panelName,int zoneId,int zonePanel,String zoneName,
+            int rangeStart,int rangeCount) {
+        byte[] wire=new byte[PanelPreviewProtocol.MAP_BYTES];
+        wire[0]=3;wire[1]=(byte)lane;put16(wire,2,pixels);
+        if(panelId!=0) {
+            wire[37]=1;wire[38]=1;
+            put16(wire,39,panelId);wire[41]=(byte)lane;
+            putName(wire,42,panelName);wire[67]=1;
+            put16(wire,155,zoneId);put16(wire,157,zonePanel);
+            putName(wire,159,zoneName);wire[184]=0x0f;wire[186]=1;
+            put16(wire,187,rangeStart);put16(wire,189,rangeCount);
+        }
+        byte[] header=new byte[14];
+        header[0]=3;header[1]=(byte)0x81;header[2]=(byte)lane;
+        put16(header,4,PanelPreviewProtocol.MAP_BYTES);
+        put16(header,6,PanelPreviewProtocol.crc16(wire));
+        put16(header,8,7);put16(header,10,7);header[13]=1;
+        PanelPreviewProtocol.SnapshotHeader parsed=
+            PanelPreviewProtocol.SnapshotHeader.parse(header,lane);
+        parsed.verify(wire,lane);
+        return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
+    }
+
+    @Test public void proposedGs400MappingMustMatchFreshAuthoritativeMapAndFitCapacity() throws Exception {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        // Reuse the existing GS400 fixture setup through the helper below.
+        mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
+        mappedZone(project,"Left Amber",109,0,1,1,"Left Housing");
+        mappedZone(project,"Left Reverse",42,0,2,1,"Left Housing");
+        mappedZone(project,"Left Bottom",253,0,3,1,"Left Housing");
+        mappedZone(project,"Left Trunk",101,0,4,2,"Left Trunk");
+        mappedZone(project,"Right Top",118,1,0,3,"Right Housing");
+        mappedZone(project,"Right Amber",109,1,1,3,"Right Housing");
+        mappedZone(project,"Right Reverse",42,1,2,3,"Right Housing");
+        mappedZone(project,"Right Bottom",253,1,3,3,"Right Housing");
+        mappedZone(project,"Right Trunk",101,1,4,4,"Right Trunk");
+        LayoutMapping mapping=mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot left=panelSnapshot(0,623,1,"Left Housing",
+            129,1,"Left Top",0,118);
+        PanelPreviewProtocol.LaneSnapshot right=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{left,right});
+    }
+
+    @Test public void proposedGeometryCannotOverlapAnUnrelatedAuthoritativeZone() throws Exception {
+        NativeProject project=new FakeProjectStorageProject().project();
+        mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
+        LayoutMapping mapping=mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot occupied=panelSnapshot(0,623,5,"Existing",
+            200,5,"Existing Zone",0,10);
+        PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        try {
+            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{occupied,empty});
+            fail("existing range overlap must block preview");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("overlaps an existing CORE Zone"));
+        }
+    }
+
+    @Test public void proposedPanelIdsCannotCollideWithExistingZonesOrDifferentPanels() throws Exception {
+        NativeProject project=new FakeProjectStorageProject().project();
+        mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
+        LayoutMapping mapping=mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot zoneCollision=panelSnapshot(0,623,7,"Other",
+            1,7,"Existing Zone",300,10);
+        PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        try {
+            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{zoneCollision,empty});
+            fail("Panel/Zone ID collision must block preview");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("namespace collision"));
+        }
+        PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(0,623,1,"Other",
+            200,1,"Other Zone",300,10);
+        try {
+            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{panelCollision,empty});
+            fail("conflicting existing Panel identity must block preview");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("conflicts with authoritative Panel"));
+        }
+    }
+
+    @Test public void proposedGeometryCannotExceedAuthoritativeActivePixelCapacity() throws Exception {
+        NativeProject project=new FakeProjectStorageProject().project();
+        mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
+        LayoutMapping mapping=mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot small=panelSnapshot(0,100,0,"",0,0,"",0,0);
+        PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        try {
+            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{small,empty});
+            fail("capacity mismatch must block preview");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("active pixel capacity"));
+        }
+    }
+
     @Test public void panelDescriptorBatchesRespectNegotiatedAttMtuAndFirmwareLimit() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         for(int i=0;i<5;i++)
