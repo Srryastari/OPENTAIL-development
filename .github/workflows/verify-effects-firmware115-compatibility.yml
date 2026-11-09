@@ -1,47 +1,55 @@
-name: Effects compatibility with exact Firmware #115 watchdog HEAD
+name: Effects #120 exact Firmware127 integrated compatibility
 on:
-  pull_request:
-    branches: [firmware/issue113-single-esp-progress-wdt-20261103]
+  push:
+    branches: [effects/fw115-compatibility-no-code-20261108]
     paths:
-      - 'core-firmware/**'
-      - 'android/app/src/main/cpp/**'
-      - 'android/qa/**'
       - 'scripts/tests/test_effects_watchdog_compatibility.py'
-      - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
       - '.github/workflows/verify-effects-firmware115-compatibility.yml'
-      - '.github/workflows/verify-issue103-exact-head.yml'
-      - '.github/workflows/codex-integrated-software.yml'
+      - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  INTEGRATED_SHA: dff7fe070b134daaaad09a8fb989f76a6c5bda39
+  EFFECTS_SHA: 601155a196a692792e60fd399505fdc676dc57d9
+
 jobs:
   exact-source-and-full-140-host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout approved integrated Firmware CORE
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.INTEGRATED_SHA }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - name: Checkout current test-only PR120 evidence
+        uses: actions/checkout@v4
         with:
-          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
-          path: pinned-effects110
+          ref: ${{ github.sha }}
+          path: compat-pr
           persist-credentials: false
-      - name: Verify no product source changes and exact renderer/watchdog/RMT source ordering
-        run: python3 scripts/tests/test_effects_watchdog_compatibility.py --effects-dir pinned-effects110
-      - name: Full authoritative 140-effect, source-golden, palette, OEM safety, NVS, STOP and watchdog host regressions
-        run: cd core-firmware && bash tests/run-host-tests.sh
-      - name: Render all 140 effects at maximum output length with watchdog progress policy
-        working-directory: core-firmware
+      - name: Checkout approved Effects110 renderer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EFFECTS_SHA }}
+          path: approved-effects
+          persist-credentials: false
+      - name: Strict original byte provenance / SHA256 / JNI contract and stable identities
+        run: python3 compat-pr/scripts/tests/test_effects_watchdog_compatibility.py --effects-dir approved-effects --integration-sha "$INTEGRATED_SHA"
+      - name: Full integrated CORE host suite (all 140 / goldens / Geometry / NVS / STOP / FX-PZ / watchdog)
+        run: bash core-firmware/tests/run-host-tests.sh
+      - name: Two-output synthetic watchdog/render timing stress
         run: |
-          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Imain \
-            main/ot_single_watchdog.c main/effects_1d.c main/ot_auto_effects.c \
-            main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c \
-            main/wled_1d.c tests/test_effect_watchdog_compat.c \
-            -lm -o /tmp/ot-effects-fw115-wdt-compat
-          /tmp/ot-effects-fw115-wdt-compat
-      - name: Recheck watchdog and effects safety structural contracts
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
+            core-firmware/main/ot_single_watchdog.c core-firmware/main/effects_1d.c \
+            core-firmware/main/ot_auto_effects.c core-firmware/main/wled_fx_compat.c \
+            core-firmware/main/palette_1d.c core-firmware/main/particle_system_1d.c \
+            core-firmware/main/wled_1d.c \
+            compat-pr/core-firmware/tests/test_effect_watchdog_compat.c \
+            -lm -o /tmp/ot-effects-fw127-wdt-compat
+          /tmp/ot-effects-fw127-wdt-compat
+      - name: Safety and source manifests
         run: |
           python3 core-firmware/tests/test_single_watchdog_contract.py
           python3 core-firmware/tests/test_effects_render_safety_contract.py
@@ -55,13 +63,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.INTEGRATED_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
-          path: pinned-effects110
+          ref: ${{ env.EFFECTS_SHA }}
+          path: approved-effects
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
@@ -70,29 +78,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Verify JNI source manifest, BLE capability contract and approved Android architecture
+      - name: Native JNI manifest, BLE 13/6, Geometry and UI contracts
         run: |
           node android/qa/test_native_source.cjs
           node android/qa/test_live_edit.cjs
           python3 android/qa/check_release.py
-      - name: Exact 140/140 Android JNI vs independent CORE golden oracle, all 13 RGB3 consumers
+      - name: Independent 140-effect JNI/CORE golden oracle and 13 tertiary roles
         run: |
           python3 android/qa/test_full_offline_preview.py \
-            --core-dir pinned-effects110 \
-            --continuity-dir pinned-effects110 \
-            --color-dir pinned-effects110 > effects-fw115-jni-140-report.json
+            --core-dir approved-effects \
+            --continuity-dir approved-effects \
+            --color-dir approved-effects > effects-fw127-jni-140-report.json
       - name: Native Android JUnit
         working-directory: android
-        run: |
-          gradle --no-daemon --stacktrace :app:testDebugUnitTest
-      - name: Build exact-head Android debug APK (no device/phone test claim)
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Exact source Android debug APK compile
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: effects-fw115-android-jni-140-and-debug-apk
+          name: effects-fw127-jni-140-report-and-debug-apk
           path: |
-            effects-fw115-jni-140-report.json
+            effects-fw127-jni-140-report.json
             android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -102,21 +109,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.INTEGRATED_SHA }}
           persist-credentials: false
-      - name: Independent OEM input arbitration, held-input and durable NVS regressions
+      - name: Active-low input, ISR queue, OEM arbitration and NVS/STOP
         run: |
           python3 core-firmware/tests/test_trigger_runtime_contract.py
           python3 core-firmware/tests/test_nvs_finalization_contract.py
           cc -std=c11 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
-            core-firmware/main/trigger_manager.c \
-            core-firmware/main/core_logic.c \
-            core-firmware/main/arbitration_logic.c \
-            core-firmware/main/output_manager.c \
-            core-firmware/main/show_logic.c \
-            core-firmware/tests/test_trigger_manager.c \
-            -o /tmp/ot-effects-fw115-trigger
-          /tmp/ot-effects-fw115-trigger
+            core-firmware/main/trigger_manager.c core-firmware/main/core_logic.c \
+            core-firmware/main/arbitration_logic.c core-firmware/main/output_manager.c \
+            core-firmware/main/show_logic.c core-firmware/tests/test_trigger_manager.c \
+            -o /tmp/ot-effects-fw127-trigger
+          /tmp/ot-effects-fw127-trigger
 
   esp-idf555-and-complete-bench-package:
     needs: exact-source-and-full-140-host
@@ -125,34 +129,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.INTEGRATED_SHA }}
           persist-credentials: false
-      - name: Compile exact Firmware #115 source with ESP-IDF v5.5.5 for ESP32-S3
+      - name: Compile immutable integrated Firmware127 with ESP-IDF v5.5.5
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
-      - name: Package and verify the four-image bench ZIP; no flashing
-        env:
-          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Package and verify four-image bench archive
         run: |
           python3 scripts/package_core_flash.py build \
-            --build-dir core-firmware/build \
-            --project-dir core-firmware \
-            --output "core-firmware/releases/opentail-effects-fw115-compat-$PIN.zip" \
-            --source-sha "$PIN"
+            --build-dir core-firmware/build --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip" \
+            --source-sha "$INTEGRATED_SHA"
           python3 scripts/package_core_flash.py verify \
-            --zip "core-firmware/releases/opentail-effects-fw115-compat-$PIN.zip" \
-            --sha256-file "core-firmware/releases/opentail-effects-fw115-compat-$PIN.zip.sha256" \
-            --source-sha "$PIN"
+            --zip "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip" \
+            --sha256-file "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip.sha256" \
+            --source-sha "$INTEGRATED_SHA"
       - uses: actions/upload-artifact@v4
         with:
-          name: effects-fw115-four-image-bench-package
+          name: effects-fw127-four-image-bench-package
           path: |
-            core-firmware/releases/opentail-effects-fw115-compat-*.zip
-            core-firmware/releases/opentail-effects-fw115-compat-*.zip.sha256
+            core-firmware/releases/opentail-effects-fw127-compat-*.zip
+            core-firmware/releases/opentail-effects-fw127-compat-*.zip.sha256
           if-no-files-found: error
           retention-days: 14
-# This is source/host certification only. Actual DMA timing, live TWDT behavior,
-# optical smoothness, owner phone, and all 22 physical tests remain separate gates.
+# Test-only integration snapshot; hardware RMT/TWDT/optics/vehicle checks NOT_RUN.
