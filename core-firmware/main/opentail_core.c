@@ -179,6 +179,14 @@ typedef struct {
     ot_pz_controller_t controller;
     uint32_t crc32;
 } ot_pz_reset_tombstone_t;
+
+/* Pair-store and legacy-migration scratch is static BSS, not task stack.
+ * Every runtime user holds om_write_mutex; boot recovery runs before tasks. */
+static ot_pz_pair_store_workspace_t pz_pair_workspace;
+static ot_pz_journal_t pz_legacy_active_journal,pz_legacy_stage_journal;
+static ot_pz_reset_tombstone_t pz_legacy_tombstone;
+_Static_assert(sizeof(pz_pair_workspace)<=16u*1024u,
+               "v4 pair-store workspace exceeds its bounded DRAM budget");
 typedef struct {
     bool active;
     uint8_t lane;
@@ -435,9 +443,8 @@ static bool pz_reset_tombstone_valid(const ot_pz_reset_tombstone_t *record){
     if(!record||record->magic!=OT_PZ_RESET_TOMBSTONE_MAGIC||
        record->version!=OT_PZ_RESET_TOMBSTONE_VERSION||
        (record->reset_mask&~((1u<<OT_PZ_OUTPUTS)-1u))!=0u)return false;
-    ot_pz_reset_tombstone_t copy=*record;
-    const uint32_t expected=copy.crc32;copy.crc32=0u;
-    return expected==ot_cfg_crc32(&copy,sizeof(copy));
+    return record->crc32==ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_reset_tombstone_t,crc32),sizeof(record->crc32));
 }
 static ot_pz_pair_io_result_t pz_pair_nvs_read(void *context,
         ot_pz_pair_namespace_t name_space,const char *key,void *data,size_t *size){
@@ -504,18 +511,22 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
     ot_pz_defaults(previous);*candidate=*previous;*reset_mask=0u;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         previous_revision[lane]=candidate_revision[lane]=1u;
+    ot_pz_journal_t *active=&pz_legacy_active_journal;
+    ot_pz_journal_t *stage=&pz_legacy_stage_journal;
+    ot_pz_reset_tombstone_t *tombstone=&pz_legacy_tombstone;
+    ot_pz_pending_t *deferred=&pz_pair_workspace.pending;
+    memset(active,0,sizeof(*active));memset(stage,0,sizeof(*stage));
+    memset(tombstone,0,sizeof(*tombstone));memset(deferred,0,sizeof(*deferred));
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_zone_map",NVS_READONLY,&h);
     if(e==ESP_OK){
-        ot_pz_journal_t active={0},stage={0};
-        ot_pz_reset_tombstone_t tombstone={0};
-        size_t tombstone_size=sizeof(tombstone);
+        size_t tombstone_size=sizeof(*tombstone);
         const esp_err_t t=nvs_get_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,
-                                       &tombstone,&tombstone_size);
-        const bool has_tombstone=t==ESP_OK&&tombstone_size==sizeof(tombstone)&&
-                                 pz_reset_tombstone_valid(&tombstone);
-        const esp_err_t a=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active);
-        const esp_err_t b=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage);
+                                       tombstone,&tombstone_size);
+        const bool has_tombstone=t==ESP_OK&&tombstone_size==sizeof(*tombstone)&&
+                                 pz_reset_tombstone_valid(tombstone);
+        const esp_err_t a=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,active);
+        const esp_err_t b=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,stage);
         const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
         if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
            (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)||
@@ -524,22 +535,21 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
             nvs_close(h);return false;
         }
         if(has_a||has_b){
-            ot_pz_pending_t deferred={0};
-            if(!ot_pz_journal_recover(has_a?&active:NULL,has_b?&stage:NULL,
-                previous,&deferred,previous_revision,candidate_revision)){
+            if(!ot_pz_journal_recover(has_a?active:NULL,has_b?stage:NULL,
+                previous,deferred,previous_revision,candidate_revision)){
                 nvs_close(h);return false;
             }
-            *candidate=deferred.pending?deferred.candidate:*previous;
+            *candidate=deferred->pending?deferred->candidate:*previous;
             if(has_tombstone&&
-               memcmp(candidate,&tombstone.controller,sizeof(*candidate))==0)
-                *reset_mask=tombstone.reset_mask;
+               memcmp(candidate,&tombstone->controller,sizeof(*candidate))==0)
+                *reset_mask=tombstone->reset_mask;
             nvs_close(h);return true;
         }
         if(has_tombstone){
-            *previous=tombstone.controller;*candidate=*previous;
-            memcpy(previous_revision,tombstone.revision,sizeof(tombstone.revision));
-            memcpy(candidate_revision,tombstone.revision,sizeof(tombstone.revision));
-            *reset_mask=tombstone.reset_mask;
+            *previous=tombstone->controller;*candidate=*previous;
+            memcpy(previous_revision,tombstone->revision,sizeof(tombstone->revision));
+            memcpy(candidate_revision,tombstone->revision,sizeof(tombstone->revision));
+            *reset_mask=tombstone->reset_mask;
             nvs_close(h);return true;
         }
         nvs_close(h);
@@ -560,6 +570,7 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
     return true;
 }
 static void pz_load(void){
+    ot_pz_pair_store_workspace_t *workspace=&pz_pair_workspace;
     ot_pz_defaults(&pz_outputs);
     pz_deferred.pending=false;pz_persistent=false;
     __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELAXED);
@@ -571,20 +582,21 @@ static void pz_load(void){
         pz_revision[lane]=pz_active_revision[lane]=1u;
     if(config_recovery_fault)return;
 
-    ot_pz_pair_store_snapshot_t snapshot={0};
-    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,&snapshot)){
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,workspace)){
         config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
         ot_st_set_fault("v4 lane/map pair journal invalid");return;
     }
+    const ot_pz_pair_store_snapshot_t *snapshot=&workspace->snapshot;
     /* The durable marker is written in phase 6 after map-active. Its presence
      * alone proves v4 ownership: if either active journal is missing, recovery
      * must fail closed rather than resurrect stale v3 geometry. */
-    const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||
-        snapshot.has_map_active||snapshot.has_lane_active;
+    const bool v4_authoritative=snapshot->has_marker||snapshot->has_intent||
+        snapshot->has_map_active||snapshot->has_lane_active;
     if(v4_authoritative){
         bool intent_pending=false;uint32_t transaction_id=0u;uint8_t reset_mask=0u;
-        if(!ot_pz_pair_store_recover(&pz_pair_store_io,NULL,&pz_outputs,&pz_deferred,
-             pz_active_revision,pz_revision,&intent_pending,&transaction_id,&reset_mask)){
+        if(!ot_pz_pair_store_recover(&pz_pair_store_io,workspace,NULL,&pz_outputs,
+             &pz_deferred,pz_active_revision,pz_revision,&intent_pending,
+             &transaction_id,&reset_mask)){
             config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
             pz_deferred.pending=false;pz_persistent=false;
             ot_st_set_fault("v4 lane/map pair recovery mismatch");return;
@@ -601,19 +613,19 @@ static void pz_load(void){
             ot_st_set_fault("legacy output journal invalid; no authoritative v4 pair");
             return;
         }
-        ot_pz_controller_t legacy_previous,legacy_candidate;
         uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
         uint8_t reset_mask=0u;
-        if(!pz_load_legacy_snapshot(&legacy_previous,&legacy_candidate,
+        if(!pz_load_legacy_snapshot(&workspace->previous,&workspace->candidate,
              previous_revision,candidate_revision,&reset_mask)){
             config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
             ot_st_set_fault("legacy configuration migration source invalid");return;
         }
-        const bool changed=memcmp(&legacy_previous,&legacy_candidate,
-                                  sizeof(legacy_previous))!=0;
+        const bool changed=memcmp(&workspace->previous,&workspace->candidate,
+                                  sizeof(workspace->previous))!=0;
         for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
-            const bool lane_changed=memcmp(&legacy_previous.outputs[lane],
-                &legacy_candidate.outputs[lane],sizeof(legacy_previous.outputs[lane]))!=0;
+            const bool lane_changed=memcmp(&workspace->previous.outputs[lane],
+                &workspace->candidate.outputs[lane],
+                sizeof(workspace->previous.outputs[lane]))!=0;
             if(lane_changed&&candidate_revision[lane]<=previous_revision[lane]){
                 if(previous_revision[lane]==UINT16_MAX){
                     config_recovery_fault=true;
@@ -634,14 +646,15 @@ static void pz_load(void){
         uint32_t transaction_id=esp_random();
         if(transaction_id==0u)transaction_id=esp_random();
         if(transaction_id==0u||
-           !ot_pz_pair_store_begin(&pz_pair_store_io,&legacy_previous,
-                &legacy_candidate,previous_revision,candidate_revision,
-                transaction_id,reset_mask,true,pz_pair_phase_hook,NULL)){
+           !ot_pz_pair_store_begin(&pz_pair_store_io,workspace,
+                &workspace->previous,&workspace->candidate,previous_revision,
+                candidate_revision,transaction_id,reset_mask,true,
+                pz_pair_phase_hook,NULL)){
             config_recovery_fault=true;
             ot_st_set_fault("v4 legacy pair migration staging failed");return;
         }
-        pz_outputs=legacy_previous;
-        pz_deferred.candidate=legacy_candidate;
+        pz_outputs=workspace->previous;
+        pz_deferred.candidate=workspace->candidate;
         pz_deferred.pending=changed;
         memcpy(pz_active_revision,previous_revision,sizeof(pz_active_revision));
         memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
@@ -658,14 +671,14 @@ static void pz_load(void){
 }
 static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     if(!candidate||!ot_pz_valid(candidate))return false;
-    ot_pz_controller_t previous;
+    ot_pz_controller_t *previous=&pz_pair_workspace.previous;
     uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
     uint8_t reset_mask=0u;
     bool busy=false;
     portENTER_CRITICAL(&state_lock);
     busy=pz_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
          (pz_preview.active&&!pz_preview.committing);
-    previous=pz_outputs;
+    *previous=pz_outputs;
     memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
     memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
     reset_mask=pz_reset_pending_mask;
@@ -673,16 +686,16 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     if(busy)return false;
     bool changed=false;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
-        if(memcmp(&previous.outputs[lane],&candidate->outputs[lane],
-                  sizeof(previous.outputs[lane]))==0)continue;
+        if(memcmp(&previous->outputs[lane],&candidate->outputs[lane],
+                  sizeof(previous->outputs[lane]))==0)continue;
         if(candidate_revision[lane]==UINT16_MAX)return false;
         candidate_revision[lane]++;changed=true;
     }
     if(!changed){
         for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
             if(reset_mask&(1u<<lane))
-                if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,(uint8_t)lane))
-                    return false;
+                if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,
+                    &pz_pair_workspace,(uint8_t)lane))return false;
         return true;
     }
     uint32_t transaction_id=esp_random();
@@ -690,9 +703,9 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     if(transaction_id==0u)return false;
     __atomic_store_n(&pz_pair_commit_phase,0u,__ATOMIC_RELEASE);
     __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
-    if(!ot_pz_pair_store_begin(&pz_pair_store_io,&previous,candidate,
-        previous_revision,candidate_revision,transaction_id,reset_mask,false,
-        pz_pair_phase_hook,NULL)){
+    if(!ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,
+        previous,candidate,previous_revision,candidate_revision,
+        transaction_id,reset_mask,false,pz_pair_phase_hook,NULL)){
         config_recovery_fault=true;
         ot_st_set_fault("v4 lane/map pair staging failed; reboot reconciliation required");
         return false;
@@ -711,20 +724,20 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
  * as one panel with contiguous zones. Complex hierarchy is never silently flattened. */
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     if(!items)return false;
-    ot_pz_controller_t candidate;
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
     portENTER_CRITICAL(&state_lock);
     if(pz_preview.active){portEXIT_CRITICAL(&state_lock);return false;}
-    candidate=pz_outputs;
+    *candidate=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         ot_om_output_t current={0};
-        if(!ot_pz_to_legacy(&candidate.outputs[lane],lane,&current))return false;
+        if(!ot_pz_to_legacy(&candidate->outputs[lane],lane,&current))return false;
         if(memcmp(&current,&items[lane],sizeof(current))==0)continue;
         ot_pz_output_t replacement={0};
-        if(!ot_pz_from_legacy_output(&items[lane],lane,&candidate,&replacement))return false;
-        candidate.outputs[lane]=replacement;
+        if(!ot_pz_from_legacy_output(&items[lane],lane,candidate,&replacement))return false;
+        candidate->outputs[lane]=replacement;
     }
-    return pz_save_controller_locked(&candidate);
+    return pz_save_controller_locked(candidate);
 }
 #define OT_SHOW_MAX_MS 60000u
 /* Input simulation is limited to 15 seconds, independent of show TTL. */
