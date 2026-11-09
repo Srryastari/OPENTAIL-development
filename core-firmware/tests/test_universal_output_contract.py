@@ -69,7 +69,9 @@ assert 'ot_st_set_fault("external pixel RMT clear failed");return false;' in res
 assert resize.index('if(e!=ESP_OK){') < resize.index('e=led_strip_del(strip[ch]);')
 assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NULL;strip_capacity[ch]=0;')
 
-assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
+# Hierarchical Panel/Zone rendering iterates the per-frame physical lane
+# length derived from the active lane snapshot, not the legacy flat output.
+assert "for(unsigned px=0;px<render_pixels[ch];++px)" in core
 assert "if(!frame_submitted[ch])continue;" in core
 status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split("static esp_err_t caps_get(",1)[0]
 # A single RMT lane fault must not reboot the whole controller or be counted
