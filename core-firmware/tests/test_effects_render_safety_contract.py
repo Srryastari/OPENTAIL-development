@@ -91,4 +91,14 @@ assert "if(frame_captured[ch])ot_frame_snapshot_complete(false);" in render
 assert "frame_submitted[ch]=false;" in render
 assert "ot_arbitrate(combined," in render
 assert "ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms)" in render
+# FX-PZ continuity: zone identity is panel+zone+generation, not array position
+# alone. Keep prior physical mapping until a complete output refresh succeeds.
+assert "old_zone_id[z]==zone_cfg->id" in render
+assert "old_panel_id[z]==zone_cfg->panel_id" in render
+assert "const uint8_t old_z=prior_pixel_zone_map[ch][px];" in render
+assert "fx_zone_scratch[logical]=fx_frame[ch][px];" in render
+reset_pos=render.index("ot_effects_1d_reset(&fx_state[ch][z],")
+assert render.index("if(!same_identity)") < reset_pos
+prior_map_copy=render.index("memcpy(prior_pixel_zone_map[ch],pixel_zone_map[ch],")
+assert prior_map_copy > render.index("if(frame_captured[ch])ot_frame_snapshot_complete(true);")
 print("PASS: corrected #49 Effects frame ownership, palette -> FX -> overlays -> OEM override -> logical RGB -> wire; physical colors bypass gamma, show/STOP and zone guards (source contract)")
