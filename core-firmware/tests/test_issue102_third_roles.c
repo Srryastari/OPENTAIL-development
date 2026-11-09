@@ -83,8 +83,77 @@ int main(void){
         }
         ot_wled_fx_reset(&sa);ot_wled_fx_reset(&sb);
     }
+    /* Aurora palette 5 is a three-color palette. Explicit black must
+     * remain a real third stop instead of collapsing to the legacy 2-color
+     * profile when the RGB value itself is zero. */
+    a=(ot_wled_fx_config_t){
+        .effect_id=38u,.speed=128u,.intensity=255u,.brightness=255u,
+        .frame_time_ms=16u,.palette_id=5u,
+        .foreground={255,0,0},.background={0,255,0},
+        .tertiary={0,0,0},.tertiary_set=true
+    };
+    b=a;
+    b.tertiary_set=false;
+    b.tertiary=(ot_wled_rgb_t){255,255,0}; /* stale bytes must be ignored */
+    ot_wled_fx_state_t aurora_black={0},aurora_legacy={0};
+    unsigned aurora_black_differences=0u;
+    for(uint32_t t=0u;t<60000u;t+=16u){
+        assert(ot_wled_fx_render(&a,&aurora_black,t,p,257u));
+        assert(ot_wled_fx_render(&b,&aurora_legacy,t,q,257u));
+        for(unsigned k=0u;k<257u;k++)
+            if(!eq(p[k],q[k]))aurora_black_differences++;
+    }
+    assert(aurora_black_differences>0u);
+    ot_wled_fx_reset(&aurora_black);ot_wled_fx_reset(&aurora_legacy);
+
+    /* Popcorn's source-drawn third slot must emit exact black when enabled;
+     * the same seed with tertiary_set=false maps that source slot to FG. */
+    a=(ot_wled_fx_config_t){
+        .effect_id=95u,.speed=128u,.intensity=255u,.brightness=255u,
+        .frame_time_ms=16u,.palette_id=0u,
+        .foreground={255,0,0},.background={0,255,0},
+        .tertiary={0,0,0},.tertiary_set=true
+    };
+    b=a;
+    b.tertiary_set=false;
+    b.tertiary=(ot_wled_rgb_t){255,255,0};
+    ot_wled_fx_state_t popcorn_black={0},popcorn_legacy={0};
+    unsigned popcorn_black_pixels=0u;
+    for(uint32_t t=0u;t<60000u;t+=16u){
+        assert(ot_wled_fx_render(&a,&popcorn_black,t,p,257u));
+        assert(ot_wled_fx_render(&b,&popcorn_legacy,t,q,257u));
+        for(unsigned k=0u;k<257u;k++)
+            if(eq(p[k],(ot_wled_rgb_t){0,0,0}) &&
+               eq(q[k],a.foreground))popcorn_black_pixels++;
+    }
+    assert(popcorn_black_pixels>0u);
+    ot_wled_fx_reset(&popcorn_black);ot_wled_fx_reset(&popcorn_legacy);
+
+    /* Solid Glitter's legacy default remains white; explicit RGB black is
+     * an authored GL color and must never be raised to a minimum brightness. */
+    a=(ot_wled_fx_config_t){
+        .effect_id=103u,.speed=128u,.intensity=255u,.brightness=255u,
+        .frame_time_ms=16u,.palette_id=0u,
+        .foreground={255,0,0},.background={0,255,0},
+        .tertiary={0,0,0},.tertiary_set=true
+    };
+    b=a;
+    b.tertiary_set=false;
+    b.tertiary=(ot_wled_rgb_t){0,0,0};
+    ot_wled_fx_state_t glitter_black={0},glitter_legacy={0};
+    unsigned glitter_black_pixels=0u;
+    for(uint32_t t=0u;t<512u;t+=16u){
+        assert(ot_wled_fx_render(&a,&glitter_black,t,p,257u));
+        assert(ot_wled_fx_render(&b,&glitter_legacy,t,q,257u));
+        for(unsigned k=0u;k<257u;k++)
+            if(eq(p[k],(ot_wled_rgb_t){0,0,0}) &&
+               eq(q[k],(ot_wled_rgb_t){255,255,255}))glitter_black_pixels++;
+    }
+    assert(glitter_black_pixels>0u);
+    ot_wled_fx_reset(&glitter_black);ot_wled_fx_reset(&glitter_legacy);
+
     uint16_t ids[160]={0};
     assert(ot_effects_1d_supported_ids(ids,160u)==140u);
-    puts("PASS Issue102: 2 real third-color consumers, 6 metadata-only/unimplemented source roles, legacy RGB and all 140 IDs (host)");
+    puts("PASS Issue102: 13 source-proven third-color roles, 6 unsupported metadata slots, explicit black Aurora/Popcorn/Solid Glitter and all 140 IDs (host)");
     return 0;
 }

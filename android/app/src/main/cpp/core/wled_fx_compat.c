@@ -198,9 +198,10 @@ static void palette_gradient(ot_wled_palette16_t *p,unsigned start,
         r+=dr;g+=dg;blue+=db;
     }
 }
-bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
+static bool ot_wled_palette_build_internal(uint8_t id,
+                           ot_wled_rgb_t primary,
                            ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
-                           ot_wled_palette16_t *out) {
+                           bool tertiary_set,ot_wled_palette16_t *out) {
     if(!out)return false;
     ot_wled_palette16_t next={0};
     if(id==0u || id==6u) {
@@ -226,7 +227,7 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
         palette_gradient(&next,0u,tertiary,8u,secondary);
         palette_gradient(&next,8u,secondary,15u,primary);
     } else if(id==5u) {
-        const bool has_third=tertiary.r||tertiary.g||tertiary.b;
+        const bool has_third=tertiary_set;
         for(unsigned i=0;i<16u;i++) {
             next.entries[i]=i<5u?primary:
                             i<10u?secondary:
@@ -239,6 +240,17 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
     *out=next;
     return true;
 }
+/* Backward-compatible helper for callers without a presence bit. The
+ * renderer uses tertiary_set so an authored RGB black is distinct from an
+ * absent third color. */
+bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
+                           ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
+                           ot_wled_palette16_t *out) {
+    const bool tertiary_set=tertiary.r!=0u||tertiary.g!=0u||tertiary.b!=0u;
+    return ot_wled_palette_build_internal(id,primary,secondary,tertiary,
+                                          tertiary_set,out);
+}
+
 /* WLED colors.cpp generateRandomPalette(): four independent CHSV colors
  * form a CRGBPalette16 with stops at 0, 5, 10, 15. Source RNG and gradual
  * palette transitions are intentionally not invented here. */
@@ -419,15 +431,26 @@ bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
 /* The global random/custom palette is generated and resolved by its owner.
  * Rendering only reads the caller's frame-stable snapshot. No per-zone random
  * generator, hidden cache, or stateful palette fallback is introduced. */
-static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
+static bool fx_palette_build_with_tertiary(
+                             const ot_wled_fx_config_t *cfg,uint8_t id,
                              ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
-                             ot_wled_rgb_t tertiary,ot_wled_palette16_t *out) {
+                             ot_wled_rgb_t tertiary,bool tertiary_set,
+                             ot_wled_palette16_t *out) {
     if((id==1u||id>72u)&&id==cfg->palette_id) {
         if(!cfg->resolved_palette||!out)return false;
         *out=*cfg->resolved_palette;
         return true;
     }
-    return ot_wled_palette_build(id,primary,secondary,tertiary,out);
+    return ot_wled_palette_build_internal(id,primary,secondary,tertiary,
+                                          tertiary_set,out);
+}
+/* Preserve the legacy helper behavior for palette callers that only have RGB. */
+static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
+                             ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
+                             ot_wled_rgb_t tertiary,ot_wled_palette16_t *out) {
+    const bool tertiary_set=tertiary.r!=0u||tertiary.g!=0u||tertiary.b!=0u;
+    return fx_palette_build_with_tertiary(cfg,id,primary,secondary,tertiary,
+                                          tertiary_set,out);
 }
 
 /* WLED pinned colors.cpp generateRandomPalette() target evaluation
@@ -3627,9 +3650,9 @@ static void aurora_frame(const ot_wled_fx_config_t *cfg,
     const uint8_t id=cfg->palette_id?cfg->palette_id:50u;
     /* Aurora's authored third slot is consumed by explicit three-color
      * palette modes, not by the default Aurora palette ID 50. */
-    if(!fx_palette_build(cfg,id,cfg->foreground,
+    if(!fx_palette_build_with_tertiary(cfg,id,cfg->foreground,
                cfg->background,cfg->tertiary_set?cfg->tertiary:
-               (ot_wled_rgb_t){0,0,0},&palette))return;
+               (ot_wled_rgb_t){0,0,0},cfg->tertiary_set,&palette))return;
     for(unsigned w=0;w<waves;w++) {
         ot_aurora_wave_t *wave=&data[w];
         if(wave->alive) {

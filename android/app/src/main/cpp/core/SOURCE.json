@@ -1,7 +1,7 @@
 {
-  "source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "source_commit": "76e24c69b935a94228b2e11b0efb8483c0276da5",
   "files": {
-    "wled_fx_compat.c": "b0a0f2e6f89aac5e6c3cdb94e0332ca6016fe70e4ee2abb334608cd631d3b009",
+    "wled_fx_compat.c": "a877b7a2dfcca6bf8e6a2816bd2d17cece5a5f290da18105a713290735b12a83",
     "wled_fx_compat.h": "cd1f8176be2ad867dceffabc3425e86404a884241b1517cf59c4a0835cc614f0",
     "effects_1d.c": "e7d8d1f95f84f828f5c5b8d139e6328ce02fefbd6357a8c026f0cfe4bc0fc0b6",
     "effects_1d.h": "6e7a45b1d433e56cd7c11d7597fbc09790ff76aa4230230a4587c0961b41aa90",
@@ -15,14 +15,14 @@
     "ot_auto_effects.h": "3116eb326df2a06c863e86cdf89b15702a2eb9c0ad7daa3617b9fa6f6b73a395",
     "core_logic.h": "ee9c173fe24da57e4e2b4c52ad218f06de77bb789ceb6aa1eca9e7413379ad5e"
   },
-  "seamless_loop_source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "seamless_loop_source_commit": "76e24c69b935a94228b2e11b0efb8483c0276da5",
   "seamless_loop_files": [
     "effects_1d.c",
     "effects_1d.h",
     "ot_auto_effects.c",
     "ot_auto_effects.h"
   ],
-  "color_slot_source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "color_slot_source_commit": "76e24c69b935a94228b2e11b0efb8483c0276da5",
   "color_slot_files": [
     "wled_fx_compat.c",
     "wled_fx_compat.h",
@@ -33,5 +33,10 @@
   "integrated_firmware96_head": "df27209b9876630b2b10f3a189f36817a2764009",
   "integrated_android106_head": "db7bcdff187197c0493b5c38991870224f2c244a",
   "tertiary_source_proven_modes": 13,
-  "tertiary_transport_admitted_modes": 11
+  "tertiary_transport_admitted_modes": 13,
+  "tertiary_transport_capability": "fx-tertiary13-v1",
+  "tertiary_legacy_capability": "fx-tertiary-v1",
+  "tertiary_legacy_transport_modes": 11,
+  "tertiary_aurora_palette_id": 4,
+  "firmware127_ble_contract_head": "29a729cdeaf17e58d500ede944b8188e07de2fab"
 }

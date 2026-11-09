@@ -1042,17 +1042,32 @@ for(const call of ['this::authorizeStored','this::pairWithBoot','this::readTrigg
 assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOperation();') &&
        frameClient.includes('byte[] complete=pixels;'), 'Bound snapshot timers and hand off owned RGB');
 
+const tertiaryCommand=fs.readFileSync('android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java','utf8');
+const bleCommand=fs.readFileSync('core-firmware/main/ble_fx_command.c','utf8');
+const bleHeader=fs.readFileSync('core-firmware/main/ble_fx_command.h','utf8');
+const bleStatus=fs.readFileSync('core-firmware/main/ble_status.c','utf8');
+assert(tertiaryCommand.includes('fx-tertiary13-v1') &&
+       tertiaryCommand.includes('supportedForFirmware') &&
+       bleCommand.includes('return ot_wled_fx_tertiary_supported(id);') &&
+       bleCommand.includes('candidate.effect_id==38u && candidate.palette_id!=4u') &&
+       bleHeader.includes('OT_BLE_FX_TERTIARY13_CAPABILITY') &&
+       bleStatus.includes('OT_BLE_FX_TERTIARY13_CAPABILITY'),
+       'Firmware #127 13-mode capability, Aurora palette gate and Android fail-closed tier must agree');
+
 const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8');
 const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
 /* Issue103: actual SHA256 and byte-identity checks, not a stale source
  * comment claiming parity. Only reviewed pure renderer sources are repinned. */
-assert(nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
+assert(nativeManifest.source_commit==='76e24c69b935a94228b2e11b0efb8483c0276da5' &&
        nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
        nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
        nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
        nativeManifest.tertiary_source_proven_modes===13 &&
-       nativeManifest.tertiary_transport_admitted_modes===11,
+       nativeManifest.tertiary_transport_admitted_modes===13 &&
+       nativeManifest.tertiary_legacy_transport_modes===11 &&
+       nativeManifest.tertiary_transport_capability==='fx-tertiary13-v1' &&
+       nativeManifest.firmware127_ble_contract_head==='29a729cdeaf17e58d500ede944b8188e07de2fab',
        'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
 for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
     const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));
@@ -1068,7 +1083,7 @@ for(const file of ['wled_fx_compat.c','wled_fx_compat.h',
 }
 assert(fs.readFileSync('android/app/src/main/cpp/core/wled_fx_compat.c','utf8')
          .includes('bool ot_wled_fx_tertiary_supported(uint16_t id)') &&
-       nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
+       nativeManifest.source_commit==='76e24c69b935a94228b2e11b0efb8483c0276da5' &&
        nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
        nativePreview.includes('ot_wled_palette_global_tick('),
        'All effects must use the pinned authoritative registry and palette producer');

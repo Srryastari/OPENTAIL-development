@@ -342,6 +342,7 @@ final class BleDiscovery {
     private volatile boolean mtuNegotiating=false;
     private volatile boolean infoReadPending=false;
     private BluetoothGattCharacteristic coreInfo;
+    private volatile String coreInfoText;
     private boolean infoReadQueued=false;
     private Consumer<String> infoListener;
     private volatile boolean continuousFx=false;
@@ -351,7 +352,7 @@ final class BleDiscovery {
     void setInfoListener(Consumer<String> listener){infoListener=listener;}
     private void clearInfo(){
         continuousFx=false;tertiaryFx=false;
-        coreInfo=null;infoReadQueued=false;
+        coreInfo=null;coreInfoText=null;infoReadQueued=false;
         final Consumer<String> receiver=infoListener;
         if(receiver!=null)ui.post(()->receiver.accept(null));
     }
@@ -1107,7 +1108,12 @@ final class BleDiscovery {
     void showContinuousTertiaryFx(int id,int chains,int zones,int r,int g,int b,
           int br,int bg,int bb,int brightness,int speed,int intensity,int palette,int third) {
         if(!canTertiaryFx()){
-            notifyStatus("CORE fx-tertiary-v1 unavailable or unauthorized; third color is local only");
+            notifyStatus("CORE third-color capability unavailable or unauthorized; third color is local only");
+            return;
+        }
+        if(!TertiaryFxCommand.supportedForFirmware(id,palette,coreInfoText)){
+            notifyStatus("CORE advertised capability does not admit effect "+id+
+                " palette "+palette+"; third-color command rejected without legacy fallback");
             return;
         }
         try {enqueueWrite(TertiaryFxCommand.encode(id,chains,zones,r,g,b,br,bg,bb,
@@ -2301,10 +2307,11 @@ final class BleDiscovery {
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
         infoReadPending=false;
-        continuousFx=false;tertiaryFx=false;
+        continuousFx=false;tertiaryFx=false;coreInfoText=null;
         if(connection!=gatt)return;
         if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
             String info=new String(value,StandardCharsets.UTF_8);
+            coreInfoText=info;
             continuousFx=ContinuousFxCommand.advertised(info);
             tertiaryFx=TertiaryFxCommand.advertised(info);
             String version=info.startsWith("OpenTail CORE ")

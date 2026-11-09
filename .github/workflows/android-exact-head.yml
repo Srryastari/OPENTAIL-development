@@ -45,7 +45,7 @@ jobs:
       - name: Checkout reconciled Effects #110 authoritative CORE source (all 140)
         uses: actions/checkout@v4
         with:
-          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
+          ref: 76e24c69b935a94228b2e11b0efb8483c0276da5
           path: pinned-effects110
       - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
         run: python3 android/qa/check_pinned_core49_contract.py

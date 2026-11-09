@@ -18,7 +18,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 CPP=ROOT/'android/app/src/main/cpp'
 JAVA=ROOT/'android/app/src/main/java/com/opentail/android'
-PIN='6180e2a5ccbfbf8567513504669c6840b68c045b'
+PIN='76e24c69b935a94228b2e11b0efb8483c0276da5'
 CONTINUITY_PIN=PIN
 COLOR_PIN=PIN
 COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h','effects_1d.c','effects_1d.h'}

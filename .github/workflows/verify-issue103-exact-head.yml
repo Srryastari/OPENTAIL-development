@@ -31,7 +31,7 @@ jobs:
           import subprocess
           def git(*args):
               return subprocess.check_output(['git',*args],text=True).strip()
-          fx='6180e2a5ccbfbf8567513504669c6840b68c045b'
+          fx='76e24c69b935a94228b2e11b0efb8483c0276da5'
           fw='df27209b9876630b2b10f3a189f36817a2764009'
           for p in ('ot_auto_effects.c','wled_fx_compat.c','wled_fx_compat.h'):
               want=git('rev-parse',fx+':core-firmware/main/'+p)
@@ -50,14 +50,35 @@ jobs:
               'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
               'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
               'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
+              'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java',
           }
           changed_java={p for p in protected if p.startswith('android/app/src/main/java/')}
           assert changed_java==owner_p0_java,(changed_java,owner_p0_java)
           assert not any(p.startswith('android/app/src/main/res/') for p in protected)
-          assert not any(p.startswith(('core-firmware/main/ble_', 'core-firmware/main/config_journal.',
+          allowed_ble_contract={
+              'core-firmware/main/ble_fx_command.c',
+              'core-firmware/main/ble_fx_command.h',
+              'core-firmware/main/ble_status.c',
+          }
+          assert not any((p.startswith('core-firmware/main/ble_') and p not in allowed_ble_contract) or
+              p.startswith(('core-firmware/main/config_journal.',
               'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
               'core-firmware/main/ot_version.')) for p in protected)
-          print('PASS: exact reconciled Effects CORE+JNI, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
+          # Pin the admitted 13-mode capability to the verified Firmware #127 contract.
+          fw127='29a729cdeaf17e58d500ede944b8188e07de2fab'
+          fw127_header=git('show',fw127+':core-firmware/main/ble_fx_command.h')
+          fw127_parser=git('show',fw127+':core-firmware/main/ble_fx_command.c')
+          fw127_status=git('show',fw127+':core-firmware/main/ble_status.c')
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY "fx-tertiary13-v1"' in fw127_header
+          assert 'return ot_wled_fx_tertiary_supported(id);' in fw127_parser
+          assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in fw127_parser
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in fw127_status
+          local_parser=git('show','HEAD:core-firmware/main/ble_fx_command.c')
+          local_status=git('show','HEAD:core-firmware/main/ble_status.c')
+          assert 'return ot_wled_fx_tertiary_supported(id);' in local_parser
+          assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in local_parser
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in local_status
+          print('PASS: exact Effects #110 CORE+JNI, Firmware #127 13-mode BLE contract, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
           PY
       - name: All 140 CORE host golden, speed, third roles, palette, stop, independent original/regression
         run: cd core-firmware && bash tests/run-host-tests.sh
@@ -75,7 +96,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 6180e2a5ccbfbf8567513504669c6840b68c045b
+          ref: 76e24c69b935a94228b2e11b0efb8483c0276da5
           path: pinned-effects110
           persist-credentials: false
       - uses: actions/setup-java@v4
