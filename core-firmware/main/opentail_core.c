@@ -2723,18 +2723,6 @@ static bool config_clear_stage(nvs_handle_t h){
     size_t n=0;
     return nvs_get_blob(h,OT_CFG_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
 }
-static bool config_write_panel_active(nvs_handle_t h,const ot_pz_journal_t *record){
-    esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_ACTIVE,record,sizeof(*record));
-    if(e==ESP_OK)e=nvs_commit(h);
-    return e==ESP_OK;
-}
-static bool config_clear_panel_stage(nvs_handle_t h){
-    esp_err_t e=nvs_erase_key(h,OT_PZ_JOURNAL_KEY_STAGED);
-    if(e==ESP_OK)e=nvs_commit(h);
-    if(e!=ESP_OK)return false;
-    size_t n=0;
-    return nvs_get_blob(h,OT_PZ_JOURNAL_KEY_STAGED,NULL,&n)==ESP_ERR_NVS_NOT_FOUND;
-}
 /* The durable active record retains BOTH the prior and the desired profile.
  * After stage erasure, a concurrent GPIO edge may veto RAM publication.
  * A later promoter retries from active_v3; reboot does likewise. No edge
