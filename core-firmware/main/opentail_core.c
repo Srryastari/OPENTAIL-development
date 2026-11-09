@@ -3047,10 +3047,7 @@ static void led_task(void *p) {
     /* Reused per-output snapshot prevents in-place overwrite during zone reorder. */
     static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
     /* Keep each indexed FX slot attached to its stable logical identity. */
-    static uint32_t fx_bank_seen_generation[OT_CHAIN_COUNT][OT_OM_ZONES];
-    static uint32_t fx_bank_seen_refresh_ms[OT_CHAIN_COUNT][OT_OM_ZONES];
-    static uint16_t fx_bank_owner_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES];
-    static uint16_t fx_bank_owner_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static ot_fx_zone_identity_map_t fx_bank_identity[OT_CHAIN_COUNT];
     static uint8_t resolved_fx_bank_index[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
@@ -3149,47 +3146,12 @@ static void led_task(void *p) {
                local_outputs[ch]=default_outputs[ch];
        for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
            memset(resolved_fx_bank_index[ch],0xff,sizeof(resolved_fx_bank_index[ch]));
-           if(!local_fx_enabled)continue;
-           for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
-               const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][bank_z];
-               if(!ot_fx_slot_active(slot,render_now_ms)){
-                   fx_bank_seen_generation[ch][bank_z]=slot->generation;
-                   fx_bank_seen_refresh_ms[ch][bank_z]=slot->refreshed_ms;
-                   fx_bank_owner_zone_id[ch][bank_z]=0u;
-                   fx_bank_owner_panel_id[ch][bank_z]=0u;
-                   continue;
-               }
-               if(fx_bank_seen_generation[ch][bank_z]!=slot->generation||
-                  fx_bank_seen_refresh_ms[ch][bank_z]!=slot->refreshed_ms||
-                  fx_bank_owner_zone_id[ch][bank_z]==0u||
-                  fx_bank_owner_panel_id[ch][bank_z]==0u){
-                   const uint16_t owner_zone=bank_z<local_panel[ch].zone_count?
-                       local_panel[ch].zones[bank_z].id:0u;
-                   const uint16_t owner_panel=bank_z<local_panel[ch].zone_count?
-                       local_panel[ch].zones[bank_z].panel_id:0u;
-                   for(unsigned other=0;other<OT_OM_ZONES;other++){
-                       if(other==bank_z)continue;
-                       if(fx_bank_owner_zone_id[ch][other]==owner_zone&&
-                          fx_bank_owner_panel_id[ch][other]==owner_panel){
-                           fx_bank_owner_zone_id[ch][other]=0u;
-                           fx_bank_owner_panel_id[ch][other]=0u;
-                       }
-                   }
-                   fx_bank_seen_generation[ch][bank_z]=slot->generation;
-                   fx_bank_seen_refresh_ms[ch][bank_z]=slot->refreshed_ms;
-                   fx_bank_owner_zone_id[ch][bank_z]=owner_zone;
-                   fx_bank_owner_panel_id[ch][bank_z]=owner_panel;
-               }
-           }
-           for(unsigned z=0;z<local_panel[ch].zone_count;z++){
-               const ot_pz_zone_t *zone=&local_panel[ch].zones[z];
-               for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
-                   if(fx_bank_owner_zone_id[ch][bank_z]==zone->id&&
-                      fx_bank_owner_panel_id[ch][bank_z]==zone->panel_id&&
-                      ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],render_now_ms)){
-                       resolved_fx_bank_index[ch][z]=(uint8_t)bank_z;break;
-                   }
-               }
+           if(local_fx_enabled&&
+              !ot_fx_bank_resolve_zone_identity(&fx_bank_identity[ch],
+                  &local_panel[ch],&local_fx_bank,ch,render_now_ms,
+                  resolved_fx_bank_index[ch])){
+               ot_st_set_fault("invalid FX Panel/Zone identity map");
+               local_fx_enabled=false;
            }
        }
        /* One immutable snapshot of every requested custom palette per frame.
