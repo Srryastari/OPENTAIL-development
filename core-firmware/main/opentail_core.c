@@ -3260,9 +3260,8 @@ static void led_task(void *p) {
                        const bool same_identity=prior_index>=0;
                        if(active&&len<=OT_PZ_MAX_PIXELS){
                            if(same_identity){
-                               fx_state[ch][z]=prior_fx_state[prior_index];
-                               memset(&prior_fx_state[prior_index],0,
-                                      sizeof(prior_fx_state[prior_index]));
+                               ot_effects_1d_move_state(&fx_state[ch][z],
+                                   &prior_fx_state[prior_index]);
                            }else{
                                ot_effects_1d_reset(&fx_state[ch][z],
                                    0x1234u+ch*97u+z*19u+slot->generation);
