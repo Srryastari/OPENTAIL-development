@@ -59,9 +59,10 @@ typedef struct {
     uint8_t payload[13];
 } crc_fixture_t;
 static void zeroed_crc_compatibility(void){
-    crc_fixture_t record={0x12345678u,7u,0xabcdef01u,
-        {0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}};
-    crc_fixture_t copy=record;copy.crc=0u;
+    crc_fixture_t record;memset(&record,0,sizeof(record));
+    record.magic=0x12345678u;record.version=7u;record.crc=0xabcdef01u;
+    for(unsigned i=0;i<sizeof(record.payload);i++)record.payload[i]=(uint8_t)i;
+    crc_fixture_t copy;memcpy(&copy,&record,sizeof(copy));copy.crc=0u;
     assert(ot_cfg_crc32_zeroed(&record,sizeof(record),offsetof(crc_fixture_t,crc),
                                sizeof(record.crc))==ot_cfg_crc32(&copy,sizeof(copy)));
 }
