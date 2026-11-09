@@ -474,8 +474,12 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     bank->zones[0][0].spark=a_spark;
     assert(ot_fx_bank_set_spark_identity(bank,current_outputs,active->outputs,
         1u,1u,1170u,&b_spark));
-    assert(memcmp(&bank->zones[0][1].spark,&b_spark,sizeof(b_spark))==0);
-    assert(memcmp(&bank->zones[0][0].spark,&a_spark,sizeof(a_spark))==0);
+    assert(bank->zones[0][1].spark.style==b_spark.style);
+    assert(bank->zones[0][1].spark.peak==b_spark.peak);
+    assert(same_wled_rgb(bank->zones[0][1].spark.color,b_spark.color));
+    assert(bank->zones[0][0].spark.style==a_spark.style);
+    assert(bank->zones[0][0].spark.peak==a_spark.peak);
+    assert(same_wled_rgb(bank->zones[0][0].spark.color,a_spark.color));
 
     const ot_fx_overlay_config_t a_overlay={
         .style=OT_FX_OVERLAY_FLARES,.peak=6u,.density=80u,
@@ -488,8 +492,18 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     bank->zones[0][0].overlay=a_overlay;
     assert(ot_fx_bank_set_overlay_identity(bank,current_outputs,active->outputs,
         1u,1u,1171u,&b_overlay));
-    assert(memcmp(&bank->zones[0][1].overlay,&b_overlay,sizeof(b_overlay))==0);
-    assert(memcmp(&bank->zones[0][0].overlay,&a_overlay,sizeof(a_overlay))==0);
+    assert(bank->zones[0][1].overlay.style==b_overlay.style);
+    assert(bank->zones[0][1].overlay.peak==b_overlay.peak);
+    assert(bank->zones[0][1].overlay.density==b_overlay.density);
+    assert(bank->zones[0][1].overlay.radius==b_overlay.radius);
+    assert(bank->zones[0][1].overlay.fade_ms==b_overlay.fade_ms);
+    assert(same_wled_rgb(bank->zones[0][1].overlay.color,b_overlay.color));
+    assert(bank->zones[0][0].overlay.style==a_overlay.style);
+    assert(bank->zones[0][0].overlay.peak==a_overlay.peak);
+    assert(bank->zones[0][0].overlay.density==a_overlay.density);
+    assert(bank->zones[0][0].overlay.radius==a_overlay.radius);
+    assert(bank->zones[0][0].overlay.fade_ms==a_overlay.fade_ms);
+    assert(same_wled_rgb(bank->zones[0][0].overlay.color,a_overlay.color));
 
     /* A continuous update to B must not clear A's separate continuous slot. */
     assert(bank->zones[0][0].configured&&bank->zones[0][0].continuous);
