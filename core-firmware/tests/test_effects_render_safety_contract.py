@@ -59,7 +59,8 @@ assert "prior_panel_ids[i]==panel_id" in effects
 assert "prior_zone_ids[i]==zone_id" in effects
 assert "prior_generations[i]==generation" in effects
 assert "old_z==(uint8_t)prior_index" in render
-assert "ot_fx_bank_resolve_zone_identity(&local_panel[ch],&local_fx_bank" in render
+assert "ot_fx_bank_resolve_zone_identity(&local_panel[ch]," in render
+assert "&local_fx_bank,ch,render_now_ms,resolved_fx_bank_index[ch])" in render
 assert "resolved_fx_bank_index" in render
 assert "bool ot_fx_bank_resolve_zone_identity(" in fxbank
 assert "slot->owner_panel_id==zone_cfg->panel_id" in fxbank
@@ -72,8 +73,9 @@ assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 assert "ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs," in core
 assert "ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req," in core
 assert "ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs," in core
-assert "fx_bank.zones[o][resolved[o][z]].spark=*spark" in core
-assert "fx_bank.zones[o][resolved[o][z]].overlay=*overlay" in core
+assert "ot_fx_bank_set_spark_identity(&fx_bank,om_outputs," in core
+assert "bank->zones[o][resolved[z]].spark=*spark" in fxbank
+assert "bank->zones[o][resolved[z]].overlay=*overlay" in fxbank
 assert "ot_fx_bank_apply_configured_identity(&replacement,&targeted," in core
 assert "ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs)" in core
 assert "bool ot_fx_bank_apply_configured_identity(" in fxbank
