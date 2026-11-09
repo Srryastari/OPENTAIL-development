@@ -129,9 +129,9 @@ success=render.split("esp_err_t e=led_strip_refresh_async_done(strip[ch]);",1)[1
     "const bool full_frame=ot_frame_all_submitted(",1
 )[0]
 assert success.index("if(e!=ESP_OK){") < success.index("continue;") < success.index(
-    "if(local_outputs[ch].active_pixels>longest_pixels)"
+    "if(render_pixels[ch]>longest_pixels)"
 )
-assert "longest_pixels=local_outputs[ch].active_pixels;" in success
+assert "longest_pixels=(uint16_t)render_pixels[ch];" in success
 assert "ot_fps_pacer_observe(&pacer,work_us,longest_pixels)" in render
 after_work=render.split("int64_t work_elapsed=esp_timer_get_time()-frame_started_us;",1)[1]
 assert "if(local_outputs[ch].active_pixels>longest_pixels)" not in after_work
