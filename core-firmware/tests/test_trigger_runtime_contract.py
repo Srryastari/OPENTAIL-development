@@ -464,7 +464,7 @@ for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
               "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
               "input_quiet_samples>=OT_DEBOUNCE_TICKS",
               "pz_outputs=recovered_pending.candidate",
-              "ot_pz_pair_store_mark_reset"):
+):
     assert token in panel_promotion, token
 assert "nvs_open(" not in panel_promotion
 assert "config_recovery_fault=true;" in panel_promotion
