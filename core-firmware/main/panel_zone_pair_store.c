@@ -41,22 +41,6 @@ static bool pair_marker_valid(const ot_pz_pair_store_marker_t *record){
         record->version==OT_PZ_PAIR_STORE_MARKER_VERSION&&
         record->transaction_id&&pair_marker_crc(record)==record->crc;
 }
-static bool write_pair_verified(const ot_pz_pair_store_io_t *io,
-        ot_pz_pair_namespace_t ns,const char *key_a,const void *data_a,size_t size_a,
-        const char *key_b,const void *data_b,size_t size_b){
-    union {
-        ot_pz_map_journal_t map;
-        ot_pz_pair_store_marker_t marker;
-    } map_readback,marker_readback;
-    if(!io->write_batch_commit||!key_a||!key_b||!data_a||!data_b||
-       size_a>sizeof(map_readback)||size_b>sizeof(marker_readback)||
-       !io->write_batch_commit(io->context,ns,key_a,data_a,size_a,
-                               key_b,data_b,size_b))return false;
-    return read_exact(io,ns,key_a,&map_readback,size_a)==OT_PZ_PAIR_IO_OK&&
-        memcmp(&map_readback,data_a,size_a)==0&&
-        read_exact(io,ns,key_b,&marker_readback,size_b)==OT_PZ_PAIR_IO_OK&&
-        memcmp(&marker_readback,data_b,size_b)==0;
-}
 static bool erase_verified(const ot_pz_pair_store_io_t *io,
         ot_pz_pair_namespace_t ns,const char *key){
     if(!io->erase_commit(io->context,ns,key))return false;
@@ -85,8 +69,7 @@ static const ot_pz_lane_journal_t *select_lane(
 }
 bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
                                ot_pz_pair_store_snapshot_t *s){
-    if(!io||!io->read||!io->write_commit||!io->write_batch_commit||
-       !io->erase_commit||!s)return false;
+    if(!io||!io->read||!io->write_commit||!io->erase_commit||!s)return false;
     memset(s,0,sizeof(*s));
 #define READ_RECORD(ns,key,field,has_field) do { \
     ot_pz_pair_io_result_t r=read_exact(io,(ns),(key),&(s->field),sizeof(s->field)); \
@@ -100,9 +83,9 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
     READ_RECORD(OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY,intent,has_intent);
 #undef READ_RECORD
     if(s->has_intent&&!ot_pz_pair_intent_valid(&s->intent))return false;
-    /* The marker and map-active record share phase-5's namespace commit.
-     * If power is interrupted inside that commit, the still-present intent
-     * authorizes recovery from whichever valid stage/active pair survived. */
+    /* The marker is a separate durable phase after map-active. If power is
+     * interrupted between them, the still-present intent authorizes recovery
+     * from the surviving stage/active records and finish() retries both. */
     const ot_pz_pair_io_result_t marker_result=read_exact(io,
         OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,&s->marker,
         sizeof(s->marker));
@@ -237,17 +220,20 @@ bool ot_pz_pair_store_finish(const ot_pz_pair_store_io_t *io,
     if(!write_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_ACTIVE,
                        lane,sizeof(*lane))||
        !phase_done(phase_hook,phase_context,4u,transaction_id))return false;
+    if(!write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
+                       map,sizeof(*map))||
+       !phase_done(phase_hook,phase_context,5u,transaction_id))return false;
     ot_pz_pair_store_marker_t marker={0};
     if(!pair_marker_build(&marker,transaction_id)||
-       !write_pair_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
-            map,sizeof(*map),OT_PZ_PAIR_STORE_MARKER_KEY,&marker,sizeof(marker))||
-       !phase_done(phase_hook,phase_context,5u,transaction_id))return false;
-    if(!erase_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_STAGED)||
+       !write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,
+                       &marker,sizeof(marker))||
        !phase_done(phase_hook,phase_context,6u,transaction_id))return false;
-    if(!erase_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_STAGED)||
+    if(!erase_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_STAGED)||
        !phase_done(phase_hook,phase_context,7u,transaction_id))return false;
-    if(!erase_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY)||
+    if(!erase_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_STAGED)||
        !phase_done(phase_hook,phase_context,8u,transaction_id))return false;
+    if(!erase_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY)||
+       !phase_done(phase_hook,phase_context,9u,transaction_id))return false;
     return true;
 }
 bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,uint8_t lane){
@@ -266,12 +252,10 @@ bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,uint8_t lane){
         return false;
     (void)previous;(void)candidate;
     ot_pz_map_journal_t updated={0};
-    ot_pz_pair_store_marker_t marker={0};
     const uint8_t mask=(uint8_t)(s.map_active.reset_mask|(1u<<lane));
     if(!ot_pz_map_journal_build_reset(&updated,&s.map_active.previous,
         &s.map_active.candidate,s.map_active.previous_revision,
-        s.map_active.candidate_revision,s.map_active.transaction_id,mask)||
-       !pair_marker_build(&marker,s.map_active.transaction_id))return false;
-    return write_pair_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
-        &updated,sizeof(updated),OT_PZ_PAIR_STORE_MARKER_KEY,&marker,sizeof(marker));
+        s.map_active.candidate_revision,s.map_active.transaction_id,mask))return false;
+    return write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
+                          &updated,sizeof(updated));
 }
