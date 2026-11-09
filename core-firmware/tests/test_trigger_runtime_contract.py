@@ -64,11 +64,24 @@ assert "edge_time_us>=state->release_deadline_us" in logic
 assert "now_us>=state->release_deadline_us" in logic
 assert "state->release_deadline_us=edge_time_us+OT_TURN_RELEASE_HOLD_US;" in logic
 assert "static DRAM_ATTR ot_turn_edge_event_t turn_edge_events[2][OT_TURN_EDGE_QUEUE_CAPACITY]" in core
-assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 32u" in core
+assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 64u" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_head[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_tail[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]" in core
+# The ISR must guard the entire timestamp+GPIO pair before publication.
+# A stale pre-guard GPIO read paired with a new timestamp can cross 400ms.
+isr = between(core, "static void IRAM_ATTR input_edge_isr(void *arg){",
+              "void ot_input_diag_snapshot_get(")
+guard = isr.index("__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)")
+clock = isr.index("const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;")
+gpio = isr.index("level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])")
+payload_time = isr.index("event->timestamp_us=edge_time_us;")
+payload_gpio = isr.index("event->asserted=asserted;")
+publish = isr.index("__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)")
+unguard = isr.index("__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)")
+assert guard < clock < gpio < payload_time < payload_gpio < publish < unguard
+assert "if(is_turn)" in isr
 assert "event->timestamp_us=edge_time_us;" in core
 assert "event->asserted=asserted;" in core
 assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
