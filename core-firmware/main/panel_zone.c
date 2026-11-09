@@ -135,6 +135,85 @@ bool ot_pz_valid(const ot_pz_controller_t *config){
     }
     return true;
 }
+bool ot_pz_split(const ot_pz_controller_t *runtime,
+                 ot_pz_lane_config_set_t *lanes,ot_pz_map_t *map){
+    if(!runtime||!lanes||!map||!ot_pz_valid(runtime))return false;
+    ot_pz_lane_config_set_t next_lanes={0};
+    ot_pz_map_t next_map={0};
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        const ot_pz_output_t *source=&runtime->outputs[lane];
+        ot_pz_lane_config_t *hardware=&next_lanes.lanes[lane];
+        ot_pz_map_output_t *geometry=&next_map.outputs[lane];
+        hardware->lane_id=(uint8_t)lane;
+        memcpy(hardware->name,source->name,sizeof(hardware->name));
+        hardware->active_pixels=source->active_pixels;
+        hardware->color_order=source->color_order;
+        memcpy(hardware->rgb_gain,source->rgb_gain,sizeof(hardware->rgb_gain));
+        memcpy(hardware->white_gain,source->white_gain,sizeof(hardware->white_gain));
+        hardware->gamma_enabled=source->gamma_enabled;
+        geometry->lane_id=(uint8_t)lane;
+        geometry->panel_count=source->panel_count;
+        geometry->zone_count=source->zone_count;
+        memcpy(geometry->panels,source->panels,
+               (size_t)source->panel_count*sizeof(geometry->panels[0]));
+        memcpy(geometry->zones,source->zones,
+               (size_t)source->zone_count*sizeof(geometry->zones[0]));
+    }
+    *lanes=next_lanes;*map=next_map;
+    return true;
+}
+bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
+                ot_pz_controller_t *runtime){
+    if(!lanes||!map||!runtime)return false;
+    ot_pz_controller_t next;ot_pz_defaults(&next);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        const ot_pz_lane_config_t *hardware=&lanes->lanes[lane];
+        const ot_pz_map_output_t *geometry=&map->outputs[lane];
+        if(hardware->lane_id!=lane||geometry->lane_id!=lane||
+           geometry->panel_count>OT_PZ_MAX_PANELS_PER_OUTPUT||
+           geometry->zone_count>OT_PZ_MAX_ZONES_PER_OUTPUT)return false;
+        ot_pz_output_t *out=&next.outputs[lane];
+        memcpy(out->name,hardware->name,sizeof(out->name));
+        out->active_pixels=hardware->active_pixels;
+        out->color_order=hardware->color_order;
+        memcpy(out->rgb_gain,hardware->rgb_gain,sizeof(out->rgb_gain));
+        memcpy(out->white_gain,hardware->white_gain,sizeof(out->white_gain));
+        out->gamma_enabled=hardware->gamma_enabled;
+        out->panel_count=geometry->panel_count;
+        out->zone_count=geometry->zone_count;
+        memcpy(out->panels,geometry->panels,
+               (size_t)geometry->panel_count*sizeof(out->panels[0]));
+        memcpy(out->zones,geometry->zones,
+               (size_t)geometry->zone_count*sizeof(out->zones[0]));
+    }
+    if(!ot_pz_valid(&next))return false;
+    *runtime=next;
+    return true;
+}
+bool ot_pz_lane_config_set_valid(const ot_pz_lane_config_set_t *lanes){
+    if(!lanes)return false;
+    ot_pz_map_t empty={0};
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        empty.outputs[lane].lane_id=(uint8_t)lane;
+    ot_pz_controller_t joined;
+    return ot_pz_join(lanes,&empty,&joined);
+}
+bool ot_pz_map_valid(const ot_pz_map_t *map){
+    if(!map)return false;
+    ot_pz_lane_config_set_t maximum={0};
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        ot_pz_lane_config_t *hardware=&maximum.lanes[lane];
+        hardware->lane_id=(uint8_t)lane;
+        (void)snprintf(hardware->name,sizeof(hardware->name),
+                       "Pixel OUT %u",lane+1u);
+        hardware->active_pixels=OT_PZ_MAX_PIXELS;
+        hardware->color_order=OT_OM_GRB;
+        for(unsigned c=0;c<3u;c++)
+            hardware->rgb_gain[c]=hardware->white_gain[c]=255u;
+    }
+    ot_pz_controller_t joined;
+    return ot_pz_join(&maximum,map,&joined);
+}
 bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
                                    uint8_t quiet_samples,uint8_t required_samples,
                                    uint32_t current_epoch,uint32_t expected_epoch){
