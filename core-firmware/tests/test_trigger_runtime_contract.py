@@ -335,12 +335,15 @@ assert "ot_tm_journal_recover(" in core and "ot_om_journal_recover(" in core
 assert "xSemaphoreGive(om_write_mutex)" in save
 assert "require_revision&&tm_revision!=expected" in save
 assert "tm_revision++;" in save
-for begin, end in (("static esp_err_t om_post(", "bool ot_ble_config_get("),
-                   ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels")):
+for begin, end, persist in (
+    ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save("),
+    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
+     "pz_save_controller_locked(&candidate)"),
+):
     saving = between(core, begin, end)
     assert "const bool raw_active=tm_gpio_input_mask()!=0;" in saving
     assert re.search(r"raw_active\s*\|\|\s*live_input_mask",saving)
-    assert saving.index("tm_gpio_input_mask()") < saving.index("om_save(")
+    assert saving.index("tm_gpio_input_mask()") < saving.index(persist)
 load = between(core, "static void tm_load(void){", "static bool tm_save(")
 assert "ot_tm_defaults(&tm_profile);" in load
 assert 'nvs_get_blob(h,"profile_v1",&stored,&size)' in load
@@ -360,7 +363,8 @@ assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("ble_startu
 assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("http_startup_ready=wifi_started&&http_start();")
 for begin,end,persist in (
     ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save(next_all)"),
-    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels", "om_save(next_all)"),
+    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
+     "pz_save_controller_locked(&candidate)"),
     ("static int tm_commit(", "bool ot_ble_trigger_get(", "tm_save(next)"),
 ):
     op = between(core,begin,end)
