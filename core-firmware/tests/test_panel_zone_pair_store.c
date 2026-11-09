@@ -141,13 +141,39 @@ static void reset_marker_and_fail_closed(void){
     fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
     ot_pz_controller_t base,candidate;
     make_runtime(&base,100u,OT_OM_GRB,100u);
-    make_runtime(&candidate,80u,OT_OM_RGB,80u);
+    candidate=base;
+    candidate.outputs[0].panel_count=0u;
+    candidate.outputs[0].zone_count=0u;
+    memset(candidate.outputs[0].panels,0,sizeof(candidate.outputs[0].panels));
+    memset(candidate.outputs[0].zones,0,sizeof(candidate.outputs[0].zones));
+    assert(ot_pz_valid(&base)&&ot_pz_valid(&candidate));
     const uint16_t old_rev[OT_PZ_OUTPUTS]={1u,1u},new_rev[OT_PZ_OUTPUTS]={2u,1u};
     assert(ot_pz_pair_store_begin(&io,&base,&candidate,old_rev,new_rev,
-                                  0x3003u,0u,true,NULL,NULL));
+                                  0x3003u,1u,true,NULL,NULL));
+    ot_pz_pair_store_snapshot_t staged={0};
+    assert(ot_pz_pair_store_snapshot(&io,&staged));
+    assert(staged.has_lane_stage&&staged.has_map_stage&&staged.has_intent);
+    /* Reset changes only geometry: lane electrical configuration is byte-identical. */
+    assert(memcmp(&staged.lane_stage.previous,&staged.lane_stage.candidate,
+                  sizeof(staged.lane_stage.previous))==0);
+    assert(memcmp(&staged.map_stage.previous.outputs[0],
+                  &staged.map_stage.candidate.outputs[0],
+                  sizeof(staged.map_stage.previous.outputs[0]))!=0);
+    assert(memcmp(&staged.map_stage.previous.outputs[1],
+                  &staged.map_stage.candidate.outputs[1],
+                  sizeof(staged.map_stage.previous.outputs[1]))==0);
+    assert(staged.map_stage.reset_mask==1u);
     assert(ot_pz_pair_store_finish(&io,0x3003u,NULL,NULL));
     assert(ot_pz_pair_store_mark_reset(&io,0u));
     recover_expect(&io,&base,&base,&candidate,true,false,0x3003u,1u);
+    ot_pz_pair_store_snapshot_t active={0};
+    assert(ot_pz_pair_store_snapshot(&io,&active));
+    assert(active.has_lane_active&&active.has_map_active);
+    assert(memcmp(&active.lane_active.previous,&active.lane_active.candidate,
+                  sizeof(active.lane_active.previous))==0);
+    assert(active.map_active.candidate.outputs[0].panel_count==0u);
+    assert(active.map_active.candidate.outputs[0].zone_count==0u);
+    assert(active.map_active.reset_mask==1u);
     store.map_active.bytes[0]^=0x01u;
     ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
     uint16_t ar[2]={0},sr[2]={0};
