@@ -432,14 +432,14 @@ bool ot_pz_pair_journal_recover(
         return true;
     }
 
-    if(!ot_pz_join(&lane_record->previous,&map_record->previous,live)||
-       !ot_pz_join(&lane_record->candidate,&map_record->candidate,
-                   &pending->candidate))return false;
     if(map_record->transaction_id!=lane_record->transaction_id||
        memcmp(map_record->previous_revision,lane_record->previous_revision,
               sizeof(map_record->previous_revision))!=0||
        memcmp(map_record->candidate_revision,lane_record->candidate_revision,
               sizeof(map_record->candidate_revision))!=0)return false;
+    if(!ot_pz_join(&lane_record->previous,&map_record->previous,live)||
+       !ot_pz_join(&lane_record->candidate,&map_record->candidate,
+                   &pending->candidate))return false;
     pending->pending=memcmp(live,&pending->candidate,sizeof(*live))!=0;
     memcpy(active_revision,map_record->previous_revision,
            sizeof(map_record->previous_revision));
