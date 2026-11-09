@@ -57,8 +57,10 @@ assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
 
 # Runtime driver length must follow each saved output, not a global max.
 assert ".max_leds=pixels" in core
-assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
-assert "strip_configure_channel(ch,local_outputs[ch].active_pixels)" in core
+# Runtime RMT lengths now come from the active Panel/Zone lane snapshot,
+# not the legacy Output Manager compatibility projection.
+assert "strip_configure_channel(ch,pixels)" in core
+assert "frame_ready[ch]=strip_configure_channel(ch,render_pixels[ch]);" in core
 # Resize must not delete a live RMT output when blackout fails.
 resize = core.split("static bool strip_configure_channel(",1)[1].split("static bool strip_init(",1)[0]
 assert "(void)led_strip_clear(strip[ch]);" not in resize
