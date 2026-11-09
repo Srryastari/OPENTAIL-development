@@ -3287,17 +3287,10 @@ static void led_task(void *p) {
                            &local_fx_bank.zones[ch][bank_z]:NULL;
                        const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
                            ot_fx_slot_active(slot,frame_ms);
-                       int prior_index=-1;
-                       if(active){
-                           for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++){
-                               if(old_active[old_z]&&
-                                  old_zone_id[old_z]==zone_cfg->id&&
-                                  old_panel_id[old_z]==zone_cfg->panel_id&&
-                                  old_generation[old_z]==slot->generation){
-                                   prior_index=(int)old_z;break;
-                               }
-                           }
-                       }
+                       const int prior_index=active?
+                           ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
+                               zone_cfg->id,slot->generation,old_panel_id,
+                               old_zone_id,old_generation,old_active,OT_OM_ZONES):-1;
                        const bool same_identity=prior_index>=0;
                        if(active&&len<=OT_PZ_MAX_PIXELS){
                            if(same_identity){
