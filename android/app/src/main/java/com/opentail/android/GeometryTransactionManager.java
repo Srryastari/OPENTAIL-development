@@ -101,20 +101,40 @@ final class GeometryTransactionManager {
      * Current Layout sections are contiguous single-range zones; multi-range
      * authoring remains disabled until the UI has explicit range metadata.
      */
+    private static boolean isExactGs400Layout(List<JSONObject>[] assigned) {
+        int[] expected={118,109,42,253,101};
+        for(int lane=0;lane<2;lane++) {
+            if(assigned[lane].size()!=5)return false;
+            List<JSONObject> sections=new ArrayList<>(assigned[lane]);
+            Collections.sort(sections,(a,b)->Integer.compare(
+                a.optInt("physicalSection",-1),b.optInt("physicalSection",-1)));
+            for(int i=0;i<expected.length;i++)
+                if(sections.get(i).optInt("physicalSection",-1)!=i||
+                   sections.get(i).optInt("length",-1)!=expected[i])return false;
+        }
+        return true;
+    }
+
     static LayoutMapping mapLayout(NativeProject project) {
         if(project==null)throw new IllegalArgumentException("Layout project is required");
         @SuppressWarnings("unchecked")
         List<JSONObject>[] assigned=new List[]{new ArrayList<>(),new ArrayList<>()};
+        boolean anyExplicitPanel=false,allExplicitPanel=true;
         for(int i=0;i<project.zoneCount();i++) {
             JSONObject zone=project.zone(i);
             int lane=zone.optInt("physicalOutput",-1);
             if(lane<0)continue;
             if(lane>1)throw new IllegalArgumentException("Physical output is outside the two-lane contract");
-            if(!zone.has("physicalPanelId")||!zone.has("physicalPanelName"))
-                throw new IllegalStateException("Section "+zone.optString("name")+
-                    " has no explicit CORE Panel identity");
+            boolean explicit=zone.has("physicalPanelId")&&zone.has("physicalPanelName");
+            anyExplicitPanel|=explicit;
+            allExplicitPanel&=explicit;
             assigned[lane].add(zone);
         }
+        boolean exactGs400Profile=!anyExplicitPanel&&isExactGs400Layout(assigned);
+        if(anyExplicitPanel&&!allExplicitPanel)
+            throw new IllegalStateException("Every assigned section must have an explicit CORE Panel identity");
+        if(!anyExplicitPanel&&!exactGs400Profile)
+            throw new IllegalStateException("Layout has no explicit CORE Panel identity and does not match the exact owner-approved GS400 section map");
         MappedLane[] lanes=new MappedLane[2];
         Map<Integer,Integer> globalPanelLanes=new HashMap<>();
         for(int lane=0;lane<2;lane++) {
@@ -129,8 +149,11 @@ final class GeometryTransactionManager {
             int cursor=0;
             for(JSONObject source:sections) {
                 int section=source.optInt("physicalSection",-1);
-                int panelId=source.optInt("physicalPanelId",-1);
-                String panelName=source.optString("physicalPanelName","").trim();
+                int panelId=exactGs400Profile
+                    ? lane*2+(section==4?2:1):source.optInt("physicalPanelId",-1);
+                String panelName=exactGs400Profile
+                    ? (lane==0?"Left ":"Right ")+(section==4?"Trunk":"Housing")
+                    : source.optString("physicalPanelName","").trim();
                 int count=source.optInt("length",-1);
                 if(section<0||section>7||panelId<1||panelId>127||
                    panelName.isEmpty()||count<1)
