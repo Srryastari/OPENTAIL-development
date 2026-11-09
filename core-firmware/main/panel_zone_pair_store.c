@@ -108,8 +108,10 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
     /* Once v4 has been initialized, a missing/mismatched active map must not
      * fall back to stale v3 combined geometry. During phases 1..4 the marker
      * still identifies the prior active map generation. */
-    if(s->has_marker&&(!s->has_map_active||
-       s->marker.transaction_id!=s->map_active.transaction_id))return false;
+    if(s->has_marker&&
+       ((!s->has_intent&&!s->has_map_active)||
+        (s->has_map_active&&
+         s->marker.transaction_id!=s->map_active.transaction_id)))return false;
     return true;
 }
 bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
@@ -121,8 +123,9 @@ bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
                               uint8_t *reset_mask){
     ot_pz_pair_store_snapshot_t s;
     if(!ot_pz_pair_store_snapshot(io,&s))return false;
-    if(s.has_marker&&(!s.has_map_active||!s.has_lane_active||
-       (!s.has_intent&&s.map_active.transaction_id!=s.lane_active.transaction_id)))
+    if(s.has_marker&&!s.has_intent&&
+       (!s.has_map_active||!s.has_lane_active||
+        s.map_active.transaction_id!=s.lane_active.transaction_id))
         return false;
     if(!ot_pz_pair_journal_recover(
         s.has_map_active?&s.map_active:NULL,s.has_map_stage?&s.map_stage:NULL,
