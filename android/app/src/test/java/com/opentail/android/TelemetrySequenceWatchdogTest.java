@@ -74,6 +74,27 @@ public class TelemetrySequenceWatchdogTest {
         assertFalse(w.snapshot().warning);
     }
 
+    @Test public void malformedStatusLatchesWarningAndActiveSessionFault() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status active=status(1,61,0,0,0,0,0,0,0,0);
+        w.observe(active);
+        TelemetrySequenceWatchdog.Decision malformed=w.markMalformedTelemetry("truncated status");
+        assertTrue(malformed.warning);assertTrue(malformed.hardFault);
+        assertFalse(w.reconcile(active,true));
+        PanelPreviewProtocol.Status fresh=status(0,0,0,0,0,0,0,0,0,0);
+        w.observe(fresh);
+        assertTrue(w.reconcile(fresh,true));
+    }
+
+    @Test public void renderRevisionMismatchPreventsTelemetryReconciliation() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status active=status(1,63,0,0x10,7,7,7,0,0,0);
+        w.observe(active);
+        PanelPreviewProtocol.Status staleRender=status(1,63,0,0x10,7,7,6,0,0,0);
+        assertFalse(w.reconcile(staleRender,true));
+        assertTrue(w.snapshot().warning);
+    }
+
     @Test public void committingRejectionWaitsForTerminalCommitBeforeClear() {
         TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
         w.observe(status(1,40,1,0,0,0,0,0,0,4));

@@ -155,8 +155,7 @@ final class GeometryTransactionManager {
            status.lane!=lastConfirmed.lane||authoritative.revision!=status.activeRevision||
            (status.hardSyncFault&&status.state!=PanelPreviewProtocol.STATE_CANCELLED)||
            status.state==PanelPreviewProtocol.STATE_COMMITTING||
-           (status.state==PanelPreviewProtocol.STATE_COMMITTED &&
-            status.activeRevision!=status.renderRevision))return false;
+           status.activeRevision!=status.renderRevision)return false;
 
         // A recoverable duplicate may resume the same active preview only
         // when CORE confirms its exact accepted sequence and candidate CRC.

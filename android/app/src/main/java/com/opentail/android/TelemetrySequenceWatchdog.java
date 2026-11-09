@@ -95,6 +95,15 @@ final class TelemetrySequenceWatchdog {
         return decision(last);
     }
 
+    synchronized Decision markMalformedTelemetry(String why) {
+        warning=true;
+        message=why==null?"Malformed Panel telemetry; authoritative reconciliation required":why;
+        if(last!=null && last.state==PanelPreviewProtocol.STATE_ACTIVE && last.sessionId!=0) {
+            hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId;
+        }
+        return decision(last);
+    }
+
     /**
      * Clear only after a stable, verified authoritative map/status read.
      * Hard faults cannot be cleared on the same session that latched them.
@@ -107,8 +116,7 @@ final class TelemetrySequenceWatchdog {
         if(authoritative.hardSyncFault)return false;
         if(hardFault && authoritative.lane==hardFaultLane &&
            authoritative.sessionId==hardFaultSession)return false;
-        if(authoritative.state==PanelPreviewProtocol.STATE_COMMITTED &&
-           authoritative.activeRevision!=authoritative.renderRevision)return false;
+        if(authoritative.activeRevision!=authoritative.renderRevision)return false;
         if(authoritative.state==PanelPreviewProtocol.STATE_ACTIVE &&
            authoritative.lastAcceptedSequence!=last.lastAcceptedSequence)return false;
         last=authoritative;warning=false;hardFault=false;message=null;

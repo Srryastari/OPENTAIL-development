@@ -1144,6 +1144,7 @@ assert(panelWatchdog.includes('missingCount>last.missingCount') &&
        panelWatchdog.includes('hardSyncFault') &&
        panelWatchdog.includes('reconcile(') &&
        panelWatchdog.includes('hardFaultSession') &&
+       panelWatchdog.includes('markMalformedTelemetry') &&
        panelWatchdog.includes('hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId'),
        'Telemetry watchdog must detect sequence anomalies and require authoritative reconciliation');
 for (const state of ['READY','BEGINNING','ACTIVE','UPDATE_PENDING','COMMIT_REQUESTED','COMMITTING','RECONCILING','ERROR']) {
@@ -1168,7 +1169,8 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('manager.observeStatus(current)') &&
        bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
        bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&
-       bleSource.includes('negotiatedMtu>=64'),
+       bleSource.includes('GATT stack performs the characteristic long-read') &&
+       bleSource.includes('panelWatchdog.markMalformedTelemetry'),
        'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
 const systemSection=compose.split('private fun SettingsPage(')[1].split('private fun SettingsDiagnostics(')[0];
 assert(systemSection.includes('panelSyncWarning.value?.let') &&

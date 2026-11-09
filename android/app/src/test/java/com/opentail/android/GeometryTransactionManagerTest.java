@@ -102,6 +102,19 @@ public class GeometryTransactionManagerTest {
         assertFalse(manager.syncUncertain());
     }
 
+    @Test public void staleRendererRevisionCannotConfirmGeometry() {
+        byte[] original={1,2,3};
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,original));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,93,0,0x10,7,7,7,0,0,0)));
+        manager.markSynchronizationUncertain("Renderer readback is stale");
+        assertFalse(manager.reconcile(status(1,93,0,0x10,7,7,6,0,0,0),
+            new GeometryTransactionManager.Snapshot(0,7,original)));
+        assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
+        assertTrue(manager.syncUncertain());
+    }
+
     @Test public void committingRejectDoesNotAbortOrDemoteActiveCommit() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1}));
