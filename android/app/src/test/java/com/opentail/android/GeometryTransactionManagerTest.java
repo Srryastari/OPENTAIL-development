@@ -249,6 +249,31 @@ public class GeometryTransactionManagerTest {
         assertEquals(118,descriptors[0].count);
     }
 
+    private static void physicalZone(NativeProject project,String name,int pixels,
+            int lane,int section) {
+        assertTrue(project.addZone(name,pixels));
+        String id=project.zone(project.zoneCount()-1).optString("id");
+        assertTrue(project.mapZoneToOutputSlot(id,lane,section));
+    }
+
+    @Test public void exactOwnerApprovedGs400LayoutGetsDeterministicHousingAndTrunkPanels() {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        int[] pixels={118,109,42,253,101};
+        String[] sections={"Top","Amber","Reverse","Bottom","Trunk"};
+        for(int lane=0;lane<2;lane++)for(int i=0;i<5;i++)
+            physicalZone(project,(lane==0?"Left ":"Right ")+sections[i],pixels[i],lane,i);
+        LayoutMapping mapping=mapLayout(project);
+        assertEquals(623,mapping.lane(0).activePixels);
+        assertEquals(623,mapping.lane(1).activePixels);
+        assertEquals(1,mapping.lane(0).zones.get(0).panelId);
+        assertEquals(1,mapping.lane(0).zones.get(3).panelId);
+        assertEquals(2,mapping.lane(0).zones.get(4).panelId);
+        assertEquals(3,mapping.lane(1).zones.get(0).panelId);
+        assertEquals(4,mapping.lane(1).zones.get(4).panelId);
+        assertEquals("Left Housing",mapping.lane(0).panels.get(0).name);
+        assertEquals("Left Trunk",mapping.lane(0).panels.get(1).name);
+    }
+
     @Test public void geometryMappingNeverGuessesMissingPanelIdentity() {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         assertTrue(project.addZone("Unassigned panel",10));
