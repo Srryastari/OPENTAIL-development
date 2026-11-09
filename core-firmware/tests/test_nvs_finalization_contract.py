@@ -59,8 +59,8 @@ assert "ot_tm_policy_build" in journal and "ot_tm_policy_valid" in journal
 # The handoff document must describe the actual v4 split and must not
 # repeat the stale "not yet complete" combined-journal status.
 for token in ("lane_active_v4","map_active_v4","policy_v1",
-              "turn_release_input_mask","immediate ISR assertion",
-              "cross-namespace hardware/map migration",
+              "0x0C","immediate ISR assertion",
+              "v4 cross-namespace lane/map runtime integration",
               "100-cycle physical power-cut/recovery"):
     assert token in implementation_doc,token
 assert "NOT YET COMPLETE" not in implementation_doc
