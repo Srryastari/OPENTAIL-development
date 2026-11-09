@@ -271,7 +271,13 @@ final class PanelPreviewProtocol {
             boolean terminated=false;
             for(int i=0;i<length;i++) {
                 int ch=u8(b[at+i]);
-                if(ch==0){terminated=true;break;}
+                if(ch==0){
+                    terminated=true;
+                    for(int tail=i+1;tail<length;tail++)
+                        if(u8(b[at+tail])!=0)
+                            throw new IllegalArgumentException("Panel map name has nonzero bytes after terminator");
+                    break;
+                }
                 if(ch<32||ch>126)throw new IllegalArgumentException("Panel map name is not printable ASCII");
                 value.append((char)ch);
             }
