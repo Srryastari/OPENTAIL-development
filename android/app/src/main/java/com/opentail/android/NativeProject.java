@@ -447,11 +447,23 @@ final class NativeProject {
                    z.optInt("physicalSection",-1)==section) {
                     z.remove("physicalOutput");
                     z.remove("physicalSection");
+                    z.remove("physicalPanelId");
+                    z.remove("physicalPanelName");
                 }
             }
             JSONObject z=zone(selected);
-            if(output==-1){z.remove("physicalOutput");z.remove("physicalSection");}
-            else z.put("physicalOutput",output).put("physicalSection",section);
+            boolean sameSlot=z.optInt("physicalOutput",-1)==output &&
+                z.optInt("physicalSection",-1)==section;
+            if(output==-1){
+                z.remove("physicalOutput");z.remove("physicalSection");
+                z.remove("physicalPanelId");z.remove("physicalPanelName");
+            } else {
+                z.put("physicalOutput",output).put("physicalSection",section);
+                if(!sameSlot){
+                    z.remove("physicalPanelId");
+                    z.remove("physicalPanelName");
+                }
+            }
             return save();
         }catch(JSONException ex){restoreCommitted();return false;}
     }
