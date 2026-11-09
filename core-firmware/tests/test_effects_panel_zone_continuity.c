@@ -27,6 +27,10 @@ static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
 
 typedef struct {
     ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint32_t bank_seen_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint16_t bank_owner_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint16_t bank_owner_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
     ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
     ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
     uint8_t prior_pixel_zone_map[OT_PZ_OUTPUTS][OT_PZ_MAX_PIXELS];
@@ -103,31 +107,88 @@ static bool render_probe_frame(render_probe_t *probe,
         ot_layout_t layout;
         if(!ot_om_layout(&output,&layout))return false;
 
+        /* Mirror CORE's stable bank-slot ownership. A generation change is a
+         * new command for the current zone at that bank index; unchanged slots
+         * remain attached to their previous Panel/Zone identity after compaction. */
+        for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+            const ot_fx_zone_slot_t *slot=&bank->zones[lane][bank_z];
+            if(!ot_fx_slot_active(slot,now_ms)){
+                probe->bank_seen_generation[lane][bank_z]=slot->generation;
+                probe->bank_owner_zone_id[lane][bank_z]=0u;
+                probe->bank_owner_panel_id[lane][bank_z]=0u;
+                continue;
+            }
+            if(probe->bank_seen_generation[lane][bank_z]!=slot->generation||
+               probe->bank_owner_zone_id[lane][bank_z]==0u||
+               probe->bank_owner_panel_id[lane][bank_z]==0u){
+                const uint16_t owner_zone=bank_z<panel_out->zone_count?
+                    panel_out->zones[bank_z].id:0u;
+                const uint16_t owner_panel=bank_z<panel_out->zone_count?
+                    panel_out->zones[bank_z].panel_id:0u;
+                for(unsigned other=0;other<OT_OM_ZONES;other++){
+                    if(other==bank_z)continue;
+                    if(probe->bank_owner_zone_id[lane][other]==owner_zone&&
+                       probe->bank_owner_panel_id[lane][other]==owner_panel){
+                        probe->bank_owner_zone_id[lane][other]=0u;
+                        probe->bank_owner_panel_id[lane][other]=0u;
+                    }
+                }
+                probe->bank_seen_generation[lane][bank_z]=slot->generation;
+                probe->bank_owner_zone_id[lane][bank_z]=owner_zone;
+                probe->bank_owner_panel_id[lane][bank_z]=owner_panel;
+            }
+        }
+        memset(probe->resolved_bank_index[lane],0xff,
+               sizeof(probe->resolved_bank_index[lane]));
+        for(unsigned zone=0;zone<output.zone_count;zone++){
+            const ot_pz_zone_t *zone_cfg=&panel_out->zones[zone];
+            for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+                if(probe->bank_owner_zone_id[lane][bank_z]==zone_cfg->id&&
+                   probe->bank_owner_panel_id[lane][bank_z]==zone_cfg->panel_id&&
+                   ot_fx_slot_active(&bank->zones[lane][bank_z],now_ms)){
+                    probe->resolved_bank_index[lane][zone]=(uint8_t)bank_z;break;
+                }
+            }
+        }
+
         uint8_t zone_map[OT_PZ_MAX_PIXELS];
         uint16_t logical_map[OT_PZ_MAX_PIXELS];
         ot_pz_build_pixel_map(panel_out,zone_map,logical_map);
-
         uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
         bool old_active[OT_OM_ZONES];
+        ot_effects_1d_state_t old_state[OT_OM_ZONES];
         memcpy(old_zone_id,probe->prior_zone_id[lane],sizeof(old_zone_id));
         memcpy(old_panel_id,probe->prior_panel_id[lane],sizeof(old_panel_id));
         memcpy(old_active,probe->prior_active[lane],sizeof(old_active));
+        memcpy(old_state,probe->state[lane],sizeof(old_state));
 
         for(unsigned zone=0;zone<output.zone_count;zone++){
             const unsigned len=output.zones[zone].pixels;
             const ot_pz_zone_t *zone_cfg=&panel_out->zones[zone];
-            const ot_fx_zone_slot_t *slot=&bank->zones[lane][zone];
-            const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&
+            const uint8_t bank_z=probe->resolved_bank_index[lane][zone];
+            const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
+                &bank->zones[lane][bank_z]:NULL;
+            const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
                 ot_fx_slot_active(slot,now_ms);
-            const bool same_identity=active&&old_active[zone]&&
-                probe->prior_generation[lane][zone]==slot->generation&&
-                old_zone_id[zone]==zone_cfg->id&&
-                old_panel_id[zone]==zone_cfg->panel_id;
-
+            int prior_index=-1;
+            if(active){
+                for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++){
+                    if(old_active[old_z]&&old_zone_id[old_z]==zone_cfg->id&&
+                       old_panel_id[old_z]==zone_cfg->panel_id&&
+                       probe->prior_generation[lane][old_z]==slot->generation){
+                        prior_index=(int)old_z;break;
+                    }
+                }
+            }
+            const bool same_identity=prior_index>=0;
             if(active&&len<=OT_PZ_MAX_PIXELS&&len<=TEST_PIXELS){
-                if(!same_identity)
+                if(same_identity){
+                    if((unsigned)prior_index!=zone)
+                        probe->state[lane][zone]=old_state[prior_index];
+                }else{
                     ot_effects_1d_reset(&probe->state[lane][zone],
                         0x1234u+lane*97u+zone*19u+slot->generation);
+                }
 
                 ot_wled_rgb_t scratch[OT_PZ_MAX_PIXELS];
                 memset(scratch,0,(size_t)len*sizeof(scratch[0]));
@@ -137,6 +198,7 @@ static bool render_probe_frame(render_probe_t *probe,
                     if(logical>=len)continue;
                     const uint8_t old_z=probe->prior_pixel_zone_map[lane][px];
                     if(same_identity&&old_z<OT_OM_ZONES&&old_active[old_z]&&
+                       old_z==(uint8_t)prior_index&&
                        old_zone_id[old_z]==zone_cfg->id&&
                        old_panel_id[old_z]==zone_cfg->panel_id)
                         scratch[logical]=probe->frame[lane][px];
@@ -144,26 +206,19 @@ static bool render_probe_frame(render_probe_t *probe,
 
                 const ot_ble_fx_packet_t *fx=&slot->request;
                 const ot_wled_fx_config_t cfg={
-                    .effect_id=fx->effect_id,
-                    .speed=fx->speed,
-                    .intensity=fx->intensity,
-                    .brightness=fx->brightness,
-                    .palette_id=fx->palette_id,
-                    .frame_time_ms=8u,
+                    .effect_id=fx->effect_id,.speed=fx->speed,
+                    .intensity=fx->intensity,.brightness=fx->brightness,
+                    .palette_id=fx->palette_id,.frame_time_ms=8u,
                     .foreground={fx->r,fx->g,fx->b},
                     .background={fx->bg_r,fx->bg_g,fx->bg_b},
                     .tertiary={slot->tertiary.r,slot->tertiary.g,slot->tertiary.b},
-                    .tertiary_set=slot->tertiary.set,
-                    .spark_style=slot->spark.style,
-                    .spark_peak=slot->spark.peak,
-                    .spark_color=slot->spark.color,
+                    .tertiary_set=slot->tertiary.set,.spark_style=slot->spark.style,
+                    .spark_peak=slot->spark.peak,.spark_color=slot->spark.color,
                     .resolved_palette=NULL
                 };
                 const uint32_t zone_elapsed=now_ms-slot->started_ms;
                 if(!ot_effects_1d_render(&cfg,&probe->state[lane][zone],
-                                         zone_elapsed,scratch,len))
-                    return false;
-
+                                         zone_elapsed,scratch,len))return false;
                 memset(probe->logical_frame[lane][zone],0,
                        sizeof(probe->logical_frame[lane][zone]));
                 memcpy(probe->logical_frame[lane][zone],scratch,
@@ -175,9 +230,7 @@ static bool render_probe_frame(render_probe_t *probe,
                 }
                 probe->prior_active[lane][zone]=true;
                 probe->prior_generation[lane][zone]=slot->generation;
-            }else{
-                probe->prior_active[lane][zone]=false;
-            }
+            }else probe->prior_active[lane][zone]=false;
             probe->prior_zone_id[lane][zone]=zone_cfg->id;
             probe->prior_panel_id[lane][zone]=zone_cfg->panel_id;
         }
