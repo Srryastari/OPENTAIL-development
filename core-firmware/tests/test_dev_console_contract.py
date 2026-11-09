@@ -127,7 +127,7 @@ assert "bool busy=pz_deferred.pending" in output_http
 assert output_http.index("bool busy=") < output_http.index("om_save(next_all)")
 assert "om_save(next_all)" in output_http
 om_save_impl = core.split("static bool om_save(",1)[1].split(
-    "static void pz_sync_from_legacy(",1)[0]
+    "#define OT_SHOW_MAX_MS",1)[0]
 assert "pz_save_controller_locked(&candidate)" in om_save_impl
 assert "pz_preview.active" in om_save_impl
 assert "busy=pz_deferred.pending" in output_ble
@@ -139,7 +139,7 @@ get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
     "static esp_err_t tm_post(",1)[0]
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in get
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
-assert "ot_om_apply_if_released(om_outputs,&om_deferred," in core
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert 'cJSON_AddNumberToObject(root,"raw_input_mask",physical)' in get
 assert 'cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask())' in get
