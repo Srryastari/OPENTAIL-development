@@ -17,12 +17,23 @@ typedef enum {
 
 /* The CORE adapter must make write_commit/erase_commit durable before return.
  * This keeps the same runtime transaction algorithm testable with host NVS. */
+#define OT_PZ_PAIR_STORE_MARKER_KEY "pair_v4_init"
+#define OT_PZ_PAIR_STORE_MARKER_MAGIC 0x4f54564du
+#define OT_PZ_PAIR_STORE_MARKER_VERSION 1u
+typedef struct {
+    uint32_t magic,version,crc,transaction_id;
+} ot_pz_pair_store_marker_t;
+
 typedef struct {
     void *context;
     ot_pz_pair_io_result_t (*read)(void *context,ot_pz_pair_namespace_t name_space,
                                    const char *key,void *data,size_t *size);
     bool (*write_commit)(void *context,ot_pz_pair_namespace_t name_space,
                          const char *key,const void *data,size_t size);
+    /* Both keys are committed atomically in one namespace transaction. */
+    bool (*write_batch_commit)(void *context,ot_pz_pair_namespace_t name_space,
+                         const char *key_a,const void *data_a,size_t size_a,
+                         const char *key_b,const void *data_b,size_t size_b);
     bool (*erase_commit)(void *context,ot_pz_pair_namespace_t name_space,
                          const char *key);
 } ot_pz_pair_store_io_t;
@@ -32,10 +43,11 @@ typedef bool (*ot_pz_pair_phase_hook_t)(void *context,uint8_t phase,
 
 typedef struct {
     bool has_lane_active,has_lane_stage;
-    bool has_map_active,has_map_stage,has_intent;
+    bool has_map_active,has_map_stage,has_intent,has_marker;
     ot_pz_lane_journal_t lane_active,lane_stage;
     ot_pz_map_journal_t map_active,map_stage;
     ot_pz_pair_intent_t intent;
+    ot_pz_pair_store_marker_t marker;
 } ot_pz_pair_store_snapshot_t;
 
 bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
