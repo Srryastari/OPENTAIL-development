@@ -320,6 +320,14 @@ final class GeometryTransactionManager {
     synchronized Update queueUpdate(byte[] candidateWire,byte[] encodedPacket) {
         if(state!=State.ACTIVE||syncUncertain||pendingPacket!=null||
            candidateWire==null||encodedPacket==null)return null;
+        if(encodedPacket.length<19||encodedPacket[0]!=(byte)0xfe||encodedPacket[1]!=2||
+           (encodedPacket.length-11)%8!=0||(encodedPacket.length-11)/8>4)
+            throw new IllegalArgumentException("Malformed Panel UPDATE packet");
+        if(!PanelPreviewProtocol.CORE_UNASSIGNED_ROLE_UPDATE_SUPPORTED) {
+            for(int at=18;at<encodedPacket.length;at+=8)
+                if((encodedPacket[at]&0x0f)==PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE)
+                    throw new IllegalStateException("CORE does not yet accept the UNASSIGNED Panel UPDATE role sentinel");
+        }
         candidate=Arrays.copyOf(candidateWire,candidateWire.length);
         pendingSequence=nextSequence;
         pendingPacket=Arrays.copyOf(encodedPacket,encodedPacket.length);
