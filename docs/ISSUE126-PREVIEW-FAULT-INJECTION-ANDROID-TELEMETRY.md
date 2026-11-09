@@ -94,9 +94,9 @@ UUID `0x37` returns a **61-byte version-2** status value. The first 35 bytes ret
 | 56 | 4 | Cumulative UPDATE/control rejections during COMMITTING (saturating LE32) |
 | 60 | 1 | Sequence flags: bit 0 warning observed, bit 1 hard sync fault latched, bit 2 at least one UPDATE accepted |
 
-The active transaction identity is the pair (lane, session_id) at offsets 2 and 4. Last accepted UPDATE sequence remains at offset 14. The last rejected UPDATE sequence and reason are at offsets 35 and 39.
+The active transaction identity is the pair (lane, session_id) at offsets 2 and 4. Last accepted UPDATE sequence remains at offset 14. Offset 35 retains the most recently rejected UPDATE sequence (it remains unchanged when a rejected control command has no UPDATE sequence); offset 39 reports the most recent rejection reason for either an UPDATE or a conflicting transaction control.
 
-**Transaction error codes** (offset 30 last_error, and offset 39 last_rejected_reason when the rejection is an UPDATE):
+**Transaction error codes** (offset 30 last_error and offset 39 last_rejected_reason):
 
 | Code | Meaning | Required client action |
 |---:|---|---|
