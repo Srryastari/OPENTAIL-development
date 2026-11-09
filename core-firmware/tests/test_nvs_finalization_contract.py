@@ -79,7 +79,7 @@ assert "nvs_set_blob(" not in legacy_output_save
 assert "static void om_promote(" not in core
 assert "static void pz_sync_from_legacy(" not in core
 
-# The exact same portable v4 store used by CORE implements all eight durable
+# The exact same portable v4 store used by CORE implements all nine durable
 # write boundaries and is exercised by test_panel_zone_pair_store.c.
 store=(root/"main/panel_zone_pair_store.c").read_text()
 store_header=(root/"main/panel_zone_pair_store.h").read_text()
