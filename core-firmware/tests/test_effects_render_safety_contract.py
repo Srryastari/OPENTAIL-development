@@ -88,10 +88,12 @@ continuous_identity=fxbank[fxbank.index("bool ot_fx_bank_apply_continuous_tertia
 assert "bank->zones[o][z].configured=false" not in continuous_identity
 # Saved scenes project identity-owned bank slots back to current logical zones.
 save_scene=core[core.index("bool ot_ble_save_fx_preset("):core.index("bool ot_ble_play_fx_preset(")]
-assert "memcpy(panel_snapshot,pz_outputs.outputs,sizeof(panel_snapshot))" in save_scene
-assert "ot_fx_scene_pack(&record,&snapshot,panel_snapshot,now_ms)" in save_scene
-assert "panel->zones[zone].panel_id==slot->owner_panel_id" in preset
-assert "panel->zones[zone].id==slot->owner_zone_id" in preset
+assert "identity_snapshot[o].zone_count=pz_outputs.outputs[o].zone_count" in save_scene
+assert "identity_snapshot[o].zones[z].panel_id=pz_outputs.outputs[o].zones[z].panel_id" in save_scene
+assert "identity_snapshot[o].zones[z].zone_id=pz_outputs.outputs[o].zones[z].id" in save_scene
+assert "ot_fx_scene_pack(&record,&snapshot,identity_snapshot,now_ms)" in save_scene
+assert "identity->zones[zone].panel_id==slot->owner_panel_id" in preset
+assert "identity->zones[zone].zone_id==slot->owner_zone_id" in preset
 assert "p.zone_mask=(uint8_t)(1u<<zone_index)" in preset
 assert "fx->brightness<=OT_MAX_BRIGHTNESS" not in preset
 
