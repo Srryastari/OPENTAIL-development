@@ -252,6 +252,50 @@ class QueueConcurrencyTests(unittest.TestCase):
         self.assertEqual(q.tail, q.head)
         self.assertFalse(q.overflow)
 
+    def test_resync_rejects_edge_between_gpio_sample_and_discard_boundary(self):
+        q = EdgeQueue()
+        q.overflow = True
+
+        def transition_after_gpio_sample(queue, raw, now_us):
+            # The sampled level is stale; a final falling edge publishes before
+            # the second head read. The old baseline must not be installed.
+            queue.begin()
+            self.assertTrue(queue.publish(now_us + 1, False))
+            return raw, now_us
+
+        status, _ = q.update(
+            5_000, raw=True, resync_interleave=transition_after_gpio_sample
+        )
+        self.assertEqual(status, "deferred")
+        self.assertTrue(q.overflow)
+        self.assertIsNone(q.baseline)
+        self.assertEqual(q.tail, 0)
+
+        status, _ = q.update(5_001, raw=False)
+        self.assertEqual(status, "resynced")
+        self.assertEqual(q.baseline, (5_001, False))
+        self.assertEqual(q.tail, q.head)
+        self.assertFalse(q.overflow)
+
+    def test_one_deferred_turn_lane_does_not_stall_other_safety_inputs(self):
+        LEFT, RIGHT, BRAKE, PARK, REVERSE, AUX1, AUX2, AUX3 = (1 << i for i in range(8))
+        previous = LEFT
+        physical = BRAKE | PARK | REVERSE | AUX1 | AUX2 | AUX3 | RIGHT
+        # Left is deferred; Right is valid. Only the stale Left bit is retained.
+        published = physical & ~(LEFT | RIGHT)
+        published |= previous & LEFT
+        published |= RIGHT
+        self.assertEqual(
+            published,
+            LEFT | RIGHT | BRAKE | PARK | REVERSE | AUX1 | AUX2 | AUX3,
+        )
+        self.assertTrue(published & BRAKE)
+        self.assertTrue(published & REVERSE)
+        self.assertTrue(published & PARK)
+        self.assertTrue(published & AUX1)
+        self.assertTrue(published & AUX2)
+        self.assertTrue(published & AUX3)
+
     def test_resync_contention_defers_boundedly_then_recovers(self):
         q = EdgeQueue()
         q.overflow = True
