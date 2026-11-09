@@ -3044,6 +3044,8 @@ static void led_task(void *p) {
     bool output_failed[OT_CHAIN_COUNT]={false};
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
+    /* Reused per-output snapshot prevents in-place overwrite during zone reorder. */
+    static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static uint16_t prior_fx_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
@@ -3221,19 +3223,33 @@ static void led_task(void *p) {
                    memcpy(old_zone_id,prior_fx_zone_id[ch],sizeof(old_zone_id));
                    memcpy(old_panel_id,prior_fx_panel_id[ch],sizeof(old_panel_id));
                    memcpy(old_active,prior_fx_active[ch],sizeof(old_active));
+                   memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state));
                    for(unsigned z=0;z<output->zone_count;z++){
                        const unsigned len=output->zones[z].pixels;
                        const ot_pz_zone_t *zone_cfg=&local_panel[ch].zones[z];
                        const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
                        const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&
                            ot_fx_slot_active(slot,frame_ms);
-                       const bool same_identity=active&&old_active[z]&&
-                           prior_fx_generation[ch][z]==slot->generation&&
-                           old_zone_id[z]==zone_cfg->id&&old_panel_id[z]==zone_cfg->panel_id;
+                       int prior_index=-1;
+                       if(active){
+                           for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++){
+                               if(old_active[old_z]&&
+                                  old_zone_id[old_z]==zone_cfg->id&&
+                                  old_panel_id[old_z]==zone_cfg->panel_id&&
+                                  prior_fx_generation[ch][old_z]==slot->generation){
+                                   prior_index=(int)old_z;break;
+                               }
+                           }
+                       }
+                       const bool same_identity=prior_index>=0;
                        if(active&&len<=OT_PZ_MAX_PIXELS){
-                           if(!same_identity)
+                           if(same_identity){
+                               if((unsigned)prior_index!=z)
+                                   fx_state[ch][z]=prior_fx_state[prior_index];
+                           }else{
                                ot_effects_1d_reset(&fx_state[ch][z],
                                    0x1234u+ch*97u+z*19u+slot->generation);
+                           }
                            memset(fx_zone_scratch,0,(size_t)len*sizeof(fx_zone_scratch[0]));
                            for(unsigned px=0;px<render_pixels[ch];px++){
                                if(pixel_zone_map[ch][px]!=(uint8_t)z)continue;
@@ -3241,6 +3257,7 @@ static void led_task(void *p) {
                                if(logical>=len)continue;
                                const uint8_t old_z=prior_pixel_zone_map[ch][px];
                                if(same_identity&&old_z<OT_OM_ZONES&&old_active[old_z]&&
+                                  old_z==(uint8_t)prior_index&&
                                   old_zone_id[old_z]==zone_cfg->id&&
                                   old_panel_id[old_z]==zone_cfg->panel_id)
                                    fx_zone_scratch[logical]=fx_frame[ch][px];
