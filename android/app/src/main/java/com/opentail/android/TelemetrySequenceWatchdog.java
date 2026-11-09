@@ -60,6 +60,8 @@ final class TelemetrySequenceWatchdog {
                     if(current.lastAcceptedSequence>expected) {
                         range=expected==lastMissing?Long.toString(expected):
                             expected+"–"+lastMissing;
+                    } else if(current.lastAcceptedSequence==1L) {
+                        range=expected+"–4294967295 (wrap)";
                     } else {
                         range=expected+"–4294967295, 1–"+lastMissing+" (wrap)";
                     }
