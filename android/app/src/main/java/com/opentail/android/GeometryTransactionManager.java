@@ -119,17 +119,9 @@ final class GeometryTransactionManager {
 
     synchronized void observeStatus(PanelPreviewProtocol.Status status) {
         if(status==null)return;
-        if(status.lastRejectedReason==PanelPreviewProtocol.ERR_COMMITTING_LOCKED ||
-           status.committingRejectCount>0 && status.state==PanelPreviewProtocol.STATE_COMMITTING) {
-            // A delayed UPDATE rejection is not a commit failure. Preserve the
-            // confirmed image and continue observing this exact transaction.
-            if(status.state==PanelPreviewProtocol.STATE_COMMITTING)state=State.COMMITTING;
-            return;
-        }
-        if(status.hardSyncFault) {
-            requireReconciliation("CORE geometry sequence fault requires cancel and authoritative reload");
-            return;
-        }
+        // COMMITTING and terminal transaction states take precedence over the
+        // retained last-rejection diagnostic. CORE intentionally keeps that
+        // diagnostic after a delayed UPDATE is rejected during COMMITTING.
         if(status.state==PanelPreviewProtocol.STATE_COMMITTING) {
             if(status.sessionId==sessionId)state=State.COMMITTING;
             return;
@@ -143,6 +135,17 @@ final class GeometryTransactionManager {
            status.state==PanelPreviewProtocol.STATE_EXPIRED ||
            status.state==PanelPreviewProtocol.STATE_ERROR) {
             requireReconciliation("Panel transaction reached terminal state; reload authoritative geometry");
+            return;
+        }
+        if(status.lastRejectedReason==PanelPreviewProtocol.ERR_COMMITTING_LOCKED ||
+           status.committingRejectCount>0) {
+            // A delayed UPDATE rejection is not a commit failure. Preserve the
+            // confirmed image and continue observing the transaction. A stale
+            // rejection must never mask a later authoritative terminal status.
+            return;
+        }
+        if(status.hardSyncFault) {
+            requireReconciliation("CORE geometry sequence fault requires cancel and authoritative reload");
         }
     }
 
