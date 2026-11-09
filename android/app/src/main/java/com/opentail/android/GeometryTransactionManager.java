@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import org.json.JSONObject;
@@ -47,12 +49,15 @@ final class GeometryTransactionManager {
         final int id,panelId,section,start,count,roleFlags;
         final String name;
         MappedZone(int id,int panelId,int section,int start,int count,String name) {
-            this.id=id;this.panelId=panelId;this.section=section;this.start=start;
-            this.count=count;this.name=name;
-            this.roleFlags=PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE;
+            this(id,panelId,section,start,count,name,PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE);
         }
-        PanelPreviewProtocol.UpdateDescriptor descriptor() {
-            return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,0,start,count,roleFlags);
+        MappedZone(int id,int panelId,int section,int start,int count,String name,int roleFlags) {
+            this.id=id;this.panelId=panelId;this.section=section;this.start=start;
+            this.count=count;this.name=name;this.roleFlags=roleFlags;
+        }
+        PanelPreviewProtocol.UpdateDescriptor descriptor() { return descriptor(roleFlags); }
+        PanelPreviewProtocol.UpdateDescriptor descriptor(int roles) {
+            return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,0,start,count,roles);
         }
     }
     static final class MappedLane {
@@ -108,6 +113,134 @@ final class GeometryTransactionManager {
             }
             return Collections.unmodifiableList(batches);
         }
+        /** Preserve CORE-assigned trigger roles while changing only pixel geometry. */
+        MappedLane withRolesFromSnapshot(PanelPreviewProtocol.LaneSnapshot snapshot) {
+            if(snapshot==null||snapshot.lane!=lane)
+                throw new IllegalArgumentException("Authoritative role snapshot lane mismatch");
+            PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(snapshot);
+            Map<Integer,PanelPreviewProtocol.MapZone> byId=new HashMap<>();
+            for(PanelPreviewProtocol.MapZone zone:current.zones)byId.put(zone.id,zone);
+            List<MappedZone> copy=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                PanelPreviewProtocol.MapZone prior=byId.get(zone.id);
+                int role=prior!=null&&prior.panelId==zone.panelId?wireRole(prior.role):zone.roleFlags;
+                copy.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
+            }
+            return new MappedLane(lane,activePixels,panels,copy);
+        }
+        /** Preserve roles across successive live Layout drafts by stable CORE Zone ID. */
+        MappedLane withRolesFrom(MappedLane previous) {
+            if(previous==null||previous.lane!=lane)
+                throw new IllegalArgumentException("Previous geometry lane mismatch");
+            Map<Integer,MappedZone> byId=new HashMap<>();
+            for(MappedZone zone:previous.zones)byId.put(zone.id,zone);
+            List<MappedZone> copy=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                MappedZone prior=byId.get(zone.id);
+                int role=prior==null?zone.roleFlags:prior.roleFlags;
+                copy.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
+            }
+            return new MappedLane(lane,activePixels,panels,copy);
+        }
+        /** Initial preview diff; CORE Zones not represented by the draft are preserved. */
+        List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(
+                PanelPreviewProtocol.LaneSnapshot snapshot,int mtu) {
+            if(snapshot==null||snapshot.lane!=lane)
+                throw new IllegalArgumentException("Authoritative geometry lane mismatch");
+            PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(snapshot);
+            Map<Integer,ExistingZone> old=new HashMap<>();
+            Map<Integer,PanelPreviewProtocol.MapZone> currentById=new HashMap<>();
+            for(PanelPreviewProtocol.MapZone zone:current.zones)currentById.put(zone.id,zone);
+            for(MappedZone zone:zones) {
+                PanelPreviewProtocol.MapZone prior=currentById.get(zone.id);
+                if(prior==null)continue;
+                if(prior.panelId!=zone.panelId||prior.ranges.size()>1||
+                   (prior.ranges.isEmpty()&&prior.flags!=1))
+                    throw new IllegalArgumentException("Existing CORE Zone cannot be represented by this single-range Layout");
+                int start=prior.ranges.isEmpty()?-1:prior.ranges.get(0).start;
+                int count=prior.ranges.isEmpty()?0:prior.ranges.get(0).count;
+                old.put(zone.id,new ExistingZone(prior.panelId,wireRole(prior.role),start,count));
+            }
+            return buildBatches(old,Collections.emptyList(),mtu);
+        }
+        /** Live draft diff: only explicitly removed/moved local IDs are deleted. */
+        List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(MappedLane previous,int mtu) {
+            if(previous==null||previous.lane!=lane)
+                throw new IllegalArgumentException("Previous geometry lane mismatch");
+            Map<Integer,MappedZone> targetById=new HashMap<>();
+            for(MappedZone zone:zones)targetById.put(zone.id,zone);
+            Map<Integer,ExistingZone> old=new HashMap<>();
+            List<PanelPreviewProtocol.UpdateDescriptor> deletes=new ArrayList<>();
+            for(MappedZone prior:previous.zones) {
+                MappedZone target=targetById.get(prior.id);
+                if(target==null||target.panelId!=prior.panelId)
+                    deletes.add(new PanelPreviewProtocol.UpdateDescriptor(prior.panelId,prior.id,0,0,0,0x20));
+                else old.put(prior.id,new ExistingZone(prior.panelId,prior.roleFlags,prior.start,prior.count));
+            }
+            return buildBatches(old,deletes,mtu);
+        }
+        private static final class ExistingZone {
+            final int panelId,roleFlags,start,count;
+            ExistingZone(int panelId,int roleFlags,int start,int count) {
+                this.panelId=panelId;this.roleFlags=roleFlags;this.start=start;this.count=count;
+            }
+        }
+        private static int wireRole(int role) {
+            return role==0xff?PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE:role;
+        }
+        private List<PanelPreviewProtocol.UpdateDescriptor[]> buildBatches(
+                Map<Integer,ExistingZone> old,List<PanelPreviewProtocol.UpdateDescriptor> deletes,int mtu) {
+            if(mtu<PanelPreviewProtocol.TX_MIN_ATT_MTU)
+                throw new IllegalArgumentException("ATT MTU is below the BLE minimum");
+            int perPacket=Math.min(4,(mtu-3-11)/8);
+            if(perPacket<1)throw new IllegalArgumentException("ATT MTU cannot carry one Panel UPDATE descriptor");
+            List<PanelPreviewProtocol.UpdateDescriptor[]> batches=new ArrayList<>();
+            for(int offset=0;offset<deletes.size();offset+=perPacket) {
+                int count=Math.min(perPacket,deletes.size()-offset);
+                batches.add(deletes.subList(offset,offset+count).toArray(new PanelPreviewProtocol.UpdateDescriptor[count]));
+            }
+            Map<Integer,ExistingZone> simulated=new HashMap<>(old);
+            List<MappedZone> pending=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                ExistingZone prior=old.get(zone.id);
+                int role=prior==null?zone.roleFlags:prior.roleFlags;
+                if(prior==null||prior.start!=zone.start||prior.count!=zone.count)
+                    pending.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
+            }
+            while(!pending.isEmpty()) {
+                List<PanelPreviewProtocol.UpdateDescriptor> batch=new ArrayList<>();
+                while(batch.size()<perPacket) {
+                    int safe=-1;
+                    for(int i=0;i<pending.size();i++) {
+                        MappedZone candidate=pending.get(i);long end=(long)candidate.start+candidate.count;
+                        boolean overlap=false;
+                        for(Map.Entry<Integer,ExistingZone> entry:simulated.entrySet()) {
+                            if(entry.getKey()==candidate.id)continue;
+                            ExistingZone occupied=entry.getValue();
+                            if(occupied.start<0||occupied.count<1)continue;
+                            long occupiedEnd=(long)occupied.start+occupied.count;
+                            if(candidate.start<occupiedEnd&&occupied.start<end){overlap=true;break;}
+                        }
+                        if(!overlap){safe=i;break;}
+                    }
+                    if(safe<0)break;
+                    MappedZone ready=pending.remove(safe);
+                    batch.add(ready.descriptor());
+                    simulated.put(ready.id,new ExistingZone(ready.panelId,ready.roleFlags,ready.start,ready.count));
+                }
+                if(batch.isEmpty()) {
+                    if(pending.size()>perPacket)
+                        throw new IllegalStateException("Geometry transition requires more simultaneous descriptors than the negotiated ATT MTU can carry atomically");
+                    for(MappedZone zone:pending) {
+                        batch.add(zone.descriptor());
+                        simulated.put(zone.id,new ExistingZone(zone.panelId,zone.roleFlags,zone.start,zone.count));
+                    }
+                    pending.clear();
+                }
+                batches.add(batch.toArray(new PanelPreviewProtocol.UpdateDescriptor[0]));
+            }
+            return Collections.unmodifiableList(batches);
+        }
     }
     static final class LayoutMapping {
         final MappedLane[] lanes;
@@ -115,6 +248,19 @@ final class GeometryTransactionManager {
         MappedLane lane(int lane) {
             if(lane<0||lane>=lanes.length)throw new IllegalArgumentException("Invalid output lane");
             return lanes[lane];
+        }
+        LayoutMapping withRolesFromSnapshots(PanelPreviewProtocol.LaneSnapshot[] snapshots) {
+            if(snapshots==null||snapshots.length!=2)
+                throw new IllegalArgumentException("Both authoritative output snapshots are required");
+            return new LayoutMapping(new MappedLane[]{
+                lanes[0].withRolesFromSnapshot(snapshots[0]),
+                lanes[1].withRolesFromSnapshot(snapshots[1])});
+        }
+        LayoutMapping withRolesFrom(LayoutMapping previous) {
+            if(previous==null)throw new IllegalArgumentException("Previous geometry mapping is required");
+            return new LayoutMapping(new MappedLane[]{
+                lanes[0].withRolesFrom(previous.lanes[0]),
+                lanes[1].withRolesFrom(previous.lanes[1])});
         }
     }
 
@@ -237,15 +383,19 @@ final class GeometryTransactionManager {
         for(int lane=0;lane<2;lane++) {
             PanelPreviewProtocol.LaneSnapshot snapshot=snapshots[lane];
             PanelPreviewProtocol.Status status=statuses[lane];
+            boolean idle=snapshot!=null&&status!=null&&
+                status.state==PanelPreviewProtocol.STATE_IDLE&&status.sessionId==0;
+            boolean otherLanePreview=snapshot!=null&&status!=null&&
+                status.state==PanelPreviewProtocol.STATE_ACTIVE&&status.sessionId!=0&&
+                status.baseRevision==snapshot.activeRevision&&status.leaseRemainingMs>0;
             if(snapshot==null||status==null||snapshot.lane!=lane||status.lane!=lane||
-               snapshot.pending||!snapshot.persistent||status.state!=PanelPreviewProtocol.STATE_IDLE||
-               status.sessionId!=0||status.configPending||!status.persistent||
-               status.hardSyncFault||status.warningObserved||
+               snapshot.pending||!snapshot.persistent||(!idle&&!otherLanePreview)||
+               status.configPending||!status.persistent||status.hardSyncFault||status.warningObserved||
                snapshot.activeRevision!=status.activeRevision||
                snapshot.stagedRevision!=status.stagedRevision||
                status.activeRevision!=status.renderRevision)
                 throw new IllegalArgumentException("CORE output "+(lane+1)+
-                    " is not in a stable, persistent, idle geometry state");
+                    " is not in a stable, persistent geometry state");
             current[lane]=PanelPreviewProtocol.MapIdentity.parse(snapshot);
             if(current[lane].lane!=lane)
                 throw new IllegalArgumentException("Authoritative map lane identity mismatch");
@@ -285,15 +435,27 @@ final class GeometryTransactionManager {
                 PanelPreviewProtocol.MapZone prior=currentZones.get(zone.id);
                 if(prior!=null) {
                     if(zoneLanes.get(zone.id)!=lane||prior.panelId!=zone.panelId||
-                       prior.ranges.size()!=1)
-                        throw new IllegalArgumentException("Existing Zone ID has a different Panel or multi-range geometry");
+                       prior.ranges.size()>1||(prior.ranges.isEmpty()&&prior.flags!=1))
+                        throw new IllegalArgumentException("Existing Zone ID has a different Panel or unsupported multi-range geometry");
                 }
                 long end=(long)zone.start+zone.count;
+                if(zone.start<0||zone.count<1||end>active.activePixels)
+                    throw new IllegalArgumentException("Proposed Zone range is outside CORE active pixel capacity");
+                Set<Integer> proposedZoneIds=new HashSet<>();
+                for(MappedZone candidate:proposed.zones)proposedZoneIds.add(candidate.id);
                 for(PanelPreviewProtocol.MapZone existing:active.zones) {
-                    if(existing.id==zone.id)continue;
+                    // Mapped stable IDs move together as one final geometry image.
+                    // Unmentioned CORE Zones remain authoritative obstacles.
+                    if(existing.id==zone.id||proposedZoneIds.contains(existing.id))continue;
                     for(PanelPreviewProtocol.MapRange range:existing.ranges)
                         if(zone.start<range.start+range.count&&range.start<end)
-                            throw new IllegalArgumentException("Proposed geometry overlaps an existing CORE Zone");
+                            throw new IllegalArgumentException("Proposed geometry overlaps an unrelated existing CORE Zone");
+                }
+                for(MappedZone other:proposed.zones) {
+                    if(other.id==zone.id)continue;
+                    long otherEnd=(long)other.start+other.count;
+                    if(zone.start<otherEnd&&other.start<end)
+                        throw new IllegalArgumentException("Proposed geometry contains overlapping Zones");
                 }
             }
         }

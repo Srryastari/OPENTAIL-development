@@ -94,6 +94,27 @@ class ComposeMainActivity : ComponentActivity() {
     // Conditional diagnostic only; the approved Settings UI is unchanged when healthy.
     private val panelSyncWarning = mutableStateOf<String?>(null)
     private val panelStatusSummary = mutableStateOf("Panel telemetry unavailable")
+    private val panelGeometryMessage = mutableStateOf("Connect and authorize to read CORE geometry")
+    private val panelGeometryRevision = mutableIntStateOf(0)
+    private val panelGeometryEpoch = mutableIntStateOf(0)
+    private var panelGeometryLoadInProgress = false
+    private var panelGeometryLoadLane = -1
+    private var panelGeometryMapping: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryAppliedMapping: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryPlanTarget: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryQueuedTarget: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryBatches: Array<List<Array<PanelPreviewProtocol.UpdateDescriptor>>> =
+        arrayOf(emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>(),emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>())
+    private var panelGeometryNextBatch = intArrayOf(0,0)
+    private var panelGeometryBeginRequested = booleanArrayOf(false,false)
+    private var panelGeometryChanged = booleanArrayOf(false,false)
+    private var panelGeometryActionStarted = booleanArrayOf(false,false)
+    private var panelGeometryActionCommit = booleanArrayOf(false,false)
+    private var panelGeometryActionDone = booleanArrayOf(false,false)
+    private var panelGeometryBaseRevisions = intArrayOf(-1,-1)
+    private var panelGeometryCommitRequested = false
+    private var panelGeometryCancelRequested = false
+    private var panelGeometryDraftValid = true
     private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
     private val paletteV3Supported = mutableStateOf(false)
     private val paletteLoadedSlot = mutableIntStateOf(-1)
@@ -270,12 +291,21 @@ class ComposeMainActivity : ComponentActivity() {
             runOnUiThread {
                 panelStatusSummary.value = if(status==null) "Panel telemetry disconnected" else
                     status.diagnosticSummary()
+                panelGeometryRevision.intValue++
+                pumpPanelGeometry()
             }
         }, { decision ->
             runOnUiThread {
                 panelSyncWarning.value = if(decision.warning) decision.message else null
+                if(decision.warning) {
+                    panelGeometryMessage.value="CORE geometry warning: "+decision.message
+                    panelGeometryRevision.intValue++
+                }
             }
         })
+        ble.setPanelSnapshotListener { snapshot ->
+            runOnUiThread { if(snapshot!=null) onPanelGeometrySnapshot(snapshot) }
+        }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
@@ -369,6 +399,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     override fun onStop() {
+        if(panelGeometryMapping!=null&&!panelGeometryCommitRequested)cancelPanelGeometryPreview()
         localMicrophone.stop()
         foregroundActivity.value = false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
@@ -408,6 +439,25 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
+        val geometryEpoch = panelGeometryEpoch.intValue
+        LaunchedEffect(geometryEpoch) {
+            if(geometryEpoch>0) {
+                var lastHeartbeat=0L
+                while(isActive) {
+                    if(panelGeometryMapping==null)break
+                    pumpPanelGeometry()
+                    val now=System.currentTimeMillis()
+                    if(now-lastHeartbeat>=1500L) {
+                        for(lane in 0..1) {
+                            if(ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE)
+                                ble.heartbeatPanelPreview(lane)
+                        }
+                        lastHeartbeat=now
+                    }
+                    delay(100)
+                }
+            }
+        }
         var page by rememberSaveable { mutableIntStateOf(0) }
         var backStack by remember { mutableStateOf(listOf<Int>()) }
         fun navigate(destination: Int) {
@@ -1538,6 +1588,19 @@ class ComposeMainActivity : ComponentActivity() {
     private fun LayoutPage(t: Tone) {
         val modelRevision = revision.intValue
         val zoneCount = remember(modelRevision) { project.zoneCount() }
+        val geometryEpoch = panelGeometryEpoch.intValue
+        LaunchedEffect(modelRevision,geometryEpoch) {
+            if(panelGeometryMapping!=null&&!panelGeometryCommitRequested&&!panelGeometryCancelRequested) {
+                delay(180)
+                queuePanelGeometryDraftUpdate()
+            }
+        }
+        DisposableEffect(Unit) {
+            onDispose {
+                if(panelGeometryMapping!=null&&!panelGeometryCommitRequested)
+                    cancelPanelGeometryPreview()
+            }
+        }
         Title("Layout", t)
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
@@ -1560,6 +1623,17 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
+            Caption("CORE geometry",t)
+            key(panelGeometryRevision.intValue) {
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp),
+                    verticalAlignment=Alignment.CenterVertically) {
+                    Pill("Refresh CORE",t) { refreshPanelGeometry() }
+                    Pill("Preview on CORE",t,panelGeometryMapping!=null) { startPanelGeometryPreview() }
+                    Pill("Commit",t,panelGeometryCommitRequested) { commitPanelGeometryPreview() }
+                    Pill("Cancel",t,panelGeometryCancelRequested) { cancelPanelGeometryPreview() }
+                }
+                Caption(panelGeometryMessage.value,t)
+            }
             for(i in 0 until zoneCount) {
                 val z=project.zone(i) ?: continue
                 val id=z.optString("id")
@@ -1709,6 +1783,343 @@ class ComposeMainActivity : ComponentActivity() {
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
+    private fun refreshPanelGeometry() {
+        if(panelGeometryMapping!=null) {
+            panelGeometryMessage.value="Finish or cancel the active CORE preview before refreshing snapshots"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.canReadPanelPreview()) {
+            panelGeometryMessage.value="Connect and authenticate to a CORE controller with Panel Preview v2"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(panelGeometryLoadInProgress)return
+        panelGeometryLoadInProgress=true
+        panelGeometryLoadLane=0
+        panelGeometryMessage.value="Reading authoritative CORE geometry for output 1..."
+        if(!ble.readPanelLaneSnapshot(0)) {
+            panelGeometryLoadInProgress=false
+            panelGeometryLoadLane=-1
+            panelGeometryMessage.value="CORE output 1 snapshot read is busy; retry Refresh CORE"
+        }
+        panelGeometryRevision.intValue++
+    }
+
+    private fun onPanelGeometrySnapshot(snapshot: PanelPreviewProtocol.LaneSnapshot) {
+        panelGeometryRevision.intValue++
+        if(panelGeometryLoadInProgress) {
+            if(snapshot.lane==0&&panelGeometryLoadLane==0) {
+                panelGeometryLoadLane=1
+                panelGeometryMessage.value="Output 1 read; reading authoritative CORE geometry for output 2..."
+                if(!ble.readPanelLaneSnapshot(1)) {
+                    panelGeometryLoadInProgress=false
+                    panelGeometryLoadLane=-1
+                    panelGeometryMessage.value="CORE output 2 snapshot read is busy; retry Refresh CORE"
+                }
+            } else if(snapshot.lane==1&&panelGeometryLoadLane==1) {
+                panelGeometryLoadInProgress=false
+                panelGeometryLoadLane=-1
+                panelGeometryMessage.value="Both snapshots received; waiting for fresh status-v2 confirmation..."
+            }
+        }
+        pumpPanelGeometry()
+    }
+
+    private fun startPanelGeometryPreview() {
+        if(panelGeometryMapping!=null) {
+            panelGeometryMessage.value="A CORE shadow preview is already active; continue editing or Commit/Cancel it"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.canReadPanelPreview()) {
+            panelGeometryMessage.value="Connect and authenticate before starting a CORE preview"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.panelGeometryReady()) {
+            panelGeometryMessage.value="Fresh output 1 and output 2 snapshots/statuses are required; refreshing now..."
+            refreshPanelGeometry()
+            return
+        }
+        try {
+            val left=ble.lastConfirmedPanelSnapshot(0)
+            val right=ble.lastConfirmedPanelSnapshot(1)
+            if(left==null||right==null)throw IllegalStateException("Both confirmed CORE snapshots are required")
+            val snapshots=arrayOf(left,right)
+            val mapping=GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
+            val mtu=ble.panelUpdateMtu()
+            val batches=arrayOf(
+                mapping.lane(0).descriptorBatches(left,mtu),
+                mapping.lane(1).descriptorBatches(right,mtu)
+            )
+            panelGeometryMapping=mapping
+            panelGeometryAppliedMapping=null
+            panelGeometryPlanTarget=mapping
+            panelGeometryQueuedTarget=null
+            panelGeometryBatches=batches
+            panelGeometryNextBatch=intArrayOf(0,0)
+            panelGeometryBeginRequested=booleanArrayOf(false,false)
+            panelGeometryChanged=booleanArrayOf(false,false)
+            panelGeometryActionStarted=booleanArrayOf(false,false)
+            panelGeometryActionCommit=booleanArrayOf(false,false)
+            panelGeometryActionDone=booleanArrayOf(false,false)
+            panelGeometryBaseRevisions=intArrayOf(left.activeRevision,right.activeRevision)
+            panelGeometryCommitRequested=false
+            panelGeometryCancelRequested=false
+            panelGeometryDraftValid=true
+            panelGeometryEpoch.intValue++
+            panelGeometryMessage.value="Opening protected shadow-preview transactions on both outputs..."
+            panelGeometryRevision.intValue++
+            pumpPanelGeometry()
+        } catch(error:Exception) {
+            panelGeometryMessage.value="CORE preview not started: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    private fun queuePanelGeometryDraftUpdate() {
+        if(panelGeometryMapping==null||panelGeometryCommitRequested||panelGeometryCancelRequested)return
+        try {
+            val roleBase=panelGeometryQueuedTarget?:panelGeometryPlanTarget?:
+                panelGeometryAppliedMapping?:panelGeometryMapping!!
+            val target=GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
+            panelGeometryDraftValid=true
+            if(panelGeometryPlanTarget!=null||panelGeometryAppliedMapping==null) {
+                panelGeometryQueuedTarget=target
+                panelGeometryRevision.intValue++
+                return
+            }
+            beginNextPanelGeometryPlan(target)
+            pumpPanelGeometry()
+        } catch(error:Exception) {
+            panelGeometryDraftValid=false
+            panelGeometryQueuedTarget=null
+            panelGeometryMessage.value="Draft not sent to CORE: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    private fun beginNextPanelGeometryPlan(targetDraft: GeometryTransactionManager.LayoutMapping) {
+        val base=panelGeometryAppliedMapping?:return
+        val target=targetDraft.withRolesFrom(base)
+        try {
+            val mtu=ble.panelUpdateMtu()
+            val batches=arrayOf(
+                target.lane(0).descriptorBatches(base.lane(0),mtu),
+                target.lane(1).descriptorBatches(base.lane(1),mtu)
+            )
+            if(batches.all { it.isEmpty() }) {
+                panelGeometryAppliedMapping=target
+                panelGeometryPlanTarget=null
+                panelGeometryMessage.value="CORE pixel ranges are unchanged; local labels and editor metadata remain app-local"
+                panelGeometryRevision.intValue++
+                return
+            }
+            panelGeometryPlanTarget=target
+            panelGeometryBatches=batches
+            panelGeometryNextBatch=intArrayOf(0,0)
+            panelGeometryMessage.value="Sending live Layout changes to the CORE shadow maps..."
+            panelGeometryRevision.intValue++
+        } catch(error:Exception) {
+            panelGeometryDraftValid=false
+            panelGeometryMessage.value="CORE rejected the draft transition plan: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    private fun pumpPanelGeometry() {
+        val mapping=panelGeometryMapping?:return
+        if(panelGeometryCommitRequested||panelGeometryCancelRequested) {
+            pumpPanelGeometryActions()
+            return
+        }
+        for(lane in 0..1) {
+            if(!panelGeometryBeginRequested[lane]) {
+                if(lane==1) {
+                    val first=ble.panelGeometryManager(0)
+                    if(!panelGeometryBeginRequested[0]||
+                       first?.state()!=GeometryTransactionManager.State.ACTIVE)return
+                }
+                if(ble.beginPanelPreview(lane,mapping)) {
+                    panelGeometryBeginRequested[lane]=true
+                    panelGeometryMessage.value="Output "+(lane+1)+" BEGIN accepted; waiting for CORE status acknowledgement..."
+                    panelGeometryRevision.intValue++
+                }
+                return
+            }
+        }
+        for(lane in 0..1) {
+            val manager=ble.panelGeometryManager(lane)
+            if(manager==null) {
+                panelGeometryMessage.value="Waiting for CORE geometry manager on output "+(lane+1)
+                panelGeometryRevision.intValue++
+                return
+            }
+            if(manager.syncUncertain()) {
+                panelGeometryMessage.value="CORE output "+(lane+1)+" synchronization is uncertain; refusing further geometry writes"
+                panelGeometryRevision.intValue++
+                return
+            }
+            if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+        }
+        val plan=panelGeometryPlanTarget
+        if(plan!=null) {
+            for(lane in 0..1) {
+                if(panelGeometryNextBatch[lane]<panelGeometryBatches[lane].size) {
+                    val batch=panelGeometryBatches[lane][panelGeometryNextBatch[lane]]
+                    if(ble.updatePanelPreview(lane,plan.lane(lane).candidateWire(),batch)) {
+                        panelGeometryNextBatch[lane]++
+                        panelGeometryChanged[lane]=true
+                        panelGeometryMessage.value="Output "+(lane+1)+" geometry UPDATE sent; waiting for CORE acknowledgement..."
+                        panelGeometryRevision.intValue++
+                    }
+                    return
+                }
+            }
+            val allAcknowledged=(0..1).all { lane ->
+                val manager=ble.panelGeometryManager(lane)
+                manager?.state()==GeometryTransactionManager.State.ACTIVE&&
+                    panelGeometryNextBatch[lane]>=panelGeometryBatches[lane].size
+            }
+            if(!allAcknowledged)return
+            panelGeometryAppliedMapping=plan
+            panelGeometryPlanTarget=null
+            val queued=panelGeometryQueuedTarget
+            if(queued!=null) {
+                panelGeometryQueuedTarget=null
+                beginNextPanelGeometryPlan(queued)
+                return
+            }
+            panelGeometryMessage.value="Live CORE preview active on both outputs. Layout edits stream after acknowledgement; Commit persists the confirmed geometry."
+            panelGeometryRevision.intValue++
+        } else {
+            val queued=panelGeometryQueuedTarget
+            if(queued!=null) {
+                panelGeometryQueuedTarget=null
+                beginNextPanelGeometryPlan(queued)
+            }
+        }
+    }
+
+    private fun commitPanelGeometryPreview() {
+        if(panelGeometryMapping==null) {
+            panelGeometryMessage.value="Start a CORE preview before committing"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null||!panelGeometryDraftValid) {
+            panelGeometryMessage.value="Wait for all draft updates to be acknowledged before Commit"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if((0..1).any { ble.panelGeometryManager(it)?.state()!=GeometryTransactionManager.State.ACTIVE }) {
+            panelGeometryMessage.value="Both CORE preview sessions must be active before Commit"
+            panelGeometryRevision.intValue++
+            return
+        }
+        panelGeometryCommitRequested=true
+        panelGeometryCancelRequested=false
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryMessage.value="Commit requested; CORE must confirm COMMITTED and return fresh authoritative snapshots before success is shown..."
+        panelGeometryRevision.intValue++
+        pumpPanelGeometry()
+    }
+
+    private fun cancelPanelGeometryPreview() {
+        if(panelGeometryMapping==null)return
+        if(panelGeometryCommitRequested) {
+            panelGeometryMessage.value="CORE commit is already in progress; waiting for authoritative reconciliation"
+            panelGeometryRevision.intValue++
+            return
+        }
+        panelGeometryCancelRequested=true
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryMessage.value="Cancel requested; waiting for CORE to discard both shadow maps..."
+        panelGeometryRevision.intValue++
+        pumpPanelGeometry()
+    }
+
+    private fun pumpPanelGeometryActions() {
+        for(lane in 0..1) {
+            if(!panelGeometryBeginRequested[lane]) {
+                panelGeometryActionDone[lane]=true
+                continue
+            }
+            val manager=ble.panelGeometryManager(lane)?:return
+            if(panelGeometryActionStarted[lane]) {
+                val confirmedRevision=manager.lastConfirmed()?.revision?:-1
+                val expectedCommit=panelGeometryActionCommit[lane]
+                val revisionMatches=if(expectedCommit)confirmedRevision!=panelGeometryBaseRevisions[lane]
+                    else confirmedRevision==panelGeometryBaseRevisions[lane]
+                val reconciled=manager.state()==GeometryTransactionManager.State.READY&&revisionMatches
+                if(reconciled) {
+                    panelGeometryActionDone[lane]=true
+                    continue
+                }
+                if(manager.state()==GeometryTransactionManager.State.READY) {
+                    panelGeometryMessage.value="CORE output "+(lane+1)+" did not confirm the expected geometry revision; no success reported"
+                    panelGeometryRevision.intValue++
+                    return
+                }
+                return
+            }
+            if(manager.state()==GeometryTransactionManager.State.READY) {
+                if(panelGeometryCommitRequested&&panelGeometryChanged[lane]) {
+                    panelGeometryMessage.value="CORE output "+(lane+1)+" preview ended before its required commit"
+                    panelGeometryRevision.intValue++
+                    return
+                }
+                panelGeometryActionDone[lane]=true
+                continue
+            }
+            if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+            val shouldCommit=panelGeometryCommitRequested&&panelGeometryChanged[lane]
+            val sent=if(shouldCommit)ble.commitPanelPreview(lane) else ble.cancelPanelPreview(lane)
+            if(sent) {
+                panelGeometryActionStarted[lane]=true
+                panelGeometryActionCommit[lane]=shouldCommit
+                panelGeometryMessage.value=(if(shouldCommit)"Committing" else "Cancelling")+
+                    " CORE output "+(lane+1)+"; waiting for authoritative readback..."
+                panelGeometryRevision.intValue++
+            }
+            return
+        }
+        if(panelGeometryActionDone.all { it }) {
+            val result=if(!panelGeometryCommitRequested)
+                "CORE shadow previews cancelled; confirmed geometry remains unchanged"
+            else if(panelGeometryActionCommit.none { it })
+                "No pixel-range changes were needed; preview sessions closed without an NVS commit"
+            else "CORE geometry committed and read back on changed outputs; unchanged previews were cancelled"
+            clearPanelGeometryPreview(result)
+        }
+    }
+
+    private fun clearPanelGeometryPreview(message:String) {
+        panelGeometryMapping=null
+        panelGeometryAppliedMapping=null
+        panelGeometryPlanTarget=null
+        panelGeometryQueuedTarget=null
+        panelGeometryBatches=arrayOf(emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>(),emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>())
+        panelGeometryNextBatch=intArrayOf(0,0)
+        panelGeometryBeginRequested=booleanArrayOf(false,false)
+        panelGeometryChanged=booleanArrayOf(false,false)
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryBaseRevisions=intArrayOf(-1,-1)
+        panelGeometryCommitRequested=false
+        panelGeometryCancelRequested=false
+        panelGeometryDraftValid=true
+        panelGeometryEpoch.intValue++
+        panelGeometryMessage.value=message
+        panelGeometryRevision.intValue++
+    }
+
     private fun addZoneAfter(index: Int): String? {
         val position = index + 1
         if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position))

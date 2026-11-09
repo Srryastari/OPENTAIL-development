@@ -351,6 +351,12 @@ public class GeometryTransactionManagerTest {
     private static PanelPreviewProtocol.LaneSnapshot panelSnapshot(int lane,int pixels,
             int panelId,String panelName,int zoneId,int zonePanel,String zoneName,
             int rangeStart,int rangeCount) {
+        return panelSnapshot(lane,pixels,panelId,panelName,zoneId,zonePanel,zoneName,
+            rangeStart,rangeCount,0xff);
+    }
+    private static PanelPreviewProtocol.LaneSnapshot panelSnapshot(int lane,int pixels,
+            int panelId,String panelName,int zoneId,int zonePanel,String zoneName,
+            int rangeStart,int rangeCount,int role) {
         byte[] wire=new byte[PanelPreviewProtocol.MAP_BYTES];
         wire[0]=3;wire[1]=(byte)lane;put16(wire,2,pixels);
         if(panelId!=0) {
@@ -358,7 +364,7 @@ public class GeometryTransactionManagerTest {
             put16(wire,39,panelId);wire[41]=(byte)lane;
             putName(wire,42,panelName);wire[67]=1;
             put16(wire,155,zoneId);put16(wire,157,zonePanel);
-            putName(wire,159,zoneName);wire[184]=(byte)0xff;wire[186]=1;
+            putName(wire,159,zoneName);wire[184]=(byte)role;wire[186]=1;
             put16(wire,187,rangeStart);put16(wire,189,rangeCount);
         }
         byte[] header=new byte[14];
@@ -379,6 +385,14 @@ public class GeometryTransactionManagerTest {
         b[29]=1;
         return PanelPreviewProtocol.Status.parse(b);
     }
+    private static PanelPreviewProtocol.Status laneStatus(int lane,int state,long session,
+            int baseRevision,int pixels,int active,int staged,int render) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=(byte)lane;b[3]=3;
+        put32(b,4,session);put16(b,8,baseRevision);put16(b,10,pixels);put16(b,12,5000);
+        put16(b,22,active);put16(b,24,staged);put16(b,26,render);b[29]=1;
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
     private static void validateSnapshots(GeometryTransactionManager.LayoutMapping mapping,
             PanelPreviewProtocol.LaneSnapshot left,PanelPreviewProtocol.LaneSnapshot right) {
         GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,
@@ -394,6 +408,83 @@ public class GeometryTransactionManagerTest {
         PanelPreviewProtocol.MapIdentity map=PanelPreviewProtocol.MapIdentity.parse(snapshot);
         assertEquals(0xff,map.zones.get(0).role);
         assertEquals(0x0f,PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE);
+    }
+
+    @Test public void assignedCoreRoleSurvivesGeometryUpdateAndOnlyChangedDescriptorIsSent() throws Exception {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        mappedZone(project,"Top",11,0,0,1,"Housing");
+        GeometryTransactionManager.LayoutMapping raw=GeometryTransactionManager.mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot left=panelSnapshot(0,623,1,"Housing",129,1,"Top",0,10,3);
+        PanelPreviewProtocol.LaneSnapshot right=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        GeometryTransactionManager.LayoutMapping mapped=raw.withRolesFromSnapshots(
+            new PanelPreviewProtocol.LaneSnapshot[]{left,right});
+        assertEquals(3,mapped.lane(0).zones.get(0).roleFlags);
+        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=mapped.lane(0).descriptorBatches(left,23);
+        assertEquals(1,batches.size());assertEquals(1,batches.get(0).length);
+        assertEquals(3,batches.get(0)[0].roleFlags);assertEquals(11,batches.get(0)[0].count);
+    }
+
+    @Test public void liveGeometryDiffDeletesRemovedZoneBeforeApplyingShiftedRemainingZone() throws Exception {
+        NativeProject beforeProject=new NativeProject(new FakeProjectStorage().prefs);
+        mappedZone(beforeProject,"Top",10,0,0,1,"Housing");
+        mappedZone(beforeProject,"Amber",10,0,1,1,"Housing");
+        GeometryTransactionManager.MappedLane before=GeometryTransactionManager.mapLayout(beforeProject).lane(0);
+        NativeProject afterProject=new NativeProject(new FakeProjectStorage().prefs);
+        mappedZone(afterProject,"Amber",10,0,1,1,"Housing");
+        GeometryTransactionManager.MappedLane after=GeometryTransactionManager.mapLayout(afterProject).lane(0).withRolesFrom(before);
+        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=after.descriptorBatches(before,23);
+        assertEquals(2,batches.size());
+        assertEquals(129,batches.get(0)[0].zoneId);assertEquals(0x20,batches.get(0)[0].roleFlags);
+        assertEquals(0,batches.get(0)[0].count);
+        assertEquals(130,batches.get(1)[0].zoneId);assertEquals(0,batches.get(1)[0].start);
+        assertEquals(10,batches.get(1)[0].count);
+    }
+
+    @Test public void mtuPlannerOrdersSafeBoundaryShrinkBeforeExpansionAndRejectsOversizedCycles() {
+        List<GeometryTransactionManager.MappedPanel> panels=java.util.Collections.singletonList(
+            new GeometryTransactionManager.MappedPanel(1,0,"Housing",2));
+        GeometryTransactionManager.MappedLane before=new GeometryTransactionManager.MappedLane(0,20,
+            panels,java.util.Arrays.asList(
+                new GeometryTransactionManager.MappedZone(129,1,0,0,10,"Top",3),
+                new GeometryTransactionManager.MappedZone(130,1,1,10,10,"Amber",4)));
+        GeometryTransactionManager.MappedLane shifted=new GeometryTransactionManager.MappedLane(0,20,
+            panels,java.util.Arrays.asList(
+                new GeometryTransactionManager.MappedZone(129,1,0,0,11,"Top",3),
+                new GeometryTransactionManager.MappedZone(130,1,1,11,9,"Amber",4)));
+        List<PanelPreviewProtocol.UpdateDescriptor[]> safe=shifted.descriptorBatches(before,23);
+        assertEquals(2,safe.size());assertEquals(130,safe.get(0)[0].zoneId);
+        assertEquals(129,safe.get(1)[0].zoneId);
+        GeometryTransactionManager.MappedLane swapped=new GeometryTransactionManager.MappedLane(0,20,
+            panels,java.util.Arrays.asList(
+                new GeometryTransactionManager.MappedZone(129,1,0,10,10,"Top",3),
+                new GeometryTransactionManager.MappedZone(130,1,1,0,10,"Amber",4)));
+        try {swapped.descriptorBatches(before,23);fail("MTU 23 cannot atomically carry a two-zone swap");}
+        catch(IllegalStateException expected){assertTrue(expected.getMessage().contains("simultaneous descriptors"));}
+        List<PanelPreviewProtocol.UpdateDescriptor[]> wide=swapped.descriptorBatches(before,247);
+        assertEquals(1,wide.size());assertEquals(2,wide.get(0).length);
+    }
+
+    @Test public void secondLaneCanBeginWhileFirstLaneIsActiveButNotWhileItIsCommitting() throws Exception {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        mappedZone(project,"Left Top",10,0,0,1,"Left Housing");
+        mappedZone(project,"Right Top",10,1,0,3,"Right Housing");
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
+        PanelPreviewProtocol.LaneSnapshot left=panelSnapshot(0,623,1,"Left Housing",129,1,"Left Top",0,10);
+        PanelPreviewProtocol.LaneSnapshot right=panelSnapshot(1,623,3,"Right Housing",137,3,"Right Top",0,10);
+        PanelPreviewProtocol.Status active=laneStatus(0,PanelPreviewProtocol.STATE_ACTIVE,77,7,623,7,7,7);
+        PanelPreviewProtocol.Status idle=laneStatus(1,PanelPreviewProtocol.STATE_IDLE,0,7,623,7,7,7);
+        GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,
+            new PanelPreviewProtocol.LaneSnapshot[]{left,right},
+            new PanelPreviewProtocol.Status[]{active,idle});
+        PanelPreviewProtocol.Status committing=laneStatus(0,PanelPreviewProtocol.STATE_COMMITTING,77,7,623,7,8,7);
+        try {
+            GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,
+                new PanelPreviewProtocol.LaneSnapshot[]{left,right},
+                new PanelPreviewProtocol.Status[]{committing,idle});
+            fail("COMMITTING must block a second lane BEGIN");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("stable, persistent geometry"));
+        }
     }
 
     @Test public void proposedGs400MappingMustMatchFreshAuthoritativeMapAndFitCapacity() throws Exception {

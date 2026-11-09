@@ -372,6 +372,22 @@ final class BleDiscovery {
         return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
                panelPreviewStatus!=null && panelConfigCommand!=null && panelConfigReply!=null;
     }
+    /** Both authoritative lane snapshots and status-v2 reads are fresh and idle. */
+    boolean panelGeometryReady() {
+        if(!canReadPanelPreview())return false;
+        for(int lane=0;lane<2;lane++) {
+            PanelPreviewProtocol.Status status=panelStatuses[lane];
+            GeometryTransactionManager manager=panelGeometryManagers[lane];
+            if(!panelSnapshotFresh[lane]||!panelStatusFresh[lane]||
+               panelConfirmedSnapshots[lane]==null||status==null||manager==null||
+               status.state!=PanelPreviewProtocol.STATE_IDLE||status.sessionId!=0||
+               manager.state()!=GeometryTransactionManager.State.READY||manager.syncUncertain())
+                return false;
+        }
+        return true;
+    }
+    /** Current negotiated ATT MTU used by both the batch planner and the writer. */
+    int panelUpdateMtu(){return Math.max(23,negotiatedMtu);}
     boolean readPanelStatus() {
         if(!canControl() || panelPreviewStatus==null || panelCapabilities==null ||
            !panelCapabilities.supportsPreviewV2())return false;
