@@ -39,16 +39,6 @@ static bool fake_write_commit(void *context,ot_pz_pair_namespace_t ns,
     memcpy(b->bytes,data,size);b->size=size;b->present=true;s->durable_writes++;
     return true;
 }
-static bool fake_write_batch_commit(void *context,ot_pz_pair_namespace_t ns,
-        const char *key_a,const void *data_a,size_t size_a,
-        const char *key_b,const void *data_b,size_t size_b){
-    fake_store_t *s=context;fake_blob_t *a=blob_for(s,ns,key_a);
-    fake_blob_t *b=blob_for(s,ns,key_b);
-    if(!a||!b||!data_a||!data_b||size_a>FAKE_BYTES||size_b>FAKE_BYTES)return false;
-    memcpy(a->bytes,data_a,size_a);a->size=size_a;a->present=true;
-    memcpy(b->bytes,data_b,size_b);b->size=size_b;b->present=true;
-    s->durable_writes++;return true;
-}
 static bool fake_erase_commit(void *context,ot_pz_pair_namespace_t ns,const char *key){
     fake_store_t *s=context;fake_blob_t *b=blob_for(s,ns,key);
     if(!b)return false;
@@ -60,8 +50,7 @@ static bool phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
     return state->cut_after!=phase;
 }
 static ot_pz_pair_store_io_t make_io(fake_store_t *store){
-    return (ot_pz_pair_store_io_t){store,fake_read,fake_write_commit,
-                                  fake_write_batch_commit,fake_erase_commit};
+    return (ot_pz_pair_store_io_t){store,fake_read,fake_write_commit,fake_erase_commit};
 }
 static void make_runtime(ot_pz_controller_t *cfg,uint16_t pixels,uint8_t order,
                          uint16_t range_count){
@@ -140,7 +129,7 @@ static void durable_boundary_matrix(void){
         assert(ot_pz_pair_store_begin(&io,&base,&candidate1,r0,r1,0x1001u,0u,
                                       true,NULL,NULL));
         assert(ot_pz_pair_store_finish(&io,0x1001u,NULL,NULL));
-        assert(store.durable_writes==8u);
+        assert(store.durable_writes==9u);
         phases.cut_after=cut;
         assert(!ot_pz_pair_store_begin(&io,&candidate1,&candidate2,r1,r2,
                                        0x2002u,0u,false,phase_hook,&phases));
@@ -150,7 +139,7 @@ static void durable_boundary_matrix(void){
         else
             recover_expect(&io,&base,&candidate1,&candidate2,true,true,0x2002u,0u);
     }
-    for(uint8_t cut=4u;cut<=8u;cut++){
+    for(uint8_t cut=4u;cut<=9u;cut++){
         fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
         phase_state_t phases={0};
         assert(ot_pz_pair_store_begin(&io,&base,&candidate1,r0,r1,0x1001u,0u,
@@ -161,8 +150,8 @@ static void durable_boundary_matrix(void){
         phases.cut_after=cut;
         assert(!ot_pz_pair_store_finish(&io,0x2002u,phase_hook,&phases));
         assert(phases.last_phase==cut);
-        recover_expect(&io,&base,&candidate1,&candidate2,true,cut<8u,0x2002u,0u);
-        if(cut<8u)assert(ot_pz_pair_store_finish(&io,0x2002u,NULL,NULL));
+        recover_expect(&io,&base,&candidate1,&candidate2,true,cut<9u,0x2002u,0u);
+        if(cut<9u)assert(ot_pz_pair_store_finish(&io,0x2002u,NULL,NULL));
         recover_expect(&io,&base,&candidate1,&candidate2,true,false,0x2002u,0u);
         ot_pz_pair_store_snapshot_t snapshot;
         assert(ot_pz_pair_store_snapshot(&io,&snapshot));
@@ -231,6 +220,6 @@ int main(void){
     initial_migration_cut_matrix();
     durable_boundary_matrix();
     reset_marker_and_fail_closed();
-    puts("PASS Issue126 v4 runtime pair store: all eight durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
+    puts("PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
     return 0;
 }
