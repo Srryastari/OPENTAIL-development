@@ -297,6 +297,8 @@ final class BleDiscovery {
     private PanelPreviewProtocol.Capabilities panelCapabilities;
     private final TelemetrySequenceWatchdog panelWatchdog=new TelemetrySequenceWatchdog();
     private PanelPreviewProtocol.Status panelLastStatus;
+    private final PanelPreviewProtocol.Status[] panelStatuses=new PanelPreviewProtocol.Status[2];
+    private final boolean[] panelStatusFresh=new boolean[2];
     private final PanelPreviewProtocol.LaneSnapshot[] panelConfirmedSnapshots=
         new PanelPreviewProtocol.LaneSnapshot[2];
     private final GeometryTransactionManager[] panelGeometryManagers=
@@ -406,6 +408,8 @@ final class BleDiscovery {
         for(GeometryTransactionManager manager:panelGeometryManagers)
             if(manager!=null)manager.connectionLost();
         panelCapabilities=null;panelLastStatus=null;
+        panelStatuses[0]=null;panelStatuses[1]=null;
+        panelStatusFresh[0]=false;panelStatusFresh[1]=false;
         panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
@@ -1696,6 +1700,8 @@ final class BleDiscovery {
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());pumpQueue();return;
         }
         panelLastStatus=current;
+        panelStatuses[current.lane]=current;
+        panelStatusFresh[current.lane]=true;
         GeometryTransactionManager manager=panelGeometryManagers[current.lane];
         if(manager!=null) {
             manager.observeStatus(current);
