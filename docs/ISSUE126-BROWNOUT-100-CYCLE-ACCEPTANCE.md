@@ -59,7 +59,7 @@ If the as-built bench does not match this topology, stop and have Hardware/Overs
 
 ## 3. Durable commit phases and randomized cut coverage
 
-The final cross-namespace implementation must identify these nine durable phases in firmware diagnostics/test hooks. Names must be reconciled with the actual implementation before the physical run; do not claim these hooks exist until verified.
+The CORE runtime emits a UART phase marker after each of these nine individually committed and read-back-verified NVS boundaries. The host fault-injection matrix covers each boundary; Hardware must confirm the phase marker against the physical interruption instrumentation before beginning the 100-cycle run.
 
 | Phase | Durable boundary to interrupt after |
 |---:|---|
