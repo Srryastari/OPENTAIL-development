@@ -83,10 +83,31 @@ ot_pz_tx_sequence_result_t ot_pz_tx_sequence_check(bool has_last,
     uint32_t last_sequence,uint32_t last_crc,uint32_t sequence,uint32_t crc){
     if(sequence==0u)return OT_PZ_TX_SEQUENCE_STALE;
     if(!has_last)return sequence==1u?OT_PZ_TX_SEQUENCE_NEW:
-                                      OT_PZ_TX_SEQUENCE_STALE;
-    const uint32_t delta=sequence-last_sequence;
-    if(delta==0u)return crc==last_crc?OT_PZ_TX_SEQUENCE_DUPLICATE:
-                                      OT_PZ_TX_SEQUENCE_CONFLICT;
-    if(delta>=0x80000000u)return OT_PZ_TX_SEQUENCE_STALE;
-    return OT_PZ_TX_SEQUENCE_NEW;
+                                      OT_PZ_TX_SEQUENCE_GAP;
+    if(sequence==last_sequence)
+        return crc==last_crc?OT_PZ_TX_SEQUENCE_DUPLICATE:
+                             OT_PZ_TX_SEQUENCE_CONFLICT;
+
+    /* Sequence zero is reserved. Measure forward distance on the nonzero
+     * uint32 ring so UINT32_MAX -> 1 is a contiguous successor. */
+    const uint32_t forward=sequence>last_sequence?
+        sequence-last_sequence:(UINT32_MAX-last_sequence)+sequence;
+    if(forward==1u)return OT_PZ_TX_SEQUENCE_NEW;
+    if(forward<0x80000000u)return OT_PZ_TX_SEQUENCE_GAP;
+    return OT_PZ_TX_SEQUENCE_OUT_OF_ORDER;
+}
+
+ot_pz_tx_update_admission_t ot_pz_tx_update_admit(bool committing,
+    bool sequence_sync_fault,bool has_last,uint32_t last_sequence,
+    uint32_t last_crc,uint32_t sequence,uint32_t crc){
+    if(committing)return OT_PZ_TX_UPDATE_REJECT_COMMITTING;
+    if(sequence_sync_fault)return OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED;
+    switch(ot_pz_tx_sequence_check(has_last,last_sequence,last_crc,sequence,crc)){
+        case OT_PZ_TX_SEQUENCE_NEW:return OT_PZ_TX_UPDATE_ACCEPT;
+        case OT_PZ_TX_SEQUENCE_DUPLICATE:return OT_PZ_TX_UPDATE_REJECT_DUPLICATE;
+        case OT_PZ_TX_SEQUENCE_GAP:return OT_PZ_TX_UPDATE_REJECT_GAP;
+        case OT_PZ_TX_SEQUENCE_OUT_OF_ORDER:return OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER;
+        case OT_PZ_TX_SEQUENCE_CONFLICT:return OT_PZ_TX_UPDATE_REJECT_CONFLICT;
+        default:return OT_PZ_TX_UPDATE_REJECT_STALE;
+    }
 }
