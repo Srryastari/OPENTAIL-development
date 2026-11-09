@@ -528,41 +528,66 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     const ot_pz_controller_t committed=*active;
     render_probe_t cancel_reference;
     clone_render_probe(&cancel_reference,probe);
-    assert(render_probe_frame(&cancel_reference,active,bank,1164u));
-    assert(ot_pz_preview_begin(&preview,active,0u,10u,10u,false,1160u));
+    assert(render_probe_frame(&cancel_reference,active,bank,1180u));
+    assert(ot_pz_preview_begin(&preview,active,0u,11u,11u,false,1178u));
     swap=preview.candidate.outputs[0].zones[0];
     preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
     preview.candidate.outputs[0].zones[1]=swap;
     assert(ot_pz_valid(&preview.candidate));
-    assert(render_probe_frame(probe,&preview.candidate,bank,1164u));
+    assert(render_probe_frame(probe,&preview.candidate,bank,1180u));
     ot_pz_preview_cancel(&preview);
     assert(memcmp(active,&committed,sizeof(committed))==0);
-    assert(render_probe_frame(&cancel_reference,active,bank,1168u));
-    assert(render_probe_frame(probe,active,bank,1168u));
+    assert(render_probe_frame(&cancel_reference,active,bank,1184u));
+    assert(render_probe_frame(probe,active,bank,1184u));
     assert(same_effect_state(&cancel_reference.state[0][0],&probe->state[0][0]));
     assert(same_effect_state(&cancel_reference.state[0][1],&probe->state[0][1]));
     release_render_probe(&cancel_reference);
 
-    /* Delete the first ordered zone. The other zone shifts from index 1 to 0;
-     * its renderer state and its bank-owned effect slot must follow its IDs. */
-    render_probe_t delete_reference;
-    clone_render_probe(&delete_reference,probe);
-    assert(render_probe_frame(&delete_reference,active,bank,1176u));
+    /* Delete B (the first ordered zone) in a preview and cancel it. Neither
+     * the real bank nor a B-only continuous bank may be pruned on CANCEL. */
     const ot_pz_range_update_t delete_first={
         .panel_id=panel_id,.zone_id=original_zone1,.range_id=0u,
         .start=0u,.count=0u,
         .role_flags=(uint8_t)(OT_PZ_TX_DELETE_ZONE<<OT_PZ_TX_ACTION_SHIFT)
     };
-    assert(ot_pz_preview_begin(&preview,active,0u,10u,10u,false,1170u));
+    const ot_fx_zone_bank_t bank_before_cancel=*bank;
+    ot_fx_zone_bank_t orphan_only;
+    ot_fx_bank_reset(&orphan_only);
+    orphan_only.zones[0][1]=bank->zones[0][1];
+    assert(ot_fx_bank_any_active(&orphan_only,1186u));
+    const ot_fx_zone_bank_t orphan_before_cancel=orphan_only;
+    assert(ot_pz_preview_begin(&preview,active,0u,12u,12u,false,1186u));
     assert(ot_pz_preview_apply_updates(&preview,0u,&delete_first,1u,
-        10u,10u,false,1172u));
+        12u,12u,false,1187u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
+    ot_pz_preview_cancel(&preview);
+    assert(memcmp(active,&committed,sizeof(committed))==0);
+    assert(memcmp(bank,&bank_before_cancel,sizeof(*bank))==0);
+    assert(memcmp(&orphan_only,&orphan_before_cancel,sizeof(orphan_only))==0);
+    assert(ot_fx_bank_any_active(&orphan_only,1188u));
+
+    /* Commit the same deletion. B's bank slot becomes an orphan and is
+     * retired; A shifts index 1->0 and retains its renderer state/phase. */
+    render_probe_t delete_reference;
+    clone_render_probe(&delete_reference,probe);
+    ot_fx_zone_bank_t delete_reference_bank=*bank;
+    assert(render_probe_frame(&delete_reference,active,&delete_reference_bank,1194u));
+    assert(ot_pz_preview_begin(&preview,active,0u,13u,13u,false,1190u));
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_first,1u,
+        13u,13u,false,1192u));
     assert(preview.candidate.outputs[0].zone_count==1u);
     assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
     preview.committing=true;
     *active=preview.candidate;
     ot_fx_bank_prune_orphans(bank,active->outputs);
+    ot_fx_bank_prune_orphans(&orphan_only,active->outputs);
     ot_pz_preview_cancel(&preview);
-    assert(render_probe_frame(probe,active,bank,1176u));
+    assert(!ot_fx_slot_active(&bank->zones[0][1],1194u));
+    assert(ot_fx_slot_active(&bank->zones[0][0],1194u));
+    assert(ot_fx_bank_any_active(bank,1194u));
+    assert(!ot_fx_bank_any_active(&orphan_only,1194u));
+    assert(render_probe_frame(probe,active,bank,1194u));
     assert(same_effect_state(&delete_reference.state[0][1],&probe->state[0][0]));
     release_render_probe(&delete_reference);
     assert(probe->prior_zone_id[0][0]==original_zone0);
