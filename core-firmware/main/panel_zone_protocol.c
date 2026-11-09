@@ -10,6 +10,40 @@ static uint32_t tx_crc32(const uint8_t *data,size_t length){
     }
     return ~crc;
 }
+bool ot_pz_tx_parse_control(const uint8_t *p,size_t n,
+                            ot_pz_tx_control_packet_t *out){
+    if(!p||!out||n<2u||p[0]!=OT_PZ_TX_MAGIC)return false;
+    ot_pz_tx_control_packet_t parsed={0};
+    parsed.opcode=p[1];
+    if(parsed.opcode==OT_PZ_TX_OP_BEGIN){
+        if(n!=8u||p[2]>=OT_PZ_OUTPUTS)return false;
+        parsed.lane=p[2];
+        parsed.base_revision=(uint16_t)(p[3]|((uint16_t)p[4]<<8));
+        parsed.pixel_capacity=(uint16_t)(p[5]|((uint16_t)p[6]<<8));
+        parsed.schema_version=p[7];
+        if(parsed.base_revision==0u||parsed.pixel_capacity==0u||
+           parsed.schema_version==0u)return false;
+    }else if(parsed.opcode==OT_PZ_TX_OP_COMMIT){
+        if(n!=11u||p[2]>=OT_PZ_OUTPUTS)return false;
+        parsed.lane=p[2];
+        parsed.session_id=(uint32_t)p[3]|((uint32_t)p[4]<<8)|
+            ((uint32_t)p[5]<<16)|((uint32_t)p[6]<<24);
+        parsed.candidate_crc32=(uint32_t)p[7]|((uint32_t)p[8]<<8)|
+            ((uint32_t)p[9]<<16)|((uint32_t)p[10]<<24);
+        if(parsed.session_id==0u)return false;
+    }else if(parsed.opcode==OT_PZ_TX_OP_CANCEL||
+             parsed.opcode==OT_PZ_TX_OP_HEARTBEAT){
+        if(n!=7u||p[2]>=OT_PZ_OUTPUTS)return false;
+        parsed.lane=p[2];
+        parsed.session_id=(uint32_t)p[3]|((uint32_t)p[4]<<8)|
+            ((uint32_t)p[5]<<16)|((uint32_t)p[6]<<24);
+        if(parsed.session_id==0u)return false;
+    }else{
+        return false;
+    }
+    *out=parsed;
+    return true;
+}
 bool ot_pz_tx_parse_update(const uint8_t *p,size_t n,uint16_t mtu,
                            ot_pz_tx_update_packet_t *out){
     if(!p||!out||mtu<OT_PZ_TX_MIN_ATT_MTU||
