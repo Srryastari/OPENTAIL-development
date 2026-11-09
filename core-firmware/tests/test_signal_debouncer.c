@@ -71,6 +71,53 @@ static void absolute_deadline_and_exact_boundary(void) {
     assert(!sample_ms(&d,4401u));
 }
 
+/* Deterministic ISR/sampler interleavings around the exact release
+ * deadline. The writer guard makes the sampler defer until the entire
+ * timestamp+GPIO pair has been published; the replay then preserves the
+ * original edge time instead of a later sampler time. */
+static void coherent_edge_interleavings_at_microsecond_boundary(void) {
+    ot_signal_debouncer_t d;
+    const uint64_t fall=1000000u;
+    const uint64_t just_before=fall+399999u;
+    const uint64_t at_deadline=fall+400000u;
+
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,fall);
+    /* ISR producer active: sampler must defer expiry rather than use a
+     * sample potentially older than its timestamp. */
+    bool writer_active=true;
+    bool valid=!writer_active;
+    assert(!valid);
+    /* Producer publishes the coherent asserted edge, then clears guard. */
+    const uint64_t published_time=just_before;
+    const bool published_asserted=true;
+    writer_active=false;
+    valid=!writer_active;
+    assert(valid);
+    edge(&d,published_asserted,published_time);
+    assert(sample_at(&d,at_deadline));
+    assert(d.asserted&&!d.release_pending);
+
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,fall);
+    writer_active=true;
+    valid=!writer_active;
+    assert(!valid);
+    const uint64_t equality_time=at_deadline;
+    writer_active=false;
+    edge(&d,true,equality_time);
+    assert(!sample_at(&d,at_deadline));
+    assert(!d.asserted&&!d.release_pending);
+
+    ot_signal_debouncer_init(&d,true);
+    edge(&d,false,fall);
+    /* Explicitly guard against a stale (low) GPIO sample being published
+     * with a later timestamp: with the corrected guard, every event derives
+     * both values inside the same protected sample window. */
+    assert(sample_at(&d,just_before));
+    assert(!sample_at(&d,at_deadline));
+}
+
 static void scheduler_jitter_uses_edge_timestamp(void) {
     ot_signal_debouncer_t d;
     ot_signal_debouncer_init(&d,true);
@@ -251,6 +298,7 @@ int main(void) {
     assertion_keeps_four_sample_qualification();
     release_hold_bridges_short_gaps();
     absolute_deadline_and_exact_boundary();
+    coherent_edge_interleavings_at_microsecond_boundary();
     scheduler_jitter_uses_edge_timestamp();
     multiple_unseen_pulses_are_replayed_in_order();
     overflow_resync_is_explicit_and_requalifies();
