@@ -194,6 +194,8 @@ final class GeometryTransactionManager {
             current[lane]=PanelPreviewProtocol.MapIdentity.parse(snapshot);
             if(current[lane].lane!=lane)
                 throw new IllegalArgumentException("Authoritative map lane identity mismatch");
+            if(status.pixelCapacity!=current[lane].activePixels)
+                throw new IllegalArgumentException("CORE status pixel capacity disagrees with authoritative Panel map");
             for(PanelPreviewProtocol.MapPanel panel:current[lane].panels) {
                 if(currentZones.containsKey(panel.id))
                     throw new IllegalArgumentException("CORE Panel/Zone ID namespace collision");
