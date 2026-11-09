@@ -29,6 +29,9 @@ int ot_effects_1d_find_prior_zone_state(uint16_t panel_id,uint16_t zone_id,
     uint32_t generation,const uint16_t *prior_panel_ids,
     const uint16_t *prior_zone_ids,const uint32_t *prior_generations,
     const bool *prior_active,size_t count);
+/* Transfer a complete state, including any owned WLED scratch allocation. */
+void ot_effects_1d_move_state(ot_effects_1d_state_t *destination,
+                              ot_effects_1d_state_t *source);
 void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed);
 bool ot_effects_1d_render(const ot_wled_fx_config_t *cfg,
     ot_effects_1d_state_t *s,uint32_t ms,ot_wled_rgb_t *frame,size_t count);
