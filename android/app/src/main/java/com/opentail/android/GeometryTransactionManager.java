@@ -206,7 +206,7 @@ final class GeometryTransactionManager {
                 if(currentZones.containsKey(panel.id))
                     throw new IllegalArgumentException("Proposed Panel ID collides with an existing Zone ID");
                 PanelPreviewProtocol.MapPanel prior=currentPanels.get(panel.id);
-                if(prior!=null&&(panelLanes.get(panel.id)!=lane||!prior.name.equals(panel.name)))
+                if(prior!=null&&panelLanes.get(panel.id)!=lane)
                     throw new IllegalArgumentException("Proposed Panel ID conflicts with authoritative Panel identity");
             }
             for(MappedZone zone:proposed.zones) {
