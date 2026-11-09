@@ -315,9 +315,14 @@ final class BleDiscovery {
     private int panelSnapshotLane=-1;
     private byte[] panelSnapshotWire;
     private PanelPreviewProtocol.SnapshotHeader panelSnapshotHeader;
+    private static final int PANEL_CONTROL_BEGIN=1,PANEL_CONTROL_COMMIT=2,PANEL_CONTROL_HEARTBEAT=3;
     private volatile boolean panelCancelQueued=false,panelCancelWaitingWrite=false;
+    private volatile boolean panelControlQueued=false,panelControlWaitingWrite=false;
+    private volatile boolean panelUpdateQueued=false,panelUpdateWritePending=false;
     private volatile boolean panelControlWritePending=false;
-    private byte[] panelCancelPacket;
+    private byte[] panelCancelPacket,panelControlPacket,panelUpdatePacket;
+    private int panelControlAction=0,panelControlLane=-1,panelUpdateLane=-1;
+    private int panelControlWriteLease=0,panelUpdateWriteLease=0,negotiatedMtu=23;
     private long panelCancelAttemptedSession=-1L;
     private volatile int panelPollLease=0;
     private final int[] panelTransactionPollAttempts={0,0};
@@ -409,6 +414,10 @@ final class BleDiscovery {
         panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
         panelSnapshotWatchLease++;panelCancelQueued=false;
         panelCancelWaitingWrite=false;panelControlWritePending=false;panelCancelPacket=null;
+        panelControlQueued=false;panelControlWaitingWrite=false;panelControlPacket=null;
+        panelControlAction=0;panelControlLane=-1;panelControlWriteLease++;
+        panelUpdateQueued=false;panelUpdateWritePending=false;panelUpdatePacket=null;
+        panelUpdateLane=-1;panelUpdateWriteLease++;negotiatedMtu=23;
         panelPollLease++;panelReconciliationPending=false;
         Arrays.fill(panelTransactionPollAttempts,0);
         Arrays.fill(panelTransactionTimeoutLatched,false);
@@ -1456,7 +1465,8 @@ final class BleDiscovery {
             if(stopped || connection!=gatt)return;
             if(mtuNegotiating){
                 mtuNegotiating=false;
-                notifyStatus("BLE MTU "+mtu+"; discovering services…");
+                negotiatedMtu=status==BluetoothGatt.GATT_SUCCESS?Math.max(23,mtu):23;
+                notifyStatus("BLE MTU "+negotiatedMtu+"; discovering services…");
                 discoverCoreServices(connection);
             }
         }
