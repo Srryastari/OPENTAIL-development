@@ -24,13 +24,18 @@ Controller → Output Lane → Panel → Zone → Pixel Ranges → LEDs.
 
 ### Migration and current NVS boundary
 
-- The new Panel/Zone active/staged journal has been moved to the dedicated ot_zone_map namespace.
-- First-boot v1/v2 conversion is staged in ot_zone_map before promotion. Legacy profile bytes in ot_output_cfg are left untouched as migration input.
-- A staged record is recoverable after reboot and promotion is still gated by raw/debounced physical-input quietness and an unchanged edge epoch.
-- The existing ot_output_cfg profile_v2/profile records are still legacy combined records. The separate hardware-only lane record, cross-namespace hardware/map reconciliation, and persistent reset tombstone required by Issue #126 section 2A are NOT YET COMPLETE. The map journal currently carries a combined runtime snapshot for compatibility; it must not be described as the final hardware/map split.
-- Section 6C reset is implemented as a two-step authenticated, revision-bound challenge/confirmation on the existing Panel command characteristic. Request is [v3, FF, AA, lane, revision LE16]; response returns a 32-bit random challenge, revision and 5-second TTL; confirmation is [v3, FF, AB, lane, challenge LE32, revision LE16]. It rejects active physical inputs, Show/Demo/Simulation, diagnostics/preview, pending configuration, a pending STOP render, and watchdog/fault inhibit.
-- Reset clears only the selected lane's Panel/Zone map while preserving its lane hardware fields and saved effect presets. It stops playback references, writes a CRC-protected reset_v3 tombstone atomically with the staged map journal, carries the reset mask through reboot recovery, and reports success only after the active journal and tombstone are re-read and validated.
-- The separate hardware-only lane record and complete cross-namespace hardware/map reconciliation required by section 2A remain NOT YET COMPLETE. The map journal still carries a combined runtime snapshot for compatibility.
+- The actual CORE runtime now uses the v4 split rather than only the portable host model:
+  - `ot_output_cfg`: hardware-only `lane_active_v4` / `lane_stage_v4` records (lane identity, active pixel capacity, color order, RGB/white calibration and gamma).
+  - `ot_zone_map`: geometry-only `map_active_v4` / `map_stage_v4` records, the cross-namespace pair intent and the v4 initialization marker.
+  - `ot_trig_cfg`: the existing IN1..IN8 function profile/journal plus the separate CRC-protected `policy_v1` physical-input policy record.
+  - `ot_fx_presets`: effect snapshots remain independently owned and are not geometry.
+- The pair-store is shared by boot recovery, runtime save, reset and activation. It commits and verifies nine durable phases: lane stage, map stage, intent, lane active, map active, marker, lane-stage erase, map-stage erase and intent erase.
+- The v4 marker/intent/active records establish authority. Once any authoritative v4 record exists, invalid or missing halves fail closed; legacy records are never used as a fallback. A power cut before the initial intent leaves legacy data authoritative and the staged v4 records are safely replaceable.
+- Legacy v1/v2 combined output profiles and the v3 combined Panel/Zone journal/tombstone remain read-only migration inputs. Their bytes are not rewritten or erased during migration. The first successful migration splits the joined runtime configuration into lane-only and map-only records.
+- Pair snapshots, readback and split/join scratch use one bounded static workspace (compile-time capped at 16 KiB); journal CRC calculation no longer creates full-structure stack copies.
+- Trigger policy migration writes only approved policy values: active-low polarity, four assertion samples at 10 ms, and a 400,000 µs release hold for physical IN3/IN4. It never stores live timer, edge timestamp or debouncer state. Existing mapping and BLE profile wire formats remain unchanged. A corrupt, unsupported or build-mismatched policy record fails closed rather than being overwritten.
+- Section 6C reset is a two-step authenticated, revision-bound challenge/confirmation on the existing Panel command characteristic. Request is [v3, FF, AA, lane, revision LE16]; response returns a 32-bit random challenge, revision and 5-second TTL; confirmation is [v3, FF, AB, lane, challenge LE32, revision LE16]. It rejects active physical inputs, Show/Demo/Simulation, diagnostics/preview, pending configuration, a pending STOP render, and watchdog/fault inhibit.
+- Reset clears only the selected lane's Panel/Zone geometry through the v4 pair transaction while preserving that lane's hardware record and saved effect presets. The reset mask is carried in the map journal and verified active pair; existing v3 reset tombstones are read-only migration inputs, not newly written. Reset reports success only after authoritative active lane/map records and the reset mask are re-read and validated.
 
 ### Commissioning fallback and diagnostics
 
