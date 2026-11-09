@@ -226,6 +226,7 @@ static void storage_split_roundtrip(void){
     make_zone(left,0u,201u,101u,OT_OM_BRAKE,"Brake",0u,40u);
     make_zone(left,1u,202u,101u,OT_OM_LEFT,"Turn",40u,60u);
     left->zones[1].range_count=2u;
+    left->zones[1].ranges[0].count=40u;
     left->zones[1].ranges[1]=(ot_pz_range_t){80u,20u};
     ot_pz_output_t *right=&runtime.outputs[1];make_output(right,1u,80u);
     (void)snprintf(right->name,sizeof(right->name),"Right physical lane");
