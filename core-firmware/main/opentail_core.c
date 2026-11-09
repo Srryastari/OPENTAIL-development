@@ -1284,7 +1284,7 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
     const uint32_t stop_generation=stop_request_generation;
-    ot_pz_controller_t candidate;
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
     bool safe=false;
     portENTER_CRITICAL(&state_lock);
     safe=pz_reset_challenge.active&&pz_reset_challenge.lane==lane&&
@@ -1302,11 +1302,11 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
         !pz_preview.active&&stop_request_generation==stop_render_generation;
     if(safe){
-        candidate=pz_outputs;
-        candidate.outputs[lane].panel_count=0u;
-        candidate.outputs[lane].zone_count=0u;
-        memset(candidate.outputs[lane].panels,0,sizeof(candidate.outputs[lane].panels));
-        memset(candidate.outputs[lane].zones,0,sizeof(candidate.outputs[lane].zones));
+        *candidate=pz_outputs;
+        candidate->outputs[lane].panel_count=0u;
+        candidate->outputs[lane].zone_count=0u;
+        memset(candidate->outputs[lane].panels,0,sizeof(candidate->outputs[lane].panels));
+        memset(candidate->outputs[lane].zones,0,sizeof(candidate->outputs[lane].zones));
         pz_reset_pending_mask|=(uint8_t)(1u<<lane);
     }
     pz_reset_challenge.active=false; /* single-use even if the confirm fails */
@@ -1319,13 +1319,13 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         portEXIT_CRITICAL(&state_lock);
         xSemaphoreGive(om_write_mutex);return 3;
     }
-    if(!ot_pz_valid(&candidate)){
+    if(!ot_pz_valid(candidate)){
         portENTER_CRITICAL(&state_lock);
         pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
         portEXIT_CRITICAL(&state_lock);
         xSemaphoreGive(om_write_mutex);return 1;
     }
-    if(!pz_save_controller_locked(&candidate)){
+    if(!pz_save_controller_locked(candidate)){
         portENTER_CRITICAL(&state_lock);
         pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
         portEXIT_CRITICAL(&state_lock);
@@ -1338,7 +1338,7 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         portEXIT_CRITICAL(&state_lock);
         if(still_pending){xSemaphoreGive(om_write_mutex);return 5;}
     }else{
-        if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,lane)){
+        if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,&pz_pair_workspace,lane)){
             xSemaphoreGive(om_write_mutex);return 4;
         }
         portENTER_CRITICAL(&state_lock);
@@ -1350,15 +1350,15 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
     }
     /* Reset readback is the authoritative v4 pair: map-only geometry and
      * hardware-only lane records must share the same transaction/revision. */
-    ot_pz_pair_store_snapshot_t readback={0};
-    bool readback_ok=ot_pz_pair_store_snapshot(&pz_pair_store_io,&readback)&&
-        readback.has_map_active&&readback.has_lane_active&&
-        readback.map_active.transaction_id==readback.lane_active.transaction_id&&
-        readback.map_active.candidate.outputs[lane].panel_count==0u&&
-        readback.map_active.candidate.outputs[lane].zone_count==0u&&
-        readback.map_active.candidate_revision[lane]==pz_active_revision[lane]&&
-        readback.lane_active.candidate_revision[lane]==pz_active_revision[lane]&&
-        (readback.map_active.reset_mask&(1u<<lane))!=0u;
+    bool readback_ok=ot_pz_pair_store_snapshot(&pz_pair_store_io,&pz_pair_workspace);
+    const ot_pz_pair_store_snapshot_t *readback=&pz_pair_workspace.snapshot;
+    readback_ok=readback_ok&&readback->has_map_active&&readback->has_lane_active&&
+        readback->map_active.transaction_id==readback->lane_active.transaction_id&&
+        readback->map_active.candidate.outputs[lane].panel_count==0u&&
+        readback->map_active.candidate.outputs[lane].zone_count==0u&&
+        readback->map_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        readback->lane_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        (readback->map_active.reset_mask&(1u<<lane))!=0u;
     if(!readback_ok){xSemaphoreGive(om_write_mutex);return 5;}
     ot_fx_bank_stop_all(&fx_bank);
     request_render_refresh();
@@ -1370,9 +1370,10 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     const TickType_t now=xTaskGetTickCount();
-    ot_pz_controller_t candidate;bool busy,stale,exhausted;
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
+    bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
-    candidate=pz_outputs;
+    *candidate=pz_outputs;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||pz_preview.active||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
@@ -1381,16 +1382,16 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return 2;}
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
-    if(memcmp(&candidate.outputs[lane],next,sizeof(*next))==0){
+    if(memcmp(&candidate->outputs[lane],next,sizeof(*next))==0){
         portENTER_CRITICAL(&state_lock);
         ot_pz_preview_cancel(&pz_preview);
         portEXIT_CRITICAL(&state_lock);
         request_render_refresh();
         xSemaphoreGive(om_write_mutex);return 0;
     }
-    candidate.outputs[lane]=*next;
-    if(!ot_pz_valid(&candidate)){xSemaphoreGive(om_write_mutex);return 1;}
-    const bool saved=pz_save_controller_locked(&candidate);
+    candidate->outputs[lane]=*next;
+    if(!ot_pz_valid(candidate)){xSemaphoreGive(om_write_mutex);return 1;}
+    const bool saved=pz_save_controller_locked(candidate);
     if(saved){
         portENTER_CRITICAL(&state_lock);
         ot_pz_preview_cancel(&pz_preview);
@@ -2780,11 +2781,12 @@ static void tm_promote(uint32_t epoch){
     nvs_close(h);
 }
 static void pz_promote(uint32_t epoch){
+    ot_pz_pair_store_workspace_t *workspace=&pz_pair_workspace;
     if(!config_activation_idle(epoch,true))return;
     if(__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)){
         const uint32_t transaction_id=__atomic_load_n(
             &pz_pair_transaction_id,__ATOMIC_RELAXED);
-        if(!ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id,
+        if(!ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id,
                                     pz_pair_phase_hook,NULL)){
             config_recovery_fault=true;
             ot_st_set_fault("v4 lane/map pair promotion failed; reboot recovery required");
@@ -2792,34 +2794,32 @@ static void pz_promote(uint32_t epoch){
         }
         __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);
     }
-    ot_pz_pair_store_snapshot_t snapshot={0};
-    ot_pz_controller_t recovered_live={0},durable_candidate={0};
-    ot_pz_pending_t recovered_pending={0};
     uint16_t active_revision[OT_PZ_OUTPUTS]={0},staged_revision[OT_PZ_OUTPUTS]={0};
     bool intent_pending=false;uint32_t recovered_transaction=0u;uint8_t reset_mask=0u;
-    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,&snapshot)||
-       !snapshot.has_map_active||!snapshot.has_lane_active||
-       snapshot.map_active.transaction_id!=snapshot.lane_active.transaction_id||
-       !ot_pz_join(&snapshot.lane_active.candidate,&snapshot.map_active.candidate,
-                   &durable_candidate)||
-       !ot_pz_pair_store_recover(&pz_pair_store_io,NULL,&recovered_live,
-            &recovered_pending,active_revision,staged_revision,&intent_pending,
-            &recovered_transaction,&reset_mask)||intent_pending||
-       recovered_transaction!=snapshot.map_active.transaction_id){
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,workspace)||
+       !workspace->snapshot.has_map_active||!workspace->snapshot.has_lane_active||
+       workspace->snapshot.map_active.transaction_id!=
+           workspace->snapshot.lane_active.transaction_id||
+       !ot_pz_join(&workspace->snapshot.lane_active.candidate,
+                   &workspace->snapshot.map_active.candidate,&workspace->candidate)||
+       !ot_pz_pair_store_recover(&pz_pair_store_io,workspace,NULL,
+            &workspace->previous,&workspace->pending,active_revision,
+            staged_revision,&intent_pending,&recovered_transaction,&reset_mask)||
+       intent_pending||recovered_transaction!=workspace->snapshot.map_active.transaction_id){
         config_recovery_fault=true;
         ot_st_set_fault("v4 lane/map active pair readback mismatch");return;
     }
     bool matches=false;
     portENTER_CRITICAL(&state_lock);
     if(pz_deferred.pending){
-        matches=recovered_pending.pending&&
-            memcmp(&pz_outputs,&recovered_live,sizeof(pz_outputs))==0&&
-            memcmp(&pz_deferred.candidate,&recovered_pending.candidate,
+        matches=workspace->pending.pending&&
+            memcmp(&pz_outputs,&workspace->previous,sizeof(pz_outputs))==0&&
+            memcmp(&pz_deferred.candidate,&workspace->pending.candidate,
                    sizeof(pz_deferred.candidate))==0&&
             memcmp(pz_active_revision,active_revision,sizeof(active_revision))==0&&
             memcmp(pz_revision,staged_revision,sizeof(staged_revision))==0;
     }else{
-        matches=memcmp(&pz_outputs,&durable_candidate,sizeof(pz_outputs))==0;
+        matches=memcmp(&pz_outputs,&workspace->candidate,sizeof(pz_outputs))==0;
     }
     portEXIT_CRITICAL(&state_lock);
     if(!matches){
@@ -2834,13 +2834,13 @@ static void pz_promote(uint32_t epoch){
        tm_gpio_input_mask()==0u&&
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         if(pz_deferred.pending){
-            pz_outputs=recovered_pending.candidate;
+            pz_outputs=workspace->pending.candidate;
             pz_deferred.pending=false;
             applied=true;
         }
-        memcpy(pz_active_revision,snapshot.map_active.candidate_revision,
+        memcpy(pz_active_revision,workspace->snapshot.map_active.candidate_revision,
                sizeof(pz_active_revision));
-        memcpy(pz_revision,snapshot.map_active.candidate_revision,
+        memcpy(pz_revision,workspace->snapshot.map_active.candidate_revision,
                sizeof(pz_revision));
         __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);pz_persistent=true;
         if(effective_reset_mask){
@@ -2870,17 +2870,16 @@ static void config_activation_task(void *unused){
             panel_pending=panel_pending||
                 __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
             bool preview_commit=false;
-            ot_pz_controller_t preview_candidate={0};
             portENTER_CRITICAL(&state_lock);
             if(pz_preview_commit_requested){
-                preview_candidate=pz_preview_commit_candidate;
+                pz_pair_workspace.candidate=pz_preview_commit_candidate;
                 pz_preview_commit_requested=false;
                 pz_preview_commit_worker_active=true;
                 preview_commit=true;
             }
             portEXIT_CRITICAL(&state_lock);
             if(preview_commit){
-                const bool saved=pz_save_controller_locked(&preview_candidate);
+                const bool saved=pz_save_controller_locked(&pz_pair_workspace.candidate);
                 portENTER_CRITICAL(&state_lock);
                 pz_preview_commit_worker_active=false;
                 if(!saved&&pz_preview.active&&pz_preview.committing&&
@@ -2891,6 +2890,7 @@ static void config_activation_task(void *unused){
                                            OT_PZ_PREVIEW_LEASE_MS;
                 }
                 memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
+                memset(&pz_pair_workspace.candidate,0,sizeof(pz_pair_workspace.candidate));
                 portEXIT_CRITICAL(&state_lock);
             }
             const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
