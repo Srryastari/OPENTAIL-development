@@ -216,7 +216,13 @@ reset_confirm = core.split("int ot_ble_panel_reset_confirm(", 1)[1].split(
     "int ot_ble_panel_save(", 1)[0]
 assert "candidate->outputs[lane].panel_count=0u" in reset_confirm
 assert "candidate->outputs[lane].zone_count=0u" in reset_confirm
-assert "ot_pz_pair_store_mark_reset" in reset_confirm
+# Reset persistence is performed exactly once by the shared save path:
+# changed geometry carries reset_mask in the pair intent; unchanged geometry
+# uses mark_reset() inside pz_save_controller_locked().
+pz_save_impl = core.split("static bool pz_save_controller_locked(",1)[1].split(
+    "/* Legacy output writes are lossless",1)[0]
+assert "ot_pz_pair_store_mark_reset" in pz_save_impl
+assert "ot_pz_pair_store_mark_reset" not in reset_confirm
 assert "nvs_open(" not in reset_confirm
 assert "ot_tm_defaults" not in reset_confirm
 assert "ot_ble_delete_fx_preset" not in reset_confirm
