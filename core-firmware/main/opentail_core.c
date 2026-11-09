@@ -1976,8 +1976,8 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         bool changed=false;
         portENTER_CRITICAL(&state_lock);
         if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
-            changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
-                  req.chain_mask,req.zone_mask,ms,&overlay);
+            changed=ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs,
+                  pz_outputs.outputs,req.chain_mask,req.zone_mask,ms,&overlay);
         portEXIT_CRITICAL(&state_lock);
         if(!changed)return respond_err(r,409,"no matching active effect zones");
         request_render_refresh();
