@@ -68,7 +68,7 @@ public class TelemetrySequenceWatchdogTest {
         put32(b,35,2);b[39]=5;b[60]=5;
         TelemetrySequenceWatchdog.Decision d=w.observe(PanelPreviewProtocol.Status.parse(b));
         assertTrue(d.warning);assertFalse(d.hardFault);
-        assertEquals(2L,d.snapshot.lastRejectedSequence);
+        assertEquals(2L,w.snapshot().lastRejectedSequence);
     }
 
     @Test public void disconnectDuringActivePreviewRequiresFreshSessionReconciliation() {
