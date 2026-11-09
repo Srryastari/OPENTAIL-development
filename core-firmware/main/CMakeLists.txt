@@ -14,6 +14,6 @@ idf_component_register(
          "ot_single_watchdog.c" "ot_single_watchdog_idf.c"
     INCLUDE_DIRS "."
     EMBED_TXTFILES "assets/dev_console.htm"
-    REQUIRES esp_wifi esp_netif esp_event esp_http_server esp_driver_spi
+    REQUIRES esp_psram esp_wifi esp_netif esp_event esp_http_server esp_driver_spi
              esp_timer driver nvs_flash json bt mbedtls app_update esp_partition
 )
