@@ -99,7 +99,7 @@ static DRAM_ATTR volatile uint32_t input_edge_epoch __attribute__((aligned(4)))=
 /* GPIO ISR transition history. A sampler tick never has to infer whether
  * one or more turn edges happened between reads. Each lane is an SPSC ring:
  * ISR publishes head with release semantics; sampler consumes through tail. */
-#define OT_TURN_EDGE_QUEUE_CAPACITY 32u
+#define OT_TURN_EDGE_QUEUE_CAPACITY 64u
 #define OT_TURN_EDGE_QUEUE_MASK (OT_TURN_EDGE_QUEUE_CAPACITY-1u)
 typedef struct {
     uint64_t timestamp_us;
@@ -2494,6 +2494,14 @@ static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     /* Reject an invalid callback index before any pin/counter/queue lookup. */
     if(input_index>=OT_IN_COUNT)return;
+    const bool is_turn=input_index==2u || input_index==3u;
+    const unsigned slot=is_turn?input_index-2u:0u;
+    /* Acquire the publication guard before sampling either the clock or the
+     * GPIO. A sampler on the other core must not expire a hold while the
+     * corresponding edge is in flight. */
+    if(is_turn)
+        __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
+    const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;
     int level=1;
     bool asserted=false;
     if(input_index<OT_INPUT_DIAG_INPUTS){
@@ -2509,12 +2517,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
         if(asserted)__atomic_fetch_or(&input_raw_level_mask,bit,__ATOMIC_RELAXED);
         else __atomic_fetch_and(&input_raw_level_mask,~bit,__ATOMIC_RELAXED);
     }
-    if(input_index==2u || input_index==3u){
-        const unsigned slot=input_index-2u;
-        /* Mark the producer active before timestamp capture. The dual-core
-         * sampler defers deadline expiry if this edge is not yet published. */
-        __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
-        const uint64_t edge_time_us=(uint64_t)esp_timer_get_time();
+    if(is_turn){
         const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_RELAXED);
         const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
         if((uint32_t)(head-tail)>=OT_TURN_EDGE_QUEUE_CAPACITY){
