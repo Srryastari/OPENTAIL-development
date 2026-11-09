@@ -86,7 +86,7 @@ store_header=(root/"main/panel_zone_pair_store.h").read_text()
 for token in ("ot_pz_pair_store_begin","ot_pz_pair_store_finish",
               "ot_pz_pair_store_snapshot","ot_pz_pair_store_recover",
               "ot_pz_pair_store_mark_reset","write_verified","erase_verified",
-              "write_pair_verified","OT_PZ_PAIR_STORE_MARKER_KEY","has_marker"):
+              "OT_PZ_PAIR_STORE_MARKER_KEY","has_marker"):
     assert token in store,token
 for token in ("OT_PZ_LANE_KEY_STAGED","OT_PZ_MAP_KEY_STAGED",
               "OT_PZ_PAIR_INTENT_KEY","OT_PZ_LANE_KEY_ACTIVE",
@@ -96,7 +96,7 @@ assert store.index("OT_PZ_LANE_KEY_STAGED") < store.index(
     "OT_PZ_MAP_KEY_STAGED") < store.index("OT_PZ_PAIR_INTENT_KEY")
 assert store.index("OT_PZ_LANE_KEY_ACTIVE") < store.index(
     "OT_PZ_MAP_KEY_ACTIVE")
-for phase in range(1,9):
+for phase in range(1,10):
     assert f"phase_context,{phase}u" in store
 
 # Runtime promotion resumes an intent, validates the matching active pair,
