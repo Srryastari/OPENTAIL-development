@@ -160,12 +160,14 @@ bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
                   sizeof(s->map_active.candidate_revision))!=0||
            memcmp(previous_revision,s->map_active.candidate_revision,
                   sizeof(s->map_active.candidate_revision))!=0)return false;
+        /* Reuse one pending candidate as the join scratch so caller-owned
+         * previous/candidate pointers may safely live inside this workspace. */
         if(!ot_pz_join(&s->lane_active.previous,&s->map_active.previous,
-                       &workspace->previous)||
+                       &workspace->pending.candidate)||
            !ot_pz_join(&s->lane_active.candidate,&s->map_active.candidate,
-                       &workspace->candidate)||
-           memcmp(&workspace->candidate,previous,sizeof(workspace->candidate))!=0)
-            return false;
+                       &workspace->pending.candidate)||
+           memcmp(&workspace->pending.candidate,previous,
+                  sizeof(workspace->pending.candidate))!=0)return false;
     }else if(!allow_empty_active){
         return false;
     }
