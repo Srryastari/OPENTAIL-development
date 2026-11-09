@@ -58,34 +58,34 @@ static uint16_t scene_checksum(const ot_fx_scene_record_t *r){
 }
 bool ot_fx_scene_pack(ot_fx_scene_record_t *rec,
                       const ot_fx_zone_bank_t *bank,
-                      const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],
+                      const ot_fx_scene_output_identity_t identities[OT_OM_OUTPUTS],
                       uint32_t now_ms){
- if(!rec||!bank||!panel_outputs)return false;
+ if(!rec||!bank||!identities)return false;
  memset(rec,0,sizeof(*rec));
  rec->magic=OT_FX_PRESET_MAGIC;rec->version=OT_FX_SCENE_VERSION;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-  const ot_pz_output_t *panel=&panel_outputs[o];
-  if(panel->zone_count>OT_OM_ZONES)return false;
+  const ot_fx_scene_output_identity_t *identity=&identities[o];
+  if(identity->zone_count>OT_OM_ZONES)return false;
   bool assigned[OT_OM_ZONES]={false};
   for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
    const ot_fx_zone_slot_t *slot=&bank->zones[o][bank_z];
    if(!ot_fx_slot_active(slot,now_ms))continue;
    unsigned zone_index=OT_OM_ZONES;
    if(slot->owner_panel_id&&slot->owner_zone_id){
-    for(unsigned zone=0;zone<panel->zone_count;zone++)
-     if(panel->zones[zone].panel_id==slot->owner_panel_id&&
-        panel->zones[zone].id==slot->owner_zone_id){
+    for(unsigned zone=0;zone<identity->zone_count;zone++)
+     if(identity->zones[zone].panel_id==slot->owner_panel_id&&
+        identity->zones[zone].zone_id==slot->owner_zone_id){
       zone_index=zone;break;
      }
    }else if(!slot->owner_panel_id&&!slot->owner_zone_id&&
-            bank_z<panel->zone_count){
+            bank_z<identity->zone_count){
     /* Legacy in-memory bank users without identity metadata retain their
      * historical index mapping. Production BLE commands always bind IDs. */
     zone_index=bank_z;
    }
    /* Never serialize an orphan, partial identity or duplicate owner as a
     * different zone. A committed geometry change must prune it first. */
-   if(zone_index>=panel->zone_count||assigned[zone_index])return false;
+   if(zone_index>=identity->zone_count||assigned[zone_index])return false;
    ot_ble_fx_packet_t p=slot->request;
    p.chain_mask=(uint8_t)(1u<<o);
    p.zone_mask=(uint8_t)(1u<<zone_index);
