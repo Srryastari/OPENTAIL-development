@@ -199,6 +199,26 @@ static void durable_boundary_matrix(void){
         assert(workspace.snapshot.marker.transaction_id==workspace.snapshot.map_active.transaction_id);
     }
 }
+static void reset_marker_rejects_pending_intent(void){
+    fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
+    ot_pz_controller_t base,candidate1,candidate2;
+    make_runtime(&base,100u,OT_OM_GRB,100u);
+    make_runtime(&candidate1,80u,OT_OM_RGB,80u);
+    const uint16_t rev0[OT_PZ_OUTPUTS]={1u,1u};
+    const uint16_t rev1[OT_PZ_OUTPUTS]={2u,2u};
+    assert(ot_pz_pair_store_begin(&io,&workspace,&base,&candidate1,
+        rev0,rev1,0x2111u,0u,true,NULL,NULL));
+    assert(ot_pz_pair_store_finish(&io,&workspace,0x2111u,NULL,NULL));
+    make_runtime(&candidate2,60u,OT_OM_GRB,60u);
+    const uint16_t rev2[OT_PZ_OUTPUTS]={3u,3u};
+    phase_state_t cut={.cut_after=3u};
+    assert(!ot_pz_pair_store_begin(&io,&workspace,&candidate1,&candidate2,
+        rev1,rev2,0x2112u,0u,false,phase_hook,&cut));
+    assert(store.intent.present);
+    const unsigned writes=store.durable_writes;
+    assert(!ot_pz_pair_store_mark_reset(&io,&workspace,0u));
+    assert(store.durable_writes==writes);
+}
 static void reset_marker_first_write_and_idempotence(void){
     fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
     ot_pz_controller_t base,candidate;
@@ -279,6 +299,7 @@ int main(void){
     initial_migration_cut_matrix();
     marker_read_error_fails_closed();
     durable_boundary_matrix();
+    reset_marker_rejects_pending_intent();
     reset_marker_first_write_and_idempotence();
     reset_marker_and_fail_closed();
     puts("PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
