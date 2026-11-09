@@ -403,7 +403,9 @@ final class BleDiscovery {
            !Arrays.equals(confirmed.wire,snapshots[lane].wire))return false;
         if(!manager.requestBegin())return false;
         byte[] packet;
-        try {packet=PanelPreviewProtocol.begin(lane,status.activeRevision,
+        // activeRevision is decoded as uint32 for shared status telemetry;
+        // BEGIN carries the authoritative uint16 active revision.
+        try {packet=PanelPreviewProtocol.begin(lane,(int)status.activeRevision,
             status.pixelCapacity,panelCapabilities.schemaVersion);}
         catch(IllegalArgumentException ex) {
             manager.markSynchronizationUncertain("Panel BEGIN values changed after preflight");
