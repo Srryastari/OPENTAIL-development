@@ -48,6 +48,8 @@ jobs:
                   "85f0cc22bdcff6cdb43a408d6b338fbfd2454671",
               "android/app/src/main/cpp/core/SOURCE.json":
                   "7eeca0e24a0801cb3bad0d77f5f64873824a215d",
+              "android/qa/test_full_offline_preview.py":
+                  "8bc501e86a06ddaf84f9acd149118e8da3c1a78f",
           }
           forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))
                      and p not in approved]
