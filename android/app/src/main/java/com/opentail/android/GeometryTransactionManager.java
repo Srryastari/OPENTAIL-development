@@ -169,16 +169,29 @@ final class GeometryTransactionManager {
      * by a guessed ID; only an exact existing Zone identity may be updated in place.
      */
     static void validateMappingAgainstSnapshots(LayoutMapping mapping,
-            PanelPreviewProtocol.LaneSnapshot[] snapshots) {
-        if(mapping==null||snapshots==null||snapshots.length!=2)
-            throw new IllegalArgumentException("Both authoritative output snapshots are required");
+            PanelPreviewProtocol.LaneSnapshot[] snapshots,
+            PanelPreviewProtocol.Status[] statuses) {
+        if(mapping==null||snapshots==null||snapshots.length!=2||
+           statuses==null||statuses.length!=2)
+            throw new IllegalArgumentException("Both authoritative output snapshots and statuses are required");
         PanelPreviewProtocol.MapIdentity[] current=new PanelPreviewProtocol.MapIdentity[2];
         Map<Integer,PanelPreviewProtocol.MapPanel> currentPanels=new HashMap<>();
         Map<Integer,Integer> panelLanes=new HashMap<>();
         Map<Integer,PanelPreviewProtocol.MapZone> currentZones=new HashMap<>();
         Map<Integer,Integer> zoneLanes=new HashMap<>();
         for(int lane=0;lane<2;lane++) {
-            current[lane]=PanelPreviewProtocol.MapIdentity.parse(snapshots[lane]);
+            PanelPreviewProtocol.LaneSnapshot snapshot=snapshots[lane];
+            PanelPreviewProtocol.Status status=statuses[lane];
+            if(snapshot==null||status==null||snapshot.lane!=lane||status.lane!=lane||
+               snapshot.pending||!snapshot.persistent||status.state!=PanelPreviewProtocol.STATE_IDLE||
+               status.sessionId!=0||status.configPending||!status.persistent||
+               status.hardSyncFault||status.warningObserved||
+               snapshot.activeRevision!=status.activeRevision||
+               snapshot.stagedRevision!=status.stagedRevision||
+               status.activeRevision!=status.renderRevision)
+                throw new IllegalArgumentException("CORE output "+(lane+1)+
+                    " is not in a stable, persistent, idle geometry state");
+            current[lane]=PanelPreviewProtocol.MapIdentity.parse(snapshot);
             if(current[lane].lane!=lane)
                 throw new IllegalArgumentException("Authoritative map lane identity mismatch");
             for(PanelPreviewProtocol.MapPanel panel:current[lane].panels) {
