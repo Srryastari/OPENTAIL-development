@@ -14,6 +14,21 @@
 #define OT_PZ_TX_DESCRIPTOR_BYTES 8u
 #define OT_PZ_TX_MAX_DESCRIPTORS 4u
 #define OT_PZ_TX_MIN_ATT_MTU 23u
+#define OT_PZ_TX_STATUS_V2_VERSION 2u
+#define OT_PZ_TX_STATUS_V2_BYTES 61u
+
+/* Read-only transaction telemetry errors. Existing codes 0..4 are retained. */
+#define OT_PZ_TX_ERROR_NONE 0u
+#define OT_PZ_TX_ERROR_INVALID 1u
+#define OT_PZ_TX_ERROR_BUSY 2u
+#define OT_PZ_TX_ERROR_STALE 3u
+#define OT_PZ_TX_ERROR_INTERNAL 4u
+#define OT_PZ_TX_ERROR_COMMITTING_LOCKED 5u
+#define OT_PZ_TX_ERROR_SEQUENCE_GAP 6u
+#define OT_PZ_TX_ERROR_SEQUENCE_OUT_OF_ORDER 7u
+#define OT_PZ_TX_ERROR_SEQUENCE_DUPLICATE 8u
+#define OT_PZ_TX_ERROR_SEQUENCE_CONFLICT 9u
+#define OT_PZ_TX_ERROR_SYNC_REQUIRED 10u
 
 typedef struct {
     uint8_t lane;
@@ -37,8 +52,21 @@ typedef enum {
     OT_PZ_TX_SEQUENCE_NEW=0,
     OT_PZ_TX_SEQUENCE_DUPLICATE,
     OT_PZ_TX_SEQUENCE_STALE,
-    OT_PZ_TX_SEQUENCE_CONFLICT
+    OT_PZ_TX_SEQUENCE_CONFLICT,
+    OT_PZ_TX_SEQUENCE_GAP,
+    OT_PZ_TX_SEQUENCE_OUT_OF_ORDER
 } ot_pz_tx_sequence_result_t;
+
+typedef enum {
+    OT_PZ_TX_UPDATE_ACCEPT=0,
+    OT_PZ_TX_UPDATE_REJECT_COMMITTING,
+    OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED,
+    OT_PZ_TX_UPDATE_REJECT_DUPLICATE,
+    OT_PZ_TX_UPDATE_REJECT_GAP,
+    OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER,
+    OT_PZ_TX_UPDATE_REJECT_CONFLICT,
+    OT_PZ_TX_UPDATE_REJECT_STALE
+} ot_pz_tx_update_admission_t;
 
 /* Control packets: BEGIN is 8 bytes, COMMIT 11, CANCEL/HEARTBEAT 7.
  * UPDATE is intentionally parsed separately on the no-response characteristic. */
@@ -53,3 +81,9 @@ bool ot_pz_tx_parse_update(const uint8_t *packet,size_t length,uint16_t att_mtu,
 ot_pz_tx_sequence_result_t ot_pz_tx_sequence_check(bool has_last,
     uint32_t last_sequence,uint32_t last_packet_crc32,
     uint32_t sequence,uint32_t packet_crc32);
+
+/* COMMITTING and a latched sequence fault are checked before sequence replay
+ * classification. A delayed BLE packet can never pass this admission gate. */
+ot_pz_tx_update_admission_t ot_pz_tx_update_admit(bool committing,
+    bool sequence_sync_fault,bool has_last,uint32_t last_sequence,
+    uint32_t last_packet_crc32,uint32_t sequence,uint32_t packet_crc32);
