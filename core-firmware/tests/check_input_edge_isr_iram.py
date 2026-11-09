@@ -7,6 +7,7 @@ Run inside the ESP-IDF toolchain container after the exact-head build:
 This is a link/disassembly gate, not a substitute for physical ISR stress tests.
 """
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
@@ -28,8 +29,9 @@ def run(*args):
                           text=True, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE).stdout
 
+symbol_table = run("-t")
 symbols = {}
-for line in run("-t").splitlines():
+for line in symbol_table.splitlines():
     fields = line.split()
     if len(fields) >= 6:
         section, name = fields[-3], fields[-1]
@@ -86,4 +88,26 @@ for raw_target in targets:
         raise SystemExit(f"ISR direct call reaches non-IRAM code: {target} in {section}")
     print(f"PASS ISR call target {target}: {section}")
 
+# Preserve the exact linked evidence beside the ELF so independent review
+# can inspect the full symbol table and actual ISR instruction stream.
+evidence_dir = elf.parent / "isr-evidence"
+evidence_dir.mkdir(parents=True, exist_ok=True)
+version = subprocess.run([objdump, "--version"], check=True, text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+(evidence_dir / "input_edge_isr.symbols.txt").write_text(symbol_table)
+(evidence_dir / "input_edge_isr.dis").write_text(disassembly)
+audit_lines = [
+    f"ELF: {elf}",
+    f"GITHUB_SHA: {os.environ.get('GITHUB_SHA', 'not-provided')}",
+    f"OBJDUMP: {objdump}",
+    version.strip(),
+    "PASS: input_edge_isr linked in IRAM",
+    "PASS: ISR mutable data in DRAM",
+    "PASS: direct call targets linked in IRAM",
+    "CALL TARGETS:",
+]
+audit_lines.extend(f"  {target.split('+', 1)[0].strip()}: {symbols[target.split('+', 1)[0].strip()]}"
+                   for target in targets)
+(evidence_dir / "input_edge_isr.audit.txt").write_text("\\n".join(audit_lines) + "\\n")
+print(f"Saved linked ISR evidence: {evidence_dir}")
 print("PASS: input_edge_isr linked in IRAM; ISR data in DRAM; direct calls IRAM-safe")
