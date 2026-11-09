@@ -1,5 +1,11 @@
 name: Effects #120 exact Firmware127 integrated compatibility
 on:
+  pull_request:
+    branches: [firmware/issue113-single-esp-progress-wdt-20261103]
+    paths:
+      - 'scripts/tests/test_effects_watchdog_compatibility.py'
+      - '.github/workflows/verify-effects-firmware115-compatibility.yml'
+      - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
   push:
     branches: [effects/fw115-compatibility-no-code-20261108]
     paths:
