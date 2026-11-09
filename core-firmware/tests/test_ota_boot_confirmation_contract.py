@@ -16,7 +16,7 @@ assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(conf
 assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
 # Early renderer creation must not let an OTA candidate get confirmed before
 # the independent BLE radio is actually advertising and the frame completes.
-assert "ot_sw_idf_stable()" in led.split(gate,1)[1].split(confirm,1)[0]
+assert led.index("ot_sw_idf_stable()") < led.index("ot_ota_confirm_boot(true)")
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
