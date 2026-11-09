@@ -209,6 +209,15 @@ static void reset_marker_and_fail_closed(void){
     assert(active.map_active.candidate.outputs[0].panel_count==0u);
     assert(active.map_active.candidate.outputs[0].zone_count==0u);
     assert(active.map_active.reset_mask==1u);
+    /* A completed v4 active pair without its initialization marker is
+     * ambiguous and must not silently reopen legacy fallback. */
+    fake_store_t missing_marker_store=store;
+    missing_marker_store.marker.present=false;
+    ot_pz_pair_store_io_t missing_marker_io=make_io(&missing_marker_store);
+    ot_pz_controller_t missing_live={0};ot_pz_pending_t missing_pending={0};
+    uint16_t missing_ar[2]={0},missing_sr[2]={0};
+    assert(!ot_pz_pair_store_recover(&missing_marker_io,&base,&missing_live,
+        &missing_pending,missing_ar,missing_sr,NULL,NULL,NULL));
     store.map_active.bytes[0]^=0x01u;
     ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
     uint16_t ar[2]={0},sr[2]={0};
