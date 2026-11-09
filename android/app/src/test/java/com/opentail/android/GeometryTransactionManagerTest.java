@@ -470,6 +470,29 @@ public class GeometryTransactionManagerTest {
         assertEquals(19,second.packet.length);
     }
 
+    @Test public void committedStatusRequiresAndAcceptsAuthoritativeMapReadback() {
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,88,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor descriptor=
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,0);
+        assertNotNull(manager.queueUpdate(new byte[]{4},
+            new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23));
+        assertTrue(manager.acknowledgeUpdate(status(1,88,1,0x20,7,7,7,0,0,4)));
+        assertNotNull(manager.requestCommit(status(1,88,1,0x20,7,7,7,0,0,4)));
+        manager.observeStatus(status(2,88,1,0x20,7,7,7,0,0,4));
+        assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
+        PanelPreviewProtocol.Status committed=status(3,88,1,0x20,7,8,8,0,0,4);
+        manager.observeStatus(committed);
+        assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
+        assertFalse(manager.reconcile(committed,
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{9})));
+        assertTrue(manager.reconcile(committed,
+            new GeometryTransactionManager.Snapshot(0,8,new byte[]{9})));
+        assertEquals(GeometryTransactionManager.State.READY,manager.state());
+    }
+
     @Test public void rawUpdateCannotBypassManagerLaneSessionOrSequenceOwnership() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
