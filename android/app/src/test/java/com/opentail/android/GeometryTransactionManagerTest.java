@@ -241,7 +241,7 @@ public class GeometryTransactionManagerTest {
         assertEquals(2,left.zones.get(4).panelId);
         assertEquals(3,right.zones.get(0).panelId);
         assertEquals(4,right.zones.get(4).panelId);
-        assertEquals(0x0f,left.zones.get(0).roleFlags);
+        assertEquals(PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE,left.zones.get(0).roleFlags);
         PanelPreviewProtocol.UpdateDescriptor[] descriptors=left.descriptors();
         assertEquals(5,descriptors.length);
         assertEquals(129,descriptors[0].zoneId);
