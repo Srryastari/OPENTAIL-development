@@ -200,7 +200,8 @@ final class PanelPreviewProtocol {
             if(u8(b[0])!=WIRE_VERSION||u8(b[1])!=snapshot.lane)
                 throw new IllegalArgumentException("Panel map version/lane mismatch");
             int active=u16(b,2),panelCount=u8(b[37]),zoneCount=u8(b[38]);
-            if(panelCount>4||zoneCount>8||active>2048)
+            if(panelCount>4||zoneCount>8||active>2048||
+               (active==0&&(panelCount!=0||zoneCount!=0)))
                 throw new IllegalArgumentException("Panel map counts or active pixel length are invalid");
             List<MapPanel> panels=new ArrayList<>();
             List<MapZone> zones=new ArrayList<>();
@@ -232,7 +233,9 @@ final class PanelPreviewProtocol {
                     if(nonzero)throw new IllegalArgumentException("Unused Zone map slot is not zero-filled");
                     continue;
                 }
-                if(id==0||panelId==0||name.isEmpty()||rangeCount>8)
+                if(id==0||panelId==0||name.isEmpty()||rangeCount>8||
+                   (role>10&&role!=0xff)||(flags&~1)!=0||
+                   (rangeCount==0?flags!=1:flags!=0))
                     throw new IllegalArgumentException("Malformed Zone identity in authoritative map");
                 for(MapZone prior:zones)if(prior.id==id)
                     throw new IllegalArgumentException("Duplicate Zone ID in authoritative map");
