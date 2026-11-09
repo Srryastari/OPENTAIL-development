@@ -1786,37 +1786,12 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
                 om_outputs,pz_outputs.outputs,tertiary,now_ms):
             ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs,
                 pz_outputs.outputs,now_ms,standalone);
-        uint8_t resolved[OT_OM_OUTPUTS][OT_OM_ZONES];
-        for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++){
-            memset(resolved[o],0xff,sizeof(resolved[o]));
-            if((req->chain_mask&(1u<<o))&&
-               !ot_fx_bank_resolve_zone_identity(&pz_outputs.outputs[o],
-                   &fx_bank,o,now_ms,resolved[o]))ready=false;
-        }
-        if(ready&&spark){
-            /* Optional sparkle tuning is transient per-logical-zone state. */
-            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-                if(!(req->chain_mask&(1u<<o)))continue;
-                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
-                    if(!(req->zone_mask&(1u<<z))||
-                       om_outputs[o].zones[z].pixels==0||
-                       om_outputs[o].zones[z].role==OT_OM_OFF||
-                       resolved[o][z]>=OT_OM_ZONES)continue;
-                    fx_bank.zones[o][resolved[o][z]].spark=*spark;
-                }
-            }
-        }
-        if(ready&&overlay){
-            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-                if(!(req->chain_mask&(1u<<o)))continue;
-                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
-                    if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
-                       om_outputs[o].zones[z].role==OT_OM_OFF||
-                       resolved[o][z]>=OT_OM_ZONES)continue;
-                    fx_bank.zones[o][resolved[o][z]].overlay=*overlay;
-                }
-            }
-        }
+        if(ready&&spark)
+            ready=ot_fx_bank_set_spark_identity(&fx_bank,om_outputs,
+                pz_outputs.outputs,req->chain_mask,req->zone_mask,now_ms,spark);
+        if(ready&&overlay)
+            ready=ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs,
+                pz_outputs.outputs,req->chain_mask,req->zone_mask,now_ms,overlay);
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
