@@ -499,7 +499,7 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_trees": {
-    "android": "d1265405de16b3e3fa271ed329d8da8e5643e9b1",
+    "android": "86191a3fe1cb03b87ba994acaed0a138020784b0",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
   },
   "owner_mandated_p0_addendum": {
@@ -515,11 +515,12 @@
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
       "android/qa/test_native_source.cjs"
     ],
-    "firmware_contract_sha": "83c0dcf83bd5a22a54210fd1576e49dd66a28f8d",
+    "firmware_contract_sha": "59cd2a41faffb67f73f39e1d9460b2581bdc3bb8",
     "protocol": {
       "status_v2_bytes": 61,
       "map_wire_bytes": 667,
-      "committing_locked_error": 5
+      "committing_locked_error": 5,
+      "gatt_status_long_read": true
     },
     "physical_release_gate": "BLOCKED — 100/100 controlled brownout cycles have not been physically evidenced",
     "ui_scope": "Conditional Settings → System synchronization warning only; six-screen UI remains owner-locked"
