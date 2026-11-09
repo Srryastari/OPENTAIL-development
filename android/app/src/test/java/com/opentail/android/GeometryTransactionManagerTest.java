@@ -377,7 +377,7 @@ public class GeometryTransactionManagerTest {
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("collides with an existing Zone ID"));
         }
-        PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(0,623,1,"Other",
+        PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(1,623,1,"Other",
             200,1,"Other Zone",300,10);
         try {
             validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{panelCollision,empty});
