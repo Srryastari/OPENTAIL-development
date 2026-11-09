@@ -261,12 +261,11 @@ static void storage_split_roundtrip(void){
 
     /* Hardware edits cannot mutate the map record; geometry edits cannot
      * mutate the physical lane record. The joined view validates both. */
+    ot_pz_map_t geometry_before=geometry;
     ot_pz_lane_config_set_t changed_hardware=hardware;
     changed_hardware.lanes[0].color_order=OT_OM_BGR;
     changed_hardware.lanes[0].active_pixels=120u;
-    assert(memcmp(&geometry.outputs[0],&((ot_pz_map_t){.outputs={
-        geometry.outputs[0],geometry.outputs[1]}}).outputs[0],
-        sizeof(geometry.outputs[0]))==0);
+    assert(memcmp(&geometry,&geometry_before,sizeof(geometry))==0);
     ot_pz_map_t changed_geometry=geometry;
     changed_geometry.outputs[0].zones[0].ranges[0].count=35u;
     assert(hardware.lanes[0].active_pixels==100u);
