@@ -39,7 +39,7 @@ int main(void){
   * left/right zone mapping. Standalone scenes do not require a phone. */
  ot_fx_zone_bank_t bank;
  ot_fx_bank_reset(&bank);
- ot_pz_output_t panel_outputs[OT_OM_OUTPUTS]={0};
+ ot_fx_scene_output_identity_t panel_outputs[OT_OM_OUTPUTS]={0};
  panel_outputs[0].zone_count=1u;
  panel_outputs[1].zone_count=3u;
  ot_ble_fx_packet_t left={0},right={0};
@@ -81,13 +81,13 @@ int main(void){
   * current logical zones. Saving must project owners back to current zone
   * indices, not serialize transient bank-slot indices. */
  ot_om_output_t outputs[OT_OM_OUTPUTS]={0};
- ot_pz_output_t identity_panels[OT_OM_OUTPUTS]={0};
+ ot_fx_scene_output_identity_t identity_panels[OT_OM_OUTPUTS]={0};
  outputs[0].zone_count=2u;outputs[0].active_pixels=2u;
  outputs[0].zones[0].pixels=1u;outputs[0].zones[0].role=OT_OM_LEFT;
  outputs[0].zones[1].pixels=1u;outputs[0].zones[1].role=OT_OM_BRAKE;
  identity_panels[0].zone_count=2u;
- identity_panels[0].zones[0].panel_id=100u;identity_panels[0].zones[0].id=200u;
- identity_panels[0].zones[1].panel_id=100u;identity_panels[0].zones[1].id=201u;
+ identity_panels[0].zones[0].panel_id=100u;identity_panels[0].zones[0].zone_id=200u;
+ identity_panels[0].zones[1].panel_id=100u;identity_panels[0].zones[1].zone_id=201u;
  ot_fx_zone_bank_t identity_bank;
  ot_fx_bank_reset(&identity_bank);
  ot_ble_fx_packet_t second_zone={0};
