@@ -46,7 +46,8 @@ assert "ot_fx_slot_active(slot,frame_ms)" in render
 assert "static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES]" in render
 assert "memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state))" in render
 assert "for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)" in render
-assert "prior_fx_generation[ch][old_z]==slot->generation" in render
+assert "memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation))" in render
+assert "old_generation[old_z]==slot->generation" in render
 assert "fx_state[ch][z]=prior_fx_state[prior_index]" in render
 assert "old_z==(uint8_t)prior_index" in render
 assert "fx_bank_owner_zone_id" in render and "fx_bank_owner_panel_id" in render
