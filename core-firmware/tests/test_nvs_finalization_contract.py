@@ -41,6 +41,7 @@ for token in ("input_quiet_samples>=OT_DEBOUNCE_TICKS",
 pz_load=between("static void pz_load(void){",
                 "static bool pz_save_controller_locked(")
 assert "const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||" in core
+assert "!s->has_intent&&s->has_map_active&&!s->has_marker" in pair_store
 assert "snapshot.has_map_active||snapshot.has_lane_active;" in core
 for token in ("ot_pz_pair_store_snapshot", "ot_pz_pair_store_recover",
               "ot_pz_pair_store_begin", "pz_load_legacy_snapshot",
