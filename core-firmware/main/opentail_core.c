@@ -42,6 +42,7 @@
 #include "panel_zone_api.h"
 #include "input_telemetry.h"
 #include "config_journal.h"
+#include "panel_zone_pair_store.h"
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
@@ -189,6 +190,10 @@ typedef struct {
 } ot_pz_reset_challenge_t;
 static ot_pz_reset_challenge_t pz_reset_challenge;
 static uint8_t pz_reset_pending_mask;
+static volatile bool pz_pair_commit_pending;
+static volatile uint32_t pz_pair_transaction_id;
+static volatile uint8_t pz_pair_commit_phase;
+static volatile uint32_t pz_pair_commit_phase_txn;
 static void pz_promote(uint32_t epoch);
 static void pz_preview_cancel_pending_locked(void);
 static bool config_activation_idle(uint32_t epoch,bool allow_show);
@@ -428,75 +433,74 @@ static bool pz_reset_tombstone_valid(const ot_pz_reset_tombstone_t *record){
     const uint32_t expected=copy.crc32;copy.crc32=0u;
     return expected==ot_cfg_crc32(&copy,sizeof(copy));
 }
-static bool pz_reset_tombstone_set_handle(nvs_handle_t h,uint8_t lane,
-        const ot_pz_controller_t *controller,const uint16_t revision[OT_PZ_OUTPUTS]){
-    if(lane>=OT_PZ_OUTPUTS||!controller||!revision)return false;
-    ot_pz_reset_tombstone_t record={0};
-    size_t length=sizeof(record);
-    esp_err_t e=nvs_get_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,&length);
-    if(e==ESP_OK){
-        if(length!=sizeof(record)||!pz_reset_tombstone_valid(&record))return false;
-    }else if(e!=ESP_ERR_NVS_NOT_FOUND)return false;
-    record.magic=OT_PZ_RESET_TOMBSTONE_MAGIC;
-    record.version=OT_PZ_RESET_TOMBSTONE_VERSION;
-    record.reset_mask|=(uint8_t)(1u<<lane);
-    memcpy(record.revision,revision,sizeof(record.revision));
-    record.controller=*controller;
-    record.crc32=0u;record.crc32=ot_cfg_crc32(&record,sizeof(record));
-    return nvs_set_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,&record,sizeof(record))==ESP_OK;
-}
-static bool pz_reset_tombstone_write_handle(nvs_handle_t h,uint8_t lane,
-        const ot_pz_controller_t *controller,const uint16_t revision[OT_PZ_OUTPUTS]){
-    if(!pz_reset_tombstone_set_handle(h,lane,controller,revision))return false;
-    return nvs_commit(h)==ESP_OK;
-}
-static bool pz_stage_legacy_migration(void){
-    ot_pz_controller_t previous,candidate;
-    if(!ot_pz_migrate_legacy(om_outputs,om_persistent,&previous))return false;
-    candidate=previous;
-    if(om_deferred.pending&&
-       !ot_pz_migrate_legacy(om_deferred.outputs,om_persistent,&candidate))
-        return false;
-    uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
-    memcpy(previous_revision,om_active_revision,sizeof(previous_revision));
-    memcpy(candidate_revision,om_revision,sizeof(candidate_revision));
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
-        if(!previous_revision[lane])previous_revision[lane]=1u;
-        if(!candidate_revision[lane])candidate_revision[lane]=previous_revision[lane];
-    }
-    ot_pz_journal_t migration={0};
-    if(!ot_pz_journal_build(&migration,&previous,&candidate,
-                            previous_revision,candidate_revision))return false;
+static ot_pz_pair_io_result_t pz_pair_nvs_read(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key,void *data,size_t *size){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
     nvs_handle_t h;
-    if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&migration,sizeof(migration));
+    esp_err_t e=nvs_open(storage_namespace,NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return OT_PZ_PAIR_IO_NOT_FOUND;
+    if(e!=ESP_OK)return OT_PZ_PAIR_IO_ERROR;
+    e=nvs_get_blob(h,key,data,size);
+    nvs_close(h);
+    if(e==ESP_OK)return OT_PZ_PAIR_IO_OK;
+    if(e==ESP_ERR_NVS_NOT_FOUND)return OT_PZ_PAIR_IO_NOT_FOUND;
+    return OT_PZ_PAIR_IO_ERROR;
+}
+static bool pz_pair_nvs_write_commit(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key,
+        const void *data,size_t size){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
+    nvs_handle_t h;
+    if(nvs_open(storage_namespace,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,key,data,size);
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
-    if(e!=ESP_OK)return false;
-    pz_outputs=previous;
-    pz_deferred.candidate=candidate;pz_deferred.pending=true;
-    memcpy(pz_active_revision,previous_revision,sizeof(pz_active_revision));
-    memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
-    pz_persistent=true;
+    return e==ESP_OK;
+}
+static bool pz_pair_nvs_erase_commit(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
+    nvs_handle_t h;
+    if(nvs_open(storage_namespace,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_erase_key(h,key);
+    if(e==ESP_ERR_NVS_NOT_FOUND){nvs_close(h);return true;}
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    return e==ESP_OK;
+}
+static const ot_pz_pair_store_io_t pz_pair_store_io={
+    .context=NULL,
+    .read=pz_pair_nvs_read,
+    .write_commit=pz_pair_nvs_write_commit,
+    .erase_commit=pz_pair_nvs_erase_commit
+};
+static bool pz_pair_phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
+    (void)context;
+    __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+    __atomic_store_n(&pz_pair_commit_phase,phase,__ATOMIC_RELEASE);
+    ESP_LOGI(TAG,"PZ_PAIR_PHASE phase=%u transaction=%08lx",
+             (unsigned)phase,(unsigned long)transaction_id);
     return true;
 }
-static void pz_load(void){
-    ot_pz_defaults(&pz_outputs);
-    pz_deferred.pending=false;pz_persistent=false;
+/* Read-only v3 combined journal/tombstone migration source. Once a v4 pair is
+ * authoritative, these legacy records are never consulted as a fallback. */
+static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
+        ot_pz_controller_t *candidate,uint16_t previous_revision[OT_PZ_OUTPUTS],
+        uint16_t candidate_revision[OT_PZ_OUTPUTS],uint8_t *reset_mask){
+    if(!previous||!candidate||!previous_revision||!candidate_revision||!reset_mask)
+        return false;
+    ot_pz_defaults(previous);*candidate=*previous;*reset_mask=0u;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
-        pz_revision[lane]=pz_active_revision[lane]=1u;
-    if(config_recovery_fault)return;
+        previous_revision[lane]=candidate_revision[lane]=1u;
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_zone_map",NVS_READONLY,&h);
-    if(e==ESP_ERR_NVS_NOT_FOUND){
-        /* Stage the legacy-to-v3 conversion in the new namespace. The old
-         * profile remains untouched until the new journal is promoted. */
-        if(!pz_stage_legacy_migration()){
-            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
-        }
-    }else if(e!=ESP_OK){
-        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
-    }else{
+    if(e==ESP_OK){
         ot_pz_journal_t active={0},stage={0};
         ot_pz_reset_tombstone_t tombstone={0};
         size_t tombstone_size=sizeof(tombstone);
@@ -510,33 +514,127 @@ static void pz_load(void){
         if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
            (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)||
            (t!=ESP_OK&&t!=ESP_ERR_NVS_NOT_FOUND)||
-           (t==ESP_OK&&!has_tombstone))config_recovery_fault=true;
-        nvs_close(h);
-        if(config_recovery_fault){
-            ot_pz_defaults(&pz_outputs);pz_deferred.pending=false;pz_persistent=false;
-            return; /* Corrupt v3 data never falls back to legacy embedded zones. */
+           (t==ESP_OK&&!has_tombstone)){
+            nvs_close(h);return false;
         }
         if(has_a||has_b){
+            ot_pz_pending_t deferred={0};
             if(!ot_pz_journal_recover(has_a?&active:NULL,has_b?&stage:NULL,
-                 &pz_outputs,&pz_deferred,pz_active_revision,pz_revision)){
-                config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
-                pz_deferred.pending=false;pz_persistent=false;return;
+                previous,&deferred,previous_revision,candidate_revision)){
+                nvs_close(h);return false;
             }
-            if(has_b&&has_tombstone&&
-               memcmp(&stage.candidate,&tombstone.controller,sizeof(stage.candidate))==0)
-                pz_reset_pending_mask=tombstone.reset_mask;
-            pz_persistent=true;
-        }else if(has_tombstone){
-            /* A reset tombstone is authoritative if the active map key was
-             * lost; never resurrect the legacy embedded zones. */
-            pz_outputs=tombstone.controller;
-            memcpy(pz_revision,tombstone.revision,sizeof(pz_revision));
-            memcpy(pz_active_revision,tombstone.revision,sizeof(pz_active_revision));
-            pz_persistent=true;
-        }else if(!pz_stage_legacy_migration()){
-            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);return;
+            *candidate=deferred.pending?deferred.candidate:*previous;
+            if(has_tombstone&&
+               memcmp(candidate,&tombstone.controller,sizeof(*candidate))==0)
+                *reset_mask=tombstone.reset_mask;
+            nvs_close(h);return true;
         }
+        if(has_tombstone){
+            *previous=tombstone.controller;*candidate=*previous;
+            memcpy(previous_revision,tombstone.revision,sizeof(tombstone.revision));
+            memcpy(candidate_revision,tombstone.revision,sizeof(tombstone.revision));
+            *reset_mask=tombstone.reset_mask;
+            nvs_close(h);return true;
+        }
+        nvs_close(h);
+    }else if(e!=ESP_ERR_NVS_NOT_FOUND){
+        return false;
     }
+    if(!ot_pz_migrate_legacy(om_outputs,om_persistent,previous))return false;
+    *candidate=*previous;
+    if(om_deferred.pending&&
+       !ot_pz_migrate_legacy(om_deferred.outputs,om_persistent,candidate))return false;
+    memcpy(previous_revision,om_active_revision,sizeof(om_active_revision));
+    memcpy(candidate_revision,om_revision,sizeof(om_revision));
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(!previous_revision[lane])previous_revision[lane]=1u;
+        if(candidate_revision[lane]<previous_revision[lane])
+            candidate_revision[lane]=previous_revision[lane];
+    }
+    return true;
+}
+static void pz_load(void){
+    ot_pz_defaults(&pz_outputs);
+    pz_deferred.pending=false;pz_persistent=false;
+    pz_pair_commit_pending=false;pz_pair_transaction_id=0u;
+    pz_pair_commit_phase=0u;pz_pair_commit_phase_txn=0u;
+    pz_reset_pending_mask=0u;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        pz_revision[lane]=pz_active_revision[lane]=1u;
+    if(config_recovery_fault)return;
+
+    ot_pz_pair_store_snapshot_t snapshot={0};
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,&snapshot)){
+        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+        ot_st_set_fault("v4 lane/map pair journal invalid");return;
+    }
+    const bool v4_authoritative=snapshot.has_intent||
+        snapshot.has_map_active||snapshot.has_lane_active;
+    if(v4_authoritative){
+        bool intent_pending=false;uint32_t transaction_id=0u;uint8_t reset_mask=0u;
+        if(!ot_pz_pair_store_recover(&pz_pair_store_io,NULL,&pz_outputs,&pz_deferred,
+             pz_active_revision,pz_revision,&intent_pending,&transaction_id,&reset_mask)){
+            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+            pz_deferred.pending=false;pz_persistent=false;
+            ot_st_set_fault("v4 lane/map pair recovery mismatch");return;
+        }
+        pz_pair_commit_pending=intent_pending;
+        pz_pair_transaction_id=transaction_id;
+        pz_pair_commit_phase=intent_pending?0u:8u;
+        pz_pair_commit_phase_txn=transaction_id;
+        pz_reset_pending_mask=reset_mask;
+        pz_persistent=true;
+    }else{
+        ot_pz_controller_t legacy_previous,legacy_candidate;
+        uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+        uint8_t reset_mask=0u;
+        if(!pz_load_legacy_snapshot(&legacy_previous,&legacy_candidate,
+             previous_revision,candidate_revision,&reset_mask)){
+            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+            ot_st_set_fault("legacy configuration migration source invalid");return;
+        }
+        const bool changed=memcmp(&legacy_previous,&legacy_candidate,
+                                  sizeof(legacy_previous))!=0;
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+            const bool lane_changed=memcmp(&legacy_previous.outputs[lane],
+                &legacy_candidate.outputs[lane],sizeof(legacy_previous.outputs[lane]))!=0;
+            if(lane_changed&&candidate_revision[lane]<=previous_revision[lane]){
+                if(previous_revision[lane]==UINT16_MAX){
+                    config_recovery_fault=true;
+                    ot_st_set_fault("legacy migration revision exhausted");return;
+                }
+                candidate_revision[lane]=(uint16_t)(previous_revision[lane]+1u);
+            }
+        }
+        /* A first-time v4 pair needs an intent even when the legacy profile is
+         * already stable. Advance one revision without changing its contents. */
+        if(!changed){
+            if(candidate_revision[0]==UINT16_MAX){
+                config_recovery_fault=true;
+                ot_st_set_fault("initial v4 pair revision exhausted");return;
+            }
+            candidate_revision[0]=(uint16_t)(candidate_revision[0]+1u);
+        }
+        uint32_t transaction_id=esp_random();
+        if(transaction_id==0u)transaction_id=esp_random();
+        if(transaction_id==0u||
+           !ot_pz_pair_store_begin(&pz_pair_store_io,&legacy_previous,
+                &legacy_candidate,previous_revision,candidate_revision,
+                transaction_id,reset_mask,true,pz_pair_phase_hook,NULL)){
+            config_recovery_fault=true;
+            ot_st_set_fault("v4 legacy pair migration staging failed");return;
+        }
+        pz_outputs=legacy_previous;
+        pz_deferred.candidate=legacy_candidate;
+        pz_deferred.pending=changed;
+        memcpy(pz_active_revision,previous_revision,sizeof(pz_active_revision));
+        memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
+        pz_pair_commit_pending=true;pz_pair_transaction_id=transaction_id;
+        pz_reset_pending_mask=reset_mask;pz_persistent=true;
+    }
+    /* All legacy output settings have been joined into the v4 pair. The old
+     * Output Manager pending journal must never race the authoritative pair. */
+    om_deferred.pending=false;
     portENTER_CRITICAL(&state_lock);
     pz_refresh_legacy_projection_locked();
     portEXIT_CRITICAL(&state_lock);
@@ -545,12 +643,15 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     if(!candidate||!ot_pz_valid(candidate))return false;
     ot_pz_controller_t previous;
     uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+    uint8_t reset_mask=0u;
     bool busy=false;
     portENTER_CRITICAL(&state_lock);
-    busy=pz_deferred.pending||(pz_preview.active&&!pz_preview.committing);
+    busy=pz_deferred.pending||pz_pair_commit_pending||
+         (pz_preview.active&&!pz_preview.committing);
     previous=pz_outputs;
     memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
     memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
+    reset_mask=pz_reset_pending_mask;
     portEXIT_CRITICAL(&state_lock);
     if(busy)return false;
     bool changed=false;
@@ -560,39 +661,33 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
         if(candidate_revision[lane]==UINT16_MAX)return false;
         candidate_revision[lane]++;changed=true;
     }
-    if(!changed)return true;
-    ot_pz_journal_t staged={0};
-    if(!ot_pz_journal_build(&staged,&previous,candidate,
-                            previous_revision,candidate_revision))return false;
-    nvs_handle_t h;
-    if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
-    uint8_t reset_mask=0u;
-    portENTER_CRITICAL(&state_lock);
-    reset_mask=pz_reset_pending_mask;
-    portEXIT_CRITICAL(&state_lock);
-    for(unsigned lane=0;e==ESP_OK&&lane<OT_PZ_OUTPUTS;lane++)
-        if(reset_mask&(1u<<lane))
-            if(!pz_reset_tombstone_set_handle(h,(uint8_t)lane,candidate,candidate_revision))
-                e=ESP_ERR_NVS_INVALID_STATE;
-    if(e==ESP_OK)e=nvs_commit(h);
-    if(e==ESP_OK){
-        ot_pz_journal_t readback={0};
-        size_t readback_size=sizeof(readback);
-        e=nvs_get_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&readback,&readback_size);
-        if(e==ESP_OK&&(readback_size!=sizeof(readback)||
-           !ot_pz_journal_valid(&readback)||
-           memcmp(&readback,&staged,sizeof(staged))!=0))
-            e=ESP_ERR_INVALID_CRC;
+    if(!changed){
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+            if(reset_mask&(1u<<lane))
+                if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,(uint8_t)lane))
+                    return false;
+        return true;
     }
-    nvs_close(h);
-    if(e!=ESP_OK)return false; /* No RAM mutation before verified durable stage. */
+    uint32_t transaction_id=esp_random();
+    if(transaction_id==0u)transaction_id=esp_random();
+    if(transaction_id==0u)return false;
+    __atomic_store_n(&pz_pair_commit_phase,0u,__ATOMIC_RELEASE);
+    __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+    if(!ot_pz_pair_store_begin(&pz_pair_store_io,&previous,candidate,
+        previous_revision,candidate_revision,transaction_id,reset_mask,false,
+        pz_pair_phase_hook,NULL)){
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map pair staging failed; reboot reconciliation required");
+        return false;
+    }
     portENTER_CRITICAL(&state_lock);
     pz_deferred.candidate=*candidate;pz_deferred.pending=true;
     memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
     pz_persistent=true;
     pz_refresh_legacy_projection_locked();
     portEXIT_CRITICAL(&state_lock);
+    pz_pair_transaction_id=transaction_id;
+    __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
     return true;
 }
 /* Legacy output writes are lossless only while the current lane is representable
@@ -1226,44 +1321,27 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         portEXIT_CRITICAL(&state_lock);
         if(still_pending){xSemaphoreGive(om_write_mutex);return 5;}
     }else{
-        /* Already-empty maps still get a durable tombstone so legacy embedded
-         * zones cannot reappear if the active map key is later lost. */
-        nvs_handle_t h;
-        if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK){
+        if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,lane)){
             xSemaphoreGive(om_write_mutex);return 4;
         }
-        uint16_t revisions[OT_PZ_OUTPUTS];
-        portENTER_CRITICAL(&state_lock);
-        memcpy(revisions,pz_active_revision,sizeof(revisions));
-        const ot_pz_controller_t snapshot=pz_outputs;
-        portEXIT_CRITICAL(&state_lock);
-        const bool tombstone_ok=pz_reset_tombstone_write_handle(
-            h,lane,&snapshot,revisions);
-        nvs_close(h);
-        if(!tombstone_ok){xSemaphoreGive(om_write_mutex);return 4;}
         portENTER_CRITICAL(&state_lock);
         pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        pz_reset_challenge.active=false;
+        ot_pz_diag_clear(&pz_diag);
+        ot_pz_preview_cancel(&pz_preview);
         portEXIT_CRITICAL(&state_lock);
     }
-    /* Success is reported only after re-reading and validating the durable
-     * active journal and confirming that the selected lane has no panels/zones. */
-    nvs_handle_t read_handle;ot_pz_journal_t readback={0};
-    bool readback_ok=nvs_open("ot_zone_map",NVS_READONLY,&read_handle)==ESP_OK;
-    if(readback_ok){
-        ot_pz_reset_tombstone_t tombstone={0};
-        size_t tombstone_size=sizeof(tombstone);
-        readback_ok=pz_journal_read(read_handle,OT_PZ_JOURNAL_KEY_ACTIVE,&readback)==ESP_OK&&
-            readback.candidate.outputs[lane].panel_count==0u&&
-            readback.candidate.outputs[lane].zone_count==0u&&
-            readback.candidate_revision[lane]==pz_active_revision[lane]&&
-            nvs_get_blob(read_handle,OT_PZ_RESET_TOMBSTONE_KEY,
-                         &tombstone,&tombstone_size)==ESP_OK&&
-            tombstone_size==sizeof(tombstone)&&pz_reset_tombstone_valid(&tombstone)&&
-            (tombstone.reset_mask&(1u<<lane))!=0u&&
-            memcmp(&tombstone.controller,&readback.candidate,
-                   sizeof(readback.candidate))==0;
-        nvs_close(read_handle);
-    }
+    /* Reset readback is the authoritative v4 pair: map-only geometry and
+     * hardware-only lane records must share the same transaction/revision. */
+    ot_pz_pair_store_snapshot_t readback={0};
+    bool readback_ok=ot_pz_pair_store_snapshot(&pz_pair_store_io,&readback)&&
+        readback.has_map_active&&readback.has_lane_active&&
+        readback.map_active.transaction_id==readback.lane_active.transaction_id&&
+        readback.map_active.candidate.outputs[lane].panel_count==0u&&
+        readback.map_active.candidate.outputs[lane].zone_count==0u&&
+        readback.map_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        readback.lane_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        (readback.map_active.reset_mask&(1u<<lane))!=0u;
     if(!readback_ok){xSemaphoreGive(om_write_mutex);return 5;}
     ot_fx_bank_stop_all(&fx_bank);
     request_render_refresh();
@@ -2126,6 +2204,9 @@ static esp_err_t status_get(httpd_req_t *r) {
     faulted_outputs=output_runtime_fault_mask;
     portEXIT_CRITICAL(&state_lock);
     const bool ble_radio_ready=ot_ble_radio_ever_ready();
+    const uint8_t commit_phase=__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE);
+    const uint32_t commit_transaction=__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE);
+    const bool commit_pending=__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
@@ -2154,17 +2235,19 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used]=0;
     char elf_sha256[65]={0};
     (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
-    char buf[2500];char led_json[384],wd_json[420];
+    char buf[2700];char led_json[384],wd_json[420];
     ot_st_format_json(led_json,sizeof(led_json));
     ot_sw_idf_status_json(wd_json,sizeof(wd_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"config_commit_phase\":%u,\"config_commit_transaction_id\":%lu,\"config_commit_pending\":%s,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
        OT_FW,(unsigned long)core_boot_id,elf_sha256,
        ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
-       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json,wd_json);
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,
+        (unsigned)commit_phase,(unsigned long)commit_transaction,
+        commit_pending?"true":"false",led_json,arb_json,wd_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
@@ -2707,87 +2790,81 @@ static void tm_promote(uint32_t epoch){
     nvs_close(h);
 }
 static void pz_promote(uint32_t epoch){
-    nvs_handle_t h;
-    if(nvs_open("ot_zone_map",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_pz_journal_t stage={0};
-    esp_err_t read=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage);
-    const bool staged=read==ESP_OK;
-    if(read==ESP_ERR_NVS_NOT_FOUND)
-        read=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&stage);
-    if(read!=ESP_OK){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("Panel/Zone v3 journal invalid during promotion");return;
+    if(!config_activation_idle(epoch,true))return;
+    uint32_t transaction_id=__atomic_load_n(&pz_pair_transaction_id,__ATOMIC_ACQUIRE);
+    if(__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)){
+        if(!ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id,
+                                    pz_pair_phase_hook,NULL)){
+            config_recovery_fault=true;
+            ot_st_set_fault("v4 lane/map pair promotion failed; reboot recovery required");
+            return;
+        }
+        __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);
+    }
+    ot_pz_pair_store_snapshot_t snapshot={0};
+    ot_pz_controller_t recovered_live={0},durable_candidate={0};
+    ot_pz_pending_t recovered_pending={0};
+    uint16_t active_revision[OT_PZ_OUTPUTS]={0},staged_revision[OT_PZ_OUTPUTS]={0};
+    bool intent_pending=false;uint32_t recovered_transaction=0u;uint8_t reset_mask=0u;
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,&snapshot)||
+       !snapshot.has_map_active||!snapshot.has_lane_active||
+       snapshot.map_active.transaction_id!=snapshot.lane_active.transaction_id||
+       !ot_pz_join(&snapshot.lane_active.candidate,&snapshot.map_active.candidate,
+                   &durable_candidate)||
+       !ot_pz_pair_store_recover(&pz_pair_store_io,NULL,&recovered_live,
+            &recovered_pending,active_revision,staged_revision,&intent_pending,
+            &recovered_transaction,&reset_mask)||intent_pending||
+       recovered_transaction!=snapshot.map_active.transaction_id){
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map active pair readback mismatch");return;
     }
     bool matches=false;
     portENTER_CRITICAL(&state_lock);
-    matches=pz_deferred.pending&&
-        memcmp(pz_revision,stage.candidate_revision,sizeof(pz_revision))==0&&
-        memcmp(pz_active_revision,stage.previous_revision,sizeof(pz_active_revision))==0&&
-        memcmp(&pz_outputs,&stage.previous,sizeof(pz_outputs))==0&&
-        memcmp(&pz_deferred.candidate,&stage.candidate,sizeof(pz_deferred.candidate))==0;
+    if(pz_deferred.pending){
+        matches=recovered_pending.pending&&
+            memcmp(&pz_outputs,&recovered_live,sizeof(pz_outputs))==0&&
+            memcmp(&pz_deferred.candidate,&recovered_pending.candidate,
+                   sizeof(pz_deferred.candidate))==0&&
+            memcmp(pz_active_revision,active_revision,sizeof(active_revision))==0&&
+            memcmp(pz_revision,staged_revision,sizeof(staged_revision))==0;
+    }else{
+        matches=memcmp(&pz_outputs,&durable_candidate,sizeof(pz_outputs))==0;
+    }
     portEXIT_CRITICAL(&state_lock);
     if(!matches){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("Panel/Zone v3 staging revision mismatch");return;
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map RAM-to-journal generation mismatch");return;
     }
-    if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
-    if(staged){
-        if(!config_write_panel_active(h,&stage)){
-            nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("Panel/Zone active journal write failed");return;
-        }
-        ot_pz_journal_t active_readback={0};
-        if(pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active_readback)!=ESP_OK||
-           memcmp(&active_readback,&stage,sizeof(stage))!=0){
-            nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("Panel/Zone active journal readback failed");return;
-        }
-        if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
-    }
-    uint8_t reset_mask=0u;
-    portENTER_CRITICAL(&state_lock);
-    reset_mask=pz_reset_pending_mask;
-    portEXIT_CRITICAL(&state_lock);
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
-        if((reset_mask&(1u<<lane))&&
-           !pz_reset_tombstone_write_handle(h,(uint8_t)lane,
-                                             &stage.candidate,stage.candidate_revision)){
-            nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("Panel/Zone reset tombstone commit failed");return;
-        }
-    }
-    /* Stage is erased only after active map and any reset tombstone are durable. */
-    if(staged&&!config_clear_panel_stage(h)){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("Panel/Zone v3 journal finalization failed");return;
-    }
-    if(!config_activation_idle(epoch,true)){nvs_close(h);return;}
-    bool applied=false;
+    if(!config_activation_idle(epoch,true))return;
+    bool applied=false,reset_cleanup=false;
+    const uint8_t effective_reset_mask=(uint8_t)(reset_mask|pz_reset_pending_mask);
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
        tm_gpio_input_mask()==0u&&
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
-        pz_outputs=stage.candidate;
-        memcpy(pz_active_revision,stage.candidate_revision,sizeof(pz_active_revision));
-        pz_deferred.pending=false;pz_persistent=true;
-        ot_pz_preview_cancel(&pz_preview);
-        pz_refresh_legacy_projection_locked();
-        applied=true;
-    }
-    portEXIT_CRITICAL(&state_lock);
-    if(applied){
-        if(reset_mask){
-            portENTER_CRITICAL(&state_lock);
-            pz_reset_pending_mask&=(uint8_t)~reset_mask;
+        if(pz_deferred.pending){
+            pz_outputs=recovered_pending.candidate;
+            pz_deferred.pending=false;
+            applied=true;
+        }
+        memcpy(pz_active_revision,snapshot.map_active.candidate_revision,
+               sizeof(pz_active_revision));
+        memcpy(pz_revision,snapshot.map_active.candidate_revision,
+               sizeof(pz_revision));
+        pz_pair_commit_pending=false;pz_persistent=true;
+        if(effective_reset_mask){
+            pz_reset_pending_mask&=(uint8_t)~effective_reset_mask;
             pz_reset_challenge.active=false;
             ot_pz_diag_clear(&pz_diag);
             ot_pz_preview_cancel(&pz_preview);
-            portEXIT_CRITICAL(&state_lock);
-            ot_fx_bank_stop_all(&fx_bank);
+            reset_cleanup=true;
         }
-        request_render_refresh();
+        ot_pz_preview_cancel(&pz_preview);
+        pz_refresh_legacy_projection_locked();
     }
-    nvs_close(h);
+    portEXIT_CRITICAL(&state_lock);
+    if(reset_cleanup)ot_fx_bank_stop_all(&fx_bank);
+    if(applied||reset_cleanup)request_render_refresh();
 }
 static void om_promote(uint32_t epoch){
     nvs_handle_t h;
@@ -2848,8 +2925,10 @@ static void config_activation_task(void *unused){
             portENTER_CRITICAL(&state_lock);
             trigger_pending=tm_deferred.pending;
             output_pending=om_deferred.pending;
-            panel_pending=pz_deferred.pending;
+            panel_pending=pz_deferred.pending||pz_reset_pending_mask!=0u;
             portEXIT_CRITICAL(&state_lock);
+            panel_pending=panel_pending||
+                __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
             bool preview_commit=false;
             ot_pz_controller_t preview_candidate={0};
             portENTER_CRITICAL(&state_lock);
@@ -3435,7 +3514,7 @@ void app_main(void) {
     tm_load();
     om_journal_load();
     tm_journal_load();
-    pz_load(); /* v3 authoritative; read-only v1/v2 migration if no v3 journal */
+    pz_load(); /* v4 split lane/map pair authoritative; v3 and v1/v2 are read-only migration inputs */
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     const bool watchdog_ready=ot_sw_idf_configure();
