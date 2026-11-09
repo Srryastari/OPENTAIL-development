@@ -709,19 +709,6 @@ static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     }
     return pz_save_controller_locked(&candidate);
 }
-static void pz_sync_from_legacy(void){
-    ot_pz_controller_t migrated;
-    if(!ot_pz_migrate_legacy(om_outputs,true,&migrated)){
-        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);pz_persistent=false;return;
-    }
-    portENTER_CRITICAL(&state_lock);
-    pz_outputs=migrated;pz_deferred.pending=false;pz_persistent=true;
-    memcpy(pz_revision,om_revision,sizeof(pz_revision));
-    memcpy(pz_active_revision,om_active_revision,sizeof(pz_active_revision));
-    pz_refresh_legacy_projection_locked();
-    portEXIT_CRITICAL(&state_lock);
-}
-
 #define OT_SHOW_MAX_MS 60000u
 /* Input simulation is limited to 15 seconds, independent of show TTL. */
 #define OT_SIM_MAX_MS 15000u
@@ -2839,65 +2826,14 @@ static void pz_promote(uint32_t epoch){
     if(reset_cleanup)ot_fx_bank_stop_all(&fx_bank);
     if(applied||reset_cleanup)request_render_refresh();
 }
-static void om_promote(uint32_t epoch){
-    nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_om_journal_t stage={0};
-    esp_err_t read=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
-    const bool staged=read==ESP_OK;
-    if(read==ESP_ERR_NVS_NOT_FOUND)
-        read=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
-    if(read!=ESP_OK){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("output journal invalid during promotion");return;
-    }
-    bool matches=false;
-    portENTER_CRITICAL(&state_lock);
-    matches=om_deferred.pending&&
-        memcmp(om_revision,stage.candidate_revision,sizeof(om_revision))==0&&
-        memcmp(om_active_revision,stage.previous_revision,sizeof(om_active_revision))==0&&
-        memcmp(om_outputs,stage.previous,sizeof(om_outputs))==0&&
-        memcmp(om_deferred.outputs,stage.candidate,sizeof(om_deferred.outputs))==0;
-    portEXIT_CRITICAL(&state_lock);
-    if(!matches){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("output staging revision mismatch");return;
-    }
-    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
-    if(staged){
-        if(!config_write_active(h,&stage,sizeof(stage))||
-           !config_activation_idle(epoch,false)){nvs_close(h);return;}
-        if(!config_clear_stage(h)){
-            nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("output journal finalization failed");return;
-        }
-    }
-    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
-    bool applied=false;
-    portENTER_CRITICAL(&state_lock);
-    if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       tm_gpio_input_mask()==0u &&
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
-        applied=ot_om_apply_if_released(om_outputs,&om_deferred,0u,0u);
-        if(applied)memcpy(om_active_revision,stage.candidate_revision,
-                          sizeof(om_active_revision));
-    }
-    portEXIT_CRITICAL(&state_lock);
-    if(applied){
-        pz_sync_from_legacy(); /* complete read-only v1/v2 -> v3 migration */
-        request_render_refresh();
-    }
-    nvs_close(h);
-}
 static void config_activation_task(void *unused){
     (void)unused;
     for(;;){
         if(input_sampler_ready&&!config_recovery_fault&&om_write_mutex &&
            xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(1))==pdTRUE){
-            bool trigger_pending,output_pending,panel_pending;
+            bool trigger_pending,panel_pending;
             portENTER_CRITICAL(&state_lock);
             trigger_pending=tm_deferred.pending;
-            output_pending=om_deferred.pending;
             panel_pending=pz_deferred.pending||pz_reset_pending_mask!=0u;
             portEXIT_CRITICAL(&state_lock);
             panel_pending=panel_pending||
@@ -2931,8 +2867,6 @@ static void config_activation_task(void *unused){
                 if(config_activation_idle(epoch,false))tm_promote(epoch);
             }else if(panel_pending){
                 if(config_activation_idle(epoch,true))pz_promote(epoch);
-            }else if(output_pending){
-                if(config_activation_idle(epoch,false))om_promote(epoch);
             }
             xSemaphoreGive(om_write_mutex);
         }
