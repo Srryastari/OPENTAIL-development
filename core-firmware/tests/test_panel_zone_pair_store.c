@@ -9,6 +9,7 @@ typedef struct {bool present;size_t size;uint8_t bytes[FAKE_BYTES];} fake_blob_t
 typedef struct {
     fake_blob_t lane_active,lane_stage,map_active,map_stage,intent,marker;
     unsigned durable_writes;
+    bool marker_read_error;
 } fake_store_t;
 typedef struct {uint8_t cut_after,last_phase;uint32_t transaction_id;} phase_state_t;
 static ot_pz_pair_store_workspace_t workspace;
@@ -29,6 +30,9 @@ static ot_pz_pair_io_result_t fake_read(void *context,ot_pz_pair_namespace_t ns,
                                         const char *key,void *data,size_t *size){
     fake_store_t *s=context;fake_blob_t *b=blob_for(s,ns,key);
     if(!b||!size)return OT_PZ_PAIR_IO_ERROR;
+    if(ns==OT_PZ_PAIR_NS_ZONE_MAP&&
+       strcmp(key,OT_PZ_PAIR_STORE_MARKER_KEY)==0&&s->marker_read_error)
+        return OT_PZ_PAIR_IO_ERROR;
     if(!b->present)return OT_PZ_PAIR_IO_NOT_FOUND;
     if(!data){*size=b->size;return OT_PZ_PAIR_IO_OK;}
     if(*size<b->size){*size=b->size;return OT_PZ_PAIR_IO_ERROR;}
@@ -123,6 +127,28 @@ static void initial_migration_cut_matrix(void){
         assert(ot_pz_pair_store_snapshot(&io,&workspace));
         assert(!workspace.snapshot.has_marker);
     }
+}
+static void marker_read_error_fails_closed(void){
+    fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
+    ot_pz_controller_t base,candidate;
+    make_runtime(&base,100u,OT_OM_GRB,100u);
+    make_runtime(&candidate,80u,OT_OM_RGB,80u);
+    const uint16_t previous_revision[OT_PZ_OUTPUTS]={1u,1u};
+    const uint16_t candidate_revision[OT_PZ_OUTPUTS]={2u,1u};
+    phase_state_t phases={.cut_after=3u};
+    /* Leave a durable intent with staged records but no marker (power cut
+     * after phase 3). NOT_FOUND is recoverable; an actual read error is not. */
+    assert(!ot_pz_pair_store_begin(&io,&workspace,&base,&candidate,
+        previous_revision,candidate_revision,0x3a3au,0u,true,
+        phase_hook,&phases));
+    assert(store.intent.present&&!store.marker.present);
+    store.marker_read_error=true;
+    assert(!ot_pz_pair_store_snapshot(&io,&workspace));
+    ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
+    uint16_t active[OT_PZ_OUTPUTS]={0},staged[OT_PZ_OUTPUTS]={0};
+    bool intent=false;uint32_t transaction=0u;uint8_t reset=0u;
+    assert(!ot_pz_pair_store_recover(&io,&workspace,&base,&live,&pending,
+        active,staged,&intent,&transaction,&reset));
 }
 static void durable_boundary_matrix(void){
     ot_pz_controller_t base,candidate1,candidate2;
@@ -230,6 +256,7 @@ int main(void){
     assert(sizeof(workspace)<=16u*1024u);
     zeroed_crc_compatibility();
     initial_migration_cut_matrix();
+    marker_read_error_fails_closed();
     durable_boundary_matrix();
     reset_marker_and_fail_closed();
     puts("PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
