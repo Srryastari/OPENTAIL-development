@@ -1170,7 +1170,9 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
        bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&
        bleSource.includes('GATT stack performs the characteristic long-read') &&
-       bleSource.includes('panelWatchdog.markMalformedTelemetry'),
+       bleSource.includes('panelWatchdog.markMalformedTelemetry') &&
+       bleSource.includes('panelSnapshotAbortForStop=true') &&
+       bleSource.includes('Panel snapshot aborted to prioritize STOP'),
        'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
 const systemSection=compose.split('private fun SettingsPage(')[1].split('private fun SettingsDiagnostics(')[0];
 assert(systemSection.includes('panelSyncWarning.value?.let') &&

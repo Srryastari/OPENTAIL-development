@@ -310,7 +310,7 @@ final class BleDiscovery {
     private volatile int panelReadKind=0,panelReadWatchLease=0;
     private volatile int panelSnapshotQueuedLane=-1;
     private volatile boolean panelSnapshotBusy=false,panelSnapshotWaitingWrite=false,
-                             panelSnapshotWaitingRead=false;
+                             panelSnapshotWaitingRead=false,panelSnapshotAbortForStop=false;
     private volatile int panelSnapshotPhase=0,panelSnapshotOffset=0,panelSnapshotWatchLease=0;
     private int panelSnapshotLane=-1;
     private byte[] panelSnapshotWire;
@@ -404,7 +404,8 @@ final class BleDiscovery {
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
         panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
-        panelSnapshotWaitingRead=false;panelSnapshotWatchLease++;panelCancelQueued=false;
+        panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
+        panelSnapshotWatchLease++;panelCancelQueued=false;
         panelCancelWaitingWrite=false;panelControlWritePending=false;panelCancelPacket=null;
         panelPollLease++;panelReconciliationPending=false;
         panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
@@ -1056,6 +1057,11 @@ final class BleDiscovery {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
+                if(panelSnapshotBusy) {
+                    panelSnapshotAbortForStop=true;
+                    if(!panelSnapshotWaitingWrite&&!panelSnapshotWaitingRead)
+                        panelSnapshotFail("Panel snapshot aborted to prioritize STOP");
+                }
             } else if (isStopPacket(nextPacket)) {
                 // A later FX edit must not erase a STOP waiting behind ATT.
                 // Coalesce newer edits in one successor slot after STOP.
@@ -1795,7 +1801,8 @@ final class BleDiscovery {
     private void startPanelSnapshot(int lane) {
         if(!canReadPanelPreview()||gatt==null)return;
         panelSnapshotBusy=true;panelSnapshotLane=lane;panelSnapshotPhase=0;
-        panelSnapshotOffset=0;panelSnapshotHeader=null;
+        panelSnapshotOffset=0;panelSnapshotHeader=null;panelSnapshotAbortForStop=false;
+        panelSnapshotFresh[lane]=false;
         panelSnapshotWire=new byte[PanelPreviewProtocol.MAP_BYTES];
         panelSnapshotWrite(new byte[]{3,1,(byte)lane});
     }
@@ -1832,6 +1839,9 @@ final class BleDiscovery {
         if(status!=BluetoothGatt.GATT_SUCCESS) {
             panelSnapshotFail("CORE Panel snapshot write failed: "+status);return;
         }
+        if(panelSnapshotAbortForStop) {
+            panelSnapshotFail("Panel snapshot aborted to prioritize STOP");return;
+        }
         panelSnapshotWaitingRead=true;
         try {
             if(!owner.readCharacteristic(panelConfigReply))
@@ -1842,6 +1852,9 @@ final class BleDiscovery {
     private void panelSnapshotRead(BluetoothGatt owner,byte[] value,int status) {
         if(owner!=gatt||!panelSnapshotBusy||!panelSnapshotWaitingRead)return;
         panelSnapshotWaitingRead=false;
+        if(panelSnapshotAbortForStop) {
+            panelSnapshotFail("Panel snapshot aborted to prioritize STOP");return;
+        }
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null) {
             panelSnapshotFail("CORE Panel snapshot response failed: "+status);return;
         }
@@ -1900,6 +1913,7 @@ final class BleDiscovery {
 
     private void panelSnapshotFail(String message) {
         panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;panelSnapshotWaitingRead=false;
+        panelSnapshotAbortForStop=false;
         panelSnapshotWire=null;panelSnapshotHeader=null;panelSnapshotWatchLease++;
         notifyStatus(message);
         if(panelReconciliationPending) {
