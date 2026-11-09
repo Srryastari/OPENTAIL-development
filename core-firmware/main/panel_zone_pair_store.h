@@ -46,9 +46,28 @@ typedef struct {
     ot_pz_pair_store_marker_t marker;
 } ot_pz_pair_store_snapshot_t;
 
+/* Large NVS/journal scratch is caller-owned so embedded callers do not put
+ * multi-kilobyte records on task stacks. CORE uses one static instance while
+ * holding om_write_mutex (boot recovery runs before tasks start). */
+typedef union {
+    ot_pz_lane_journal_t lane;
+    ot_pz_map_journal_t map;
+    ot_pz_pair_intent_t intent;
+    ot_pz_pair_store_marker_t marker;
+} ot_pz_pair_store_readback_t;
+typedef struct {
+    ot_pz_pair_store_snapshot_t snapshot;
+    ot_pz_controller_t previous,candidate;
+    ot_pz_pending_t pending;
+    ot_pz_lane_config_set_t previous_lanes,candidate_lanes;
+    ot_pz_map_t previous_map,candidate_map;
+    ot_pz_pair_store_readback_t readback;
+} ot_pz_pair_store_workspace_t;
+
 bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
-                               ot_pz_pair_store_snapshot_t *snapshot);
+                               ot_pz_pair_store_workspace_t *workspace);
 bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
+                              ot_pz_pair_store_workspace_t *workspace,
                               const ot_pz_controller_t *legacy_fallback,
                               ot_pz_controller_t *live,ot_pz_pending_t *pending,
                               uint16_t active_revision[OT_PZ_OUTPUTS],
@@ -59,6 +78,7 @@ bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
 /* Writes lane stage, map stage, then pair intent: durable phases 1..3.
  * allow_empty_active is reserved for first-time legacy migration only. */
 bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
+                            ot_pz_pair_store_workspace_t *workspace,
                             const ot_pz_controller_t *previous,
                             const ot_pz_controller_t *candidate,
                             const uint16_t previous_revision[OT_PZ_OUTPUTS],
@@ -70,8 +90,11 @@ bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
 /* Completes phases 4..9 idempotently. It can resume from any durable cut
  * while the pair intent remains present. */
 bool ot_pz_pair_store_finish(const ot_pz_pair_store_io_t *io,
+                             ot_pz_pair_store_workspace_t *workspace,
                              uint32_t transaction_id,
                              ot_pz_pair_phase_hook_t phase_hook,void *phase_context);
 
 /* Records a reset of an already-empty lane without writing a combined profile. */
-bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,uint8_t lane);
+bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,
+                                 ot_pz_pair_store_workspace_t *workspace,
+                                 uint8_t lane);
