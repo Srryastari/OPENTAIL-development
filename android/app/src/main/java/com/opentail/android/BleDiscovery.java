@@ -376,6 +376,7 @@ final class BleDiscovery {
     }
     boolean readPanelLaneSnapshot(int lane) {
         if(lane<0||lane>1||!canReadPanelPreview())return false;
+        panelSnapshotFresh[lane]=false;panelStatusFresh[lane]=false;
         panelSnapshotQueuedLane=lane;pumpQueue();return true;
     }
     PanelPreviewProtocol.LaneSnapshot lastConfirmedPanelSnapshot(int lane) {
@@ -1900,7 +1901,7 @@ final class BleDiscovery {
         if(!canReadPanelPreview()||gatt==null)return;
         panelSnapshotBusy=true;panelSnapshotLane=lane;panelSnapshotPhase=0;
         panelSnapshotOffset=0;panelSnapshotHeader=null;panelSnapshotAbortForStop=false;
-        panelSnapshotFresh[lane]=false;
+        panelSnapshotFresh[lane]=false;panelStatusFresh[lane]=false;
         panelSnapshotWire=new byte[PanelPreviewProtocol.MAP_BYTES];
         panelSnapshotWrite(new byte[]{3,1,(byte)lane});
     }
@@ -1995,8 +1996,10 @@ final class BleDiscovery {
             if(panelReconciliationPending) {
                 panelReconciliationSnapshot=snapshot;
                 panelReconciliationSnapshotVerified=true;
-                panelReadQueued=2;
             }
+            // Every fresh lane map is paired with a fresh status-v2 read before
+            // it can authorize a new preview transaction.
+            panelReadQueued=2;
             pumpQueue();
         } catch(IllegalArgumentException ex) {
             panelSnapshotFail("CORE Panel snapshot rejected: "+ex.getMessage());
