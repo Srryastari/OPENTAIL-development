@@ -54,9 +54,47 @@ typedef struct {
     ot_pz_zone_t zones[OT_PZ_MAX_ZONES_PER_OUTPUT];
 } ot_pz_output_t;
 
+/* Persistent v4 ownership split. Runtime still joins these two records for
+ * rendering, but ot_zone_map stores only this geometry map and ot_output_cfg
+ * stores only this physical lane configuration. Array index and lane_id must
+ * agree; the explicit IDs prevent a cross-lane record swap during recovery. */
+typedef struct {
+    uint8_t lane_id;
+    uint8_t panel_count;
+    uint8_t zone_count;
+    ot_pz_panel_t panels[OT_PZ_MAX_PANELS_PER_OUTPUT];
+    ot_pz_zone_t zones[OT_PZ_MAX_ZONES_PER_OUTPUT];
+} ot_pz_map_output_t;
+
+typedef struct {
+    ot_pz_map_output_t outputs[OT_PZ_OUTPUTS];
+} ot_pz_map_t;
+
+typedef struct {
+    uint8_t lane_id;
+    char name[OT_PZ_NAME_LEN];
+    uint16_t active_pixels; /* validated physical strip length, not build capacity */
+    uint8_t color_order;
+    uint8_t rgb_gain[3];
+    uint8_t white_gain[3];
+    bool gamma_enabled;
+} ot_pz_lane_config_t;
+
+typedef struct {
+    ot_pz_lane_config_t lanes[OT_PZ_OUTPUTS];
+} ot_pz_lane_config_set_t;
+
+/* Joined runtime view; never persist this combined form in the v4 map namespace. */
 typedef struct {
     ot_pz_output_t outputs[OT_PZ_OUTPUTS];
 } ot_pz_controller_t;
+
+bool ot_pz_split(const ot_pz_controller_t *runtime,
+                 ot_pz_lane_config_set_t *lanes,ot_pz_map_t *map);
+bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
+                ot_pz_controller_t *runtime);
+bool ot_pz_lane_config_set_valid(const ot_pz_lane_config_set_t *lanes);
+bool ot_pz_map_valid(const ot_pz_map_t *map);
 
 /* Single-owner volatile arrangement preview; slider updates never write NVS. */
 #define OT_PZ_PREVIEW_LEASE_MS 5000u
