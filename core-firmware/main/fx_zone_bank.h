@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "ble_fx_command.h"
 #include "output_manager.h"
+#include "panel_zone.h"
 #include "fx_overlay_engine.h"
 
 /* Temporary per-zone effect accents; not part of saved NVS v1/v2 payload. */
