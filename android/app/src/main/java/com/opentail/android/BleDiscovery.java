@@ -1801,13 +1801,15 @@ final class BleDiscovery {
         if(panelReadPending&&panelReadKind==2){panelReadPending=false;panelReadKind=0;panelReadWatchLease++;}
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null){
             if(panelStatusExpectedLane>=0)panelStatusFresh[panelStatusExpectedLane]=false;
+            else if(panelLastStatus!=null)panelStatusFresh[panelLastStatus.lane]=false;
             panelStatusExpectedLane=-1;
             TelemetrySequenceWatchdog.Decision malformed=panelWatchdog.markMalformedTelemetry(
                 "CORE Panel status read failed; transaction synchronization is uncertain");
             for(GeometryTransactionManager manager:panelGeometryManagers)
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
-            notifyStatus("CORE Panel status read failed: "+status);pumpQueue();return;
+            notifyStatus("CORE Panel status read failed: "+status);
+            panelReadQueued=2;pumpQueue();return;
         }
         final PanelPreviewProtocol.Status current;
         try{current=PanelPreviewProtocol.Status.parse(value);}
@@ -1819,7 +1821,8 @@ final class BleDiscovery {
             for(GeometryTransactionManager manager:panelGeometryManagers)
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
-            notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());pumpQueue();return;
+            notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());
+            panelReadQueued=2;pumpQueue();return;
         }
         if(panelStatusExpectedLane>=0&&current.lane!=panelStatusExpectedLane) {
             panelStatusFresh[panelStatusExpectedLane]=false;
