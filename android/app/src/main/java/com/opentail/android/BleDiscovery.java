@@ -1702,11 +1702,12 @@ final class BleDiscovery {
                 snapshot.pending==current.configPending;
             boolean managerReconciled=true;
             if(stable) {
-                GeometryTransactionManager manager=panelGeometryManagers[current.lane];
                 GeometryTransactionManager.Snapshot confirmed=new GeometryTransactionManager.Snapshot(
                     snapshot.lane,snapshot.activeRevision,snapshot.wire);
-                if(manager==null)panelGeometryManagers[current.lane]=new GeometryTransactionManager(confirmed);
-                else managerReconciled=manager.reconcile(current,confirmed);
+                if(manager==null) {
+                    manager=new GeometryTransactionManager(confirmed);
+                    panelGeometryManagers[current.lane]=manager;
+                } else managerReconciled=manager.reconcile(current,confirmed);
             }
             boolean reconciled=stable&&managerReconciled&&panelWatchdog.reconcile(current,true);
             TelemetrySequenceWatchdog.Decision reconciliationFailure=null;
