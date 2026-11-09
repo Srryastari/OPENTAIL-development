@@ -1723,7 +1723,14 @@ final class BleDiscovery {
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {ui.post(()->frameCapture.written(connection,status));return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
             if (PANEL_CFG_CMD_UUID.equals(characteristic.getUuid())) {panelSnapshotWritten(connection,status);return;}
-            if (PANEL_PREVIEW_CONTROL_UUID.equals(characteristic.getUuid())) {panelCancelWritten(connection,status);return;}
+            if (PANEL_PREVIEW_CONTROL_UUID.equals(characteristic.getUuid())) {
+                if(panelCancelWaitingWrite)panelCancelWritten(connection,status);
+                else panelControlWritten(connection,status);
+                return;
+            }
+            if (PANEL_PREVIEW_UPDATE_UUID.equals(characteristic.getUuid())) {
+                panelUpdateWritten(connection,status);return;
+            }
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
