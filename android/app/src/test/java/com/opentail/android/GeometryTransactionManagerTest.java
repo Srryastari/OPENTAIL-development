@@ -274,6 +274,24 @@ public class GeometryTransactionManagerTest {
         assertEquals("Left Trunk",mapping.lane(0).panels.get(1).name);
     }
 
+    @Test public void gs400PanelIdentityRemainsStableWhenPixelCountsAreEdited() {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        int[] edited={120,110,40,250,103}; // Same owner-approved sections; total remains 623.
+        String[] sections={"Top","Amber","Reverse","Bottom","Trunk"};
+        for(int lane=0;lane<2;lane++)for(int i=0;i<5;i++)
+            physicalZone(project,(lane==0?"Left ":"Right ")+sections[i],edited[i],lane,i);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
+        GeometryTransactionManager.MappedLane left=mapping.lane(0);
+        assertEquals(623,left.activePixels);
+        assertEquals(2,left.panels.size());
+        assertEquals("Left Housing",left.panels.get(0).name);
+        assertEquals(4,left.panels.get(0).zoneCount);
+        assertEquals("Left Trunk",left.panels.get(1).name);
+        assertEquals(120,left.zones.get(0).count);
+        assertEquals(520,left.zones.get(4).start);
+        assertEquals(103,left.zones.get(4).count);
+    }
+
     @Test public void geometryMappingNeverGuessesMissingPanelIdentity() {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         assertTrue(project.addZone("Unassigned panel",10));
