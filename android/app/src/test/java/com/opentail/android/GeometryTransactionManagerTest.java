@@ -450,7 +450,8 @@ public class GeometryTransactionManagerTest {
             validateSnapshots(mapping,empty,panelCollision);
             fail("conflicting existing Panel identity must block preview");
         } catch(IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("conflicts with authoritative Panel"));
+            assertTrue("Unexpected Panel collision rejection: "+expected.getMessage(),
+                expected.getMessage()!=null&&expected.getMessage().contains("conflicts with authoritative Panel"));
         }
     }
 
