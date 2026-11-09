@@ -1177,6 +1177,10 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&
        bleSource.includes('GATT stack performs the characteristic long-read') &&
        bleSource.includes('panelWatchdog.markMalformedTelemetry') &&
+       bleSource.includes('panelScheduleTransactionPoll(owner,current.lane)') &&
+       bleSource.includes('panelTransactionTimeoutLatched[current.lane]') &&
+       bleSource.includes('manager.state()==GeometryTransactionManager.State.RECONCILING') &&
+       bleSource.includes('panelSnapshotQueuedLane=current.lane') &&
        bleSource.includes('panelSnapshotAbortForStop=true') &&
        bleSource.includes('Panel snapshot aborted to prioritize STOP'),
        'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
