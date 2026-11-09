@@ -94,10 +94,28 @@ final class PanelPreviewProtocol {
         }
 
         /** Compact owner-facing sequence evidence for the existing System warning. */
+        private static String rejectionReasonName(int code) {
+            switch(code) {
+                case 0: return "NONE";
+                case 1: return "INVALID";
+                case 2: return "BUSY";
+                case 3: return "STALE";
+                case 4: return "INTERNAL";
+                case 5: return "COMMITTING_LOCKED";
+                case 6: return "SEQUENCE_GAP";
+                case 7: return "SEQUENCE_OUT_OF_ORDER";
+                case 8: return "SEQUENCE_DUPLICATE";
+                case 9: return "SEQUENCE_CONFLICT";
+                case 10: return "SYNC_REQUIRED";
+                default: return "UNKNOWN_" + code;
+            }
+        }
+
         String diagnosticSummary() {
             return "Panel " + (lane+1) + " · session " + sessionId +
                 " · accepted " + lastAcceptedSequence +
-                " · rejected " + lastRejectedSequence + " (reason " + lastRejectedReason + ")" +
+                " · rejected " + lastRejectedSequence + " (" + rejectionReasonName(lastRejectedReason) + ")" +
+                " · last error " + rejectionReasonName(lastError) +
                 " · missing " + missingCount + " · out-of-order " + outOfOrderCount +
                 " · duplicates " + duplicateCount + " · conflicts " + conflictCount +
                 " · COMMITTING rejects " + committingRejectCount +
