@@ -121,10 +121,13 @@ bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
                   sizeof(s.map_active.candidate_revision))!=0||
            memcmp(previous_revision,s.map_active.candidate_revision,
                   sizeof(s.map_active.candidate_revision))!=0)return false;
-        ot_pz_controller_t durable_current;
-        if(!ot_pz_join(&s.lane_active.candidate,&s.map_active.candidate,
+        ot_pz_controller_t durable_previous,durable_current;
+        if(!ot_pz_join(&s.lane_active.previous,&s.map_active.previous,
+                       &durable_previous)||
+           !ot_pz_join(&s.lane_active.candidate,&s.map_active.candidate,
                        &durable_current)||
            memcmp(&durable_current,previous,sizeof(durable_current))!=0)return false;
+        (void)durable_previous;
     }else if(!allow_empty_active){
         return false;
     }
@@ -196,8 +199,15 @@ bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,uint8_t lane){
     if(!ot_pz_pair_store_snapshot(io,&s)||s.has_intent||
        !s.has_map_active||!s.has_lane_active||
        s.map_active.transaction_id!=s.lane_active.transaction_id||
+       memcmp(s.map_active.previous_revision,s.lane_active.previous_revision,
+              sizeof(s.map_active.previous_revision))!=0||
        memcmp(s.map_active.candidate_revision,s.lane_active.candidate_revision,
               sizeof(s.map_active.candidate_revision))!=0)return false;
+    ot_pz_controller_t previous,candidate;
+    if(!ot_pz_join(&s.lane_active.previous,&s.map_active.previous,&previous)||
+       !ot_pz_join(&s.lane_active.candidate,&s.map_active.candidate,&candidate))
+        return false;
+    (void)previous;(void)candidate;
     ot_pz_map_journal_t updated={0};
     const uint8_t mask=(uint8_t)(s.map_active.reset_mask|(1u<<lane));
     if(!ot_pz_map_journal_build_reset(&updated,&s.map_active.previous,
