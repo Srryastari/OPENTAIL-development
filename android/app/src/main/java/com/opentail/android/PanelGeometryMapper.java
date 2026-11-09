@@ -2,7 +2,6 @@ package com.opentail.android;
 
 import org.json.JSONObject;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,7 +92,8 @@ final class PanelGeometryMapper {
         Map<Integer,Integer> globalPanelLanes=new HashMap<>();
         for(int lane=0;lane<2;lane++) {
             List<JSONObject> sections=assigned[lane];
-            sections.sort(Comparator.comparingInt(z->z.optInt("physicalSection",-1)));
+            java.util.Collections.sort(sections,(a,b)->
+                Integer.compare(a.optInt("physicalSection",-1),b.optInt("physicalSection",-1)));
             if(sections.size()>MAX_ZONES_PER_LANE)
                 throw new IllegalArgumentException("Output "+(lane+1)+" exceeds CORE's eight-zone limit");
             Map<Integer,String> panelNames=new HashMap<>();
@@ -108,12 +108,14 @@ final class PanelGeometryMapper {
                 if(section<0||section>7||panelId<1||panelId>MAX_PANEL_ID||
                    panelName.isEmpty()||count<1)
                     throw new IllegalArgumentException("Invalid physical section or Panel identity");
-                Integer priorLane=globalPanelLanes.putIfAbsent(panelId,lane);
-                if(priorLane!=null&&priorLane!=lane)
+                Integer priorLane=globalPanelLanes.get(panelId);
+                if(priorLane!=null&&priorLane.intValue()!=lane)
                     throw new IllegalArgumentException("CORE Panel IDs are controller-wide and cannot cross outputs");
-                String priorName=panelNames.putIfAbsent(panelId,panelName);
+                if(priorLane==null)globalPanelLanes.put(panelId,lane);
+                String priorName=panelNames.get(panelId);
                 if(priorName!=null&&!priorName.equals(panelName))
                     throw new IllegalArgumentException("One Panel ID has conflicting names");
+                if(priorName==null)panelNames.put(panelId,panelName);
                 panelCounts.put(panelId,panelCounts.getOrDefault(panelId,0)+1);
                 long end=(long)cursor+count;
                 if(end>MAX_PIXELS)
