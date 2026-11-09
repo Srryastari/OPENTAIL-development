@@ -43,9 +43,15 @@ assert render.count("ot_palette_runtime_snapshot(")==1
 assert render.count("ot_wled_palette_global_tick(")==1
 assert "750u,true,palette_random_byte,NULL" in render
 assert "ot_fx_slot_active(slot,frame_ms)" in render
-assert "const bool same_identity=active&&old_active[z]&&" in render
-assert "prior_fx_generation[ch][z]==slot->generation" in render
-assert "if(!same_identity)" in render
+assert "static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES]" in render
+assert "memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state))" in render
+assert "for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)" in render
+assert "prior_fx_generation[ch][old_z]==slot->generation" in render
+assert "fx_state[ch][z]=prior_fx_state[prior_index]" in render
+assert "old_z==(uint8_t)prior_index" in render
+assert "fx_bank_owner_zone_id" in render and "fx_bank_owner_panel_id" in render
+assert "resolved_fx_bank_index" in render
+assert "if(!same_identity)" not in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
 # The physical safety override is performed after all decorative FX and
@@ -91,10 +97,12 @@ assert "if(frame_captured[ch])ot_frame_snapshot_complete(false);" in render
 assert "frame_submitted[ch]=false;" in render
 assert "ot_arbitrate(combined," in render
 assert "ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms)" in render
-# FX-PZ continuity: zone identity is panel+zone+generation, not array position
-# alone. Keep prior physical mapping until a complete output refresh succeeds.
-assert "old_zone_id[z]==zone_cfg->id" in render
-assert "old_panel_id[z]==zone_cfg->panel_id" in render
+# FX-PZ continuity: stable Panel/Zone identity owns both effect slots and
+# renderer phase across index shifts, while the old pixel map gates frame carry.
+assert "old_zone_id[old_z]==zone_cfg->id" in render
+assert "old_panel_id[old_z]==zone_cfg->panel_id" in render
+assert "fx_bank_seen_generation" in render
+assert "fx_bank_owner_zone_id[ch][bank_z]=owner_zone" in render
 assert "const uint8_t old_z=prior_pixel_zone_map[ch][px];" in render
 assert "fx_zone_scratch[logical]=fx_frame[ch][px];" in render
 reset_pos=render.index("ot_effects_1d_reset(&fx_state[ch][z],")
