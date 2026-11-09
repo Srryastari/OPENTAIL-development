@@ -515,7 +515,7 @@
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
       "android/qa/test_native_source.cjs"
     ],
-    "firmware_contract_sha": "98824439a65eddab22a69b0a6f24c06000dd27e1",
+    "firmware_contract_sha": "ceeae01fa458a27123492af8e96d36eb1d6061fb",
     "protocol": {
       "status_v2_bytes": 61,
       "map_wire_bytes": 667,
