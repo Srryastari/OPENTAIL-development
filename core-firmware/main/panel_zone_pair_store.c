@@ -15,10 +15,14 @@ static ot_pz_pair_io_result_t read_exact(const ot_pz_pair_store_io_t *io,
 static bool write_verified(const ot_pz_pair_store_io_t *io,
         ot_pz_pair_namespace_t ns,const char *key,const void *record,size_t size){
     if(!io->write_commit(io->context,ns,key,record,size))return false;
-    uint8_t readback[sizeof(ot_pz_lane_journal_t)];
+    union {
+        ot_pz_lane_journal_t lane;
+        ot_pz_map_journal_t map;
+        ot_pz_pair_intent_t intent;
+    } readback;
     if(size>sizeof(readback))return false;
-    return read_exact(io,ns,key,readback,size)==OT_PZ_PAIR_IO_OK&&
-           memcmp(readback,record,size)==0;
+    return read_exact(io,ns,key,&readback,size)==OT_PZ_PAIR_IO_OK&&
+           memcmp(&readback,record,size)==0;
 }
 static bool erase_verified(const ot_pz_pair_store_io_t *io,
         ot_pz_pair_namespace_t ns,const char *key){
