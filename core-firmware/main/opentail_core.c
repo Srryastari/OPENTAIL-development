@@ -270,9 +270,9 @@ static bool tm_policy_load(void){
     if(e!=ESP_OK||size!=sizeof(stored)||!ot_tm_policy_valid(&stored)||
        memcmp(&stored,&expected,sizeof(stored))!=0)return false;
     if(migrated)ESP_LOGI(TAG,
-        "Migrated trigger input policy: active_low=%u assert=%u x 10ms turn_release_us=%lu",
+        "Migrated trigger input policy: active_low=%u assert=%u x %ums turn_release_us=%lu",
         (unsigned)stored.input_active_low,(unsigned)stored.assertion_samples,
-        (unsigned long)stored.turn_release_hold_us);
+        (unsigned)stored.sample_period_ms,(unsigned long)stored.turn_release_hold_us);
     return true;
 }
 /* Size/version-aware reader preserves draft-v1 records and the older
