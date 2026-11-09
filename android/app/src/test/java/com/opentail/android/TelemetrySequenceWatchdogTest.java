@@ -59,6 +59,18 @@ public class TelemetrySequenceWatchdogTest {
         assertFalse(w.observe(duplicate).warning); // firmware's warning bit remains latched; local reconciliation is authoritative.
     }
 
+    @Test public void sameRejectedReasonWithNewRejectedSequenceIsDetected() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,64,1,0,0,0,0,0,0,4));
+        byte[] b=new byte[61];b[0]=2;b[1]=1;b[2]=0;b[3]=3;
+        put32(b,4,64);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,1);put32(b,18,0x1234);put16(b,22,7);put16(b,24,7);put16(b,26,7);
+        put32(b,35,2);b[39]=5;b[60]=5;
+        TelemetrySequenceWatchdog.Decision d=w.observe(PanelPreviewProtocol.Status.parse(b));
+        assertTrue(d.warning);assertFalse(d.hardFault);
+        assertEquals(2L,d.snapshot.lastRejectedSequence);
+    }
+
     @Test public void disconnectDuringActivePreviewRequiresFreshSessionReconciliation() {
         TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
         PanelPreviewProtocol.Status active=status(1,51,0,0,0,0,0,0,0,0);

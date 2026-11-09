@@ -75,8 +75,10 @@ final class TelemetrySequenceWatchdog {
         if(current.hardSyncFault)
             latchHard(reason(current));
         else if(current.lastRejectedReason!=0 &&
-                current.lastRejectedReason!=last.lastRejectedReason && !warning) {
-            warning=true;message=reason(current);
+                (current.lastRejectedReason!=last.lastRejectedReason ||
+                 current.lastRejectedSequence!=last.lastRejectedSequence)) {
+            warning=true;
+            if(message==null)message=reason(current);
         }
         last=current;
         return decision(current);
