@@ -286,6 +286,7 @@ final class GeometryTransactionManager {
         lastConfirmed=copy(initial);
     }
 
+    synchronized long sessionId() { return sessionId; }
     synchronized State state() { return state; }
     synchronized Snapshot lastConfirmed() { return copy(lastConfirmed); }
     synchronized byte[] candidateCopy() { return candidate==null?null:Arrays.copyOf(candidate,candidate.length); }
