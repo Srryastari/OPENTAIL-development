@@ -208,7 +208,7 @@ for token in ("OT_PZ_TX_SEQUENCE_DUPLICATE", "OT_PZ_TX_SEQUENCE_GAP",
               "conflict_count"):
     assert token in committing_classifier, token
 
-# A random per-boot identity is available to the physical endurance log via /status.
+# A random per-boot identity is available to the physical endurance log via /api/v1/status.
 core = (ROOT / "main/opentail_core.c").read_text()
 assert "core_boot_id=esp_random()" in core
 status_endpoint = core.split("static esp_err_t status_get(", 1)[1].split(
