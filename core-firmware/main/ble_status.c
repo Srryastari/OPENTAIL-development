@@ -511,6 +511,13 @@ static void panel_preview_reject_control(uint8_t reason){
     if(reason==OT_PZ_TX_ERROR_COMMITTING_LOCKED)
         panel_preview_sat_add(&panel_preview_tx.committing_reject_count,1u);
 }
+static uint32_t panel_preview_missing_before(uint32_t sequence){
+    if(!panel_preview_tx.has_sequence)return sequence>1u?sequence-1u:0u;
+    const uint32_t distance=sequence>panel_preview_tx.last_sequence?
+        sequence-panel_preview_tx.last_sequence:
+        (UINT32_MAX-panel_preview_tx.last_sequence)+sequence;
+    return distance>1u?distance-1u:0u;
+}
 static void panel_preview_reject_update(uint32_t sequence,uint8_t reason,
                                         uint32_t missing_count){
     panel_preview_tx.last_rejected_sequence=sequence;
@@ -547,6 +554,30 @@ static void panel_preview_reject_update(uint32_t sequence,uint8_t reason,
         default:
             break;
     }
+}
+static void panel_preview_reject_committing_update(
+        const ot_pz_tx_update_packet_t *update){
+    if(!update)return;
+    /* Classification is telemetry only. The COMMITTING guard still rejects
+     * every packet and never passes one to the shadow geometry mutator. */
+    const ot_pz_tx_sequence_result_t observed=ot_pz_tx_sequence_check(
+        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
+        panel_preview_tx.last_packet_crc32,update->sequence,update->packet_crc32);
+    switch(observed){
+        case OT_PZ_TX_SEQUENCE_DUPLICATE:
+            panel_preview_sat_add(&panel_preview_tx.duplicate_count,1u);break;
+        case OT_PZ_TX_SEQUENCE_GAP:
+            panel_preview_sat_add(&panel_preview_tx.missing_sequence_count,
+                panel_preview_missing_before(update->sequence));break;
+        case OT_PZ_TX_SEQUENCE_OUT_OF_ORDER:
+            panel_preview_sat_add(&panel_preview_tx.out_of_order_count,1u);break;
+        case OT_PZ_TX_SEQUENCE_CONFLICT:
+            panel_preview_sat_add(&panel_preview_tx.conflict_count,1u);break;
+        default:
+            break;
+    }
+    panel_preview_reject_update(update->sequence,
+        OT_PZ_TX_ERROR_COMMITTING_LOCKED,0u);
 }
 static bool panel_preview_session_matches(uint8_t lane,uint32_t session_id){
     return panel_preview_tx.active&&panel_preview_tx.lane==lane&&
@@ -687,14 +718,24 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
             panel_preview_reject_control(OT_PZ_TX_ERROR_SYNC_REQUIRED);return 0;
         }
         const uint32_t expected=command.candidate_crc32;
-        const int rc=ot_ble_panel_preview_commit(lane,
-                    panel_preview_tx.base_revision,expected);
-        if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
-            (rc==3?OT_PZ_TX_ERROR_STALE:(rc==4?OT_PZ_TX_ERROR_INTERNAL:
-                                          OT_PZ_TX_ERROR_INVALID)));return 0;}
+        const uint32_t previous_crc=panel_preview_tx.candidate_crc32;
+        /* Publish the protocol lock before entering CORE. A delayed/concurrent
+         * UPDATE can now only observe COMMITTING, never the old ACTIVE state. */
         panel_preview_tx.candidate_crc32=expected;
         panel_preview_tx.committing=true;
         panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+        const int rc=ot_ble_panel_preview_commit(lane,
+                    panel_preview_tx.base_revision,expected);
+        if(rc!=0){
+            panel_preview_tx.candidate_crc32=previous_crc;
+            panel_preview_tx.committing=false;
+            panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+            panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+                (rc==3?OT_PZ_TX_ERROR_STALE:(rc==4?OT_PZ_TX_ERROR_INTERNAL:
+                                              OT_PZ_TX_ERROR_INVALID)));
+            return 0;
+        }
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
         panel_preview_refresh_commit_state();
         return 0;
     }
@@ -740,8 +781,7 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
      * Write Without Response packet arriving after COMMIT is rejected while
      * the transaction remains COMMITTING; no shadow or NVS mutation occurs. */
     if(panel_preview_tx.committing){
-        panel_preview_reject_update(update.sequence,
-            OT_PZ_TX_ERROR_COMMITTING_LOCKED,0u);
+        panel_preview_reject_committing_update(&update);
         return 0;
     }
     if(!panel_preview_session_matches(update.lane,update.session_id)){
@@ -758,12 +798,9 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
         return 0; /* Exact replay is observed, never applied twice. */
     }
     if(admission==OT_PZ_TX_UPDATE_REJECT_GAP){
-        const uint32_t distance=!panel_preview_tx.has_sequence?update.sequence:
-            (update.sequence>panel_preview_tx.last_sequence?
-             update.sequence-panel_preview_tx.last_sequence:
-             (UINT32_MAX-panel_preview_tx.last_sequence)+update.sequence);
         panel_preview_reject_update(update.sequence,
-            OT_PZ_TX_ERROR_SEQUENCE_GAP,distance>1u?distance-1u:0u);
+            OT_PZ_TX_ERROR_SEQUENCE_GAP,
+            panel_preview_missing_before(update.sequence));
         return 0;
     }
     if(admission==OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER){
@@ -791,7 +828,10 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
         const uint8_t error=rc==2?OT_PZ_TX_ERROR_BUSY:
             (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID);
         panel_preview_reject_update(update.sequence,error,0u);
-        if(rc==3)panel_preview_tx.sequence_sync_fault=true;
+        if(rc==3){
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+        }
         return 0;
     }
     uint32_t candidate_crc=0u;
@@ -801,6 +841,7 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
          * client must reconcile/cancel rather than guess whether it was applied. */
         panel_preview_reject_update(update.sequence,
             OT_PZ_TX_ERROR_INTERNAL,0u);
+        panel_preview_tx.sequence_sync_warning=true;
         panel_preview_tx.sequence_sync_fault=true;
         return 0;
     }
