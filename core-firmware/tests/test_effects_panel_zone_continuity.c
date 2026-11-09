@@ -217,13 +217,11 @@ static void test_zone_independence_and_discontiguous_ranges(
     assert(zone_map[6]==0xffu&&zone_map[11]==0xffu);
 
     for(unsigned i=0;i<3u;i++)
-        assert(memcmp(&probe->frame[0][i],
-                      &probe->logical_frame[0][0][i],
-                      sizeof(ot_wled_rgb_t))==0);
+        assert(same_wled_rgb(probe->frame[0][i],
+                             probe->logical_frame[0][0][i]));
     for(unsigned i=0;i<3u;i++)
-        assert(memcmp(&probe->frame[0][8u+i],
-                      &probe->logical_frame[0][0][3u+i],
-                      sizeof(ot_wled_rgb_t))==0);
+        assert(same_wled_rgb(probe->frame[0][8u+i],
+                             probe->logical_frame[0][0][3u+i]));
 }
 
 static void test_preview_phase_commit_cancel_and_unaffected_zone(
@@ -248,9 +246,8 @@ static void test_preview_phase_commit_cancel_and_unaffected_zone(
     assert(render_probe_frame(&previewed,&preview.candidate,bank,1110u));
     const unsigned untouched[]={3u,4u,5u,12u,13u,14u};
     for(size_t i=0;i<sizeof(untouched)/sizeof(untouched[0]);i++)
-        assert(memcmp(&reference.frame[0][untouched[i]],
-                      &previewed.frame[0][untouched[i]],
-                      sizeof(ot_wled_rgb_t))==0);
+        assert(same_wled_rgb(reference.frame[0][untouched[i]],
+                             previewed.frame[0][untouched[i]]));
     assert(previewed.state[0][0].original_last_ms==110u);
     assert(previewed.state[0][0].original_phase_q32!=
            probe->state[0][0].original_phase_q32);
@@ -355,15 +352,15 @@ static void test_stop_and_physical_priority(ot_fx_zone_bank_t *bank){
         (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),true,255u,&physical));
     const ot_rgb_t left=ot_om_trigger_color(OT_OM_LEFT,
         (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),255u);
-    assert(memcmp(&physical,&left,sizeof(left))==0);
+    assert(same_rgb(physical,left));
     assert(ot_om_trigger_overlay(OT_OM_RIGHT,
         (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),true,255u,&physical));
     const ot_rgb_t right=ot_om_trigger_color(OT_OM_RIGHT,
         (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),255u);
-    assert(memcmp(&physical,&right,sizeof(right))==0);
+    assert(same_rgb(physical,right));
     assert(ot_om_trigger_overlay(OT_OM_REVERSE,OT_SIG_REVERSE,true,255u,&physical));
     const ot_rgb_t reverse=ot_om_trigger_color(OT_OM_REVERSE,OT_SIG_REVERSE,255u);
-    assert(memcmp(&physical,&reverse,sizeof(reverse))==0);
+    assert(same_rgb(physical,reverse));
 }
 
 int main(void){
