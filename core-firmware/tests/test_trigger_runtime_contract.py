@@ -339,7 +339,7 @@ for begin, end in (("static esp_err_t om_post(", "bool ot_ble_config_get("),
                    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels")):
     saving = between(core, begin, end)
     assert "const bool raw_active=tm_gpio_input_mask()!=0;" in saving
-    assert re.search(r"raw_active\\s*\\|\\|\\s*live_input_mask",saving)
+    assert re.search(r"raw_active\s*\|\|\s*live_input_mask",saving)
     assert saving.index("tm_gpio_input_mask()") < saving.index("om_save(")
 load = between(core, "static void tm_load(void){", "static bool tm_save(")
 assert "ot_tm_defaults(&tm_profile);" in load
