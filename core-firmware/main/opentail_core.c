@@ -123,7 +123,7 @@ static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]={0u,0u};
 #if CONFIG_STDATOMIC_S32C1I_SPIRAM_WORKAROUND
 _Static_assert(__alignof__(turn_edge_head[0])>=4 &&
                __alignof__(turn_edge_tail[0])>=4 &&
-               __alignof__(input_raw_edges[0])>=4,
+               __alignof__(turn_edge_writer_active[0])>=4,
                "internal ISR atomic words must be 4-byte aligned");
 #else
 _Static_assert(__atomic_always_lock_free(sizeof(uint32_t),0),
