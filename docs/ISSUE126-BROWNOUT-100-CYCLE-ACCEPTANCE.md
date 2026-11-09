@@ -104,7 +104,7 @@ Record at minimum for every cycle:
 - Any reset, watchdog, brownout, NVS or partition error log.
 - Final cycle PASS/FAIL and evidence file references.
 
-The updated CORE exposes a random per-boot 32-bit boot identity in the existing /status JSON response as boot_id and logs the same identity at startup. Record the pre-cut and post-reboot values. Confirm this field is present on the exact test SHA before cycle 1; do not substitute a timestamp or reuse an earlier boot's value.
+The updated CORE exposes a random per-boot 32-bit boot identity in the existing GET /api/v1/status JSON response as boot_id and logs the same identity at startup. Record the pre-cut and post-reboot values. Confirm this field is present on the exact test SHA before cycle 1; do not substitute a timestamp or reuse an earlier boot's value.
 
 ### 5.1 Copyable cycle-log CSV header
 
