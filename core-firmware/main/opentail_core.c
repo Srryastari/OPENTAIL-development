@@ -47,6 +47,7 @@
 #include "nvs.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "xt_utils.h"
 #include "esp_psram.h"
 #include "hal/gpio_ll.h"
 #include "esp_random.h"
@@ -2504,6 +2505,58 @@ static bool wifi_ap_init(void) {
 }
 /* ESP-IDF 5.5.x esp_timer_get_time is ISR-safe/IRAM-backed; capture only the
  * two turn channels so the task can classify edge time despite wake jitter. */
+/* ESP-IDF 5.5.5 selects STDATOMIC_S32C1I_SPIRAM_WORKAROUND when
+ * N16R8 octal PSRAM is enabled. The general-purpose __atomic_* fallback
+ * may then enter a non-IRAM critical section and is NOT ISR-safe.
+ *
+ * This deliberately narrow path uses Xtensa S32C1I only on internal
+ * DRAM_ATTR, naturally-aligned queue/telemetry words; external PSRAM must
+ * never be passed here. The exact ELF disassembly/section audit enforces
+ * this no-helper-call contract and rejects any non-IRAM dependencies.
+ * Every helper is force-inlined into input_edge_isr. */
+static inline __attribute__((always_inline)) void ot_isr_dram_fence(void){
+    __asm__ __volatile__("memw" ::: "memory");
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_load_acquire(const volatile uint32_t *word){
+    const uint32_t value=*word;
+    ot_isr_dram_fence();
+    return value;
+}
+static inline __attribute__((always_inline)) void
+ot_isr_dram_store_release(volatile uint32_t *word,uint32_t value){
+    ot_isr_dram_fence();
+    *word=value;
+    ot_isr_dram_fence();
+}
+static inline __attribute__((always_inline)) bool
+ot_isr_dram_cas(volatile uint32_t *word,uint32_t previous,uint32_t next){
+    ot_isr_dram_fence();
+    const bool changed=xt_utils_compare_and_set(word,previous,next);
+    ot_isr_dram_fence();
+    return changed;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_add(volatile uint32_t *word,uint32_t delta){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old+delta));
+    return old;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_or(volatile uint32_t *word,uint32_t mask){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old|mask));
+    return old;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_and(volatile uint32_t *word,uint32_t mask){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old&mask));
+    return old;
+}
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
     /* Reject an invalid callback index before any pin/counter/queue lookup. */
@@ -2514,7 +2567,7 @@ static void IRAM_ATTR input_edge_isr(void *arg){
      * GPIO. A sampler on the other core must not expire a hold while the
      * corresponding edge is in flight. */
     if(is_turn)
-        __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
+        ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u);
     const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;
     int level=1;
     bool asserted=false;
@@ -2522,40 +2575,39 @@ static void IRAM_ATTR input_edge_isr(void *arg){
         /* LL read is IRAM-safe; normalized asserted=1 honors active-low wiring. */
         level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
         asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
-        __atomic_fetch_add(&input_raw_edges[input_index],1u,__ATOMIC_RELAXED);
+        ot_isr_dram_fetch_add(&input_raw_edges[input_index],1u);
         if(asserted)
-            __atomic_fetch_add(&input_asserted_edges[input_index],1u,__ATOMIC_RELAXED);
+            ot_isr_dram_fetch_add(&input_asserted_edges[input_index],1u);
         else
-            __atomic_fetch_add(&input_deasserted_edges[input_index],1u,__ATOMIC_RELAXED);
+            ot_isr_dram_fetch_add(&input_deasserted_edges[input_index],1u);
         const uint32_t bit=1u<<input_index;
-        if(asserted)__atomic_fetch_or(&input_raw_level_mask,bit,__ATOMIC_RELAXED);
-        else __atomic_fetch_and(&input_raw_level_mask,~bit,__ATOMIC_RELAXED);
+        if(asserted)ot_isr_dram_fetch_or(&input_raw_level_mask,bit);
+        else ot_isr_dram_fetch_and(&input_raw_level_mask,~bit);
     }
     if(is_turn){
-        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_RELAXED);
-        const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
+        const uint32_t head=ot_isr_dram_load_acquire(&turn_edge_head[slot]);
+        const uint32_t tail=ot_isr_dram_load_acquire(&turn_edge_tail[slot]);
         if((uint32_t)(head-tail)>=OT_TURN_EDGE_QUEUE_CAPACITY){
             /* Preserve the existing SPSC queue; telemetry counts each full-ring edge. */
-            __atomic_store_n(&turn_edge_overflow[slot],1u,__ATOMIC_RELEASE);
-            __atomic_fetch_add(&turn_edge_overflow_count[slot],1u,__ATOMIC_RELAXED);
+            ot_isr_dram_store_release(&turn_edge_overflow[slot],1u);
+            ot_isr_dram_fetch_add(&turn_edge_overflow_count[slot],1u);
         }else{
             ot_turn_edge_event_t *event=
                 &turn_edge_events[slot][head&OT_TURN_EDGE_QUEUE_MASK];
             event->timestamp_us=edge_time_us;
             event->asserted=asserted;
-            __atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE);
+            ot_isr_dram_store_release(&turn_edge_head[slot],head+1u);
             const uint32_t depth=(uint32_t)(head+1u-tail);
-            uint32_t high=__atomic_load_n(&turn_edge_high_water[slot],__ATOMIC_RELAXED);
+            uint32_t high=ot_isr_dram_load_acquire(&turn_edge_high_water[slot]);
             /* One bounded best-effort high-water update; the existing ISR is
              * the sole producer for this lane. A racing update may under-report
              * the diagnostic maximum, but it can never extend ISR latency. */
-            if(depth>high)(void)__atomic_compare_exchange_n(
-                &turn_edge_high_water[slot],&high,depth,true,
-                __ATOMIC_RELAXED,__ATOMIC_RELAXED);
+            if(depth>high)(void)ot_isr_dram_cas(
+                &turn_edge_high_water[slot],high,depth);
         }
-        __atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE);
+        ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u);
     }
-    (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
+    (void)ot_isr_dram_fetch_add(&input_edge_epoch,1u);
 }
 
 void ot_input_diag_snapshot_get(ot_input_diag_snapshot_t *out){
