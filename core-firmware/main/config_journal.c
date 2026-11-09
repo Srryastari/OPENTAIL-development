@@ -10,13 +10,25 @@ uint32_t ot_cfg_crc32(const void *data,size_t bytes){
     }
     return ~crc;
 }
+uint32_t ot_cfg_crc32_zeroed(const void *data,size_t bytes,
+                             size_t zero_offset,size_t zero_bytes){
+    if(!data||zero_offset>bytes||zero_bytes>bytes-zero_offset)return 0u;
+    const uint8_t *p=(const uint8_t*)data;uint32_t crc=0xffffffffu;
+    for(size_t i=0;i<bytes;i++){
+        const uint8_t value=(i>=zero_offset&&i-zero_offset<zero_bytes)?0u:p[i];
+        crc^=value;
+        for(unsigned j=0;j<8u;j++)
+            crc=(crc>>1)^((crc&1u)?0xedb88320u:0u);
+    }
+    return ~crc;
+}
 static uint32_t tm_crc(const ot_tm_journal_t *p){
-    ot_tm_journal_t copy=*p;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(p,sizeof(*p),
+        offsetof(ot_tm_journal_t,crc),sizeof(p->crc));
 }
 static uint32_t om_crc(const ot_om_journal_t *p){
-    ot_om_journal_t copy=*p;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(p,sizeof(*p),
+        offsetof(ot_om_journal_t,crc),sizeof(p->crc));
 }
 static bool outputs_valid(const ot_om_output_t a[OT_OM_OUTPUTS]){
     if(!a)return false;
@@ -130,8 +142,8 @@ bool ot_om_journal_recover(const ot_om_journal_t *active,
 }
 
 static uint32_t pz_crc(const ot_pz_journal_t *record){
-    ot_pz_journal_t copy=*record;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_journal_t,crc),sizeof(record->crc));
 }
 bool ot_pz_journal_build(ot_pz_journal_t *out,
                          const ot_pz_controller_t *previous,
@@ -229,16 +241,16 @@ static bool pz_pair_has_revision_change(
     return false;
 }
 static uint32_t pz_map_journal_crc(const ot_pz_map_journal_t *record){
-    ot_pz_map_journal_t copy=*record;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_map_journal_t,crc),sizeof(record->crc));
 }
 static uint32_t pz_lane_journal_crc(const ot_pz_lane_journal_t *record){
-    ot_pz_lane_journal_t copy=*record;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_lane_journal_t,crc),sizeof(record->crc));
 }
 static uint32_t pz_pair_intent_crc(const ot_pz_pair_intent_t *record){
-    ot_pz_pair_intent_t copy=*record;copy.crc=0u;
-    return ot_cfg_crc32(&copy,sizeof(copy));
+    return ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_pair_intent_t,crc),sizeof(record->crc));
 }
 bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
                          const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
@@ -259,20 +271,21 @@ bool ot_pz_map_journal_build_reset(ot_pz_map_journal_t *out,
        (reset_mask&~valid_mask)!=0u||
        !ot_pz_map_valid(previous)||!ot_pz_map_valid(candidate)||
        !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
-    ot_pz_map_journal_t next={0};
-    next.magic=OT_PZ_MAP_JOURNAL_MAGIC;
-    next.version=OT_PZ_PAIR_SCHEMA_VERSION;
-    next.transaction_id=transaction_id;
-    next.reset_mask=reset_mask;
-    next.previous=*previous;next.candidate=*candidate;
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         if(memcmp(&previous->outputs[lane],&candidate->outputs[lane],
                   sizeof(previous->outputs[lane]))!=0&&
            candidate_revision[lane]<=previous_revision[lane])return false;
-        next.previous_revision[lane]=previous_revision[lane];
-        next.candidate_revision[lane]=candidate_revision[lane];
+    memset(out,0,sizeof(*out));
+    out->magic=OT_PZ_MAP_JOURNAL_MAGIC;
+    out->version=OT_PZ_PAIR_SCHEMA_VERSION;
+    out->transaction_id=transaction_id;
+    out->reset_mask=reset_mask;
+    out->previous=*previous;out->candidate=*candidate;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        out->previous_revision[lane]=previous_revision[lane];
+        out->candidate_revision[lane]=candidate_revision[lane];
     }
-    next.crc=pz_map_journal_crc(&next);*out=next;return true;
+    out->crc=pz_map_journal_crc(out);return true;
 }
 bool ot_pz_map_journal_valid(const ot_pz_map_journal_t *record){
     const uint8_t valid_mask=(uint8_t)((1u<<OT_PZ_OUTPUTS)-1u);
@@ -419,17 +432,15 @@ bool ot_pz_pair_journal_recover(
         return true;
     }
 
-    ot_pz_controller_t previous,candidate;
-    if(!ot_pz_join(&lane_record->previous,&map_record->previous,&previous)||
-       !ot_pz_join(&lane_record->candidate,&map_record->candidate,&candidate))
-        return false;
+    if(!ot_pz_join(&lane_record->previous,&map_record->previous,live)||
+       !ot_pz_join(&lane_record->candidate,&map_record->candidate,
+                   &pending->candidate))return false;
     if(map_record->transaction_id!=lane_record->transaction_id||
        memcmp(map_record->previous_revision,lane_record->previous_revision,
               sizeof(map_record->previous_revision))!=0||
        memcmp(map_record->candidate_revision,lane_record->candidate_revision,
               sizeof(map_record->candidate_revision))!=0)return false;
-    *live=previous;pending->candidate=candidate;
-    pending->pending=memcmp(&previous,&candidate,sizeof(previous))!=0;
+    pending->pending=memcmp(live,&pending->candidate,sizeof(*live))!=0;
     memcpy(active_revision,map_record->previous_revision,
            sizeof(map_record->previous_revision));
     memcpy(staged_revision,map_record->candidate_revision,
