@@ -45,6 +45,9 @@ assert "750u,true,palette_random_byte,NULL" in render
 assert "ot_fx_slot_active(slot,frame_ms)" in render
 assert "static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES]" in render
 assert "memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state))" in render
+assert "memset(fx_state[ch],0,sizeof(fx_state[ch]))" in render
+assert "memset(&prior_fx_state[prior_index],0" in render
+assert "ot_effects_1d_reset(&prior_fx_state[old_z],0u)" in render
 assert "for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)" in render
 assert "memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation))" in render
 assert "ot_effects_1d_find_prior_zone_state(" in render
