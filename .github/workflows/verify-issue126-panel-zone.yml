@@ -36,9 +36,26 @@ jobs:
               ["git","diff","--name-only",
                "66c2d9c843a0b434f9399811110e42d7e26c4692","HEAD"],
               text=True).splitlines()
-          forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))]
+          # Approved split-source renderer integration only. Keep all other
+          # Android/UI paths forbidden and prove byte identity to the vetted
+          # Effects #110 + Android #111 Git blobs, not just file names.
+          approved={
+              "android/app/src/main/cpp/core/effects_1d.c":
+                  "3985028279ec7ef6d765415b6e54f4fa027647d0",
+              "android/app/src/main/cpp/core/effects_1d.h":
+                  "a1e9c4b7601704f725c4c9221f606bc11a213bf7",
+              "android/app/src/main/cpp/core/wled_fx_compat.c":
+                  "85f0cc22bdcff6cdb43a408d6b338fbfd2454671",
+              "android/app/src/main/cpp/core/SOURCE.json":
+                  "7eeca0e24a0801cb3bad0d77f5f64873824a215d",
+          }
+          forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))
+                     and p not in approved]
           assert not forbidden, forbidden
-          print("PASS: no Android or UI source changes")
+          for path,expected in approved.items():
+              actual=subprocess.check_output(["git","hash-object",path],text=True).strip()
+              assert actual==expected,(path,actual,expected)
+          print("PASS: approved JNI/manifest blobs only; no other Android or UI source changes")
           PY
       - name: Full CORE host regressions — Panel, Trigger, Effects, BLE, STOP and NVS
         run: cd core-firmware && bash tests/run-host-tests.sh
