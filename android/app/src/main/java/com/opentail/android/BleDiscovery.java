@@ -320,6 +320,8 @@ final class BleDiscovery {
     private byte[] panelCancelPacket;
     private long panelCancelAttemptedSession=-1L;
     private volatile int panelPollLease=0;
+    private final int[] panelTransactionPollAttempts={0,0};
+    private final boolean[] panelTransactionTimeoutLatched={false,false};
     private boolean panelReconciliationPending=false,panelReconciliationSnapshotVerified=false;
     private int panelReconciliationAttempts=0;
     private PanelPreviewProtocol.LaneSnapshot panelReconciliationSnapshot;
@@ -408,6 +410,8 @@ final class BleDiscovery {
         panelSnapshotWatchLease++;panelCancelQueued=false;
         panelCancelWaitingWrite=false;panelControlWritePending=false;panelCancelPacket=null;
         panelPollLease++;panelReconciliationPending=false;
+        Arrays.fill(panelTransactionPollAttempts,0);
+        Arrays.fill(panelTransactionTimeoutLatched,false);
         panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
     }
     boolean canMapTriggers(){return canControl() && triggerMapping!=null;}
@@ -1688,6 +1692,15 @@ final class BleDiscovery {
         if(manager!=null&&decision.warning)manager.markSynchronizationUncertain(decision.message);
         panelNotify(current,decision);
 
+        if(manager!=null&&!panelReconciliationPending&&
+           manager.state()==GeometryTransactionManager.State.RECONCILING) {
+            if(!decision.requiresReconciliation)
+                decision=panelWatchdog.markReconciliationFailed(manager.lastError());
+            panelNotify(current,decision);
+            panelBeginReconciliation(owner,current,decision);
+            pumpQueue();return;
+        }
+
         if(panelReconciliationPending&&panelReconciliationSnapshotVerified) {
             if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
                 panelReconciliationSnapshotVerified=false;
@@ -1723,6 +1736,8 @@ final class BleDiscovery {
             panelReconciliationSnapshotVerified=false;
             if(reconciled) {
                 panelReconciliationAttempts=0;
+                panelTransactionPollAttempts[current.lane]=0;
+                panelTransactionTimeoutLatched[current.lane]=false;
                 panelNotify(current,panelWatchdog.snapshot());
             } else if(!stable&&panelReconciliationAttempts<1) {
                 panelReconciliationAttempts++;
@@ -1735,6 +1750,29 @@ final class BleDiscovery {
                     panelBeginReconciliation(owner,current,reconciliationFailure);
             }
             pumpQueue();return;
+        }
+        if(manager!=null) {
+            GeometryTransactionManager.State transactionState=manager.state();
+            boolean awaitingAck=transactionState==GeometryTransactionManager.State.BEGINNING||
+                transactionState==GeometryTransactionManager.State.UPDATE_PENDING||
+                transactionState==GeometryTransactionManager.State.COMMIT_REQUESTED||
+                transactionState==GeometryTransactionManager.State.COMMITTING;
+            if(awaitingAck) {
+                if(panelTransactionPollAttempts[current.lane]>=40&&
+                   !panelTransactionTimeoutLatched[current.lane]) {
+                    panelTransactionTimeoutLatched[current.lane]=true;
+                    TelemetrySequenceWatchdog.Decision timeout=panelWatchdog.markReconciliationFailed(
+                        "CORE Panel transaction did not acknowledge its latest phase within the bounded poll window");
+                    manager.markSynchronizationUncertain(timeout.message);
+                    panelNotify(current,timeout);
+                    panelBeginReconciliation(owner,current,timeout);
+                    pumpQueue();return;
+                }
+                panelScheduleTransactionPoll(owner,current.lane);
+            } else {
+                panelTransactionPollAttempts[current.lane]=0;
+                panelTransactionTimeoutLatched[current.lane]=false;
+            }
         }
         if(decision.requiresReconciliation)panelBeginReconciliation(owner,current,decision);
         pumpQueue();
@@ -1764,11 +1802,19 @@ final class BleDiscovery {
     }
 
     private void panelScheduleCommitPoll(BluetoothGatt owner) {
+        int lane=panelLastStatus==null?-1:panelLastStatus.lane;
+        if(lane>=0)panelScheduleTransactionPoll(owner,lane);
+    }
+
+    private void panelScheduleTransactionPoll(BluetoothGatt owner,int lane) {
+        if(lane<0||lane>1)return;
         final int lease=++panelPollLease;
+        final int attempt=++panelTransactionPollAttempts[lane];
+        long delay=attempt<=40?200L:1000L;
         ui.postDelayed(()->{
             if(!stopped&&owner==gatt&&canControl()&&panelPollLease==lease&&
                !panelReadPending&&panelReadQueued==0)readPanelStatus();
-        },200L);
+        },delay);
     }
 
     @SuppressWarnings({"MissingPermission","deprecation"})
