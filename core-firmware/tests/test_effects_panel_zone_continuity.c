@@ -39,7 +39,6 @@ static bool same_effect_state(const ot_effects_1d_state_t *a,
 
 typedef struct {
     ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    ot_fx_zone_identity_map_t bank_identity[OT_PZ_OUTPUTS];
     uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
     ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
     ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
@@ -126,7 +125,7 @@ static ot_ble_fx_packet_t make_fx(uint16_t effect,unsigned lane,unsigned zone){
  * path. The source-order contract separately pins this harness to led_task().
  */
 static bool render_probe_frame(render_probe_t *probe,
-        const ot_pz_controller_t *panel,const ot_fx_zone_bank_t *bank,
+        const ot_pz_controller_t *panel,ot_fx_zone_bank_t *bank,
         uint32_t now_ms){
     if(!probe||!panel||!bank)return false;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
@@ -136,8 +135,8 @@ static bool render_probe_frame(render_probe_t *probe,
         ot_layout_t layout;
         if(!ot_om_layout(&output,&layout))return false;
 
-        if(!ot_fx_bank_resolve_zone_identity(&probe->bank_identity[lane],
-            panel_out,bank,lane,now_ms,probe->resolved_bank_index[lane]))
+        if(!ot_fx_bank_resolve_zone_identity(panel_out,bank,lane,now_ms,
+            probe->resolved_bank_index[lane]))
             return false;
 
         uint8_t zone_map[OT_PZ_MAX_PIXELS];
@@ -372,7 +371,7 @@ static void test_preview_phase_commit_cancel_and_unaffected_zone(
 }
 
 static void test_identity_state_survives_reorder_delete_and_cancel(
-        ot_pz_controller_t *active,const ot_fx_zone_bank_t *bank,
+        ot_pz_controller_t *active,ot_fx_zone_bank_t *bank,
         render_probe_t *probe){
     const uint16_t original_zone0=active->outputs[0].zones[0].id;
     const uint16_t original_zone1=active->outputs[0].zones[1].id;
