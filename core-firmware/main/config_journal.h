@@ -36,6 +36,7 @@ typedef struct {
     uint16_t candidate_revision[OT_OM_OUTPUTS];
 } ot_om_journal_t;
 uint32_t ot_cfg_crc32(const void *data,size_t bytes);
+uint32_t ot_cfg_crc32_zeroed(const void *data,size_t bytes,size_t zero_offset,size_t zero_bytes);
 bool ot_tm_journal_build(ot_tm_journal_t *out,const ot_tm_profile_t *previous,
                          const ot_tm_profile_t *candidate);
 bool ot_om_journal_build(ot_om_journal_t *out,
