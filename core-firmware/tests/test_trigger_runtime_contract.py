@@ -316,11 +316,13 @@ assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in save
 assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
 assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
-# Issue #126 makes the hierarchical Panel/Zone v3 journal authoritative for
-# output geometry. The legacy Output Manager is now a compatibility projection;
-# verify that accepted geometry saves stage the real v3 candidate before RAM.
+# Issue #126 v4 stores hardware-only lane records and map-only geometry records
+# in their dedicated namespaces. The legacy Output Manager is a compatibility
+# projection; accepted geometry saves stage the real cross-namespace pair first.
 assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
-assert "ot_pz_journal_build(&staged,&previous,candidate," in core
+assert "ot_pz_pair_store_begin(&pz_pair_store_io,&previous,candidate," in core
+assert "ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id," in core
+assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and "OT_PZ_PAIR_NS_ZONE_MAP" in core
 assert "pz_save_controller_locked(&candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
