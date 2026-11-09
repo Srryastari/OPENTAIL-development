@@ -202,6 +202,7 @@ bool ot_fx_bank_apply_configured_identity(ot_fx_zone_bank_t *bank,
  bool any=false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!(request->chain_mask&(1u<<o)))continue;
+  if(outputs[o].zone_count>OT_OM_ZONES)return false;
   bool has_target=false;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
    if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
@@ -252,12 +253,8 @@ bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
   any=true;
  }
  if(!any)return false;
- for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++)
-  if(bank->zones[o][z].continuous&&!(masks[o]&(1u<<z))){
-   bank->zones[o][z].configured=false;
-   bank->zones[o][z].owner_panel_id=0u;
-   bank->zones[o][z].owner_zone_id=0u;
-  }
+ /* Per-target update: untouched zones keep their continuous assignments.
+  * STOP is the explicit operation that clears the whole continuous show. */
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!masks[o])continue;
   ot_ble_fx_packet_t effective=*request;
@@ -287,6 +284,25 @@ bool ot_fx_bank_set_overlay_identity(ot_fx_zone_bank_t *bank,
   for(unsigned z=0;z<outputs[o].zone_count;z++)
    if((zone_mask&(1u<<z))&&resolved[z]<OT_OM_ZONES)
     bank->zones[o][resolved[z]].overlay=*overlay;
+ }
+ return any;
+}
+bool ot_fx_bank_set_spark_identity(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_spark_style_t *spark){
+ if(!bank||!outputs||!panel_outputs||!spark||!chain_mask||
+    (chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))||!zone_mask)return false;
+ bool any=false;
+ for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+  if(!(chain_mask&(1u<<o)))continue;
+  uint8_t mask=0u,resolved[OT_OM_ZONES];
+  if(!resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
+      zone_mask,now_ms,true,&mask,resolved))continue;
+  any=true;
+  for(unsigned z=0;z<outputs[o].zone_count;z++)
+   if((zone_mask&(1u<<z))&&resolved[z]<OT_OM_ZONES)
+    bank->zones[o][resolved[z]].spark=*spark;
  }
  return any;
 }
