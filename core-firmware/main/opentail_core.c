@@ -1994,34 +1994,31 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
        event_key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
     return send_json(r,payload);
 }
-void ot_ble_stop_show(void){
+/* One software STOP owner for both BLE and HTTP. It never writes GPIOs,
+ * clears physical input state, or suppresses Brake/Turn/Hazards/Reverse.
+ * An already-COMMITTING geometry transaction is deliberately preserved. */
+static void core_stop_all_sources(void){
     const TickType_t now=xTaskGetTickCount();
-    bool stopped=false,refresh_requested=false;
     portENTER_CRITICAL(&state_lock);
-    /* STOP cancels all active BLE-owned zones, including a scene whose
-     * ownership bit was cleared during a pending disconnect. A genuine
-     * unrelated HTTP show remains untouched. */
-    if(ble_owns_show || ble_fx_enabled){
-        ble_owns_show=false;
-        ble_fx_enabled=false;
-        ot_fx_bank_stop_all(&fx_bank);
-        native_show.mode=OT_SHOW_OFF;
-        native_show_deadline=now;
-        stop_request_generation++;
-        stopped=true;refresh_requested=true;
-    }else if(native_show.mode==OT_SHOW_OFF || !show_window(now)){
-        /* Stop may be pressed after the 60-second FX timeout. Record the
-         * requested post-stop refresh even when no show is still owned. */
-        stop_request_generation++;
-        refresh_requested=true;
+    demo.mode=OT_DEMO_OFF;demo_deadline=now;
+    sim_mask=0u;sim_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;
+    ot_fx_bank_stop_all(&fx_bank);
+    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    if(pz_diag.mode!=OT_PZ_DIAG_NONE)ot_pz_diag_clear(&pz_diag);
+    const bool geometry_commit_active=pz_preview.committing||
+        pz_preview_commit_requested||pz_preview_commit_worker_active;
+    if(!geometry_commit_active&&pz_preview.active){
+        pz_preview_cancel_pending_locked();
+        ot_pz_preview_cancel(&pz_preview);
     }
-    if(pz_diag.mode!=OT_PZ_DIAG_NONE){ot_pz_diag_clear(&pz_diag);refresh_requested=true;}
-    if(pz_preview.active){pz_preview_cancel_pending_locked();ot_pz_preview_cancel(&pz_preview);refresh_requested=true;}
+    stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
-    if(refresh_requested)request_render_refresh();
-    /* Restore the previous status indication immediately, rather than
-     * leaving a stale rainbow until the next BLE preview TTL expires. */
-    if(stopped)ot_st_show_active(false);
+    request_render_refresh();
+    ot_st_show_active(false);
+}
+void ot_ble_stop_show(void){
+    core_stop_all_sources();
 }
 /* Eight opt-in named-by-slot effect snapshots in controller NVS. Flash records are
  * independently checksummed and versioned; they never alter road-lighting maps.
@@ -2333,19 +2330,7 @@ static esp_err_t simulate_post(httpd_req_t *r) {
     return send_json(r,"{\"ok\":true,\"message\":\"temporary isolated bench input simulation scheduled\"}");
 }
 static esp_err_t stop_post(httpd_req_t *r) {
-    TickType_t now=xTaskGetTickCount();
-    portENTER_CRITICAL(&state_lock);
-    demo.mode=OT_DEMO_OFF;demo_deadline=now;
-    sim_mask=0;sim_deadline=now;
-    ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);
-    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
-    ot_pz_diag_clear(&pz_diag);
-    pz_preview_cancel_pending_locked();
-    ot_pz_preview_cancel(&pz_preview);
-    stop_request_generation++;
-    portEXIT_CRITICAL(&state_lock);
-    request_render_refresh();
-    ot_st_show_active(false);
+    core_stop_all_sources();
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
 /* CORE ships only its own developer console. The approved Studio is
