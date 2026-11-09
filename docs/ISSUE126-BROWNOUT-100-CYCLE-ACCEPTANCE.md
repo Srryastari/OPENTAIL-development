@@ -9,7 +9,7 @@ This procedure is mandatory for Firmware, Hardware and QA. A host test, simulate
 - Load: 944 WS2815 pixels, 12 V, full-white output (R=255, G=255, B=255 at the approved firmware ceiling).
 - Endurance: 100 controlled power-cut/recovery cycles.
 - Commit activity: a real geometry transaction and NVS commit in every cycle.
-- Cut timing: randomized across the eight durable cross-namespace commit phases below, with phase coverage recorded.
+- Cut timing: randomized across the nine durable cross-namespace commit phases below, with phase coverage recorded.
 - Recovery: reboot after each interruption and verify partition, NVS, journal, CRC, active geometry and safety behavior.
 - Required result: 100/100 recovered cycles, zero unrecoverable corruption, zero invalid active configurations, zero silent configuration loss, and no safety arbitration regression.
 
@@ -20,12 +20,12 @@ The CORE runtime now implements the v4 hardware-only/map-only cross-namespace pa
 - `ot_trig_cfg`: independent trigger policy records.
 - `ot_fx_presets`: effect preset slots and custom palette records. The former `ot_palettes` namespace is read-only migration input.
 
-The same portable pair-store state machine is called by CORE and exercised by `tests/test_panel_zone_pair_store.c`. It performs the eight durable phases below, verifies each committed record by readback, and resumes idempotently while the pair-intent marker exists. Host fault injection now cuts after each durable phase and checks that recovery selects a complete previous or candidate generation. This is software evidence only; exact-head ESP-IDF build/review and physical electrical acceptance remain separate gates.
+The same portable pair-store state machine is called by CORE and exercised by `tests/test_panel_zone_pair_store.c`. It performs the nine durable phases below, verifies each committed record by readback, and resumes idempotently while the pair-intent marker exists. Host fault injection now cuts after each durable phase and checks that recovery selects a complete previous or candidate generation. This is software evidence only; exact-head ESP-IDF build/review and physical electrical acceptance remain separate gates.
 
-The v4 initialization marker is written with the map-active record in phase 5 using one NVS handle/commit. NVS does not guarantee multi-key atomicity; the durable pair intent therefore remains present until both records independently pass readback. If power interrupts this write, recovery uses the intent and surviving stage/active records to resume. After the intent is cleared, a marker without a complete active pair makes CORE fail closed instead of falling back to stale v3 geometry.
+The v4 initialization marker is its own phase-6 durable write, after the map-active record has independently committed and passed readback in phase 5. The pair intent remains present until the marker also passes readback. If power interrupts between phases 5 and 6, recovery uses the intent and surviving stage/active records to resume. After the intent is cleared in phase 9, a missing marker or incomplete active pair makes CORE fail closed instead of falling back to stale v3 geometry.
 
 The runtime emits a UART marker after each durable commit/readback:
-`PZ_PAIR_PHASE phase=<1..8> transaction=<32-bit-id>`.
+`PZ_PAIR_PHASE phase=<1..9> transaction=<32-bit-id>`.
 The existing `GET /api/v1/status` response exposes `config_commit_phase`, `config_commit_transaction_id`, and `config_commit_pending` so a bench logger/relay can correlate the cut with the transaction. The marker is emitted after the named phase is durable; it does not itself interrupt power.
 
 ## 2. Electrical preflight — mandatory before energizing the endurance run
@@ -59,7 +59,7 @@ If the as-built bench does not match this topology, stop and have Hardware/Overs
 
 ## 3. Durable commit phases and randomized cut coverage
 
-The final cross-namespace implementation must identify these eight durable phases in firmware diagnostics/test hooks. Names must be reconciled with the actual implementation before the physical run; do not claim these hooks exist until verified.
+The final cross-namespace implementation must identify these nine durable phases in firmware diagnostics/test hooks. Names must be reconciled with the actual implementation before the physical run; do not claim these hooks exist until verified.
 
 | Phase | Durable boundary to interrupt after |
 |---:|---|
@@ -68,13 +68,14 @@ The final cross-namespace implementation must identify these eight durable phase
 | 3 | Cross-namespace pair-intent marker committed and read back |
 | 4 | Hardware-lane active record committed and read back |
 | 5 | Map active record committed and read back |
-| 6 | Hardware-lane staged marker erased and absence verified |
-| 7 | Map staged marker erased and absence verified |
-| 8 | Pair-intent marker cleared and absence verified |
+| 6 | V4 initialization marker committed and read back in `ot_zone_map` |
+| 7 | Hardware-lane staged marker erased and absence verified |
+| 8 | Map staged marker erased and absence verified |
+| 9 | Pair-intent marker cleared and absence verified |
 
-Also include a controlled interruption after phase 8 but before the final quiet-window/edge-epoch check and RAM publication. This is a separate pre-publication recovery boundary, not a ninth durable NVS phase.
+Also include a controlled interruption after phase 9 but before the final quiet-window/edge-epoch check and RAM publication. This is a separate pre-publication recovery boundary, not a tenth durable NVS phase.
 
-Use a recorded random seed to choose the cut phase and intra-phase delay. Ensure all eight phases receive physical coverage across the 100 cycles. Do not inject a cut merely by sleeping a guessed number of milliseconds; use a verified phase marker/diagnostic hook so the log identifies the actual phase reached.
+Use a recorded random seed to choose the cut phase and intra-phase delay. Ensure all nine phases receive physical coverage across the 100 cycles. Do not inject a cut merely by sleeping a guessed number of milliseconds; use a verified phase marker/diagnostic hook so the log identifies the actual phase reached.
 
 ## 4. Per-cycle procedure
 
@@ -137,7 +138,7 @@ cycle,firmware_sha,build_id,pre_boot_id,post_boot_id,random_seed,transaction_id,
 - Zero silent configuration loss; every result is confirmed by revision, transaction identity, CRC and full readback.
 - Zero physical safety arbitration regressions.
 - Every cycle has complete electrical, thermal, phase, boot-ID and firmware-SHA evidence.
-- All eight durable phases and the pre-RAM-publication boundary have physical interruption coverage.
+- All nine durable phases and the pre-RAM-publication boundary have physical interruption coverage.
 
 Any failed or incomplete cycle blocks PASS. Fix the root cause, preserve the failed evidence, reset the acceptance run counter, and repeat a new complete 100-cycle run after review. Do not discard failed cycles or count a repaired/reflashed retry as the original cycle.
 
