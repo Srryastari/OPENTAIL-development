@@ -35,7 +35,8 @@ public class PanelPreviewProtocolTest {
         assertTrue(s.warningObserved);assertTrue(s.hasSequence);
         String summary=s.diagnosticSummary();
         assertTrue(summary.contains("Panel 1 · session 2309737967"));
-        assertTrue(summary.contains("accepted 17 · rejected 16 (reason 5)"));
+        assertTrue(summary.contains("accepted 17 · rejected 16 (COMMITTING_LOCKED)"));
+        assertTrue(summary.contains("last error NONE"));
         assertTrue(summary.contains("missing 2 · out-of-order 3 · duplicates 4 · conflicts 5"));
         assertTrue(summary.contains("COMMITTING rejects 6"));
         assertTrue(summary.contains("warning latched · hard sync fault"));
