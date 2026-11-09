@@ -40,6 +40,8 @@ for token in ("input_quiet_samples>=OT_DEBOUNCE_TICKS",
 # v4 runtime joins a lane-only output_cfg journal and map-only zone_map journal.
 pz_load=between("static void pz_load(void){",
                 "static bool pz_save_controller_locked(")
+assert "const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||" in core
+assert "snapshot.has_map_active||snapshot.has_lane_active;" in core
 for token in ("ot_pz_pair_store_snapshot", "ot_pz_pair_store_recover",
               "ot_pz_pair_store_begin", "pz_load_legacy_snapshot",
               "om_deferred.pending=false"):
