@@ -115,7 +115,7 @@ assert "ot_pz_reset_tombstone_t tombstone={0}" not in legacy_load
 reset_confirm=between("int ot_ble_panel_reset_confirm(",
                       "int ot_ble_panel_save(")
 assert "ot_pz_pair_store_mark_reset" not in reset_confirm
-assert "ot_pz_pair_store_mark_reset" in save_impl
+assert "ot_pz_pair_store_mark_reset" in pz_save
 assert "__atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u" in pz_load
 
 # The exact same portable v4 store used by CORE implements all nine durable
