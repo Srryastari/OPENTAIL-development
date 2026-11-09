@@ -3048,6 +3048,7 @@ static void led_task(void *p) {
     static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
     /* Keep each indexed FX slot attached to its stable logical identity. */
     static uint32_t fx_bank_seen_generation[OT_CHAIN_COUNT][OT_OM_ZONES];
+    static uint32_t fx_bank_seen_refresh_ms[OT_CHAIN_COUNT][OT_OM_ZONES];
     static uint16_t fx_bank_owner_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES];
     static uint16_t fx_bank_owner_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES];
     static uint8_t resolved_fx_bank_index[OT_CHAIN_COUNT][OT_OM_ZONES];
@@ -3153,11 +3154,13 @@ static void led_task(void *p) {
                const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][bank_z];
                if(!ot_fx_slot_active(slot,render_now_ms)){
                    fx_bank_seen_generation[ch][bank_z]=slot->generation;
+                   fx_bank_seen_refresh_ms[ch][bank_z]=slot->refreshed_ms;
                    fx_bank_owner_zone_id[ch][bank_z]=0u;
                    fx_bank_owner_panel_id[ch][bank_z]=0u;
                    continue;
                }
                if(fx_bank_seen_generation[ch][bank_z]!=slot->generation||
+                  fx_bank_seen_refresh_ms[ch][bank_z]!=slot->refreshed_ms||
                   fx_bank_owner_zone_id[ch][bank_z]==0u||
                   fx_bank_owner_panel_id[ch][bank_z]==0u){
                    const uint16_t owner_zone=bank_z<local_panel[ch].zone_count?
@@ -3173,6 +3176,7 @@ static void led_task(void *p) {
                        }
                    }
                    fx_bank_seen_generation[ch][bank_z]=slot->generation;
+                   fx_bank_seen_refresh_ms[ch][bank_z]=slot->refreshed_ms;
                    fx_bank_owner_zone_id[ch][bank_z]=owner_zone;
                    fx_bank_owner_panel_id[ch][bank_z]=owner_panel;
                }
