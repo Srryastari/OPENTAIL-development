@@ -111,7 +111,7 @@ pair_store = (ROOT / "main/panel_zone_pair_store.c").read_text()
 pair_header = (ROOT / "main/panel_zone_pair_store.h").read_text()
 for token in ("ot_pz_pair_store_begin", "ot_pz_pair_store_finish",
               "ot_pz_pair_store_recover", "ot_pz_pair_store_mark_reset","OT_PZ_PAIR_STORE_MARKER_KEY",
-              "write_batch_commit","has_marker","OT_PZ_LANE_KEY_STAGED", "OT_PZ_MAP_KEY_STAGED",
+              "write_verified","has_marker","OT_PZ_LANE_KEY_STAGED", "OT_PZ_MAP_KEY_STAGED",
               "OT_PZ_PAIR_INTENT_KEY", "OT_PZ_LANE_KEY_ACTIVE",
               "OT_PZ_MAP_KEY_ACTIVE"):
     assert token in pair_store or token in pair_header, token
@@ -119,7 +119,7 @@ assert pair_store.index("OT_PZ_LANE_KEY_STAGED") < pair_store.index(
     "OT_PZ_MAP_KEY_STAGED") < pair_store.index("OT_PZ_PAIR_INTENT_KEY")
 assert pair_store.index("OT_PZ_LANE_KEY_ACTIVE") < pair_store.index(
     "OT_PZ_MAP_KEY_ACTIVE")
-for phase in range(1, 9):
+for phase in range(1, 10):
     assert f"phase_context,{phase}u" in pair_store or f"phase_context,{phase}u" in pair_store
 
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
