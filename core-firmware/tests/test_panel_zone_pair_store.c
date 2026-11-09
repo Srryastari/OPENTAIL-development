@@ -108,7 +108,7 @@ static void initial_migration_cut_matrix(void){
         recover_expect(&io,&legacy,&legacy,&candidate,cut==3u,cut==3u,
                        cut==3u?0x0a0au:0u,0u);
         assert(ot_pz_pair_store_snapshot(&io,&workspace));
-        assert(!workspace.workspace.snapshot.has_marker);
+        assert(!workspace.snapshot.has_marker);
     }
 }
 static void durable_boundary_matrix(void){
@@ -174,27 +174,27 @@ static void reset_marker_and_fail_closed(void){
     assert(ot_pz_pair_store_begin(&io,&workspace,&base,&candidate,old_rev,new_rev,
                                   0x3003u,1u,true,NULL,NULL));
     assert(ot_pz_pair_store_snapshot(&io,&workspace));
-    assert(workspace.workspace.snapshot.has_lane_stage&&workspace.workspace.snapshot.has_map_stage&&workspace.workspace.snapshot.has_intent);
+    assert(workspace.snapshot.has_lane_stage&&workspace.snapshot.has_map_stage&&workspace.snapshot.has_intent);
     /* Reset changes only geometry: lane electrical configuration is byte-identical. */
-    assert(memcmp(&workspace.workspace.snapshot.lane_stage.previous,&workspace.workspace.snapshot.lane_stage.candidate,
-                  sizeof(workspace.workspace.snapshot.lane_stage.previous))==0);
-    assert(memcmp(&workspace.workspace.snapshot.map_stage.previous.outputs[0],
-                  &workspace.workspace.snapshot.map_stage.candidate.outputs[0],
-                  sizeof(workspace.workspace.snapshot.map_stage.previous.outputs[0]))!=0);
-    assert(memcmp(&workspace.workspace.snapshot.map_stage.previous.outputs[1],
-                  &workspace.workspace.snapshot.map_stage.candidate.outputs[1],
-                  sizeof(workspace.workspace.snapshot.map_stage.previous.outputs[1]))==0);
-    assert(workspace.workspace.snapshot.map_stage.reset_mask==1u);
+    assert(memcmp(&workspace.snapshot.lane_stage.previous,&workspace.snapshot.lane_stage.candidate,
+                  sizeof(workspace.snapshot.lane_stage.previous))==0);
+    assert(memcmp(&workspace.snapshot.map_stage.previous.outputs[0],
+                  &workspace.snapshot.map_stage.candidate.outputs[0],
+                  sizeof(workspace.snapshot.map_stage.previous.outputs[0]))!=0);
+    assert(memcmp(&workspace.snapshot.map_stage.previous.outputs[1],
+                  &workspace.snapshot.map_stage.candidate.outputs[1],
+                  sizeof(workspace.snapshot.map_stage.previous.outputs[1]))==0);
+    assert(workspace.snapshot.map_stage.reset_mask==1u);
     assert(ot_pz_pair_store_finish(&io,&workspace,0x3003u,NULL,NULL));
     assert(ot_pz_pair_store_mark_reset(&io,&workspace,0u));
     recover_expect(&io,&base,&base,&candidate,true,false,0x3003u,1u);
     assert(ot_pz_pair_store_snapshot(&io,&workspace));
-    assert(workspace.workspace.snapshot.has_lane_active&&workspace.workspace.snapshot.has_map_active&&workspace.workspace.snapshot.has_marker);
-    assert(memcmp(&workspace.workspace.snapshot.lane_active.previous,&workspace.workspace.snapshot.lane_active.candidate,
-                  sizeof(workspace.workspace.snapshot.lane_active.previous))==0);
-    assert(workspace.workspace.snapshot.map_active.candidate.outputs[0].panel_count==0u);
-    assert(workspace.workspace.snapshot.map_active.candidate.outputs[0].zone_count==0u);
-    assert(workspace.workspace.snapshot.map_active.reset_mask==1u);
+    assert(workspace.snapshot.has_lane_active&&workspace.snapshot.has_map_active&&workspace.snapshot.has_marker);
+    assert(memcmp(&workspace.snapshot.lane_active.previous,&workspace.snapshot.lane_active.candidate,
+                  sizeof(workspace.snapshot.lane_active.previous))==0);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].panel_count==0u);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].zone_count==0u);
+    assert(workspace.snapshot.map_active.reset_mask==1u);
     /* A completed v4 active pair without its initialization marker is
      * ambiguous and must not silently reopen legacy fallback. */
     fake_store_t missing_marker_store=store;
