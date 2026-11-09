@@ -340,7 +340,7 @@ public class GeometryTransactionManagerTest {
             put16(wire,39,panelId);wire[41]=(byte)lane;
             putName(wire,42,panelName);wire[67]=1;
             put16(wire,155,zoneId);put16(wire,157,zonePanel);
-            putName(wire,159,zoneName);wire[184]=0x0f;wire[186]=1;
+            putName(wire,159,zoneName);wire[184]=(byte)0xff;wire[186]=1;
             put16(wire,187,rangeStart);put16(wire,189,rangeCount);
         }
         byte[] header=new byte[14];
