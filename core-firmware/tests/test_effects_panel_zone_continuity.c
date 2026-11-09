@@ -28,6 +28,7 @@ static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
 typedef struct {
     ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
     uint32_t bank_seen_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint32_t bank_seen_refresh_ms[OT_PZ_OUTPUTS][OT_OM_ZONES];
     uint16_t bank_owner_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
     uint16_t bank_owner_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
     uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
@@ -114,11 +115,13 @@ static bool render_probe_frame(render_probe_t *probe,
             const ot_fx_zone_slot_t *slot=&bank->zones[lane][bank_z];
             if(!ot_fx_slot_active(slot,now_ms)){
                 probe->bank_seen_generation[lane][bank_z]=slot->generation;
+                probe->bank_seen_refresh_ms[lane][bank_z]=slot->refreshed_ms;
                 probe->bank_owner_zone_id[lane][bank_z]=0u;
                 probe->bank_owner_panel_id[lane][bank_z]=0u;
                 continue;
             }
             if(probe->bank_seen_generation[lane][bank_z]!=slot->generation||
+               probe->bank_seen_refresh_ms[lane][bank_z]!=slot->refreshed_ms||
                probe->bank_owner_zone_id[lane][bank_z]==0u||
                probe->bank_owner_panel_id[lane][bank_z]==0u){
                 const uint16_t owner_zone=bank_z<panel_out->zone_count?
@@ -134,6 +137,7 @@ static bool render_probe_frame(render_probe_t *probe,
                     }
                 }
                 probe->bank_seen_generation[lane][bank_z]=slot->generation;
+                probe->bank_seen_refresh_ms[lane][bank_z]=slot->refreshed_ms;
                 probe->bank_owner_zone_id[lane][bank_z]=owner_zone;
                 probe->bank_owner_panel_id[lane][bank_z]=owner_panel;
             }
