@@ -273,6 +273,26 @@ static int pz_find_zone(const ot_pz_output_t *out,uint16_t zone_id){
         if(out->zones[i].id==zone_id)return (int)i;
     return -1;
 }
+/* UPDATE has one byte per ID. Resolve the low-byte alias to the full stable
+ * ID; multiple matches are rejected rather than guessed. */
+static int pz_find_panel_wire(const ot_pz_output_t *out,uint8_t wire_id){
+    int found=-1;
+    for(unsigned i=0;i<out->panel_count;i++){
+        if((out->panels[i].id&OT_PZ_ID_WIRE_MASK)!=wire_id)continue;
+        if(found>=0)return -2;
+        found=(int)i;
+    }
+    return found;
+}
+static int pz_find_zone_wire(const ot_pz_output_t *out,uint8_t wire_id){
+    int found=-1;
+    for(unsigned i=0;i<out->zone_count;i++){
+        if((out->zones[i].id&OT_PZ_ID_WIRE_MASK)!=wire_id)continue;
+        if(found>=0)return -2;
+        found=(int)i;
+    }
+    return found;
+}
 static void pz_recount_panel_zones(ot_pz_output_t *out){
     for(unsigned p=0;p<out->panel_count;p++){
         unsigned count=0;
@@ -313,7 +333,10 @@ static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
         OT_PZ_ROLE_UNASSIGNED:wire_role;
     const uint8_t action=(uint8_t)((u->role_flags&OT_PZ_TX_ACTION_MASK)>>OT_PZ_TX_ACTION_SHIFT);
     if(u->panel_id==0u)return false;
-    int panel_index=pz_find_panel(out,u->panel_id);
+    int panel_index=pz_find_panel_wire(out,u->panel_id);
+    if(panel_index==-2)return false; /* ambiguous low-byte identity */
+    const uint16_t panel_id=panel_index>=0?out->panels[panel_index].id:
+        (uint16_t)(OT_PZ_PANEL_ID_PREFIX|u->panel_id);
     if(action==OT_PZ_TX_DELETE_PANEL){
         if(u->zone_id!=0u||u->range_id!=0u||u->start!=0u||u->count!=0u||role!=0u||
            panel_index<0)return false;
@@ -321,19 +344,22 @@ static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
         return true;
     }
     if(u->zone_id==0u)return false;
-    int zone_index=pz_find_zone(out,u->zone_id);
+    int zone_index=pz_find_zone_wire(out,u->zone_id);
+    if(zone_index==-2)return false; /* ambiguous low-byte identity */
+    const uint16_t zone_id=zone_index>=0?out->zones[zone_index].id:
+        (uint16_t)(OT_PZ_ZONE_ID_PREFIX|u->zone_id);
     if(action==OT_PZ_TX_DELETE_ZONE){
         if(u->range_id!=0u||u->start!=0u||u->count!=0u||role!=0u||
-           zone_index<0||out->zones[zone_index].panel_id!=u->panel_id)return false;
+           zone_index<0||out->zones[zone_index].panel_id!=panel_id)return false;
         pz_remove_zone(out,(unsigned)zone_index);
-        panel_index=pz_find_panel(out,u->panel_id);
+        panel_index=pz_find_panel(out,panel_id);
         if(panel_index>=0&&out->panels[panel_index].zone_count==0u)
             pz_remove_panel(out,(unsigned)panel_index);
         return true;
     }
     if(action==OT_PZ_TX_DELETE_RANGE){
         if(u->start!=0u||u->count!=0u||role!=0u||zone_index<0||
-           out->zones[zone_index].panel_id!=u->panel_id||
+           out->zones[zone_index].panel_id!=panel_id||
            u->range_id>=out->zones[zone_index].range_count)return false;
         ot_pz_zone_t *zone=&out->zones[zone_index];
         if(u->range_id+1u<zone->range_count)
@@ -343,7 +369,7 @@ static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
         memset(&zone->ranges[zone->range_count],0,sizeof(zone->ranges[0]));
         if(zone->range_count==0u){
             pz_remove_zone(out,(unsigned)zone_index);
-            panel_index=pz_find_panel(out,u->panel_id);
+            panel_index=pz_find_panel(out,panel_id);
             if(panel_index>=0&&out->panels[panel_index].zone_count==0u)
                 pz_remove_panel(out,(unsigned)panel_index);
         }
@@ -356,19 +382,19 @@ static bool pz_apply_one_update(ot_pz_output_t *out,unsigned lane,
         if(out->panel_count>=OT_PZ_MAX_PANELS_PER_OUTPUT)return false;
         panel_index=(int)out->panel_count++;
         ot_pz_panel_t *panel=&out->panels[panel_index];
-        memset(panel,0,sizeof(*panel));panel->id=u->panel_id;
+        memset(panel,0,sizeof(*panel));panel->id=panel_id;
         panel->lane=(uint8_t)lane;
-        (void)snprintf(panel->name,sizeof(panel->name),"Panel %u",(unsigned)u->panel_id);
+        (void)snprintf(panel->name,sizeof(panel->name),"Panel %u",(unsigned)panel_id);
     }
     if(zone_index<0){
         if(out->zone_count>=OT_PZ_MAX_ZONES_PER_OUTPUT)return false;
         zone_index=(int)out->zone_count++;
         ot_pz_zone_t *zone=&out->zones[zone_index];
-        memset(zone,0,sizeof(*zone));zone->id=u->zone_id;
-        zone->panel_id=u->panel_id;zone->role=role;
-        (void)snprintf(zone->name,sizeof(zone->name),"Zone %u",(unsigned)u->zone_id);
+        memset(zone,0,sizeof(*zone));zone->id=zone_id;
+        zone->panel_id=panel_id;zone->role=role;
+        (void)snprintf(zone->name,sizeof(zone->name),"Zone %u",(unsigned)zone_id);
         pz_recount_panel_zones(out);
-    }else if(out->zones[zone_index].panel_id!=u->panel_id)return false;
+    }else if(out->zones[zone_index].panel_id!=panel_id)return false;
     ot_pz_zone_t *zone=&out->zones[zone_index];
     if(u->range_id>zone->range_count)return false;
     if(u->range_id==zone->range_count){
@@ -435,7 +461,7 @@ bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
         dst->panel_count=1u;
         dst->zone_count=src->zone_count;
         ot_pz_panel_t *panel=&dst->panels[0];
-        panel->id=(uint16_t)(0x8001u+lane);
+        panel->id=(uint16_t)(OT_PZ_PANEL_ID_PREFIX+1u+lane);
         panel->lane=(uint8_t)lane;
         (void)snprintf(panel->name,sizeof(panel->name),"Panel %u",lane+1u);
         panel->zone_count=src->zone_count;
@@ -443,7 +469,7 @@ bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
         for(unsigned z=0;z<src->zone_count;z++){
             const ot_om_zone_t *old=&src->zones[z];
             ot_pz_zone_t *zone=&dst->zones[z];
-            zone->id=(uint16_t)(0x4001u+lane*OT_PZ_MAX_ZONES_PER_OUTPUT+z);
+            zone->id=(uint16_t)(OT_PZ_ZONE_ID_PREFIX+1u+lane*OT_PZ_MAX_ZONES_PER_OUTPUT+z);
             zone->panel_id=panel->id;
             memcpy(zone->name,old->name,OT_PZ_NAME_LEN);
             zone->role=old->role;
@@ -475,7 +501,7 @@ static uint16_t pz_allocate_id(const ot_pz_controller_t *cfg,unsigned lane,
                                const ot_pz_output_t *built,uint16_t seed){
     for(uint32_t step=0;step<UINT16_MAX;step++){
         uint16_t id=(uint16_t)(seed+step);
-        if(id==0u)continue;
+        if(id==0u||(id&OT_PZ_ID_WIRE_MASK)==0u)continue;
         bool used=pz_id_used(cfg,lane,id);
         if(built){
             for(unsigned p=0;p<built->panel_count;p++)if(built->panels[p].id==id)used=true;
@@ -496,7 +522,8 @@ bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
     memcpy(next.white_gain,legacy->white_gain,sizeof(next.white_gain));
     next.gamma_enabled=legacy->gamma_enabled;
     next.panel_count=1u;next.zone_count=legacy->zone_count;
-    const uint16_t panel_id=pz_allocate_id(existing,lane,&next,(uint16_t)(0x8001u+lane));
+    const uint16_t panel_id=pz_allocate_id(existing,lane,&next,
+        (uint16_t)(OT_PZ_PANEL_ID_PREFIX+1u+lane));
     if(!panel_id)return false;
     next.panels[0].id=panel_id;next.panels[0].lane=(uint8_t)lane;
     (void)snprintf(next.panels[0].name,sizeof(next.panels[0].name),"Panel %u",lane+1u);
@@ -505,7 +532,7 @@ bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
     for(unsigned z=0;z<legacy->zone_count;z++){
         ot_pz_zone_t *zone=&next.zones[z];
         zone->id=pz_allocate_id(existing,lane,&next,
-            (uint16_t)(0x4001u+lane*OT_PZ_MAX_ZONES_PER_OUTPUT+z));
+            (uint16_t)(OT_PZ_ZONE_ID_PREFIX+1u+lane*OT_PZ_MAX_ZONES_PER_OUTPUT+z));
         if(!zone->id)return false;
         zone->panel_id=panel_id;zone->role=legacy->zones[z].role;
         memcpy(zone->name,legacy->zones[z].name,OT_PZ_NAME_LEN);

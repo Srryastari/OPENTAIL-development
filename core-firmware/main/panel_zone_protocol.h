@@ -74,8 +74,12 @@ bool ot_pz_tx_parse_control(const uint8_t *packet,size_t length,
                             ot_pz_tx_control_packet_t *out);
 
 /* UPDATE is [FE,02,lane,session_id:u32LE,sequence:u32LE,1..4 descriptors].
- * Descriptor = panel:u8,zone:u8,range_slot:u8,start:u16LE,count:u16LE,role_flags:u8.
- * Payload must fit one ATT write command (ATT_MTU - 3). */
+ * Descriptor = panel_id_low8:u8,zone_id_low8:u8,range_slot:u8,start:u16LE,
+ * count:u16LE,role_flags:u8. The two IDs are low-byte aliases of the stable
+ * 16-bit IDs in Panel v3 readback; zero is reserved. CORE resolves aliases
+ * within the addressed lane and rejects ambiguous matches. New IDs use the
+ * reserved 0x8000 (Panel) and 0x4000 (Zone) namespaces. Payload must fit one
+ * ATT write command (ATT_MTU - 3). */
 bool ot_pz_tx_parse_update(const uint8_t *packet,size_t length,uint16_t att_mtu,
                            ot_pz_tx_update_packet_t *out);
 ot_pz_tx_sequence_result_t ot_pz_tx_sequence_check(bool has_last,

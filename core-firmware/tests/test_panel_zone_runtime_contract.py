@@ -88,6 +88,14 @@ for token in ("OT_PZ_TX_UPDATE_HEADER_BYTES","OT_PZ_TX_DESCRIPTOR_BYTES",
 assert "ot_pz_tx_parse_update" in protocol
 assert "OT_PZ_PREVIEW_LEASE_MS 5000u" in (ROOT / "main/panel_zone.h").read_text()
 assert "OT_PZ_TX_OP_HEARTBEAT" in protocol_header
+preview_model = (ROOT / "main/panel_zone.c").read_text()
+preview_model_header = (ROOT / "main/panel_zone.h").read_text()
+for token in ("pz_find_panel_wire", "pz_find_zone_wire",
+              "OT_PZ_PANEL_ID_PREFIX|u->panel_id",
+              "OT_PZ_ZONE_ID_PREFIX|u->zone_id",
+              "OT_PZ_ID_WIRE_MASK"):
+    assert token in preview_model or token in preview_model_header, token
+assert "low-byte alias" in preview_model
 
 # Runtime v4 pair storage: hardware-only lanes in ot_output_cfg and map-only
 # Panel/Zone geometry in ot_zone_map. The same portable state machine is called

@@ -29,6 +29,8 @@ static void role_sentinel_semantics(void){
     assert(ot_pz_preview_apply_updates(&preview,0u,&unassigned,1u,
                                        1u,1u,false,101u));
     assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].panels[0].id==0x8001u);
+    assert(preview.candidate.outputs[0].zones[0].id==0x4002u);
     assert(preview.candidate.outputs[0].zones[0].role==OT_PZ_ROLE_UNASSIGNED);
     ot_pz_preview_cancel(&preview);
 
@@ -39,9 +41,99 @@ static void role_sentinel_semantics(void){
     assert(ot_pz_preview_apply_updates(&preview,0u,&off,1u,
                                        1u,1u,false,101u));
     assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].panels[0].id==0x8003u);
+    assert(preview.candidate.outputs[0].zones[0].id==0x4004u);
     assert(preview.candidate.outputs[0].zones[0].role==OT_OM_OFF);
     ot_pz_preview_cancel(&preview);
 }
+static void migrated_wire_id_aliases(void){
+    ot_om_output_t legacy[OT_OM_OUTPUTS];
+    ot_om_defaults(legacy);
+    legacy[0].active_pixels=20u;
+    legacy[0].zone_count=1u;
+    memset(&legacy[0].zones[0],0,sizeof(legacy[0].zones[0]));
+    memcpy(legacy[0].zones[0].name,"Legacy zone",sizeof("Legacy zone"));
+    legacy[0].zones[0].pixels=20u;
+    legacy[0].zones[0].role=OT_OM_DECORATIVE;
+    ot_pz_controller_t committed;
+    assert(ot_pz_migrate_legacy(legacy,true,&committed));
+    const ot_pz_output_t *source=&committed.outputs[0];
+    assert(source->panels[0].id==0x8001u);
+    assert(source->zones[0].id==0x4001u);
+
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,100u));
+    const ot_pz_range_update_t resize={
+        .panel_id=(uint8_t)source->panels[0].id,
+        .zone_id=(uint8_t)source->zones[0].id,
+        .range_id=0u,.start=1u,.count=19u,
+        .role_flags=(uint8_t)OT_OM_DECORATIVE
+    };
+    assert(resize.panel_id==1u&&resize.zone_id==1u);
+    assert(ot_pz_preview_apply_updates(&preview,0u,&resize,1u,
+                                       1u,1u,false,101u));
+    const ot_pz_output_t *updated=&preview.candidate.outputs[0];
+    assert(updated->panels[0].id==0x8001u);
+    assert(updated->zones[0].id==0x4001u);
+    assert(updated->zones[0].panel_id==0x8001u);
+    assert(updated->zones[0].ranges[0].start==1u);
+    assert(updated->zones[0].ranges[0].count==19u);
+    ot_pz_preview_cancel(&preview);
+
+    memset(&preview,0,sizeof(preview));
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,200u));
+    const ot_pz_range_update_t delete_zone={
+        .panel_id=1u,.zone_id=1u,.range_id=0u,.start=0u,.count=0u,
+        .role_flags=(uint8_t)(OT_PZ_TX_DELETE_ZONE<<OT_PZ_TX_ACTION_SHIFT)
+    };
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_zone,1u,
+                                       1u,1u,false,201u));
+    assert(preview.candidate.outputs[0].zone_count==0u);
+    assert(preview.candidate.outputs[0].panel_count==0u);
+    ot_pz_preview_cancel(&preview);
+
+    memset(&preview,0,sizeof(preview));
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,300u));
+    const ot_pz_range_update_t delete_panel={
+        .panel_id=1u,.zone_id=0u,.range_id=0u,.start=0u,.count=0u,
+        .role_flags=(uint8_t)(OT_PZ_TX_DELETE_PANEL<<OT_PZ_TX_ACTION_SHIFT)
+    };
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_panel,1u,
+                                       1u,1u,false,301u));
+    assert(preview.candidate.outputs[0].panel_count==0u);
+    assert(preview.candidate.outputs[0].zone_count==0u);
+    ot_pz_preview_cancel(&preview);
+
+    /* Two valid full-width IDs with the same low byte are ambiguous on the
+     * compact UPDATE wire. Reject without changing the preview candidate. */
+    ot_pz_controller_t ambiguous=committed;
+    ot_pz_output_t *out=&ambiguous.outputs[0];
+    out->panel_count=2u;out->zone_count=2u;
+    out->panels[0].zone_count=1u;
+    out->panels[1]=out->panels[0];
+    out->panels[1].id=0x8101u;out->panels[1].zone_count=1u;
+    memset(out->panels[1].name,0,sizeof(out->panels[1].name));
+    memcpy(out->panels[1].name,"Second panel",sizeof("Second panel"));
+    out->zones[0].ranges[0]=(ot_pz_range_t){0u,10u};
+    out->zones[1]=out->zones[0];
+    out->zones[1].id=0x4101u;out->zones[1].panel_id=0x8101u;
+    out->zones[1].ranges[0]=(ot_pz_range_t){10u,10u};
+    memset(out->zones[1].name,0,sizeof(out->zones[1].name));
+    memcpy(out->zones[1].name,"Second zone",sizeof("Second zone"));
+    assert(ot_pz_valid(&ambiguous));
+    memset(&preview,0,sizeof(preview));
+    assert(ot_pz_preview_begin(&preview,&ambiguous,0u,1u,1u,false,400u));
+    const ot_pz_range_update_t ambiguous_update={
+        .panel_id=1u,.zone_id=1u,.range_id=0u,.start=0u,.count=10u,
+        .role_flags=(uint8_t)OT_OM_DECORATIVE
+    };
+    const ot_pz_controller_t before=preview.candidate;
+    assert(!ot_pz_preview_apply_updates(&preview,0u,&ambiguous_update,1u,
+                                        1u,1u,false,401u));
+    assert(memcmp(&preview.candidate,&before,sizeof(before))==0);
+    ot_pz_preview_cancel(&preview);
+}
+
 static void control_packets(void){
     ot_pz_tx_control_packet_t parsed={0};
     const uint8_t begin[8]={0xfe,0x01,1u,0x34,0x12,0x80,0x00,0x03};
@@ -142,5 +234,6 @@ int main(void){
            OT_PZ_TX_UPDATE_REJECT_CONFLICT);
     control_packets();
     role_sentinel_semantics();
+    migrated_wire_id_aliases();
     return 0;
 }

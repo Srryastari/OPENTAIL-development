@@ -50,6 +50,7 @@ UPDATE is written to UUID `0x36`:
 
 - Header: `FE 02 lane session_id:u32 sequence:u32` (11 bytes).
 - Followed by 1–4 descriptors, each 8 bytes: `panel_id:u8, zone_id:u8, range_slot:u8, start:u16, count:u16, role_flags:u8`.
+- `panel_id` and `zone_id` are low-byte aliases of the stable 16-bit IDs in Panel v3 readback, not array indices. Zero is reserved. CORE resolves aliases within the addressed lane and rejects ambiguous matches atomically. New IDs use `0x8000 | panel_id` for Panels and `0x4000 | zone_id` for Zones; after commit, clients reload authoritative readback for the full IDs. Clients send `id & 0xff` in UPDATE.
 - The packet must fit in one ATT write command: `11 + 8*N <= ATT_MTU - 3`.
 - Maximum descriptors are `min(4, floor((ATT_MTU - 14) / 8))`: one at MTU 23, two at MTU 31, four at MTU 46 or greater.
 - `range_slot` is the zero-based range-array slot in the addressed zone.

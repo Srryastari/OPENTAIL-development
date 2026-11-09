@@ -197,11 +197,13 @@ fx_presets = (root / "fx_preset_record.c").read_text(encoding="utf-8")
 for adapter in (ble_show, ble_fx, fx_presets):
     assert "#include \"board_config.h\"" in adapter
     assert "(1u<<OT_OM_OUTPUTS)-1u" in adapter
-# Only the Show and persisted-preset adapters carry an explicit brightness
-# field. BLE FX transport validates effect/chain capability, not a second cap.
-for adapter in (ble_show, fx_presets):
-    assert "OT_MAX_BRIGHTNESS" in adapter
+# The legacy Show adapter retains its explicit configured cap. FX requests
+# and saved scenes preserve the full 8-bit request; CORE applies the ceiling
+# once at the final RGB boundary instead of rejecting a preset on save.
+assert "OT_MAX_BRIGHTNESS" in ble_show
 assert "OT_MAX_BRIGHTNESS" not in ble_fx
+assert "OT_MAX_BRIGHTNESS" not in fx_presets
+assert "ot_om_limit_brightness" in core
 
 # BLE FX validation must follow the physical output count, not a vehicle or
 # two-lane mask literal. Actual 12-output hardware/protocol support is future work.

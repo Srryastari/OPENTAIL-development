@@ -70,6 +70,7 @@ All three characteristics require the active authenticated owner connection and 
 
 - Fixed 11-byte header: `FE 02 lane session_id:u32 sequence:u32`.
 - Followed by 1–4 fixed 8-byte descriptors: `panel_id:u8, zone_id:u8, range_slot:u8, start:u16, count:u16, role_flags:u8`.
+- `panel_id` and `zone_id` are the low 8 bits of the stable 16-bit IDs returned by Panel v3 readback; they are aliases, not array indices. Zero is reserved. CORE resolves each alias against the addressed lane and rejects multiple matches without mutating the candidate. New IDs are created in the reserved namespaces `0x8000 | panel_id` (Panel) and `0x4000 | zone_id` (Zone); authoritative readback returns the resulting full 16-bit IDs. Clients preserve those full IDs and send their low byte on UPDATE.
 - The entire packet must fit one ATT write command. Maximum descriptors are `min(4, floor((ATT_MTU - 3 - 11) / 8))`: one at MTU 23, two at MTU 31, and four at MTU 46 or higher.
 - `range_slot` is the current zero-based range-array slot within the zone. `role_flags` bits 0–3 carry the zone role, bits 4–5 carry action (0 upsert, 1 delete range, 2 delete zone, 3 delete panel), and bits 6–7 must be zero. Delete actions require zero start/count and role fields.
 - UPDATE is applied as one candidate snapshot. Invalid IDs, duplicate targets, range overlap, out-of-capacity endpoints, cross-panel moves, and invalid role/action combinations are rejected without changing the previous preview snapshot.

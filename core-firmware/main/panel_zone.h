@@ -19,6 +19,11 @@
 #define OT_PZ_ZONE_FLAG_LEGACY_EMPTY 0x01u
 #define OT_PZ_ZONE_FLAGS_MASK OT_PZ_ZONE_FLAG_LEGACY_EMPTY
 
+/* Stable 16-bit identity namespaces; UPDATE descriptors carry the low byte. */
+#define OT_PZ_PANEL_ID_PREFIX 0x8000u
+#define OT_PZ_ZONE_ID_PREFIX 0x4000u
+#define OT_PZ_ID_WIRE_MASK 0x00ffu
+
 typedef struct {
     uint16_t start; /* inclusive, zero-based lane coordinate */
     uint16_t count; /* positive; inclusive end = start + count - 1 */
@@ -119,8 +124,8 @@ typedef struct {
 #define OT_PZ_TX_DELETE_ZONE 2u
 #define OT_PZ_TX_DELETE_PANEL 3u
 typedef struct {
-    uint8_t panel_id;
-    uint8_t zone_id;
+    uint8_t panel_id; /* low byte of the stable 16-bit Panel ID; zero is reserved */
+    uint8_t zone_id; /* low byte of the stable 16-bit Zone ID; zero is reserved */
     uint8_t range_id;
     uint16_t start;
     uint16_t count;
