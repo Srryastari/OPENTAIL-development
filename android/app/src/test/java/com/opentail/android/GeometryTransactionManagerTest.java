@@ -470,6 +470,28 @@ public class GeometryTransactionManagerTest {
         assertEquals(19,second.packet.length);
     }
 
+    @Test public void rawUpdateCannotBypassManagerLaneSessionOrSequenceOwnership() {
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,90,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor descriptor=
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,0);
+        byte[] wrongSession=PanelPreviewProtocol.update(0,91,1,
+            new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+        try { manager.queueUpdate(new byte[]{1},wrongSession);fail("session mismatch"); }
+        catch(IllegalArgumentException expected) {}
+        byte[] wrongLane=PanelPreviewProtocol.update(1,90,1,
+            new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+        try { manager.queueUpdate(new byte[]{1},wrongLane);fail("lane mismatch"); }
+        catch(IllegalArgumentException expected) {}
+        byte[] wrongSequence=PanelPreviewProtocol.update(0,90,2,
+            new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+        try { manager.queueUpdate(new byte[]{1},wrongSequence);fail("sequence mismatch"); }
+        catch(IllegalArgumentException expected) {}
+        assertEquals(GeometryTransactionManager.State.ACTIVE,manager.state());
+    }
+
     @Test public void transactionManagerBlocksUnassignedRoleUntilFirmwareFixIsVerified() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
