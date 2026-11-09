@@ -13,6 +13,11 @@
 #define OT_CFG_JOURNAL_VERSION 2u
 #define OT_CFG_JOURNAL_KEY_ACTIVE "active_v3"
 #define OT_CFG_JOURNAL_KEY_STAGED "stage_v3"
+/* Read-only physical input policy defaults are versioned separately from
+ * the editable IN1..IN8 function profile and its stage/active transaction. */
+#define OT_TM_POLICY_MAGIC 0x4f54504cu
+#define OT_TM_POLICY_VERSION 1u
+#define OT_TM_POLICY_KEY "policy_v1"
 
 /* V1 is read-only migration input (original #46 draft). */
 typedef struct {
@@ -31,12 +36,23 @@ typedef struct {
 } ot_tm_journal_t;
 typedef struct {
     uint32_t magic,version,crc;
+    uint8_t input_active_low;
+    uint8_t assertion_samples;
+    uint16_t sample_period_ms;
+    uint32_t turn_release_hold_us;
+} ot_tm_policy_record_t;
+typedef struct {
+    uint32_t magic,version,crc;
     ot_om_output_t previous[OT_OM_OUTPUTS],candidate[OT_OM_OUTPUTS];
     uint16_t previous_revision[OT_OM_OUTPUTS];
     uint16_t candidate_revision[OT_OM_OUTPUTS];
 } ot_om_journal_t;
 uint32_t ot_cfg_crc32(const void *data,size_t bytes);
 uint32_t ot_cfg_crc32_zeroed(const void *data,size_t bytes,size_t zero_offset,size_t zero_bytes);
+bool ot_tm_policy_build(ot_tm_policy_record_t *out,uint8_t input_active_low,
+                        uint8_t assertion_samples,uint16_t sample_period_ms,
+                        uint32_t turn_release_hold_us);
+bool ot_tm_policy_valid(const ot_tm_policy_record_t *record);
 bool ot_tm_journal_build(ot_tm_journal_t *out,const ot_tm_profile_t *previous,
                          const ot_tm_profile_t *candidate);
 bool ot_om_journal_build(ot_om_journal_t *out,
