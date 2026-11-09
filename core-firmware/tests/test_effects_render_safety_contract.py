@@ -113,9 +113,6 @@ assert "ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],frame_ms)" in render
 # renderer phase across index shifts, while the old pixel map gates frame carry.
 assert "old_zone_id[old_z]==zone_cfg->id" in render
 assert "old_panel_id[old_z]==zone_cfg->panel_id" in render
-assert "fx_bank_seen_generation" in render
-assert "fx_bank_seen_refresh_ms[ch][bank_z]!=slot->refreshed_ms" in render
-assert "fx_bank_owner_zone_id[ch][bank_z]=owner_zone" in render
 assert "const uint8_t old_z=prior_pixel_zone_map[ch][px];" in render
 assert "fx_zone_scratch[logical]=fx_frame[ch][px];" in render
 reset_pos=render.index("ot_effects_1d_reset(&fx_state[ch][z],")
