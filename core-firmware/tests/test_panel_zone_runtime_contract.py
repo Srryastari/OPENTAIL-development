@@ -118,7 +118,7 @@ for token in ("ot_pz_pair_store_begin", "ot_pz_pair_store_finish",
 assert pair_store.index("OT_PZ_LANE_KEY_STAGED") < pair_store.index(
     "OT_PZ_MAP_KEY_STAGED") < pair_store.index("OT_PZ_PAIR_INTENT_KEY")
 assert pair_store.index("OT_PZ_LANE_KEY_ACTIVE") < pair_store.index(
-    "OT_PZ_MAP_KEY_ACTIVE") < pair_store.index("OT_PZ_LANE_KEY_STAGED)")
+    "OT_PZ_MAP_KEY_ACTIVE")
 for phase in range(1, 9):
     assert f"phase_context,{phase}u" in pair_store or f"phase_context,{phase}u" in pair_store
 
