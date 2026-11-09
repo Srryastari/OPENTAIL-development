@@ -97,21 +97,27 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
     READ_RECORD(OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,map_active,has_map_active);
     READ_RECORD(OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_STAGED,map_stage,has_map_stage);
     READ_RECORD(OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY,intent,has_intent);
-    READ_RECORD(OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,marker,has_marker);
 #undef READ_RECORD
+    if(s->has_intent&&!ot_pz_pair_intent_valid(&s->intent))return false;
+    /* The marker and map-active record share phase-5's namespace commit.
+     * If power is interrupted inside that commit, the still-present intent
+     * authorizes recovery from whichever valid stage/active pair survived. */
+    const ot_pz_pair_io_result_t marker_result=read_exact(io,
+        OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,&s->marker,
+        sizeof(s->marker));
+    if(marker_result==OT_PZ_PAIR_IO_OK)s->has_marker=true;
+    else if(marker_result!=OT_PZ_PAIR_IO_NOT_FOUND&&!s->has_intent)return false;
+    if(s->has_marker&&!pair_marker_valid(&s->marker)){
+        if(!s->has_intent)return false;
+        s->has_marker=false;memset(&s->marker,0,sizeof(s->marker));
+    }
+    if(s->has_marker&&!s->has_intent&&
+       (!s->has_map_active||
+        s->marker.transaction_id!=s->map_active.transaction_id))return false;
     if((s->has_lane_active&&!ot_pz_lane_journal_valid(&s->lane_active))||
        (s->has_lane_stage&&!ot_pz_lane_journal_valid(&s->lane_stage))||
        (s->has_map_active&&!ot_pz_map_journal_valid(&s->map_active))||
-       (s->has_map_stage&&!ot_pz_map_journal_valid(&s->map_stage))||
-       (s->has_intent&&!ot_pz_pair_intent_valid(&s->intent))||
-       (s->has_marker&&!pair_marker_valid(&s->marker)))return false;
-    /* Once v4 has been initialized, a missing/mismatched active map must not
-     * fall back to stale v3 combined geometry. During phases 1..4 the marker
-     * still identifies the prior active map generation. */
-    if(s->has_marker&&
-       ((!s->has_intent&&!s->has_map_active)||
-        (s->has_map_active&&
-         s->marker.transaction_id!=s->map_active.transaction_id)))return false;
+       (s->has_map_stage&&!ot_pz_map_journal_valid(&s->map_stage)))return false;
     return true;
 }
 bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
