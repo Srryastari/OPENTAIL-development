@@ -9,7 +9,7 @@ int ot_effects_1d_find_prior_zone_state(uint16_t panel_id,uint16_t zone_id,
     uint32_t generation,const uint16_t *prior_panel_ids,
     const uint16_t *prior_zone_ids,const uint32_t *prior_generations,
     const bool *prior_active,size_t count){
-    if(!panel_id||!zone_id||!generation||!prior_panel_ids||!prior_zone_ids||
+    if(!panel_id||!zone_id||!prior_panel_ids||!prior_zone_ids||
        !prior_generations||!prior_active)return -1;
     for(size_t i=0;i<count;i++){
         if(prior_active[i]&&prior_panel_ids[i]==panel_id&&
