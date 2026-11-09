@@ -221,8 +221,8 @@ public class GeometryTransactionManagerTest {
         mappedZone(project,"Right Bottom",253,1,3,3,"Right Housing");
         mappedZone(project,"Right Trunk",101,1,4,4,"Right Trunk");
 
-        LayoutMapping mapping=mapLayout(project);
-        MappedLane left=mapping.lane(0),right=mapping.lane(1);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
+        GeometryTransactionManager.MappedLane left=mapping.lane(0),right=mapping.lane(1);
         assertEquals(623,left.activePixels);assertEquals(623,right.activePixels);
         assertEquals(2,left.panels.size());assertEquals(2,right.panels.size());
         assertEquals(5,left.zones.size());assertEquals(5,right.zones.size());
@@ -262,7 +262,7 @@ public class GeometryTransactionManagerTest {
         String[] sections={"Top","Amber","Reverse","Bottom","Trunk"};
         for(int lane=0;lane<2;lane++)for(int i=0;i<5;i++)
             physicalZone(project,(lane==0?"Left ":"Right ")+sections[i],pixels[i],lane,i);
-        LayoutMapping mapping=mapLayout(project);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         assertEquals(623,mapping.lane(0).activePixels);
         assertEquals(623,mapping.lane(1).activePixels);
         assertEquals(1,mapping.lane(0).zones.get(0).panelId);
@@ -279,7 +279,7 @@ public class GeometryTransactionManagerTest {
         assertTrue(project.addZone("Unassigned panel",10));
         String id=project.zone(0).optString("id");
         assertTrue(project.mapZoneToOutputSlot(id,0,0));
-        try { mapLayout(project);fail("Panel identity must not be guessed"); }
+        try { GeometryTransactionManager.mapLayout(project);fail("Panel identity must not be guessed"); }
         catch(IllegalStateException expected) {
             assertTrue(expected.getMessage().contains("explicit CORE Panel identity"));
         }
@@ -289,7 +289,7 @@ public class GeometryTransactionManagerTest {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left",10,0,0,7,"Left Housing");
         mappedZone(project,"Right",10,1,0,7,"Right Housing");
-        try { mapLayout(project);fail("Panel IDs are controller-wide"); }
+        try { GeometryTransactionManager.mapLayout(project);fail("Panel IDs are controller-wide"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("controller-wide"));
         }
@@ -298,13 +298,13 @@ public class GeometryTransactionManagerTest {
     @Test public void geometryMappingRejectsPixelAndPanelCapacityOverflow() throws Exception {
         NativeProject tooLong=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(tooLong,"Too long",2001,0,0,1,"Housing");
-        try { mapLayout(tooLong);fail("pixel capacity"); }
+        try { GeometryTransactionManager.mapLayout(tooLong);fail("pixel capacity"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("2,000-pixel"));
         }
         NativeProject tooMany=new NativeProject(new FakeProjectStorage().prefs);
         for(int i=0;i<5;i++)mappedZone(tooMany,"Panel "+i,1,0,i,i+1,"Panel "+i);
-        try { mapLayout(tooMany);fail("panel capacity"); }
+        try { GeometryTransactionManager.mapLayout(tooMany);fail("panel capacity"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("four-Panel"));
         }
@@ -314,13 +314,13 @@ public class GeometryTransactionManagerTest {
         NativeProject conflict=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(conflict,"Top",10,0,0,1,"Housing");
         mappedZone(conflict,"Bottom",10,0,1,1,"Trunk");
-        try { mapLayout(conflict);fail("conflicting Panel names"); }
+        try { GeometryTransactionManager.mapLayout(conflict);fail("conflicting Panel names"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("conflicting names"));
         }
         NativeProject invalid=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(invalid,"Invalid",10,0,0,128,"Housing");
-        try { mapLayout(invalid);fail("Panel ID wire range"); }
+        try { GeometryTransactionManager.mapLayout(invalid);fail("Panel ID wire range"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("Panel identity"));
         }
@@ -361,9 +361,9 @@ public class GeometryTransactionManagerTest {
         b[29]=1;
         return PanelPreviewProtocol.Status.parse(b);
     }
-    private static void validateSnapshots(LayoutMapping mapping,
+    private static void validateSnapshots(GeometryTransactionManager.LayoutMapping mapping,
             PanelPreviewProtocol.LaneSnapshot left,PanelPreviewProtocol.LaneSnapshot right) {
-        validateMappingAgainstSnapshots(mapping,
+        GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,
             new PanelPreviewProtocol.LaneSnapshot[]{left,right},
             new PanelPreviewProtocol.Status[]{
                 idlePanelStatus(0,7,PanelPreviewProtocol.MapIdentity.parse(left).activePixels),
@@ -391,7 +391,7 @@ public class GeometryTransactionManagerTest {
         mappedZone(project,"Right Reverse",42,1,2,3,"Right Housing");
         mappedZone(project,"Right Bottom",253,1,3,3,"Right Housing");
         mappedZone(project,"Right Trunk",101,1,4,4,"Right Trunk");
-        LayoutMapping mapping=mapLayout(project);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot left=panelSnapshot(0,623,1,"Left Housing",
             129,1,"Left Top",0,118);
         PanelPreviewProtocol.LaneSnapshot right=panelSnapshot(1,623,0,"",0,0,"",0,0);
@@ -401,7 +401,7 @@ public class GeometryTransactionManagerTest {
     @Test public void proposedGeometryCannotOverlapAnUnrelatedAuthoritativeZone() throws Exception {
         NativeProject project=new FakeProjectStorageProject().project();
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
-        LayoutMapping mapping=mapLayout(project);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot occupied=panelSnapshot(0,623,5,"Existing",
             200,5,"Existing Zone",0,10);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
@@ -416,7 +416,7 @@ public class GeometryTransactionManagerTest {
     @Test public void proposedPanelIdsCannotCollideWithExistingZonesOrDifferentPanels() throws Exception {
         NativeProject project=new FakeProjectStorageProject().project();
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
-        LayoutMapping mapping=mapLayout(project);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot zoneCollision=panelSnapshot(0,623,7,"Other",
             1,7,"Existing Zone",300,10);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
@@ -439,7 +439,7 @@ public class GeometryTransactionManagerTest {
     @Test public void proposedGeometryCannotExceedAuthoritativeActivePixelCapacity() throws Exception {
         NativeProject project=new FakeProjectStorageProject().project();
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
-        LayoutMapping mapping=mapLayout(project);
+        GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot small=panelSnapshot(0,100,0,"",0,0,"",0,0);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
         try {
@@ -535,7 +535,7 @@ public class GeometryTransactionManagerTest {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         for(int i=0;i<5;i++)
             mappedZone(project,"Section "+i,10,0,i,1,"Housing");
-        MappedLane lane=mapLayout(project).lane(0);
+        GeometryTransactionManager.MappedLane lane=GeometryTransactionManager.mapLayout(project).lane(0);
 
         List<PanelPreviewProtocol.UpdateDescriptor[]> at23=lane.descriptorBatches(23);
         assertEquals(5,at23.size());
