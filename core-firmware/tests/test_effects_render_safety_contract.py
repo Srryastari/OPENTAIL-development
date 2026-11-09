@@ -11,6 +11,7 @@ output=(root/"main/output_manager.c").read_text()
 effects=(root/"main/effects_1d.c").read_text()
 overlay=(root/"main/fx_overlay_engine.c").read_text()
 fxbank=(root/"main/fx_zone_bank.c").read_text()
+preset=(root/"main/fx_preset_record.c").read_text()
 render_start=core.index("static void led_task(")
 render=core[render_start:]
 def ordered(blob,items):
@@ -85,6 +86,14 @@ assert "bool ot_fx_bank_set_spark_identity(" in fxbank
 assert "void ot_fx_bank_prune_orphans(" in fxbank
 continuous_identity=fxbank[fxbank.index("bool ot_fx_bank_apply_continuous_tertiary_identity("):fxbank.index("bool ot_fx_bank_set_overlay_identity(")]
 assert "bank->zones[o][z].configured=false" not in continuous_identity
+# Saved scenes project identity-owned bank slots back to current logical zones.
+save_scene=core[core.index("bool ot_ble_save_fx_preset("):core.index("bool ot_ble_play_fx_preset(")]
+assert "memcpy(panel_snapshot,pz_outputs.outputs,sizeof(panel_snapshot))" in save_scene
+assert "ot_fx_scene_pack(&record,&snapshot,panel_snapshot,now_ms)" in save_scene
+assert "panel->zones[zone].panel_id==slot->owner_panel_id" in preset
+assert "panel->zones[zone].id==slot->owner_zone_id" in preset
+assert "p.zone_mask=(uint8_t)(1u<<zone_index)" in preset
+assert "fx->brightness<=OT_MAX_BRIGHTNESS" not in preset
 
 # The physical safety override is performed after all decorative FX and
 # before logical RGB capture. Decorative calibration must stay strictly
