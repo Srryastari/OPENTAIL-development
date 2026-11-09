@@ -335,11 +335,13 @@ final class BleDiscovery {
     private Consumer<String> infoListener;
     private volatile boolean continuousFx=false;
     private volatile boolean tertiaryFx=false;
+    private volatile boolean tertiary13Fx=false;
     boolean canContinuousFx(){return canControl() && continuousFx;}
     boolean canTertiaryFx(){return canContinuousFx() && tertiaryFx;}
+    boolean canTertiary13Fx(){return canTertiaryFx() && tertiary13Fx;}
     void setInfoListener(Consumer<String> listener){infoListener=listener;}
     private void clearInfo(){
-        continuousFx=false;tertiaryFx=false;
+        continuousFx=false;tertiaryFx=false;tertiary13Fx=false;
         coreInfo=null;infoReadQueued=false;
         final Consumer<String> receiver=infoListener;
         if(receiver!=null)ui.post(()->receiver.accept(null));
@@ -976,6 +978,12 @@ final class BleDiscovery {
           int br,int bg,int bb,int brightness,int speed,int intensity,int palette,int third) {
         if(!canTertiaryFx()){
             notifyStatus("CORE fx-tertiary-v1 unavailable or unauthorized; third color is local only");
+            return;
+        }
+        /* Older CORE advertises the base opcode but only knows the first 11.
+         * Source-proven Aurora/Popcorn require the extra 13-ID capability. */
+        if((id==38 || id==95) && !canTertiary13Fx()){
+            notifyStatus("CORE 13-effect third-color capability unavailable; local preview only");
             return;
         }
         try {enqueueWrite(TertiaryFxCommand.encode(id,chains,zones,r,g,b,br,bg,bb,
@@ -1937,12 +1945,13 @@ final class BleDiscovery {
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
         infoReadPending=false;
-        continuousFx=false;tertiaryFx=false;
+        continuousFx=false;tertiaryFx=false;tertiary13Fx=false;
         if(connection!=gatt)return;
         if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
             String info=new String(value,StandardCharsets.UTF_8);
             continuousFx=ContinuousFxCommand.advertised(info);
             tertiaryFx=TertiaryFxCommand.advertised(info);
+            tertiary13Fx=TertiaryFxCommand.advertised13(info);
             String version=info.startsWith("OpenTail CORE ")
                 ? info.substring("OpenTail CORE ".length()).split(" \\|",2)[0].trim() : "";
             final String reported=version.isEmpty()?null:version;

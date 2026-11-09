@@ -8,6 +8,10 @@ public class TertiaryFxCommandTest {
    assertFalse(TertiaryFxCommand.advertised("OpenTail CORE 0.1 |continuous-fx-v1"));
    assertFalse(TertiaryFxCommand.advertised("OpenTail CORE 0.1 |fx-tertiary-v11"));
    assertFalse(TertiaryFxCommand.advertised(null));
+   assertTrue(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |continuous-fx-v1|fx-tertiary-v1|fx-tertiary13-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |continuous-fx-v1|fx-tertiary-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |fx-tertiary13-v1"));
+   assertFalse(TertiaryFxCommand.advertised13("OpenTail CORE 0.1 |fx-tertiary-v1|fx-tertiary13-v11"));
  }
  @Test public void explicitBlackAndColorSlotAreEncoded() {
    byte[] black=TertiaryFxCommand.encode(54,1,1,255,0,0,0,255,0,24,255,128,0,0xff000000);
@@ -19,11 +23,22 @@ public class TertiaryFxCommandTest {
    assertEquals(2,colored[4]);assertEquals(4,colored[5]);
  }
  @Test public void rejectedEffectsNeverSilentlyFallback() {
-   for(int id:new int[]{10,11,38,40,48,60,91,95,0,32781})
+   for(int id:new int[]{10,11,40,48,60,91,0,32781})
        assertFalse(TertiaryFxCommand.supported(id));
-   for(int id:new int[]{28,29,34,50,52,54,55,56,84,87,103})
+   for(int id:new int[]{28,29,34,38,50,52,54,55,56,84,87,95,103})
        assertTrue(TertiaryFxCommand.supported(id));
+   assertTrue(TertiaryFxCommand.supported(38,4));
+   assertFalse(TertiaryFxCommand.supported(38,0));
+   assertFalse(TertiaryFxCommand.supported(38,50));
+   assertTrue(TertiaryFxCommand.supported(95,0));
+   byte[] aurora=TertiaryFxCommand.encode(38,1,1,1,2,3,4,5,6,24,128,128,4,0xff002244);
+   assertEquals(11,aurora[1]&255);assertEquals(38,aurora[2]&255);
+   assertEquals(4,aurora[15]&255);assertEquals(0x44,aurora[19]&255);
+   byte[] popcorn=TertiaryFxCommand.encode(95,1,1,1,2,3,4,5,6,24,128,128,0,0xff00ff11);
+   assertEquals(95,popcorn[2]&255);assertEquals(0xff,popcorn[18]&255);
    try{TertiaryFxCommand.encode(38,1,1,1,2,3,4,5,6,24,128,128,0,0);fail();}
+   catch(IllegalArgumentException expected){}
+   try{TertiaryFxCommand.encode(38,1,1,1,2,3,4,5,6,24,128,128,50,0);fail();}
    catch(IllegalArgumentException expected){}
    try{TertiaryFxCommand.encode(54,1,1,1,2,3,4,5,6,33,128,128,0,0);fail();}
    catch(IllegalArgumentException expected){}
