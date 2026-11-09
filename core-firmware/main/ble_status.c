@@ -88,11 +88,16 @@ typedef enum {
 typedef struct {
     uint32_t session_id,last_sequence,last_packet_crc32;
     uint32_t expires_ms,base_crc32,candidate_crc32;
+    uint32_t last_rejected_sequence,missing_sequence_count;
+    uint32_t out_of_order_count,duplicate_count,conflict_count;
+    uint32_t committing_reject_count;
     uint16_t base_revision,pixel_capacity;
-    uint8_t lane,status,last_error;
+    uint8_t lane,status,last_error,last_rejected_reason;
     bool active,has_sequence,committing;
+    bool sequence_sync_warning,sequence_sync_fault;
 } ot_pz_tx_session_t;
 static ot_pz_tx_session_t panel_preview_tx;
+static void panel_preview_reject_control(uint8_t reason);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
@@ -317,7 +322,7 @@ static int panel_caps_read(uint16_t conn,uint16_t handle,
     const uint8_t caps[11]={
         OT_PZ_WIRE_VERSION,OT_PZ_SCHEMA_VERSION,
         OT_PZ_MAX_PANELS_PER_OUTPUT,OT_PZ_MAX_ZONES_PER_OUTPUT,
-        OT_PZ_MAX_RANGES_PER_ZONE,0x07u,
+        OT_PZ_MAX_RANGES_PER_ZONE,0x0fu,
         (uint8_t)OT_PZ_MAX_WIRE_BYTES,(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8),
         15u,(uint8_t)(OT_PZ_PREVIEW_LEASE_MS/1000u),(uint8_t)OT_MAX_BRIGHTNESS
     };
@@ -357,6 +362,14 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
     const uint8_t opcode=packet[1],lane=packet[2];
     panel_ack(opcode,lane,0u);
     if(!authorized||!panel_caps_seen){panel_ack(opcode,lane,5u);return 0;}
+    /* Legacy geometry upload/save/reset paths share the same protected commit
+     * boundary as 0xFE. Reads remain available; no competing write may proceed. */
+    if(panel_preview_tx.committing&&
+       (opcode==3u||opcode==4u||opcode==5u||opcode==6u||opcode==0xffu)){
+        panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        panel_ack(opcode,lane,OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        return 0;
+    }
     /* Two-step destructive map reset. 0xFF/0xAA requests a revision-bound
      * challenge; 0xFF/0xAB confirms it. This is separate from Pixel Probe AA. */
     if(opcode==0xffu&&lane==0xaau){
@@ -487,6 +500,54 @@ static void panel_preview_set_error(uint8_t status){
     panel_preview_tx.last_error=status;
     panel_preview_tx.status=OT_PZ_TX_ERROR;
 }
+static void panel_preview_sat_add(uint32_t *value,uint32_t amount){
+    if(!value)return;
+    *value=UINT32_MAX-*value<amount?UINT32_MAX:*value+amount;
+}
+static void panel_preview_reject_control(uint8_t reason){
+    panel_preview_tx.last_error=reason;
+    panel_preview_tx.last_rejected_reason=reason;
+    panel_preview_tx.sequence_sync_warning=true;
+    if(reason==OT_PZ_TX_ERROR_COMMITTING_LOCKED)
+        panel_preview_sat_add(&panel_preview_tx.committing_reject_count,1u);
+}
+static void panel_preview_reject_update(uint32_t sequence,uint8_t reason,
+                                        uint32_t missing_count){
+    panel_preview_tx.last_rejected_sequence=sequence;
+    panel_preview_tx.last_rejected_reason=reason;
+    panel_preview_tx.last_error=reason;
+    switch(reason){
+        case OT_PZ_TX_ERROR_COMMITTING_LOCKED:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_sat_add(&panel_preview_tx.committing_reject_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_GAP:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.missing_sequence_count,missing_count);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_OUT_OF_ORDER:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.out_of_order_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_DUPLICATE:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_sat_add(&panel_preview_tx.duplicate_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_CONFLICT:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.conflict_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SYNC_REQUIRED:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            break;
+        default:
+            break;
+    }
+}
 static bool panel_preview_session_matches(uint8_t lane,uint32_t session_id){
     return panel_preview_tx.active&&panel_preview_tx.lane==lane&&
         panel_preview_tx.session_id==session_id;
@@ -507,7 +568,9 @@ static void panel_preview_refresh_commit_state(void){
     bool pending=false,persistent=false;
     if(!ot_ble_panel_get(panel_preview_tx.lane,&output,&active_revision,
                          &staged_revision,&pending,&persistent)){
-        panel_preview_set_error(4u);return;
+        /* A transient read failure cannot demote or release a durable commit. */
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_INTERNAL;
+        return;
     }
     (void)persistent;
     if(panel_preview_tx.candidate_crc32==panel_preview_tx.base_crc32){
@@ -544,16 +607,22 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
     ot_pz_tx_control_packet_t command={0};
     if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
        !ot_pz_tx_parse_control(packet,n,&command)){
-        panel_preview_set_error(1u);return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     panel_preview_expire_if_needed(now_ms);
     if(command.opcode==OT_PZ_TX_OP_BEGIN){
+        if(panel_preview_tx.committing){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+            return 0;
+        }
         if(command.schema_version!=OT_PZ_SCHEMA_VERSION)
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-        if(panel_preview_tx.active||panel_preview_tx.committing||
-           panel_upload_index!=255u){
-            panel_preview_set_error(2u);return 0;
+        if(panel_preview_tx.active||panel_upload_index!=255u){
+            panel_preview_set_error(OT_PZ_TX_ERROR_BUSY);return 0;
         }
         const uint8_t lane=command.lane;
         const uint16_t revision=command.base_revision;
@@ -563,13 +632,14 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         if(!ot_ble_panel_get(lane,&output,&active,&staged,&pending,&persistent)||
            pending||revision!=active||revision!=staged||
            capacity!=output.active_pixels||revision==UINT16_MAX){
-            panel_preview_set_error(3u);return 0;
+            panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
         }
         uint32_t session=esp_random();
         if(session==0u)session=esp_random();
-        if(session==0u){panel_preview_set_error(4u);return 0;}
+        if(session==0u){panel_preview_set_error(OT_PZ_TX_ERROR_INTERNAL);return 0;}
         const int rc=ot_ble_panel_preview_begin(lane,revision,capacity);
-        if(rc!=0){panel_preview_set_error(rc==2?2u:(rc==3?3u:1u));return 0;}
+        if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+            (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID));return 0;}
         memset(&panel_preview_tx,0,sizeof(panel_preview_tx));
         panel_preview_tx.session_id=session;
         panel_preview_tx.base_revision=revision;
@@ -580,27 +650,48 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         panel_preview_tx.status=OT_PZ_TX_ACTIVE;
         if(!ot_ble_panel_preview_crc32(lane,revision,&panel_preview_tx.base_crc32)){
             ot_ble_panel_preview_cancel();
-            panel_preview_tx.active=false;panel_preview_set_error(4u);return 0;
+            panel_preview_tx.active=false;
+            panel_preview_set_error(OT_PZ_TX_ERROR_INTERNAL);return 0;
         }
         panel_preview_tx.candidate_crc32=panel_preview_tx.base_crc32;
         return 0;
     }
+
     const uint8_t lane=command.lane;
     const uint32_t session=command.session_id;
-    if(!panel_preview_session_matches(lane,session)){
-        panel_preview_set_error(3u);return 0;
-    }
     if(panel_preview_tx.committing){
-        if(command.opcode==OT_PZ_TX_OP_COMMIT){
+        /* Only an exact duplicate COMMIT is idempotent. UPDATE, CANCEL,
+         * HEARTBEAT, BEGIN, wrong-session and conflicting COMMIT packets are
+         * rejected without changing COMMITTING or touching the durable journal. */
+        if(command.opcode==OT_PZ_TX_OP_COMMIT&&
+           lane==panel_preview_tx.lane&&session==panel_preview_tx.session_id&&
+           command.candidate_crc32==panel_preview_tx.candidate_crc32){
             panel_preview_refresh_commit_state();return 0;
         }
-        panel_preview_set_error(2u);return 0;
+        panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        return 0;
+    }
+    /* A delayed exact COMMIT after terminal success is read-only/idempotent. */
+    if(!panel_preview_tx.active&&panel_preview_tx.status==OT_PZ_TX_COMMITTED&&
+       lane==panel_preview_tx.lane&&session==panel_preview_tx.session_id){
+        if(command.opcode==OT_PZ_TX_OP_COMMIT&&
+           command.candidate_crc32==panel_preview_tx.candidate_crc32)return 0;
+        panel_preview_reject_control(OT_PZ_TX_ERROR_STALE);
+        return 0;
+    }
+    if(!panel_preview_session_matches(lane,session)){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
     }
     if(command.opcode==OT_PZ_TX_OP_COMMIT){
+        if(panel_preview_tx.sequence_sync_fault){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_SYNC_REQUIRED);return 0;
+        }
         const uint32_t expected=command.candidate_crc32;
         const int rc=ot_ble_panel_preview_commit(lane,
                     panel_preview_tx.base_revision,expected);
-        if(rc!=0){panel_preview_set_error(rc==2?2u:(rc==3?3u:(rc==4?4u:1u)));return 0;}
+        if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+            (rc==3?OT_PZ_TX_ERROR_STALE:(rc==4?OT_PZ_TX_ERROR_INTERNAL:
+                                          OT_PZ_TX_ERROR_INVALID)));return 0;}
         panel_preview_tx.candidate_crc32=expected;
         panel_preview_tx.committing=true;
         panel_preview_tx.status=OT_PZ_TX_COMMITTING;
@@ -608,18 +699,18 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         return 0;
     }
     if(command.opcode==OT_PZ_TX_OP_CANCEL){
-        /* CANCEL is rejected once COMMITTING has begun. */
         ot_ble_panel_preview_cancel();
         panel_preview_tx.active=false;
         panel_preview_tx.status=OT_PZ_TX_CANCELLED;
-        panel_preview_tx.last_error=0u;
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
         return 0;
     }
     const int rc=ot_ble_panel_preview_heartbeat(lane,panel_preview_tx.base_revision);
-    if(rc!=0){panel_preview_set_error(rc==2?2u:3u);return 0;}
+    if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+                                             OT_PZ_TX_ERROR_STALE);return 0;}
     panel_preview_tx.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
     panel_preview_tx.status=OT_PZ_TX_ACTIVE;
-    panel_preview_tx.last_error=0u;
+    panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
     return 0;
 }
 static int panel_preview_update_write(uint16_t conn,uint16_t handle,
@@ -629,44 +720,96 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
        !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     uint8_t packet[43]={0};uint16_t n=0;
     if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0){
-        panel_preview_set_error(1u);return 0;
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return 0;
     }
     ot_pz_tx_update_packet_t update={0};
     const uint16_t mtu=ble_att_mtu(conn);
     if(!ot_pz_tx_parse_update(packet,n,mtu,&update)){
-        panel_preview_set_error(1u);return 0;
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return 0;
     }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     panel_preview_expire_if_needed(now_ms);
-    if(!panel_preview_session_matches(update.lane,update.session_id)){
-        panel_preview_set_error(3u);return 0;
-    }
+
+    /* This guard intentionally precedes session/sequence checks. Any delayed
+     * Write Without Response packet arriving after COMMIT is rejected while
+     * the transaction remains COMMITTING; no shadow or NVS mutation occurs. */
     if(panel_preview_tx.committing){
-        panel_preview_set_error(2u);return 0;
-    }
-    const ot_pz_tx_sequence_result_t sequence=ot_pz_tx_sequence_check(
-        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
-        panel_preview_tx.last_packet_crc32,update.sequence,update.packet_crc32);
-    if(sequence==OT_PZ_TX_SEQUENCE_DUPLICATE){
-        panel_preview_tx.status=OT_PZ_TX_ACTIVE;
-        panel_preview_tx.last_error=0u;
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_COMMITTING_LOCKED,0u);
         return 0;
     }
-    if(sequence!=OT_PZ_TX_SEQUENCE_NEW){
-        panel_preview_set_error(3u);return 0;
+    if(!panel_preview_session_matches(update.lane,update.session_id)){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
     }
+
+    const ot_pz_tx_update_admission_t admission=ot_pz_tx_update_admit(
+        panel_preview_tx.committing,panel_preview_tx.sequence_sync_fault,
+        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
+        panel_preview_tx.last_packet_crc32,update.sequence,update.packet_crc32);
+    if(admission==OT_PZ_TX_UPDATE_REJECT_DUPLICATE){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_DUPLICATE,0u);
+        return 0; /* Exact replay is observed, never applied twice. */
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_GAP){
+        const uint32_t distance=!panel_preview_tx.has_sequence?update.sequence:
+            (update.sequence>panel_preview_tx.last_sequence?
+             update.sequence-panel_preview_tx.last_sequence:
+             (UINT32_MAX-panel_preview_tx.last_sequence)+update.sequence);
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_GAP,distance>1u?distance-1u:0u);
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_OUT_OF_ORDER,0u);
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_CONFLICT){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_CONFLICT,0u);
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SYNC_REQUIRED,0u);
+        return 0;
+    }
+    if(admission!=OT_PZ_TX_UPDATE_ACCEPT){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
+    }
+
     const int rc=ot_ble_panel_preview_update_ranges(update.lane,
         panel_preview_tx.base_revision,update.descriptors,update.descriptor_count);
-    if(rc!=0){panel_preview_set_error(rc==2?2u:(rc==3?3u:1u));return 0;}
+    if(rc!=0){
+        const uint8_t error=rc==2?OT_PZ_TX_ERROR_BUSY:
+            (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID);
+        panel_preview_reject_update(update.sequence,error,0u);
+        if(rc==3)panel_preview_tx.sequence_sync_fault=true;
+        return 0;
+    }
+    uint32_t candidate_crc=0u;
+    if(!ot_ble_panel_preview_crc32(update.lane,panel_preview_tx.base_revision,
+                                   &candidate_crc)){
+        /* The shadow may already contain this edit. Freeze the session so the
+         * client must reconcile/cancel rather than guess whether it was applied. */
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_INTERNAL,0u);
+        panel_preview_tx.sequence_sync_fault=true;
+        return 0;
+    }
     panel_preview_tx.last_sequence=update.sequence;
     panel_preview_tx.last_packet_crc32=update.packet_crc32;
     panel_preview_tx.has_sequence=true;
-    if(!ot_ble_panel_preview_crc32(update.lane,panel_preview_tx.base_revision,
-                                   &panel_preview_tx.candidate_crc32)){
-        panel_preview_set_error(4u);return 0;
-    }
+    panel_preview_tx.candidate_crc32=candidate_crc;
     panel_preview_tx.status=OT_PZ_TX_ACTIVE;
-    panel_preview_tx.last_error=0u;
+    panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
     /* UPDATE deliberately does not renew the 5-second lease. HEARTBEAT owns it. */
     return 0;
 }
@@ -677,8 +820,8 @@ static int panel_preview_status_read(uint16_t conn,uint16_t handle,
        !authorized||!panel_caps_seen)return BLE_ATT_ERR_READ_NOT_PERMITTED;
     panel_preview_expire_if_needed((uint32_t)(esp_timer_get_time()/1000LL));
     panel_preview_refresh_commit_state();
-    uint8_t payload[40]={0};
-    payload[0]=1u;payload[1]=panel_preview_tx.status;
+    uint8_t payload[OT_PZ_TX_STATUS_V2_BYTES]={0};
+    payload[0]=OT_PZ_TX_STATUS_V2_VERSION;payload[1]=panel_preview_tx.status;
     payload[2]=panel_preview_tx.lane;payload[3]=OT_PZ_SCHEMA_VERSION;
     payload[4]=(uint8_t)panel_preview_tx.session_id;
     payload[5]=(uint8_t)(panel_preview_tx.session_id>>8);
@@ -717,7 +860,29 @@ static int panel_preview_status_read(uint16_t conn,uint16_t handle,
         panel_preview_tx.expires_ms-now_ms:0u;
     payload[31]=(uint8_t)remaining;payload[32]=(uint8_t)(remaining>>8);
     payload[33]=(uint8_t)(remaining>>16);payload[34]=(uint8_t)(remaining>>24);
-    return os_mbuf_append(ctx->om,payload,35u)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
+    const uint32_t rejected=panel_preview_tx.last_rejected_sequence;
+    payload[35]=(uint8_t)rejected;payload[36]=(uint8_t)(rejected>>8);
+    payload[37]=(uint8_t)(rejected>>16);payload[38]=(uint8_t)(rejected>>24);
+    payload[39]=panel_preview_tx.last_rejected_reason;
+    const uint32_t counters[5]={
+        panel_preview_tx.missing_sequence_count,
+        panel_preview_tx.out_of_order_count,
+        panel_preview_tx.duplicate_count,
+        panel_preview_tx.conflict_count,
+        panel_preview_tx.committing_reject_count
+    };
+    for(unsigned i=0;i<5u;i++){
+        const unsigned offset=40u+i*4u;
+        payload[offset]=(uint8_t)counters[i];
+        payload[offset+1u]=(uint8_t)(counters[i]>>8);
+        payload[offset+2u]=(uint8_t)(counters[i]>>16);
+        payload[offset+3u]=(uint8_t)(counters[i]>>24);
+    }
+    payload[60]=(uint8_t)((panel_preview_tx.sequence_sync_warning?1u:0u)|
+                          (panel_preview_tx.sequence_sync_fault?2u:0u)|
+                          (panel_preview_tx.has_sequence?4u:0u));
+    return os_mbuf_append(ctx->om,payload,sizeof(payload))==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int pixel_probe_write(uint16_t conn,uint16_t handle,
                              struct ble_gatt_access_ctxt *ctx,void *arg){
