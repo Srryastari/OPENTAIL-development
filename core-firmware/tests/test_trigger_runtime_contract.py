@@ -316,7 +316,12 @@ assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in save
 assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
 assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
-assert "om_deferred.pending=true;" in core
+# Issue #126 makes the hierarchical Panel/Zone v3 journal authoritative for
+# output geometry. The legacy Output Manager is now a compatibility projection;
+# verify that accepted geometry saves stage the real v3 candidate before RAM.
+assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
+assert "ot_pz_journal_build(&staged,&previous,candidate," in core
+assert "pz_save_controller_locked(&candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
 assert "tm_persistent && !tm_deferred.pending" in core
@@ -436,6 +441,39 @@ for kind,operation,helper in (
     assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in operation, kind
     assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in operation, kind
     assert "stage.previous_revision" in operation and "stage.candidate_revision" in operation, kind
+
+# Issue #126 authoritative Panel/Zone v3 promotion uses its own journal keys
+# and allow_show=True so a saved layout can activate without stopping Show Mode.
+panel_promotion=between(core,"static void pz_promote(uint32_t epoch){",
+                        "static void om_promote(uint32_t epoch){")
+for token in (
+    'nvs_open("ot_zone_map",NVS_READWRITE',
+    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage)",
+    "pz_deferred.pending",
+    "pz_revision,stage.candidate_revision",
+    "pz_active_revision,stage.previous_revision",
+    "config_activation_idle(epoch,true)",
+    "tm_gpio_input_mask()==0u",
+    "live_input_mask==0u",
+    "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+    "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+    "pz_outputs=stage.candidate",
+):
+    assert token in panel_promotion, token
+panel_active_write=panel_promotion.index("config_write_panel_active(h,&stage)")
+panel_active_readback=panel_promotion.index(
+    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active_readback)")
+panel_stage_erase=panel_promotion.index("config_clear_panel_stage(h)")
+panel_fresh_quiet=panel_promotion.index(
+    "if(!config_activation_idle(epoch,true))",panel_stage_erase)
+panel_ram_publish=panel_promotion.index("pz_outputs=stage.candidate")
+assert panel_active_write<panel_active_readback<panel_stage_erase
+assert panel_stage_erase<panel_fresh_quiet<panel_ram_publish
+assert panel_promotion.index("pz_reset_tombstone_write_handle(")<panel_stage_erase
+panel_recovery=between(core,"static void pz_load(void){",
+                       "static bool pz_save_controller_locked(")
+assert "ot_pz_journal_recover(" in panel_recovery
+assert "Corrupt v3 data never falls back to legacy embedded zones" in panel_recovery
 
 # On power-loss recovery, an active-only journal still restores previous
 # mapping/geometry and holds the candidate pending; stage deletion does
