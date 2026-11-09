@@ -1,6 +1,12 @@
 package com.opentail.android;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.json.JSONObject;
 
 /**
  * Protocol-independent guard for Layout geometry edits.
@@ -25,6 +31,120 @@ final class GeometryTransactionManager {
         Update(long sequence,byte[] packet) {
             this.sequence=sequence;this.packet=Arrays.copyOf(packet,packet.length);
         }
+    }
+
+    /** Explicit Panel/Zone translation; no implicit housing or trunk inference. */
+    static final class MappedPanel {
+        final int id,lane,zoneCount;
+        final String name;
+        MappedPanel(int id,int lane,String name,int zoneCount) {
+            this.id=id;this.lane=lane;this.name=name;this.zoneCount=zoneCount;
+        }
+    }
+    static final class MappedZone {
+        final int id,panelId,section,start,count,roleFlags;
+        final String name;
+        MappedZone(int id,int panelId,int section,int start,int count,String name) {
+            this.id=id;this.panelId=panelId;this.section=section;this.start=start;
+            this.count=count;this.name=name;this.roleFlags=0x0f; // CORE UNASSIGNED
+        }
+        PanelPreviewProtocol.UpdateDescriptor descriptor() {
+            return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,0,start,count,roleFlags);
+        }
+    }
+    static final class MappedLane {
+        final int lane,activePixels;
+        final List<MappedPanel> panels;
+        final List<MappedZone> zones;
+        MappedLane(int lane,int activePixels,List<MappedPanel> panels,List<MappedZone> zones) {
+            this.lane=lane;this.activePixels=activePixels;
+            this.panels=Collections.unmodifiableList(new ArrayList<>(panels));
+            this.zones=Collections.unmodifiableList(new ArrayList<>(zones));
+        }
+        PanelPreviewProtocol.UpdateDescriptor[] descriptors() {
+            PanelPreviewProtocol.UpdateDescriptor[] out=
+                new PanelPreviewProtocol.UpdateDescriptor[zones.size()];
+            for(int i=0;i<zones.size();i++)out[i]=zones.get(i).descriptor();
+            return out;
+        }
+    }
+    static final class LayoutMapping {
+        final MappedLane[] lanes;
+        LayoutMapping(MappedLane[] lanes) { this.lanes=lanes; }
+        MappedLane lane(int lane) {
+            if(lane<0||lane>=lanes.length)throw new IllegalArgumentException("Invalid output lane");
+            return lanes[lane];
+        }
+    }
+
+    /**
+     * Maps existing local Output/section links to CORE's hierarchical schema.
+     * Panel IDs/names must be explicit project metadata; a design zone is never
+     * guessed to be a housing or trunk Panel. Existing UI structure is unchanged.
+     * Current Layout sections are contiguous single-range zones; multi-range
+     * authoring remains disabled until the UI has explicit range metadata.
+     */
+    static LayoutMapping mapLayout(NativeProject project) {
+        if(project==null)throw new IllegalArgumentException("Layout project is required");
+        @SuppressWarnings("unchecked")
+        List<JSONObject>[] assigned=new List[]{new ArrayList<>(),new ArrayList<>()};
+        for(int i=0;i<project.zoneCount();i++) {
+            JSONObject zone=project.zone(i);
+            int lane=zone.optInt("physicalOutput",-1);
+            if(lane<0)continue;
+            if(lane>1)throw new IllegalArgumentException("Physical output is outside the two-lane contract");
+            if(!zone.has("physicalPanelId")||!zone.has("physicalPanelName"))
+                throw new IllegalStateException("Section "+zone.optString("name")+
+                    " has no explicit CORE Panel identity");
+            assigned[lane].add(zone);
+        }
+        MappedLane[] lanes=new MappedLane[2];
+        Map<Integer,Integer> globalPanelLanes=new HashMap<>();
+        for(int lane=0;lane<2;lane++) {
+            List<JSONObject> sections=assigned[lane];
+            Collections.sort(sections,(a,b)->Integer.compare(
+                a.optInt("physicalSection",-1),b.optInt("physicalSection",-1)));
+            if(sections.size()>8)
+                throw new IllegalArgumentException("Output "+(lane+1)+" exceeds CORE's eight-zone limit");
+            Map<Integer,String> panelNames=new HashMap<>();
+            Map<Integer,Integer> panelCounts=new HashMap<>();
+            List<MappedZone> zones=new ArrayList<>();
+            int cursor=0;
+            for(JSONObject source:sections) {
+                int section=source.optInt("physicalSection",-1);
+                int panelId=source.optInt("physicalPanelId",-1);
+                String panelName=source.optString("physicalPanelName","").trim();
+                int count=source.optInt("length",-1);
+                if(section<0||section>7||panelId<1||panelId>127||
+                   panelName.isEmpty()||count<1)
+                    throw new IllegalArgumentException("Invalid physical section or Panel identity");
+                Integer priorLane=globalPanelLanes.get(panelId);
+                if(priorLane!=null&&priorLane.intValue()!=lane)
+                    throw new IllegalArgumentException("CORE Panel IDs are controller-wide and cannot cross outputs");
+                if(priorLane==null)globalPanelLanes.put(panelId,lane);
+                String priorName=panelNames.get(panelId);
+                if(priorName!=null&&!priorName.equals(panelName))
+                    throw new IllegalArgumentException("One Panel ID has conflicting names");
+                if(priorName==null)panelNames.put(panelId,panelName);
+                panelCounts.put(panelId,panelCounts.containsKey(panelId)?
+                    panelCounts.get(panelId)+1:1);
+                long end=(long)cursor+count;
+                if(end>2000)
+                    throw new IllegalArgumentException("Output "+(lane+1)+" exceeds the 2,000-pixel Android limit");
+                int zoneId=128+lane*8+section+1;
+                zones.add(new MappedZone(zoneId,panelId,section,cursor,count,source.optString("name")));
+                cursor=(int)end;
+            }
+            if(panelNames.size()>4)
+                throw new IllegalArgumentException("Output "+(lane+1)+" exceeds CORE's four-Panel limit");
+            List<MappedPanel> panels=new ArrayList<>();
+            for(Map.Entry<Integer,String> entry:panelNames.entrySet())
+                panels.add(new MappedPanel(entry.getKey(),lane,entry.getValue(),
+                    panelCounts.get(entry.getKey())));
+            Collections.sort(panels,(a,b)->Integer.compare(a.id,b.id));
+            lanes[lane]=new MappedLane(lane,cursor,panels,zones);
+        }
+        return new LayoutMapping(lanes);
     }
 
     private Snapshot lastConfirmed;
