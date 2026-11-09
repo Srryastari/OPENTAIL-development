@@ -3,22 +3,36 @@
 #include <string.h>
 #include "config_journal.h"
 
+static void make_output(ot_pz_output_t *out,unsigned lane,uint16_t pixels){
+    memset(out,0,sizeof(*out));
+    (void)snprintf(out->name,sizeof(out->name),"Physical lane %u",lane+1u);
+    out->active_pixels=pixels;out->color_order=OT_OM_GRB;
+    for(unsigned c=0;c<3u;c++)out->rgb_gain[c]=out->white_gain[c]=255u;
+}
+static void make_panel(ot_pz_output_t *out,unsigned lane,uint16_t id,const char *name){
+    ot_pz_panel_t *panel=&out->panels[out->panel_count++];
+    panel->id=id;panel->lane=(uint8_t)lane;
+    (void)snprintf(panel->name,sizeof(panel->name),"%s",name);
+}
+static void make_zone(ot_pz_output_t *out,unsigned index,uint16_t id,uint16_t panel_id,
+                      uint8_t role,const char *name,uint16_t start,uint16_t count){
+    ot_pz_zone_t *zone=&out->zones[index];
+    zone->id=id;zone->panel_id=panel_id;zone->role=role;
+    (void)snprintf(zone->name,sizeof(zone->name),"%s",name);
+    zone->range_count=1u;zone->ranges[0]=(ot_pz_range_t){start,count};
+    out->zone_count++;
+    for(unsigned p=0;p<out->panel_count;p++)
+        if(out->panels[p].id==panel_id)out->panels[p].zone_count++;
+}
 static void make_runtime(ot_pz_controller_t *cfg,uint16_t pixels,
                          uint8_t color_order,uint16_t zone_count){
     ot_pz_defaults(cfg);
-    ot_pz_output_t *out=&cfg->outputs[0];
-    (void)snprintf(out->name,sizeof(out->name),"Physical lane one");
-    out->active_pixels=pixels;out->color_order=color_order;
+    ot_pz_output_t *out=&cfg->outputs[0];make_output(out,0u,pixels);
+    out->color_order=color_order;
     out->rgb_gain[0]=191u;out->white_gain[2]=223u;out->gamma_enabled=true;
-    out->panel_count=1u;out->zone_count=1u;
-    out->panels[0].id=101u;out->panels[0].lane=0u;
-    (void)snprintf(out->panels[0].name,sizeof(out->panels[0].name),"Rear panel");
-    out->panels[0].zone_count=1u;
-    out->zones[0].id=201u;out->zones[0].panel_id=101u;
-    out->zones[0].role=OT_OM_BRAKE;
-    (void)snprintf(out->zones[0].name,sizeof(out->zones[0].name),"Brake zone");
-    out->zones[0].range_count=1u;
-    out->zones[0].ranges[0]=(ot_pz_range_t){0u,zone_count};
+    make_panel(out,0u,101u,"Rear panel");
+    make_zone(out,0u,201u,101u,OT_OM_BRAKE,"Brake zone",0u,zone_count);
+    make_output(&cfg->outputs[1],1u,50u);
     assert(ot_pz_valid(cfg));
 }
 static void assert_pending_pair(const ot_pz_map_journal_t *map_active,
