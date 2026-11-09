@@ -453,7 +453,7 @@ static bool pz_stage_legacy_migration(void){
     if(!ot_pz_migrate_legacy(om_outputs,om_persistent,&previous))return false;
     candidate=previous;
     if(om_deferred.pending&&
-       !ot_pz_migrate_legacy(om_deferred.candidate,om_persistent,&candidate))
+       !ot_pz_migrate_legacy(om_deferred.outputs,om_persistent,&candidate))
         return false;
     uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
     memcpy(previous_revision,om_active_revision,sizeof(previous_revision));
