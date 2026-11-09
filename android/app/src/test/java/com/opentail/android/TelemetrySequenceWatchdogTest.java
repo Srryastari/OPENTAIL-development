@@ -38,6 +38,15 @@ public class TelemetrySequenceWatchdogTest {
         assertFalse(w.snapshot().warning);
     }
 
+    @Test public void forwardGapAcrossUint32WrapIsReportedNotMisclassifiedAsBackwards() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,22,0xfffffffeL,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision gap=
+            w.observe(status(1,22,1,0,0,0,0,0,0,4));
+        assertTrue(gap.hardFault);
+        assertTrue(gap.message.contains("missing sequence 4294967295"));
+    }
+
     @Test public void acceptedSequenceJumpAndOutOfOrderCounterAreHardFaults() {
         TelemetrySequenceWatchdog jump=new TelemetrySequenceWatchdog();
         jump.observe(status(1,20,1,0,0,0,0,0,0,4));
