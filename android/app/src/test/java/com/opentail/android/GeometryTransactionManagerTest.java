@@ -329,9 +329,9 @@ public class GeometryTransactionManagerTest {
         return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
     }
 
-    private static PanelPreviewProtocol.Status idlePanelStatus(int lane,int revision) {
+    private static PanelPreviewProtocol.Status idlePanelStatus(int lane,int revision,int pixels) {
         byte[] b=new byte[61];b[0]=2;b[1]=0;b[2]=(byte)lane;b[3]=3;
-        put16(b,8,revision);put16(b,10,623);put16(b,12,5000);
+        put16(b,8,revision);put16(b,10,pixels);put16(b,12,5000);
         put16(b,22,revision);put16(b,24,revision);put16(b,26,revision);
         b[29]=1;
         return PanelPreviewProtocol.Status.parse(b);
@@ -340,7 +340,9 @@ public class GeometryTransactionManagerTest {
             PanelPreviewProtocol.LaneSnapshot left,PanelPreviewProtocol.LaneSnapshot right) {
         validateMappingAgainstSnapshots(mapping,
             new PanelPreviewProtocol.LaneSnapshot[]{left,right},
-            new PanelPreviewProtocol.Status[]{idlePanelStatus(0,7),idlePanelStatus(1,7)});
+            new PanelPreviewProtocol.Status[]{
+                idlePanelStatus(0,7,PanelPreviewProtocol.MapIdentity.parse(left).activePixels),
+                idlePanelStatus(1,7,PanelPreviewProtocol.MapIdentity.parse(right).activePixels)});
     }
 
     @Test public void proposedGs400MappingMustMatchFreshAuthoritativeMapAndFitCapacity() throws Exception {
