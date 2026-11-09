@@ -83,7 +83,7 @@ Sequence starts at 1 and only the contiguous next nonzero 32-bit sequence is acc
 - The legacy Panel write path and CORE geometry save/reset paths remain blocked while the preview candidate is active/committing. The NVS worker remains the only owner of the preview's durable write.
 - UUID suffix 0x37 now returns a 61-byte version-2 status value. The v1 prefix retains lane/session identity, last accepted sequence, candidate CRC, active/staged/render revisions, error and lease fields. The extension exposes last rejected sequence/reason, saturating missing/out-of-order/duplicate/conflict/COMMITTING-rejection counters, and sequence warning/fault flags. Panel capability feature bit 3 advertises this telemetry.
 - Error codes 5–10 are documented in ISSUE126-PREVIEW-FAULT-INJECTION-ANDROID-TELEMETRY.md. Android must surface sequence warnings immediately in the existing Settings → System area, reconcile the authoritative status/map, and never blindly retry or commit after a hard sequence fault. The approved six-screen UI is unchanged.
-- Host protocol tests and exact-source contract checks have been added for commit-locked delayed, duplicate, gap and out-of-order packets. They remain **pending execution on CI** until the updated workflow completes.
+- Host protocol tests and exact-source contract checks for commit-locked delayed, duplicate, gap and out-of-order packets **PASS** at code SHA `d5ed5cf7ae74386d545c1cea3ae9219ac603165f`. A subsequent logging-only firmware commit and documentation update are queued for exact-HEAD rerun.
 - CORE now assigns a random 32-bit per-boot diagnostic identity, logs it at startup, and exposes it as `boot_id` in the existing `/api/v1/status` JSON. The brownout log must capture pre-cut and post-reboot values on the exact tested SHA.
 
 - BEGIN binds the preview to the committed lane revision and its validated active pixel capacity. Unknown/unconfigured capacity cannot start a geometry preview.
@@ -136,12 +136,14 @@ The existing STOP command stops Show/Demo/Simulation and clears diagnostics/prev
 
 ## Verification status
 
-- Host regression suite and exact-source contract tests are wired into the draft workflow.
-- ESP-IDF v5.5.5 ESP32-S3 build and flash-manifest checks are wired into the draft workflow; no device is flashed by CI.
-- Cross-namespace hardware/map migration, reset handshake/tombstone, independent exact-HEAD review, IRAM disassembly confirmation, and physical bench tests remain open.
+- The v4 cross-namespace lane/map runtime integration, nine-phase pair-store fault matrix, reset-mask recovery, trigger-policy migration/CRC, protected COMMITTING protocol and telemetry contracts are implemented in CORE.
+- Full CORE host regressions and exact-source contracts **PASS** at code SHA `d5ed5cf7ae74386d545c1cea3ae9219ac603165f`; this includes the v4 pair-store restart/fault tests, marker read-error fail-closed test, reset single-write contract, and the versioned trigger-policy record tests.
+- Trigger integration **PASS** at the same source checkpoint. ESP-IDF v5.5.5 ESP32-S3 build, linked ISR IRAM/DRAM audit and exact-head artifact are still running for that checkpoint; no device is flashed by CI.
+- The current PR branch head is a documentation-only descendant of that source checkpoint; the latest firmware logging change is queued for exact-HEAD rerun.
+- Independent exact-HEAD review, physical bench/electrical preflight, controlled brightness A/B, 944-pixel RMT/optical/thermal tests and 100-cycle brownout endurance remain open.
 - Passing software CI is not physical or road certification.
 
 
 ## Owner-mandated brownout endurance gate
 
-The mandatory 100-cycle physical power-cut/recovery test under a measured full-white 944-pixel WS2815 load is specified in ISSUE126-BROWNOUT-100-CYCLE-ACCEPTANCE.md. **NOT RUN.** The final cross-namespace hardware/map journal, verified electrical preflight, boot-ID evidence and physical phase instrumentation must exist before cycle 1. A CI build or host fault simulation cannot satisfy this gate.
+The mandatory 100-cycle physical power-cut/recovery test under a measured full-white 944-pixel WS2815 load is specified in ISSUE126-BROWNOUT-100-CYCLE-ACCEPTANCE.md. **NOT RUN.** The exact tested v4 cross-namespace journal must be built and flashed only after verified electrical preflight; the run must capture boot-ID evidence and physical phase instrumentation for every cycle. A CI build or host fault simulation cannot satisfy this gate.
