@@ -13,16 +13,12 @@ static ot_pz_pair_io_result_t read_exact(const ot_pz_pair_store_io_t *io,
            OT_PZ_PAIR_IO_OK:OT_PZ_PAIR_IO_ERROR;
 }
 static bool write_verified(const ot_pz_pair_store_io_t *io,
+        ot_pz_pair_store_workspace_t *workspace,
         ot_pz_pair_namespace_t ns,const char *key,const void *record,size_t size){
-    if(!io->write_commit(io->context,ns,key,record,size))return false;
-    union {
-        ot_pz_lane_journal_t lane;
-        ot_pz_map_journal_t map;
-        ot_pz_pair_intent_t intent;
-    } readback;
-    if(size>sizeof(readback))return false;
-    return read_exact(io,ns,key,&readback,size)==OT_PZ_PAIR_IO_OK&&
-           memcmp(&readback,record,size)==0;
+    if(!workspace||!io->write_commit(io->context,ns,key,record,size))return false;
+    if(size>sizeof(workspace->readback))return false;
+    return read_exact(io,ns,key,&workspace->readback,size)==OT_PZ_PAIR_IO_OK&&
+           memcmp(&workspace->readback,record,size)==0;
 }
 static uint32_t pair_marker_crc(const ot_pz_pair_store_marker_t *record){
     ot_pz_pair_store_marker_t copy=*record;copy.crc=0u;
@@ -68,8 +64,9 @@ static const ot_pz_lane_journal_t *select_lane(
     return NULL;
 }
 bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
-                               ot_pz_pair_store_snapshot_t *s){
-    if(!io||!io->read||!io->write_commit||!io->erase_commit||!s)return false;
+                               ot_pz_pair_store_workspace_t *workspace){
+    if(!io||!io->read||!io->write_commit||!io->erase_commit||!workspace)return false;
+    ot_pz_pair_store_snapshot_t *s=&workspace->snapshot;
     memset(s,0,sizeof(*s));
 #define READ_RECORD(ns,key,field,has_field) do { \
     ot_pz_pair_io_result_t r=read_exact(io,(ns),(key),&(s->field),sizeof(s->field)); \
@@ -106,38 +103,40 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
     return true;
 }
 bool ot_pz_pair_store_recover(const ot_pz_pair_store_io_t *io,
+                              ot_pz_pair_store_workspace_t *workspace,
                               const ot_pz_controller_t *legacy_fallback,
                               ot_pz_controller_t *live,ot_pz_pending_t *pending,
                               uint16_t active_revision[OT_PZ_OUTPUTS],
                               uint16_t staged_revision[OT_PZ_OUTPUTS],
                               bool *intent_pending,uint32_t *transaction_id,
                               uint8_t *reset_mask){
-    ot_pz_pair_store_snapshot_t s;
-    if(!ot_pz_pair_store_snapshot(io,&s))return false;
-    if(s.has_marker&&!s.has_intent&&
-       (!s.has_map_active||!s.has_lane_active||
-        s.map_active.transaction_id!=s.lane_active.transaction_id))
+    if(!workspace||!ot_pz_pair_store_snapshot(io,workspace))return false;
+    const ot_pz_pair_store_snapshot_t *s=&workspace->snapshot;
+    if(s->has_marker&&!s->has_intent&&
+       (!s->has_map_active||!s->has_lane_active||
+        s->map_active.transaction_id!=s->lane_active.transaction_id))
         return false;
     if(!ot_pz_pair_journal_recover(
-        s.has_map_active?&s.map_active:NULL,s.has_map_stage?&s.map_stage:NULL,
-        s.has_lane_active?&s.lane_active:NULL,s.has_lane_stage?&s.lane_stage:NULL,
-        s.has_intent?&s.intent:NULL,legacy_fallback,live,pending,
+        s->has_map_active?&s->map_active:NULL,s->has_map_stage?&s->map_stage:NULL,
+        s->has_lane_active?&s->lane_active:NULL,s->has_lane_stage?&s->lane_stage:NULL,
+        s->has_intent?&s->intent:NULL,legacy_fallback,live,pending,
         active_revision,staged_revision))return false;
-    if(intent_pending)*intent_pending=s.has_intent;
+    if(intent_pending)*intent_pending=s->has_intent;
     if(transaction_id){
-        *transaction_id=s.has_intent?s.intent.transaction_id:
-            (s.has_map_active?s.map_active.transaction_id:
-             (s.has_lane_active?s.lane_active.transaction_id:0u));
+        *transaction_id=s->has_intent?s->intent.transaction_id:
+            (s->has_map_active?s->map_active.transaction_id:
+             (s->has_lane_active?s->lane_active.transaction_id:0u));
     }
     if(reset_mask){
         const ot_pz_map_journal_t *record=NULL;
-        if(s.has_intent)record=select_map(&s,s.intent.transaction_id);
-        else if(s.has_map_active)record=&s.map_active;
+        if(s->has_intent)record=select_map(s,s->intent.transaction_id);
+        else if(s->has_map_active)record=&s->map_active;
         *reset_mask=record?record->reset_mask:0u;
     }
     return true;
 }
 bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
+                            ot_pz_pair_store_workspace_t *workspace,
                             const ot_pz_controller_t *previous,
                             const ot_pz_controller_t *candidate,
                             const uint16_t previous_revision[OT_PZ_OUTPUTS],
@@ -145,88 +144,85 @@ bool ot_pz_pair_store_begin(const ot_pz_pair_store_io_t *io,
                             uint32_t transaction_id,uint8_t reset_mask,
                             bool allow_empty_active,
                             ot_pz_pair_phase_hook_t phase_hook,void *phase_context){
-    if(!io||!previous||!candidate||!previous_revision||!candidate_revision||
-       !transaction_id||!ot_pz_valid(previous)||!ot_pz_valid(candidate))return false;
-    ot_pz_pair_store_snapshot_t s;
-    if(!ot_pz_pair_store_snapshot(io,&s)||s.has_intent)return false;
-    if(s.has_marker&&!s.has_map_active)return false;
-    if(s.has_map_active||s.has_lane_active){
-        if(!s.has_map_active||!s.has_lane_active||
-           s.map_active.transaction_id!=s.lane_active.transaction_id||
-           memcmp(s.map_active.previous_revision,s.lane_active.previous_revision,
-                  sizeof(s.map_active.previous_revision))!=0||
-           memcmp(s.map_active.candidate_revision,s.lane_active.candidate_revision,
-                  sizeof(s.map_active.candidate_revision))!=0||
-           memcmp(previous_revision,s.map_active.candidate_revision,
-                  sizeof(s.map_active.candidate_revision))!=0)return false;
-        ot_pz_controller_t durable_previous,durable_current;
-        if(!ot_pz_join(&s.lane_active.previous,&s.map_active.previous,
-                       &durable_previous)||
-           !ot_pz_join(&s.lane_active.candidate,&s.map_active.candidate,
-                       &durable_current)||
-           memcmp(&durable_current,previous,sizeof(durable_current))!=0)return false;
-        (void)durable_previous;
+    if(!io||!workspace||!previous||!candidate||!previous_revision||
+       !candidate_revision||!transaction_id||!ot_pz_valid(previous)||
+       !ot_pz_valid(candidate))return false;
+    if(!ot_pz_pair_store_snapshot(io,workspace))return false;
+    ot_pz_pair_store_snapshot_t *s=&workspace->snapshot;
+    if(s->has_intent)return false;
+    if(s->has_marker&&!s->has_map_active)return false;
+    if(s->has_map_active||s->has_lane_active){
+        if(!s->has_map_active||!s->has_lane_active||
+           s->map_active.transaction_id!=s->lane_active.transaction_id||
+           memcmp(s->map_active.previous_revision,s->lane_active.previous_revision,
+                  sizeof(s->map_active.previous_revision))!=0||
+           memcmp(s->map_active.candidate_revision,s->lane_active.candidate_revision,
+                  sizeof(s->map_active.candidate_revision))!=0||
+           memcmp(previous_revision,s->map_active.candidate_revision,
+                  sizeof(s->map_active.candidate_revision))!=0)return false;
+        if(!ot_pz_join(&s->lane_active.previous,&s->map_active.previous,
+                       &workspace->previous)||
+           !ot_pz_join(&s->lane_active.candidate,&s->map_active.candidate,
+                       &workspace->candidate)||
+           memcmp(&workspace->candidate,previous,sizeof(workspace->candidate))!=0)
+            return false;
     }else if(!allow_empty_active){
         return false;
     }
-    ot_pz_lane_config_set_t previous_lanes,candidate_lanes;
-    ot_pz_map_t previous_map,candidate_map;
-    ot_pz_lane_journal_t lane_stage={0};
-    ot_pz_map_journal_t map_stage={0};
-    ot_pz_pair_intent_t intent={0};
-    if(!ot_pz_split(previous,&previous_lanes,&previous_map)||
-       !ot_pz_split(candidate,&candidate_lanes,&candidate_map)||
-       !ot_pz_lane_journal_build(&lane_stage,&previous_lanes,&candidate_lanes,
-            previous_revision,candidate_revision,transaction_id)||
-       !ot_pz_map_journal_build_reset(&map_stage,&previous_map,&candidate_map,
-            previous_revision,candidate_revision,transaction_id,reset_mask)||
-       !ot_pz_pair_intent_build(&intent,transaction_id,
+    if(!ot_pz_split(previous,&workspace->previous_lanes,&workspace->previous_map)||
+       !ot_pz_split(candidate,&workspace->candidate_lanes,&workspace->candidate_map)||
+       !ot_pz_lane_journal_build(&s->lane_stage,&workspace->previous_lanes,
+            &workspace->candidate_lanes,previous_revision,candidate_revision,
+            transaction_id)||
+       !ot_pz_map_journal_build_reset(&s->map_stage,&workspace->previous_map,
+            &workspace->candidate_map,previous_revision,candidate_revision,
+            transaction_id,reset_mask)||
+       !ot_pz_pair_intent_build(&s->intent,transaction_id,
             previous_revision,candidate_revision))return false;
 
-    if(!write_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_STAGED,
-                       &lane_stage,sizeof(lane_stage))||
+    if(!write_verified(io,workspace,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_STAGED,
+                       &s->lane_stage,sizeof(s->lane_stage))||
        !phase_done(phase_hook,phase_context,1u,transaction_id))return false;
-    if(!write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_STAGED,
-                       &map_stage,sizeof(map_stage))||
+    if(!write_verified(io,workspace,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_STAGED,
+                       &s->map_stage,sizeof(s->map_stage))||
        !phase_done(phase_hook,phase_context,2u,transaction_id))return false;
-    if(!write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY,
-                       &intent,sizeof(intent))||
+    if(!write_verified(io,workspace,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_INTENT_KEY,
+                       &s->intent,sizeof(s->intent))||
        !phase_done(phase_hook,phase_context,3u,transaction_id))return false;
     return true;
 }
 bool ot_pz_pair_store_finish(const ot_pz_pair_store_io_t *io,
+                             ot_pz_pair_store_workspace_t *workspace,
                              uint32_t transaction_id,
                              ot_pz_pair_phase_hook_t phase_hook,void *phase_context){
-    ot_pz_pair_store_snapshot_t s;
-    if(!ot_pz_pair_store_snapshot(io,&s)||!s.has_intent||
-       (transaction_id&&s.intent.transaction_id!=transaction_id))return false;
-    transaction_id=s.intent.transaction_id;
-    const ot_pz_map_journal_t *map=select_map(&s,transaction_id);
-    const ot_pz_lane_journal_t *lane=select_lane(&s,transaction_id);
+    if(!workspace||!ot_pz_pair_store_snapshot(io,workspace))return false;
+    ot_pz_pair_store_snapshot_t *s=&workspace->snapshot;
+    if(!s->has_intent||(transaction_id&&s->intent.transaction_id!=transaction_id))
+        return false;
+    transaction_id=s->intent.transaction_id;
+    const ot_pz_map_journal_t *map=select_map(s,transaction_id);
+    const ot_pz_lane_journal_t *lane=select_lane(s,transaction_id);
     if(!map||!lane||
-       memcmp(map->previous_revision,s.intent.previous_revision,
-              sizeof(s.intent.previous_revision))!=0||
-       memcmp(map->candidate_revision,s.intent.candidate_revision,
-              sizeof(s.intent.candidate_revision))!=0||
-       memcmp(lane->previous_revision,s.intent.previous_revision,
-              sizeof(s.intent.previous_revision))!=0||
-       memcmp(lane->candidate_revision,s.intent.candidate_revision,
-              sizeof(s.intent.candidate_revision))!=0)return false;
-    ot_pz_controller_t previous,candidate;
-    if(!ot_pz_join(&lane->previous,&map->previous,&previous)||
-       !ot_pz_join(&lane->candidate,&map->candidate,&candidate))return false;
-    (void)previous;(void)candidate;
+       memcmp(map->previous_revision,s->intent.previous_revision,
+              sizeof(s->intent.previous_revision))!=0||
+       memcmp(map->candidate_revision,s->intent.candidate_revision,
+              sizeof(s->intent.candidate_revision))!=0||
+       memcmp(lane->previous_revision,s->intent.previous_revision,
+              sizeof(s->intent.previous_revision))!=0||
+       memcmp(lane->candidate_revision,s->intent.candidate_revision,
+              sizeof(s->intent.candidate_revision))!=0)return false;
+    if(!ot_pz_join(&lane->previous,&map->previous,&workspace->previous)||
+       !ot_pz_join(&lane->candidate,&map->candidate,&workspace->candidate))return false;
 
-    if(!write_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_ACTIVE,
+    if(!write_verified(io,workspace,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_ACTIVE,
                        lane,sizeof(*lane))||
        !phase_done(phase_hook,phase_context,4u,transaction_id))return false;
-    if(!write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
+    if(!write_verified(io,workspace,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
                        map,sizeof(*map))||
        !phase_done(phase_hook,phase_context,5u,transaction_id))return false;
-    ot_pz_pair_store_marker_t marker={0};
-    if(!pair_marker_build(&marker,transaction_id)||
-       !write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,
-                       &marker,sizeof(marker))||
+    if(!pair_marker_build(&s->marker,transaction_id)||
+       !write_verified(io,workspace,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,
+                       &s->marker,sizeof(s->marker))||
        !phase_done(phase_hook,phase_context,6u,transaction_id))return false;
     if(!erase_verified(io,OT_PZ_PAIR_NS_OUTPUT_CFG,OT_PZ_LANE_KEY_STAGED)||
        !phase_done(phase_hook,phase_context,7u,transaction_id))return false;
@@ -236,26 +232,27 @@ bool ot_pz_pair_store_finish(const ot_pz_pair_store_io_t *io,
        !phase_done(phase_hook,phase_context,9u,transaction_id))return false;
     return true;
 }
-bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,uint8_t lane){
-    if(lane>=OT_PZ_OUTPUTS)return false;
-    ot_pz_pair_store_snapshot_t s;
-    if(!ot_pz_pair_store_snapshot(io,&s)||s.has_intent||
-       !s.has_map_active||!s.has_lane_active||
-       s.map_active.transaction_id!=s.lane_active.transaction_id||
-       memcmp(s.map_active.previous_revision,s.lane_active.previous_revision,
-              sizeof(s.map_active.previous_revision))!=0||
-       memcmp(s.map_active.candidate_revision,s.lane_active.candidate_revision,
-              sizeof(s.map_active.candidate_revision))!=0)return false;
-    ot_pz_controller_t previous,candidate;
-    if(!ot_pz_join(&s.lane_active.previous,&s.map_active.previous,&previous)||
-       !ot_pz_join(&s.lane_active.candidate,&s.map_active.candidate,&candidate))
+bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,
+                                 ot_pz_pair_store_workspace_t *workspace,
+                                 uint8_t lane){
+    if(lane>=OT_PZ_OUTPUTS||!workspace||
+       !ot_pz_pair_store_snapshot(io,workspace))return false;
+    ot_pz_pair_store_snapshot_t *s=&workspace->snapshot;
+    if(s->has_intent||!s->has_map_active||!s->has_lane_active||
+       s->map_active.transaction_id!=s->lane_active.transaction_id||
+       memcmp(s->map_active.previous_revision,s->lane_active.previous_revision,
+              sizeof(s->map_active.previous_revision))!=0||
+       memcmp(s->map_active.candidate_revision,s->lane_active.candidate_revision,
+              sizeof(s->map_active.candidate_revision))!=0)return false;
+    if(!ot_pz_join(&s->lane_active.previous,&s->map_active.previous,
+                   &workspace->previous)||
+       !ot_pz_join(&s->lane_active.candidate,&s->map_active.candidate,
+                   &workspace->candidate))return false;
+    const uint8_t mask=(uint8_t)(s->map_active.reset_mask|(1u<<lane));
+    if(!ot_pz_map_journal_build_reset(&s->map_stage,&s->map_active.previous,
+        &s->map_active.candidate,s->map_active.previous_revision,
+        s->map_active.candidate_revision,s->map_active.transaction_id,mask))
         return false;
-    (void)previous;(void)candidate;
-    ot_pz_map_journal_t updated={0};
-    const uint8_t mask=(uint8_t)(s.map_active.reset_mask|(1u<<lane));
-    if(!ot_pz_map_journal_build_reset(&updated,&s.map_active.previous,
-        &s.map_active.candidate,s.map_active.previous_revision,
-        s.map_active.candidate_revision,s.map_active.transaction_id,mask))return false;
-    return write_verified(io,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
-                          &updated,sizeof(updated));
+    return write_verified(io,workspace,OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_MAP_KEY_ACTIVE,
+                          &s->map_stage,sizeof(s->map_stage));
 }
