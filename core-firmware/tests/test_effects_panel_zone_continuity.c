@@ -169,8 +169,8 @@ static bool render_probe_frame(render_probe_t *probe,
             const bool same_identity=prior_index>=0;
             if(active&&len<=OT_PZ_MAX_PIXELS&&len<=TEST_PIXELS){
                 if(same_identity){
-                    probe->state[lane][zone]=old_state[prior_index];
-                    memset(&old_state[prior_index],0,sizeof(old_state[prior_index]));
+                    ot_effects_1d_move_state(&probe->state[lane][zone],
+                        &old_state[prior_index]);
                 }else{
                     ot_effects_1d_reset(&probe->state[lane][zone],
                         0x1234u+lane*97u+zone*19u+slot->generation);
