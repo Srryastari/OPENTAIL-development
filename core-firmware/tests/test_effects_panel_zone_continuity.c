@@ -159,10 +159,12 @@ static bool render_probe_frame(render_probe_t *probe,
         uint16_t logical_map[OT_PZ_MAX_PIXELS];
         ot_pz_build_pixel_map(panel_out,zone_map,logical_map);
         uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
+        uint32_t old_generation[OT_OM_ZONES];
         bool old_active[OT_OM_ZONES];
         ot_effects_1d_state_t old_state[OT_OM_ZONES];
         memcpy(old_zone_id,probe->prior_zone_id[lane],sizeof(old_zone_id));
         memcpy(old_panel_id,probe->prior_panel_id[lane],sizeof(old_panel_id));
+        memcpy(old_generation,probe->prior_generation[lane],sizeof(old_generation));
         memcpy(old_active,probe->prior_active[lane],sizeof(old_active));
         memcpy(old_state,probe->state[lane],sizeof(old_state));
 
@@ -179,7 +181,7 @@ static bool render_probe_frame(render_probe_t *probe,
                 for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++){
                     if(old_active[old_z]&&old_zone_id[old_z]==zone_cfg->id&&
                        old_panel_id[old_z]==zone_cfg->panel_id&&
-                       probe->prior_generation[lane][old_z]==slot->generation){
+                       old_generation[old_z]==slot->generation){
                         prior_index=(int)old_z;break;
                     }
                 }
