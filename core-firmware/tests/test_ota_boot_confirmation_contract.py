@@ -14,16 +14,20 @@ gate = "if(full_frame && ot_sw_idf_stable() &&"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
+# Early renderer creation must not let an OTA candidate get confirmed before
+# the independent BLE radio is actually advertising and the frame completes.
+assert "ot_sw_idf_stable()" in led.split(gate,1)[1].split(confirm,1)[0]
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
 assert 'if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");' in startup
 assert 'if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}' not in startup
 assert "if(!om_write_mutex || xSemaphoreTake(" in core
-assert startup.index("om_write_mutex=xSemaphoreCreateMutex();") < startup.index("xTaskCreate(led_task")
+render_alloc = startup.index('led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL')
+assert render_alloc < startup.index("om_write_mutex=xSemaphoreCreateMutex();")
 assert "http_startup_ready=wifi_started&&http_start();" in startup
 assert "if(!http_startup_ready)ot_st_set_fault(" in startup
-assert startup.index("http_startup_ready=wifi_started&&http_start();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("http_startup_ready=wifi_started&&http_start();")
 # The diagnostic HTTP service must never take down physical lighting on
 # registration failure. OTA acceptance still requires service startup.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
@@ -44,18 +48,18 @@ assert "return false;" in input_init and "return true;" in input_init
 assert "const bool inputs_ready=watchdog_ready&&input_init();" in startup
 assert 'if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");' in startup
 assert "const bool sampler_ready=input_watched &&" in startup
-assert "bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();" in startup
-assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < startup.index("xTaskCreate(led_task")
+assert "const bool outputs_ready=sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init();" in startup
+assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < render_alloc
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
 assert "http_startup_ready=wifi_started&&http_start();" in startup
-assert startup.index("const bool wifi_started=wifi_ap_init();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("const bool wifi_started=wifi_ap_init();")
 assert "ESP_ERROR_CHECK(httpd_start" not in http
 assert "ESP_ERROR_CHECK(httpd_register_uri_handler" not in http
 assert "httpd_stop(server);" in http
 assert "return false;" in http and "return true;" in http
 assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
-assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("ble_startup_ready=ot_ble_start();")
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
 assert "bool ot_ble_start(void)" in ble
 assert "bool ot_ble_radio_ever_ready(void)" in ble
