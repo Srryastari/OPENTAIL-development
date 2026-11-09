@@ -448,6 +448,7 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     release_render_probe(&delete_reference);
     assert(probe->prior_zone_id[0][0]==original_zone0);
     assert(probe->resolved_bank_index[0][0]==0u);
+    assert(probe->state[0][0].wled.scratch==NULL);
 }
 
 static void test_committing_and_sync_fault_admission(
