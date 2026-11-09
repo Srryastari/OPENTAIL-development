@@ -448,7 +448,7 @@ public class GeometryTransactionManagerTest {
         assertTrue(manager.requestBegin());
         assertTrue(manager.acceptBegin(status(1,88,0,0x10,7,7,7,0,0,0)));
         PanelPreviewProtocol.UpdateDescriptor descriptor=
-            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,0x0f);
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,0);
         GeometryTransactionManager.Update first=manager.queueUpdate(
             new byte[]{1},new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
         assertNotNull(first);
@@ -460,6 +460,24 @@ public class GeometryTransactionManagerTest {
         assertNotNull(second);
         assertEquals(2,PanelPreviewProtocol.u32(second.packet,7));
         assertEquals(19,second.packet.length);
+    }
+
+    @Test public void transactionManagerBlocksUnassignedRoleUntilFirmwareFixIsVerified() {
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,89,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor unassigned=
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,
+                PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE);
+        try {
+            manager.queueUpdate(new byte[]{1},
+                new PanelPreviewProtocol.UpdateDescriptor[]{unassigned},23);
+            fail("Firmware's current UPDATE handler rejects the UNASSIGNED sentinel");
+        } catch(IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("does not yet accept"));
+        }
+        assertEquals(GeometryTransactionManager.State.ACTIVE,manager.state());
     }
 
     @Test public void panelDescriptorBatchesRespectNegotiatedAttMtuAndFirmwareLimit() throws Exception {
