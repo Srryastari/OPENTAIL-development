@@ -409,7 +409,7 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     render_probe_t delete_reference=*probe;
     assert(render_probe_frame(&delete_reference,active,bank,1176u));
     const ot_pz_range_update_t delete_first={
-        .panel_id=panel_id,.zone_id=original_zone1,.range_slot=0u,
+        .panel_id=panel_id,.zone_id=original_zone1,.range_id=0u,
         .start=0u,.count=0u,
         .role_flags=(uint8_t)(OT_PZ_TX_DELETE_ZONE<<OT_PZ_TX_ACTION_SHIFT)
     };
