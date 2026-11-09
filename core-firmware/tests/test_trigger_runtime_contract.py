@@ -502,7 +502,7 @@ for token in ("om_active_revision,r->previous_revision",
 assert 'cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision)' in readback
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in readback
 assert "tm_revision==UINT16_MAX" in core
-assert "om_revision[index]==UINT16_MAX" in core
+assert "pz_revision[index]==UINT16_MAX" in core
 assert 'expected_config_revision required' in core
 # No wire-layout changes: the same authenticated 11-byte trigger mapping write
 # and 15-byte active-profile readback continue to use the durable edit token.
