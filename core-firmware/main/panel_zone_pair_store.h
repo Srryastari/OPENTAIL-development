@@ -30,7 +30,9 @@ typedef struct {
                                    const char *key,void *data,size_t *size);
     bool (*write_commit)(void *context,ot_pz_pair_namespace_t name_space,
                          const char *key,const void *data,size_t size);
-    /* Both keys are committed atomically in one namespace transaction. */
+    /* Write both keys through one namespace handle/commit. NVS does not
+     * promise multi-key atomicity: the pair intent remains durable until both
+     * records pass readback, so any partial write is recoverable. */
     bool (*write_batch_commit)(void *context,ot_pz_pair_namespace_t name_space,
                          const char *key_a,const void *data_a,size_t size_a,
                          const char *key_b,const void *data_b,size_t size_b);
