@@ -56,6 +56,13 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_pair_journal.c \
   -o /tmp/ot-panel-zone-pair-journal && /tmp/ot-panel-zone-pair-journal
+# The same durable pair-store state machine used by CORE, with fake NVS commit
+# boundaries and simulated power loss after each of the eight verified phases.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/panel_zone_pair_store.c \
+  main/trigger_manager.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone_pair_store.c -o /tmp/ot-panel-zone-pair-store
+/tmp/ot-panel-zone-pair-store
 # Five-byte authenticated probe and cumulative fill primitive; no RMT calls here.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/panel_zone_diag.c tests/test_panel_zone_diag.c -o /tmp/ot-panel-zone-diag
