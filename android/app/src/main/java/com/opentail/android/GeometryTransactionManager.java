@@ -67,6 +67,22 @@ final class GeometryTransactionManager {
             for(int i=0;i<zones.size();i++)out[i]=zones.get(i).descriptor();
             return out;
         }
+
+        /** Split descriptors to the exact negotiated ATT write-command budget. */
+        List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(int mtu) {
+            if(mtu<PanelPreviewProtocol.TX_MIN_ATT_MTU)
+                throw new IllegalArgumentException("ATT MTU is below the BLE minimum");
+            int perPacket=Math.min(4,(mtu-3-11)/8);
+            if(perPacket<1)
+                throw new IllegalArgumentException("ATT MTU cannot carry one Panel UPDATE descriptor");
+            List<PanelPreviewProtocol.UpdateDescriptor[]> batches=new ArrayList<>();
+            PanelPreviewProtocol.UpdateDescriptor[] all=descriptors();
+            for(int offset=0;offset<all.length;offset+=perPacket) {
+                int count=Math.min(perPacket,all.length-offset);
+                batches.add(Arrays.copyOfRange(all,offset,offset+count));
+            }
+            return Collections.unmodifiableList(batches);
+        }
     }
     static final class LayoutMapping {
         final MappedLane[] lanes;
