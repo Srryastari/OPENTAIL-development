@@ -304,9 +304,7 @@ void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank){
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
         for(unsigned z=0;z<OT_OM_ZONES;z++)
             if(!bank->zones[o][z].standalone&&!bank->zones[o][z].continuous){
-                {bank->zones[o][z].configured=false;
-             bank->zones[o][z].owner_panel_id=0u;
-             bank->zones[o][z].owner_zone_id=0u;}
+                bank->zones[o][z].configured=false;
                 bank->zones[o][z].owner_panel_id=0u;
                 bank->zones[o][z].owner_zone_id=0u;
             }
@@ -314,8 +312,11 @@ void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank){
 void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank){
     if(!bank)return;
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
-        for(unsigned z=0;z<OT_OM_ZONES;z++)
+        for(unsigned z=0;z<OT_OM_ZONES;z++){
             bank->zones[o][z].configured=false;
+            bank->zones[o][z].owner_panel_id=0u;
+            bank->zones[o][z].owner_zone_id=0u;
+        }
 }
 
 bool ot_fx_bank_apply_continuous_tertiary(ot_fx_zone_bank_t *bank,
