@@ -101,16 +101,19 @@ final class GeometryTransactionManager {
      * Current Layout sections are contiguous single-range zones; multi-range
      * authoring remains disabled until the UI has explicit range metadata.
      */
-    private static boolean isExactGs400Layout(List<JSONObject>[] assigned) {
-        int[] expected={118,109,42,253,101};
+    private static boolean hasOwnerApprovedGs400SectionTopology(List<JSONObject>[] assigned) {
+        // Panel identity is determined by the owner's physical section topology,
+        // not by the current pixel counts. This keeps the approved Housing vs
+        // Trunk identity stable while the owner adjusts section boundaries.
         for(int lane=0;lane<2;lane++) {
             if(assigned[lane].size()!=5)return false;
-            List<JSONObject> sections=new ArrayList<>(assigned[lane]);
-            Collections.sort(sections,(a,b)->Integer.compare(
-                a.optInt("physicalSection",-1),b.optInt("physicalSection",-1)));
-            for(int i=0;i<expected.length;i++)
-                if(sections.get(i).optInt("physicalSection",-1)!=i||
-                   sections.get(i).optInt("length",-1)!=expected[i])return false;
+            boolean[] seen=new boolean[5];
+            for(JSONObject section:assigned[lane]) {
+                int index=section.optInt("physicalSection",-1);
+                if(index<0||index>=seen.length||seen[index])return false;
+                seen[index]=true;
+            }
+            for(boolean present:seen)if(!present)return false;
         }
         return true;
     }
@@ -134,11 +137,11 @@ final class GeometryTransactionManager {
         }
         if(partialPanelMetadata)
             throw new IllegalStateException("Panel identity requires both ID and name");
-        boolean exactGs400Profile=!anyExplicitPanel&&isExactGs400Layout(assigned);
+        boolean exactGs400Profile=!anyExplicitPanel&&hasOwnerApprovedGs400SectionTopology(assigned);
         if(anyExplicitPanel&&!allExplicitPanel)
             throw new IllegalStateException("Every assigned section must have an explicit CORE Panel identity");
         if(!anyExplicitPanel&&!exactGs400Profile)
-            throw new IllegalStateException("Layout has no explicit CORE Panel identity and does not match the exact owner-approved GS400 section map");
+            throw new IllegalStateException("Layout has no explicit CORE Panel identity and does not match the owner-approved GS400 five-section topology");
         MappedLane[] lanes=new MappedLane[2];
         Map<Integer,Integer> globalPanelLanes=new HashMap<>();
         for(int lane=0;lane<2;lane++) {
