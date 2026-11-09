@@ -16,6 +16,50 @@ static void make_packet(uint8_t *p,unsigned count,uint32_t seq){
         d[5]=10u;d[6]=0u;d[7]=(uint8_t)OT_OM_DECORATIVE;
     }
 }
+static void control_packets(void){
+    ot_pz_tx_control_packet_t parsed={0};
+    const uint8_t begin[8]={0xfe,0x01,1u,0x34,0x12,0x80,0x00,0x03};
+    assert(ot_pz_tx_parse_control(begin,sizeof(begin),&parsed));
+    assert(parsed.opcode==OT_PZ_TX_OP_BEGIN&&parsed.lane==1u);
+    assert(parsed.base_revision==0x1234u&&parsed.pixel_capacity==128u);
+    assert(parsed.schema_version==3u);
+
+    const uint8_t commit[11]={0xfe,0x03,0u,0x78,0x56,0x34,0x12,
+                              0xef,0xcd,0xab,0x90};
+    assert(ot_pz_tx_parse_control(commit,sizeof(commit),&parsed));
+    assert(parsed.opcode==OT_PZ_TX_OP_COMMIT&&parsed.lane==0u);
+    assert(parsed.session_id==0x12345678u&&parsed.candidate_crc32==0x90abcdefu);
+
+    const uint8_t cancel[7]={0xfe,0x04,1u,0x04,0x03,0x02,0x01};
+    assert(ot_pz_tx_parse_control(cancel,sizeof(cancel),&parsed));
+    assert(parsed.opcode==OT_PZ_TX_OP_CANCEL&&parsed.session_id==0x01020304u);
+    const uint8_t heartbeat[7]={0xfe,0x05,0u,0x04,0x03,0x02,0x01};
+    assert(ot_pz_tx_parse_control(heartbeat,sizeof(heartbeat),&parsed));
+    assert(parsed.opcode==OT_PZ_TX_OP_HEARTBEAT&&parsed.lane==0u);
+
+    uint8_t bad[12]={0};
+    memcpy(bad,begin,sizeof(begin));bad[0]=0u;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(begin),&parsed));
+    assert(!ot_pz_tx_parse_control(begin,7u,&parsed));
+    memcpy(bad,commit,sizeof(commit));
+    assert(!ot_pz_tx_parse_control(bad,10u,&parsed));
+    memcpy(bad,cancel,sizeof(cancel));
+    assert(!ot_pz_tx_parse_control(bad,8u,&parsed));
+    memcpy(bad,begin,sizeof(begin));bad[2]=OT_PZ_OUTPUTS;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(begin),&parsed));
+    memcpy(bad,begin,sizeof(begin));bad[3]=0u;bad[4]=0u;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(begin),&parsed));
+    memcpy(bad,begin,sizeof(begin));bad[5]=0u;bad[6]=0u;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(begin),&parsed));
+    memcpy(bad,begin,sizeof(begin));bad[7]=0u;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(begin),&parsed));
+    memcpy(bad,cancel,sizeof(cancel));memset(bad+3,0,4u);
+    assert(!ot_pz_tx_parse_control(bad,sizeof(cancel),&parsed));
+    memcpy(bad,heartbeat,sizeof(heartbeat));bad[1]=OT_PZ_TX_OP_UPDATE;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(heartbeat),&parsed));
+    memcpy(bad,heartbeat,sizeof(heartbeat));bad[1]=0x06u;
+    assert(!ot_pz_tx_parse_control(bad,sizeof(heartbeat),&parsed));
+}
 int main(void){
     uint8_t packet[43];ot_pz_tx_update_packet_t parsed={0};
     make_packet(packet,1u,1u);
@@ -45,5 +89,6 @@ int main(void){
     assert(ot_pz_tx_sequence_check(true,103u,13u,102u,12u)==OT_PZ_TX_SEQUENCE_STALE);
     assert(ot_pz_tx_sequence_check(true,UINT32_MAX-1u,1u,1u,2u)==OT_PZ_TX_SEQUENCE_NEW);
     assert(ot_pz_tx_sequence_check(true,10u,1u,0u,2u)==OT_PZ_TX_SEQUENCE_STALE);
+    control_packets();
     return 0;
 }
