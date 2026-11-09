@@ -144,12 +144,17 @@ assert panel_promotion.index("__atomic_load_n(&pz_pair_commit_pending") < panel_
 # These values are observed by the BLE status path and the activation worker.
 # Mixing plain volatile accesses with compiler atomics is still a C data race;
 # require every runtime access to use the same atomic builtins.
+core_lines=core.splitlines()
 for variable in ("pz_pair_commit_pending","pz_pair_transaction_id",
                  "pz_pair_commit_phase","pz_pair_commit_phase_txn"):
-    for line in core.splitlines():
+    for index,line in enumerate(core_lines):
         if variable in line:
-            assert line.lstrip().startswith("static ") or "__atomic_" in line, (
-                variable,line)
+            start=index
+            while start>0 and ";" not in core_lines[start-1]:
+                start-=1
+            statement="\n".join(core_lines[start:index+1])
+            assert statement.lstrip().startswith("static ") or "__atomic_" in statement, (
+                variable,statement)
 
 # Phase telemetry is observable for a hardware relay/logger; this is a marker,
 # not a claim that the physical endurance test has been run.
