@@ -50,6 +50,8 @@ jobs:
                   "7eeca0e24a0801cb3bad0d77f5f64873824a215d",
               "android/qa/test_full_offline_preview.py":
                   "8bc501e86a06ddaf84f9acd149118e8da3c1a78f",
+              "android/qa/test_native_source.cjs":
+                  "03ec977e93b3620a9dd9809a1ea1d296c2434a99",
           }
           forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))
                      and p not in approved]
