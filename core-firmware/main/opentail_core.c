@@ -115,8 +115,20 @@ static DRAM_ATTR volatile uint32_t turn_edge_tail[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]={0u,0u};
 /* Telemetry is additive: keep the existing per-lane SPSC turn queues intact. */
+/* The ESP-IDF 5.5.5 S32C1I PSRAM workaround deliberately reports 32-bit
+ * atomics as not globally lock-free: external PSRAM is not S32C1I atomic.
+ * Our ISR variables stay in internal DRAM. Require 4-byte alignment here;
+ * the exact linked-ELF IRAM audit additionally rejects any out-of-IRAM
+ * atomic helper calls, rather than trusting a global compiler predicate. */
+#if CONFIG_STDATOMIC_S32C1I_SPIRAM_WORKAROUND
+_Static_assert(__alignof__(turn_edge_head[0])>=4 &&
+               __alignof__(turn_edge_tail[0])>=4 &&
+               __alignof__(input_raw_edges[0])>=4,
+               "internal ISR atomic words must be 4-byte aligned");
+#else
 _Static_assert(__atomic_always_lock_free(sizeof(uint32_t),0),
                "32-bit ISR telemetry atomics must be lock-free");
+#endif
 static DRAM_ATTR volatile uint32_t input_raw_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
 static DRAM_ATTR volatile uint32_t input_asserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
 static DRAM_ATTR volatile uint32_t input_deasserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
