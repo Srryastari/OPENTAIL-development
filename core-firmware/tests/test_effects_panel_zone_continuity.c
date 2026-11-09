@@ -176,16 +176,10 @@ static bool render_probe_frame(render_probe_t *probe,
                 &bank->zones[lane][bank_z]:NULL;
             const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
                 ot_fx_slot_active(slot,now_ms);
-            int prior_index=-1;
-            if(active){
-                for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++){
-                    if(old_active[old_z]&&old_zone_id[old_z]==zone_cfg->id&&
-                       old_panel_id[old_z]==zone_cfg->panel_id&&
-                       old_generation[old_z]==slot->generation){
-                        prior_index=(int)old_z;break;
-                    }
-                }
-            }
+            const int prior_index=active?
+                ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
+                    zone_cfg->id,slot->generation,old_panel_id,old_zone_id,
+                    old_generation,old_active,OT_OM_ZONES):-1;
             const bool same_identity=prior_index>=0;
             if(active&&len<=OT_PZ_MAX_PIXELS&&len<=TEST_PIXELS){
                 if(same_identity){
@@ -246,6 +240,23 @@ static bool render_probe_frame(render_probe_t *probe,
                OT_PZ_MAX_PIXELS*sizeof(zone_map[0]));
     }
     return true;
+}
+
+static void test_production_identity_lookup(void){
+    const uint16_t panel_ids[3]={100u,100u,200u};
+    const uint16_t zone_ids[3]={200u,201u,300u};
+    const uint32_t generations[3]={11u,22u,33u};
+    const bool active[3]={true,true,false};
+    assert(ot_effects_1d_find_prior_zone_state(100u,201u,22u,
+        panel_ids,zone_ids,generations,active,3u)==1);
+    assert(ot_effects_1d_find_prior_zone_state(100u,200u,11u,
+        panel_ids,zone_ids,generations,active,3u)==0);
+    assert(ot_effects_1d_find_prior_zone_state(100u,201u,99u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
+    assert(ot_effects_1d_find_prior_zone_state(200u,300u,33u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
+    assert(ot_effects_1d_find_prior_zone_state(0u,201u,22u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
 }
 
 static void test_zone_independence_and_discontiguous_ranges(
@@ -514,6 +525,7 @@ int main(void){
     ot_fx_bank_reset(&bank);
     render_probe_t probe={0};
 
+    test_production_identity_lookup();
     test_zone_independence_and_discontiguous_ranges(&active,&bank,&probe);
     test_preview_phase_commit_cancel_and_unaffected_zone(&active,&bank,&probe);
     test_identity_state_survives_reorder_delete_and_cancel(&active,&bank,&probe);
