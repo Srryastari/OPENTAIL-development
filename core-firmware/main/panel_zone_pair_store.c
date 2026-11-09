@@ -246,13 +246,13 @@ bool ot_pz_pair_store_mark_reset(const ot_pz_pair_store_io_t *io,
               sizeof(s->map_active.previous_revision))!=0||
        memcmp(s->map_active.candidate_revision,s->lane_active.candidate_revision,
               sizeof(s->map_active.candidate_revision))!=0)return false;
-    /* Reset markers are monotonic metadata. Reconfirming an already durable
-     * bit is idempotent and must not spend another NVS commit. */
-    if(s->map_active.reset_mask&(1u<<lane))return true;
     if(!ot_pz_join(&s->lane_active.previous,&s->map_active.previous,
                    &workspace->previous)||
        !ot_pz_join(&s->lane_active.candidate,&s->map_active.candidate,
                    &workspace->candidate))return false;
+    /* Reset markers are monotonic metadata. Reconfirming an already durable
+     * bit is idempotent and must not spend another NVS commit. */
+    if(s->map_active.reset_mask&(1u<<lane))return true;
     const uint8_t mask=(uint8_t)(s->map_active.reset_mask|(1u<<lane));
     if(!ot_pz_map_journal_build_reset(&s->map_stage,&s->map_active.previous,
         &s->map_active.candidate,s->map_active.previous_revision,
