@@ -202,8 +202,13 @@ bool ot_fx_bank_apply_configured_identity(ot_fx_zone_bank_t *bank,
  bool any=false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!(request->chain_mask&(1u<<o)))continue;
+  bool has_target=false;
+  for(unsigned z=0;z<outputs[o].zone_count;z++)
+   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
+      outputs[o].zones[z].role!=OT_OM_OFF)has_target=true;
+  if(!has_target)continue;
   if(!resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
-      request->zone_mask,now_ms,false,&masks[o],resolved[o]))continue;
+      request->zone_mask,now_ms,false,&masks[o],resolved[o]))return false;
   any=true;
  }
  if(!any)return false;
@@ -237,8 +242,14 @@ bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
    total+=outputs[o].zones[z].pixels;
   }
   if(total!=outputs[o].active_pixels)return false;
-  if(resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
-      request->zone_mask,now_ms,false,&masks[o],resolved[o]))any=true;
+  bool has_target=false;
+  for(unsigned z=0;z<outputs[o].zone_count;z++)
+   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
+      outputs[o].zones[z].role!=OT_OM_OFF)has_target=true;
+  if(!has_target)continue;
+  if(!resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
+      request->zone_mask,now_ms,false,&masks[o],resolved[o]))return false;
+  any=true;
  }
  if(!any)return false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++)
