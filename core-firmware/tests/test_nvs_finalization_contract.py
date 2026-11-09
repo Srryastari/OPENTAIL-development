@@ -79,6 +79,19 @@ assert "nvs_set_blob(" not in legacy_output_save
 assert "static void om_promote(" not in core
 assert "static void pz_sync_from_legacy(" not in core
 
+# A damaged legacy Output Manager journal cannot veto an already-valid
+# v4 lane/map pair. It is fatal only when no v4 authority exists.
+legacy_om_load=between("static void om_journal_load(void){",
+                       "static esp_err_t pz_journal_read(")
+assert "config_recovery_fault" not in legacy_om_load
+assert "om_legacy_journal_fault=true" in legacy_om_load
+pz_load=between("static void pz_load(void){",
+                "static bool pz_save_controller_locked(")
+assert "snapshot.has_marker||snapshot.has_intent" in pz_load
+assert pz_load.index("if(v4_authoritative)") < pz_load.index(
+    "if(om_legacy_journal_fault)")
+assert "__atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u" in pz_load
+
 # The exact same portable v4 store used by CORE implements all nine durable
 # write boundaries and is exercised by test_panel_zone_pair_store.c.
 store=pair_store
