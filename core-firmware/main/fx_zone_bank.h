@@ -47,7 +47,7 @@ bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
  const ot_om_output_t outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
  uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
-bool ot_fx_bank_resolve_zone_identity(ot_pz_output_t *panel_output,
+bool ot_fx_bank_resolve_zone_identity(const ot_pz_output_t *panel_output,
  ot_fx_zone_bank_t *bank,unsigned output,uint32_t now_ms,
  uint8_t resolved_indices[OT_OM_ZONES]);
 bool ot_fx_bank_apply_configured_identity(ot_fx_zone_bank_t *bank,
