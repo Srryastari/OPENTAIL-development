@@ -145,7 +145,7 @@ assert "tm_revision==UINT16_MAX" in core
 assert 'expected_config_revision required' in core
 assert 'om_number(obj,"expected_config_revision",&expected_rev,1,UINT16_MAX)' in core
 assert "if(memcmp(&next_all[index],&next,sizeof(next))==0)" in core
-assert "if(memcmp(&next_all[index],next,sizeof(*next))==0)" in core
+assert "if(memcmp(&current,next,sizeof(current))==0)" in core
 assert "tm_deferred.pending=true" in core
 assert "pz_deferred.pending=true" in core
 assert 'cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision)' in core
