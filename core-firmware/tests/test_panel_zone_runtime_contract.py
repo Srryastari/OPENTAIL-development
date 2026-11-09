@@ -110,8 +110,8 @@ assert "nvs_set_blob(" not in legacy_load and "nvs_commit(" not in legacy_load
 pair_store = (ROOT / "main/panel_zone_pair_store.c").read_text()
 pair_header = (ROOT / "main/panel_zone_pair_store.h").read_text()
 for token in ("ot_pz_pair_store_begin", "ot_pz_pair_store_finish",
-              "ot_pz_pair_store_recover", "ot_pz_pair_store_mark_reset",
-              "OT_PZ_LANE_KEY_STAGED", "OT_PZ_MAP_KEY_STAGED",
+              "ot_pz_pair_store_recover", "ot_pz_pair_store_mark_reset","OT_PZ_PAIR_STORE_MARKER_KEY",
+              "write_batch_commit","has_marker","OT_PZ_LANE_KEY_STAGED", "OT_PZ_MAP_KEY_STAGED",
               "OT_PZ_PAIR_INTENT_KEY", "OT_PZ_LANE_KEY_ACTIVE",
               "OT_PZ_MAP_KEY_ACTIVE"):
     assert token in pair_store or token in pair_header, token
