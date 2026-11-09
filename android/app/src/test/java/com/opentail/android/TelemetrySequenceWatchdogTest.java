@@ -86,6 +86,27 @@ public class TelemetrySequenceWatchdogTest {
         assertFalse(w.snapshot().warning);
     }
 
+    @Test public void hardFaultCancellationTargetsOnlyTheSessionThatLatchedIt() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status oldSession=status(1,51,0,0,0,0,0,0,0,0);
+        w.observe(oldSession);
+        assertTrue(w.markDisconnected().hardFault);
+        assertTrue(w.requiresCancelFor(oldSession));
+
+        PanelPreviewProtocol.Status cancelled=status(4,51,0,0,0,0,0,0,0,0);
+        w.observe(cancelled);
+        assertFalse(w.requiresCancelFor(cancelled));
+        assertTrue(w.awaitingFreshSession(cancelled));
+        assertFalse(w.reconcile(cancelled,true));
+
+        PanelPreviewProtocol.Status freshSession=status(1,52,0,0,0,0,0,0,0,0);
+        assertTrue(w.observe(freshSession).hardFault);
+        assertFalse(w.requiresCancelFor(freshSession));
+        assertFalse(w.awaitingFreshSession(freshSession));
+        assertTrue(w.reconcile(freshSession,true));
+        assertFalse(w.snapshot().warning);
+    }
+
     @Test public void malformedStatusLatchesWarningAndActiveSessionFault() {
         TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
         PanelPreviewProtocol.Status active=status(1,61,0,0,0,0,0,0,0,0);

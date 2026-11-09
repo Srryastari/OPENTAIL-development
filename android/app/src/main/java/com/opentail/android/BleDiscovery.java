@@ -1730,7 +1730,8 @@ final class BleDiscovery {
                 panelSnapshotQueuedLane=current.lane;
             } else if(reconciliationFailure!=null) {
                 panelNotify(current,reconciliationFailure);
-                if(reconciliationFailure.hardFault)
+                if(reconciliationFailure.hardFault&&
+                   !panelWatchdog.awaitingFreshSession(current))
                     panelBeginReconciliation(owner,current,reconciliationFailure);
             }
             pumpQueue();return;
@@ -1750,10 +1751,14 @@ final class BleDiscovery {
             panelReconciliationPending=true;panelReconciliationAttempts=0;
             panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
         }
-        if(decision.hardFault&&current.state==PanelPreviewProtocol.STATE_ACTIVE&&
-           current.sessionId!=0&&panelCancelAttemptedSession!=current.sessionId) {
-            panelCancelPacket=PanelPreviewProtocol.cancel(current.lane,current.sessionId);
-            panelCancelQueued=true;pumpQueue();return;
+        if(panelWatchdog.requiresCancelFor(current)) {
+            if(panelCancelAttemptedSession!=current.sessionId) {
+                panelCancelPacket=PanelPreviewProtocol.cancel(current.lane,current.sessionId);
+                panelCancelQueued=true;pumpQueue();return;
+            }
+            notifyStatus("CORE still reports the hard-fault geometry session as ACTIVE after CANCEL; reconnect before editing");
+            panelReconciliationPending=false;panelReconciliationSnapshotVerified=false;
+            panelReconciliationSnapshot=null;return;
         }
         panelSnapshotQueuedLane=current.lane;pumpQueue();
     }

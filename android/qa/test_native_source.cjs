@@ -1146,6 +1146,8 @@ assert(panelWatchdog.includes('missingCount>last.missingCount') &&
        panelWatchdog.includes('hardFaultSession') &&
        panelWatchdog.includes('markMalformedTelemetry') &&
        panelWatchdog.includes('markReconciliationFailed') &&
+       panelWatchdog.includes('requiresCancelFor') &&
+       panelWatchdog.includes('awaitingFreshSession') &&
        panelWatchdog.includes('current.lastRejectedSequence!=last.lastRejectedSequence') &&
        panelWatchdog.includes('hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId'),
        'Telemetry watchdog must detect sequence anomalies and require authoritative reconciliation');
@@ -1168,6 +1170,8 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
        bleSource.includes('panelScheduleCommitPoll(owner)') &&
        bleSource.includes('panelWatchdog.reconcile(current,true)') &&
+       bleSource.includes('panelWatchdog.requiresCancelFor(current)') &&
+       bleSource.includes('panelWatchdog.awaitingFreshSession(current)') &&
        bleSource.includes('manager.observeStatus(current)') &&
        bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
        bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&

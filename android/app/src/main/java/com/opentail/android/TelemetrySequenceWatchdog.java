@@ -139,6 +139,18 @@ final class TelemetrySequenceWatchdog {
         return true;
     }
 
+    synchronized boolean requiresCancelFor(PanelPreviewProtocol.Status current) {
+        return hardFault && current!=null &&
+            current.state==PanelPreviewProtocol.STATE_ACTIVE && current.sessionId!=0 &&
+            current.lane==hardFaultLane && current.sessionId==hardFaultSession;
+    }
+
+    synchronized boolean awaitingFreshSession(PanelPreviewProtocol.Status current) {
+        return hardFault && current!=null &&
+            current.state==PanelPreviewProtocol.STATE_CANCELLED &&
+            current.lane==hardFaultLane && current.sessionId==hardFaultSession;
+    }
+
     synchronized Decision snapshot() { return decision(last); }
     synchronized boolean hasSession() { return last!=null && last.sessionId!=0; }
 
