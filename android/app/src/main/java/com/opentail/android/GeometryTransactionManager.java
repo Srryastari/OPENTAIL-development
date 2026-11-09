@@ -299,6 +299,16 @@ final class GeometryTransactionManager {
         return new Update(pendingSequence,pendingPacket);
     }
 
+    /** Build the next authenticated, sequenced UPDATE from CORE's exact wire contract. */
+    synchronized Update queueUpdate(byte[] candidateWire,
+            PanelPreviewProtocol.UpdateDescriptor[] descriptors,int attMtu) {
+        if(state!=State.ACTIVE||syncUncertain||pendingPacket!=null||
+           candidateWire==null||descriptors==null||descriptors.length==0)return null;
+        byte[] packet=PanelPreviewProtocol.update(lastConfirmed.lane,sessionId,
+            nextSequence,descriptors,attMtu);
+        return queueUpdate(candidateWire,packet);
+    }
+
     synchronized boolean acknowledgeUpdate(PanelPreviewProtocol.Status status) {
         if(status==null)return false;
         if(state==State.COMMITTING||status.state==PanelPreviewProtocol.STATE_COMMITTING)
