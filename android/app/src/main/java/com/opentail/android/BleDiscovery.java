@@ -405,11 +405,11 @@ final class BleDiscovery {
             status.pixelCapacity,panelCapabilities.schemaVersion);}
         catch(IllegalArgumentException ex) {
             manager.markSynchronizationUncertain("Panel BEGIN values changed after preflight");
-            return false;
+            panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
         }
         if(queuePanelControl(lane,PANEL_CONTROL_BEGIN,packet))return true;
         manager.markSynchronizationUncertain("Panel BEGIN could not enter the serialized GATT queue");
-        panelReadQueued=2;pumpQueue();return false;
+        panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
     }
 
     /** One acknowledged UPDATE at a time; callers send the next MTU batch only after status-v2 ACK. */
@@ -448,7 +448,7 @@ final class BleDiscovery {
         if(packet==null)return false;
         if(queuePanelControl(lane,PANEL_CONTROL_COMMIT,packet))return true;
         manager.markSynchronizationUncertain("Panel COMMIT could not enter the serialized GATT queue");
-        panelReadQueued=2;pumpQueue();return false;
+        panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
     }
 
     boolean heartbeatPanelPreview(int lane) {
@@ -2015,6 +2015,8 @@ final class BleDiscovery {
             GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
                 ?panelGeometryManagers[panelControlLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel control characteristic unavailable");
+            panelStatusExpectedLane=panelControlLane;
+            panelStatusExpectedLane=panelControlLane;
             panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
             panelReadQueued=2;pumpQueue();return;
         }
@@ -2052,6 +2054,8 @@ final class BleDiscovery {
             GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
                 ?panelGeometryManagers[panelUpdateLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE characteristic unavailable");
+            panelStatusExpectedLane=panelUpdateLane;
+            panelStatusExpectedLane=panelUpdateLane;
             panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
         }
         panelUpdateWritePending=true;
