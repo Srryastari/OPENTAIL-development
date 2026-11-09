@@ -541,25 +541,27 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
     if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
        !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     uint8_t packet[12]={0};uint16_t n=0;
-    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||n<2u||
-       packet[0]!=0xfeu)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    const uint8_t opcode=packet[1];
+    ot_pz_tx_control_packet_t command={0};
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
+       !ot_pz_tx_parse_control(packet,n,&command)){
+        panel_preview_set_error(1u);return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     panel_preview_expire_if_needed(now_ms);
-    if(opcode==0x01u){ /* BEGIN: lane, base revision LE16, capacity LE16, schema */
-        if(n!=8u||packet[2]>=OT_PZ_OUTPUTS||packet[7]!=OT_PZ_SCHEMA_VERSION)
+    if(command.opcode==OT_PZ_TX_OP_BEGIN){
+        if(command.schema_version!=OT_PZ_SCHEMA_VERSION)
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         if(panel_preview_tx.active||panel_preview_tx.committing||
            panel_upload_index!=255u){
             panel_preview_set_error(2u);return 0;
         }
-        const uint8_t lane=packet[2];
-        const uint16_t revision=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
-        const uint16_t capacity=(uint16_t)(packet[5]|((uint16_t)packet[6]<<8));
+        const uint8_t lane=command.lane;
+        const uint16_t revision=command.base_revision;
+        const uint16_t capacity=command.pixel_capacity;
         ot_pz_output_t output={0};uint16_t active=0u,staged=0u;
         bool pending=false,persistent=false;
         if(!ot_ble_panel_get(lane,&output,&active,&staged,&pending,&persistent)||
-           pending||revision!=active||revision!=staged||capacity==0u||
+           pending||revision!=active||revision!=staged||
            capacity!=output.active_pixels||revision==UINT16_MAX){
             panel_preview_set_error(3u);return 0;
         }
@@ -583,27 +585,19 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         panel_preview_tx.candidate_crc32=panel_preview_tx.base_crc32;
         return 0;
     }
-    if(opcode!=0x03u&&opcode!=0x04u&&opcode!=0x05u)
-        return BLE_ATT_ERR_UNLIKELY;
-    if(packet[2]>=OT_PZ_OUTPUTS)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    const uint8_t lane=packet[2];
-    const uint32_t session=(uint32_t)packet[3]|
-        ((uint32_t)packet[4]<<8)|((uint32_t)packet[5]<<16)|
-        ((uint32_t)packet[6]<<24);
-    if(opcode==0x03u){
-        if(n!=11u)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    }else if(n!=7u)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    const uint8_t lane=command.lane;
+    const uint32_t session=command.session_id;
     if(!panel_preview_session_matches(lane,session)){
         panel_preview_set_error(3u);return 0;
     }
     if(panel_preview_tx.committing){
-        if(opcode==0x03u){panel_preview_refresh_commit_state();return 0;}
+        if(command.opcode==OT_PZ_TX_OP_COMMIT){
+            panel_preview_refresh_commit_state();return 0;
+        }
         panel_preview_set_error(2u);return 0;
     }
-    if(opcode==0x03u){ /* COMMIT: append expected canonical controller CRC32 LE */
-        const uint32_t expected=(uint32_t)packet[7]|
-            ((uint32_t)packet[8]<<8)|((uint32_t)packet[9]<<16)|
-            ((uint32_t)packet[10]<<24);
+    if(command.opcode==OT_PZ_TX_OP_COMMIT){
+        const uint32_t expected=command.candidate_crc32;
         const int rc=ot_ble_panel_preview_commit(lane,
                     panel_preview_tx.base_revision,expected);
         if(rc!=0){panel_preview_set_error(rc==2?2u:(rc==3?3u:(rc==4?4u:1u)));return 0;}
@@ -613,8 +607,8 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         panel_preview_refresh_commit_state();
         return 0;
     }
-    if(opcode==0x04u){ /* CANCEL is rejected once COMMITTING has begun. */
-        if(panel_preview_tx.committing){panel_preview_set_error(2u);return 0;}
+    if(command.opcode==OT_PZ_TX_OP_CANCEL){
+        /* CANCEL is rejected once COMMITTING has begun. */
         ot_ble_panel_preview_cancel();
         panel_preview_tx.active=false;
         panel_preview_tx.status=OT_PZ_TX_CANCELLED;
