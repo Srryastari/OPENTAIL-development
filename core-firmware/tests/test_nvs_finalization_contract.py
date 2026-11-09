@@ -11,6 +11,8 @@ root=Path(__file__).resolve().parents[1]
 core=(root/"main/opentail_core.c").read_text()
 journal=(root/"main/config_journal.c").read_text()
 header=(root/"main/config_journal.h").read_text()
+board=(root/"main/board_config.h").read_text()
+logic_header=(root/"main/core_logic.h").read_text()
 
 
 def between(start,end):
@@ -54,6 +56,14 @@ assert "#define OT_TM_POLICY_VERSION 1u" in header
 assert '#define OT_TM_POLICY_KEY "policy_v1"' in header
 assert "ot_tm_policy_build" in journal and "ot_tm_policy_valid" in journal
 assert "turn_release_hold_us" in header and "assertion_samples" in header
+assert "#define OT_INPUT_ACTIVE_LOW 1" in board
+assert "#define OT_DEBOUNCE_TICKS 4" in board
+assert "#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)" in logic_header
+input_sampler=core.split("static void input_sampler_task(",1)[1].split(
+    "static void render_task(",1)[0]
+assert "pdMS_TO_TICKS(10u)" in input_sampler
+assert "ot_signal_debouncer" not in header.split(
+    "} ot_tm_policy_record_t",1)[0].split("typedef struct {")[-1]
 # The legacy v3 combined record is read-only migration input. The authoritative
 # v4 runtime joins a lane-only output_cfg journal and map-only zone_map journal.
 pz_load=between("static void pz_load(void){",
