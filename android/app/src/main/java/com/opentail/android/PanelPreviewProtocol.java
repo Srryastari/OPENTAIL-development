@@ -1,6 +1,9 @@
 package com.opentail.android;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** Exact, little-endian client codec for the Issue #126 Panel/Zone BLE contract. */
 final class PanelPreviewProtocol {
@@ -157,6 +160,123 @@ final class PanelPreviewProtocol {
             lane=h.lane;activeRevision=h.activeRevision;stagedRevision=h.stagedRevision;
             crc16=h.crc16;pending=h.pending;persistent=h.persistent;
             wire=Arrays.copyOf(bytes,bytes.length);
+        }
+    }
+
+    static final class MapRange {
+        final int start,count;
+        MapRange(int start,int count){this.start=start;this.count=count;}
+    }
+    static final class MapPanel {
+        final int id,lane,zoneCount;
+        final String name;
+        MapPanel(int id,int lane,String name,int zoneCount) {
+            this.id=id;this.lane=lane;this.name=name;this.zoneCount=zoneCount;
+        }
+    }
+    static final class MapZone {
+        final int id,panelId,role,flags;
+        final String name;
+        final List<MapRange> ranges;
+        MapZone(int id,int panelId,int role,int flags,String name,List<MapRange> ranges) {
+            this.id=id;this.panelId=panelId;this.role=role;this.flags=flags;this.name=name;
+            this.ranges=Collections.unmodifiableList(new ArrayList<>(ranges));
+        }
+    }
+    static final class MapIdentity {
+        final int lane,activePixels;
+        final List<MapPanel> panels;
+        final List<MapZone> zones;
+        private MapIdentity(int lane,int activePixels,List<MapPanel> panels,List<MapZone> zones) {
+            this.lane=lane;this.activePixels=activePixels;
+            this.panels=Collections.unmodifiableList(new ArrayList<>(panels));
+            this.zones=Collections.unmodifiableList(new ArrayList<>(zones));
+        }
+        static MapIdentity parse(LaneSnapshot snapshot) {
+            if(snapshot==null||snapshot.wire==null||snapshot.wire.length!=MAP_BYTES||
+               crc16(snapshot.wire)!=snapshot.crc16)
+                throw new IllegalArgumentException("Panel map snapshot is missing or failed CRC verification");
+            byte[] b=snapshot.wire;
+            if(u8(b[0])!=WIRE_VERSION||u8(b[1])!=snapshot.lane)
+                throw new IllegalArgumentException("Panel map version/lane mismatch");
+            int active=u16(b,2),panelCount=u8(b[37]),zoneCount=u8(b[38]);
+            if(panelCount>4||zoneCount>8||active>2048)
+                throw new IllegalArgumentException("Panel map counts or active pixel length are invalid");
+            List<MapPanel> panels=new ArrayList<>();
+            List<MapZone> zones=new ArrayList<>();
+            int panelBase=39;
+            for(int i=0;i<4;i++) {
+                int at=panelBase+i*29,id=u16(b,at),lane=u8(b[at+2]);
+                String name=wireName(b,at+3,25);
+                int count=u8(b[at+28]);
+                if(i>=panelCount) {
+                    if(id!=0||lane!=0||count!=0||!name.isEmpty())
+                        throw new IllegalArgumentException("Unused Panel map slot is not zero-filled");
+                    continue;
+                }
+                if(id==0||lane!=snapshot.lane||name.isEmpty()||count>8)
+                    throw new IllegalArgumentException("Malformed Panel identity in authoritative map");
+                for(MapPanel prior:panels)if(prior.id==id)
+                    throw new IllegalArgumentException("Duplicate Panel ID in authoritative map");
+                panels.add(new MapPanel(id,lane,name,count));
+            }
+            int zoneBase=155;
+            int[] actualPanelCounts=new int[panels.size()];
+            for(int i=0;i<8;i++) {
+                int at=zoneBase+i*64,id=u16(b,at),panelId=u16(b,at+2);
+                String name=wireName(b,at+4,25);
+                int role=u8(b[at+29]),flags=u8(b[at+30]),rangeCount=u8(b[at+31]);
+                if(i>=zoneCount) {
+                    boolean nonzero=id!=0||panelId!=0||!name.isEmpty()||role!=0||flags!=0||rangeCount!=0;
+                    for(int r=0;r<8;r++)nonzero|=u16(b,at+32+r*4)!=0||u16(b,at+34+r*4)!=0;
+                    if(nonzero)throw new IllegalArgumentException("Unused Zone map slot is not zero-filled");
+                    continue;
+                }
+                if(id==0||panelId==0||name.isEmpty()||rangeCount>8)
+                    throw new IllegalArgumentException("Malformed Zone identity in authoritative map");
+                for(MapZone prior:zones)if(prior.id==id)
+                    throw new IllegalArgumentException("Duplicate Zone ID in authoritative map");
+                int panelIndex=-1;
+                for(int j=0;j<panels.size();j++)if(panels.get(j).id==panelId)panelIndex=j;
+                if(panelIndex<0)throw new IllegalArgumentException("Zone references missing Panel identity");
+                actualPanelCounts[panelIndex]++;
+                List<MapRange> ranges=new ArrayList<>();
+                for(int r=0;r<8;r++) {
+                    int start=u16(b,at+32+r*4),count=u16(b,at+34+r*4);
+                    if(r>=rangeCount) {
+                        if(start!=0||count!=0)throw new IllegalArgumentException("Unused Zone range is not zero-filled");
+                    } else {
+                        if(count==0||(long)start+count>active)
+                            throw new IllegalArgumentException("Zone range exceeds active output pixels");
+                        ranges.add(new MapRange(start,count));
+                    }
+                }
+                zones.add(new MapZone(id,panelId,role,flags,name,ranges));
+            }
+            for(int i=0;i<panels.size();i++)
+                if(panels.get(i).zoneCount!=actualPanelCounts[i])
+                    throw new IllegalArgumentException("Panel zone count disagrees with authoritative map");
+            for(int i=0;i<zones.size();i++)for(int a=0;a<zones.get(i).ranges.size();a++) {
+                MapRange x=zones.get(i).ranges.get(a);
+                for(int j=i;j<zones.size();j++)for(int r=(j==i?a+1:0);r<zones.get(j).ranges.size();r++) {
+                    MapRange y=zones.get(j).ranges.get(r);
+                    if(x.start<y.start+y.count&&y.start<x.start+x.count)
+                        throw new IllegalArgumentException("Authoritative Panel ranges overlap");
+                }
+            }
+            return new MapIdentity(snapshot.lane,active,panels,zones);
+        }
+        private static String wireName(byte[] b,int at,int length) {
+            StringBuilder value=new StringBuilder();
+            boolean terminated=false;
+            for(int i=0;i<length;i++) {
+                int ch=u8(b[at+i]);
+                if(ch==0){terminated=true;break;}
+                if(ch<32||ch>126)throw new IllegalArgumentException("Panel map name is not printable ASCII");
+                value.append((char)ch);
+            }
+            if(!terminated)throw new IllegalArgumentException("Panel map name is not NUL-terminated");
+            return value.toString();
         }
     }
 
