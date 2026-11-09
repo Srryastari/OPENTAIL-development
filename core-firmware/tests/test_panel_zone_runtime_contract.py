@@ -139,6 +139,17 @@ for token in ("ot_pz_pair_store_finish", "ot_pz_pair_store_snapshot",
     assert token in panel_promotion, token
 assert "config_recovery_fault=true" in panel_promotion
 assert "nvs_open(" not in panel_promotion
+assert panel_promotion.index("__atomic_load_n(&pz_pair_commit_pending") < panel_promotion.index(
+    "&pz_pair_transaction_id,__ATOMIC_RELAXED")
+# These values are observed by the BLE status path and the activation worker.
+# Mixing plain volatile accesses with compiler atomics is still a C data race;
+# require every runtime access to use the same atomic builtins.
+for variable in ("pz_pair_commit_pending","pz_pair_transaction_id",
+                 "pz_pair_commit_phase","pz_pair_commit_phase_txn"):
+    for line in core.splitlines():
+        if variable in line:
+            assert line.lstrip().startswith("static ") or "__atomic_" in line, (
+                variable,line)
 
 # Phase telemetry is observable for a hardware relay/logger; this is a marker,
 # not a claim that the physical endurance test has been run.
