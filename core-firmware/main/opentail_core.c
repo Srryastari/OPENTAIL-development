@@ -3272,9 +3272,11 @@ static void led_task(void *p) {
                }
                if(native_rendering&&local_fx_enabled){
                    uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
+                   uint32_t old_generation[OT_OM_ZONES];
                    bool old_active[OT_OM_ZONES];
                    memcpy(old_zone_id,prior_fx_zone_id[ch],sizeof(old_zone_id));
                    memcpy(old_panel_id,prior_fx_panel_id[ch],sizeof(old_panel_id));
+                   memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation));
                    memcpy(old_active,prior_fx_active[ch],sizeof(old_active));
                    memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state));
                    for(unsigned z=0;z<output->zone_count;z++){
@@ -3291,7 +3293,7 @@ static void led_task(void *p) {
                                if(old_active[old_z]&&
                                   old_zone_id[old_z]==zone_cfg->id&&
                                   old_panel_id[old_z]==zone_cfg->panel_id&&
-                                  prior_fx_generation[ch][old_z]==slot->generation){
+                                  old_generation[old_z]==slot->generation){
                                    prior_index=(int)old_z;break;
                                }
                            }
