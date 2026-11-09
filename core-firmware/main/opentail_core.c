@@ -241,6 +241,40 @@ static void tm_load(void){
     /* Pending always wins at boot, even if power failed AFTER writing the
      * future active key. Its previous image is the only safe old routing. */
 }
+/* Persist only the approved physical input policy values. Live debounce
+ * timers, edge timestamps and sampler state are deliberately never stored.
+ * Existing trigger profiles migrate by writing this independent versioned
+ * policy record with the exact defaults used by this firmware build. */
+static bool tm_policy_load(void){
+    ot_tm_policy_record_t expected={0},stored={0};
+    if(!ot_tm_policy_build(&expected,(uint8_t)(OT_INPUT_ACTIVE_LOW?1u:0u),
+        (uint8_t)OT_DEBOUNCE_TICKS,10u,(uint32_t)OT_TURN_RELEASE_HOLD_US))
+        return false;
+    nvs_handle_t h;
+    if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
+    size_t size=0u;
+    esp_err_t e=nvs_get_blob(h,OT_TM_POLICY_KEY,NULL,&size);
+    bool migrated=false;
+    if(e==ESP_ERR_NVS_NOT_FOUND){
+        e=nvs_set_blob(h,OT_TM_POLICY_KEY,&expected,sizeof(expected));
+        if(e==ESP_OK)e=nvs_commit(h);
+        if(e==ESP_OK){
+            migrated=true;size=sizeof(stored);
+            e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
+        }
+    }else if(e==ESP_OK){
+        if(size!=sizeof(stored))e=ESP_ERR_NVS_INVALID_SIZE;
+        else e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
+    }
+    nvs_close(h);
+    if(e!=ESP_OK||size!=sizeof(stored)||!ot_tm_policy_valid(&stored)||
+       memcmp(&stored,&expected,sizeof(stored))!=0)return false;
+    if(migrated)ESP_LOGI(TAG,
+        "Migrated trigger input policy: active_low=%u assert=%u x 10ms turn_release_us=%lu",
+        (unsigned)stored.input_active_low,(unsigned)stored.assertion_samples,
+        (unsigned long)stored.turn_release_hold_us);
+    return true;
+}
 /* Size/version-aware reader preserves draft-v1 records and the older
  * profile_v1 key. A corrupt newer journal never falls back to legacy. */
 static esp_err_t tm_journal_read(nvs_handle_t h,const char *key,ot_tm_journal_t *out){
@@ -3449,6 +3483,10 @@ void app_main(void) {
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
     om_load();
     tm_load();
+    if(!tm_policy_load()){
+        config_recovery_fault=true;
+        ESP_LOGE(TAG,"Trigger input policy NVS record invalid or mismatched");
+    }
     om_journal_load();
     tm_journal_load();
     pz_load(); /* v4 split lane/map pair authoritative; v3 and v1/v2 are read-only migration inputs */
