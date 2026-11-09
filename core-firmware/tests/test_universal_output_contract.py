@@ -239,7 +239,7 @@ assert "legacy_example_zone_local" not in core
 
 # NVS load must recover the previously saved profile even when v2 exists
 # but is invalid. Boot migration must not write over either record.
-load = core.split("static void om_load(void){",1)[1].split("static bool om_save(",1)[0]
+load = core.split("static void om_load(void){",1)[1].split("static esp_err_t om_journal_read(",1)[0]
 assert 'const char *const keys[]={"profile_v2","profile"}' in load
 assert 'attempt<sizeof(keys)/sizeof(keys[0])&&!om_persistent' in load
 assert 'nvs_get_blob(h,key,NULL,&n)' in load
