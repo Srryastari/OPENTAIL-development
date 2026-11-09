@@ -1,0 +1,80 @@
+name: Issue121 turn-signal release debouncer exact-head verification
+on:
+  push:
+    branches: [triggers/issue121-turn-release-debounce-20261108]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [firmware/issue113-single-esp-progress-wdt-20261103]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused-and-full-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact Firmware #115 parent and narrow Issue121-only delta
+        env:
+          PIN: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          BASE=f97bceec7445a958f735df17ca0842b97bf8e062
+          git merge-base --is-ancestor "$BASE" HEAD
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):
+              return subprocess.check_output(["git",*args],text=True).strip()
+          base="f97bceec7445a958f735df17ca0842b97bf8e062"
+          allowed={
+              ".github/workflows/verify-issue121-turn-debounce.yml",
+              "core-firmware/main/core_logic.c",
+              "core-firmware/main/core_logic.h",
+              "core-firmware/main/opentail_core.c",
+              "core-firmware/tests/run-host-tests.sh",
+              "core-firmware/tests/test_signal_debouncer.c",
+              "core-firmware/tests/test_turn_edge_queue_concurrency.py",
+              "core-firmware/tests/test_trigger_runtime_contract.py",
+              "core-firmware/tests/test_single_watchdog_contract.py",
+              "docs/ISSUE121-TURN-SIGNAL-DEBOUNCE.md",
+          }
+          changed=set(git("diff","--name-only",base,"HEAD").splitlines())
+          assert changed<=allowed,("Unexpected files",changed-allowed)
+          assert "core-firmware/main/core_logic.c" in changed
+          assert "core-firmware/main/core_logic.h" in changed
+          assert "core-firmware/main/opentail_core.c" in changed
+          assert not any(p.startswith(("android/","web-studio/")) for p in changed)
+          print("PASS: exact #115 ancestry and Issue121-only source/test/workflow delta")
+          PY
+      - name: Focused SignalDebouncer and independent Trigger source contract
+        working-directory: core-firmware
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+            main/core_logic.c main/arbitration_logic.c \
+            tests/test_signal_debouncer.c -o /tmp/ot-signal-debouncer
+          /tmp/ot-signal-debouncer
+          python3 tests/test_trigger_runtime_contract.py
+          python3 tests/test_turn_edge_queue_concurrency.py
+          python3 tests/test_nvs_finalization_contract.py
+      - name: Full CORE host regression including Effects, BLE, NVS, STOP and watchdog
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  esp-idf-5-5-5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compile exact Issue121 HEAD for ESP32-S3 using ESP-IDF v5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+# Host simulation and compile gates do not certify the GS400 optocoupler
+# waveform, powered GPIO behavior, physical watchdog timing, or vehicle safety.

@@ -12,6 +12,7 @@ root = Path(__file__).resolve().parents[1] / "main"
 core = (root / "opentail_core.c").read_text(encoding="utf-8")
 board = (root / "board_config.h").read_text(encoding="utf-8")
 logic = (root / "core_logic.c").read_text(encoding="utf-8")
+logic_header = (root / "core_logic.h").read_text(encoding="utf-8")
 ble = (root / "ble_status.c").read_text(encoding="utf-8")
 outputs = (root / "output_manager.c").read_text(encoding="utf-8")
 manager = (root / "trigger_manager.c").read_text(encoding="utf-8")
@@ -43,11 +44,80 @@ sampler = between(core, "static void input_sampler_task(void *arg){", "static vo
 for token in ("pdMS_TO_TICKS(10u)", "gpio_get_level(input_pin[i])",
               "OT_INPUT_ACTIVE_LOW?(level==0):(level!=0)",
               "ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS)",
-              "live_input_mask=physical", "xTaskNotifyGive(target)",
+              "const uint8_t previous=live_input_mask;",
+              "if(published!=previous){live_input_mask=published;target=render_task_handle;}",
+              "if(target)xTaskNotifyGive(target);",
               "vTaskDelayUntil(&last_wake,period)"):
     assert token in sampler, f"Input sampler contract lost: {token}"
 assert "in->ticks[i]>=stable_ticks" in logic
 assert "in->settled[i]=in->pending[i]" in logic
+
+# Issue121: ISR-published transition queues feed only Left/Right release holds.
+# Absolute uint64 monotonic deadlines remove sampler-tick drift and edge aliasing.
+assert "#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)" in logic_header
+assert "ot_signal_debouncer_init" in logic
+assert "ot_signal_debouncer_transition" in logic
+assert "ot_signal_debouncer_sample" in logic
+assert "ot_signal_debouncer_resync" in logic
+assert "uint64_t release_deadline_us;" in logic_header
+assert "edge_time_us>=state->release_deadline_us" in logic
+assert "now_us>=state->release_deadline_us" in logic
+assert "state->release_deadline_us=edge_time_us+OT_TURN_RELEASE_HOLD_US;" in logic
+assert "static DRAM_ATTR ot_turn_edge_event_t turn_edge_events[2][OT_TURN_EDGE_QUEUE_CAPACITY]" in core
+assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 32u" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_head[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_tail[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]" in core
+assert "static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]" in core
+assert "event->timestamp_us=edge_time_us;" in core
+assert "event->asserted=asserted;" in core
+assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
+assert "__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE)" in core
+assert "__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE)" in core
+assert "__atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE)" in core
+assert "turn_edge_overflow[slot]" in core
+assert "gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])" in core
+assert "__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)" in core
+assert "__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)" in core
+assert "static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT]" in core
+assert "input_pin_isr[i]=input_pin[i];" in core
+assert "input_boot_snapshot_us=(uint64_t)esp_timer_get_time();" in core
+assert "static bool turn_edge_queue_update(" in core
+assert "ot_signal_debouncer_transition(state,event.asserted,event.timestamp_us)" in core
+assert "static bool turn_edge_queue_resync(" in core
+assert "__atomic_load_n(&turn_edge_writer_active[slot],__ATOMIC_ACQUIRE)" in core
+assert "const uint32_t head_before=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);" in core
+assert "const uint32_t head_after=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);" in core
+assert "const int level=gpio_get_level(input_pin[slot+2u]);" in core
+assert "__atomic_store_n(&turn_edge_tail[slot],head_after,__ATOMIC_RELEASE)" in core
+assert "ot_signal_debouncer_resync(state,raw);" in core
+assert "ot_signal_debouncer_sample(state,baseline_us,OT_DEBOUNCE_TICKS)" in core
+assert "ot_signal_debouncer_sample(state,now_us,OT_DEBOUNCE_TICKS)" in core
+assert "head_after!=head" in core
+assert "bool left_valid=false,right_valid=false;" in sampler
+assert "if(left_valid&&right_valid)" in sampler
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert "if(left_valid){\n            if(left)published|=OT_SIG_LEFT;" in sampler
+assert "else{\n            published=(uint8_t)((published&(uint8_t)~OT_SIG_LEFT)|" in sampler
+assert "if(right_valid){\n            if(right)published|=OT_SIG_RIGHT;" in sampler
+assert "else{\n            published=(uint8_t)((published&(uint8_t)~OT_SIG_RIGHT)|" in sampler
+assert "if(published!=previous){live_input_mask=published;target=render_task_handle;}" in sampler
+assert "if(left_valid&&right_valid)\n            ot_sw_idf_input_sampled();" in sampler
+assert "if(target)xTaskNotifyGive(target);" in sampler
+assert "ot_signal_debouncer_t turn_signal[2];" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[0],(boot_physical&OT_SIG_LEFT)!=0u);" in sampler
+assert "ot_signal_debouncer_init(&turn_signal[1],(boot_physical&OT_SIG_RIGHT)!=0u);" in sampler
+assert "turn_edge_queue_update(0u,&turn_signal[0]" in sampler
+assert "turn_edge_queue_update(1u,&turn_signal[1]" in sampler
+assert "read_turn_input_snapshot" not in core
+assert "uint8_t published=(uint8_t)(physical&" in sampler
+assert "if(left_valid){\n            if(left)published|=OT_SIG_LEFT;" in sampler
+assert "if(right_valid){\n            if(right)published|=OT_SIG_RIGHT;" in sampler
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert sampler.index("if(published!=previous){live_input_mask=published;target=render_task_handle;}") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("portEXIT_CRITICAL(&state_lock);") < sampler.index("ot_sw_idf_input_sampled();")
+assert sampler.index("ot_sw_idf_input_sampled();") < sampler.index("if(target)xTaskNotifyGive(target);")
+assert "millis()" not in logic and "Arduino.h" not in logic_header
 
 # 3: universal user mapping, duplicate/disabled functions and no
 # car-specific physical assignments in trigger resolution.

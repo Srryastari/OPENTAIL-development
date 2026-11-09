@@ -79,7 +79,9 @@ assert "sampler.ticks[i]=OT_DEBOUNCE_TICKS;" in sampler
 assert sampler.index("sampler.settled[i]=asserted;") < sampler.index("gpio_get_level(input_pin[i])")
 assert sampler.index("gpio_get_level(input_pin[i])") < sampler.index(
     "ot_debounce(&sampler,levels,OT_DEBOUNCE_TICKS)")
-assert sampler.index("live_input_mask=physical") < sampler.index("ot_sw_idf_input_sampled()")
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert "if(published!=previous){live_input_mask=published;target=render_task_handle;}" in sampler
+assert sampler.index("if(published!=previous){live_input_mask=published;target=render_task_handle;}") < sampler.index("ot_sw_idf_input_sampled()")
 assert sampler.index("ot_sw_idf_input_sampled()") < sampler.index("vTaskDelayUntil(")
 assert render.index("led_strip_refresh_async(strip[ch])") < render.index(
     "led_strip_refresh_async_done(strip[ch])")
@@ -94,7 +96,8 @@ for token in ("ot_fx_bank_stop_all(&fx_bank)","native_show.mode=OT_SHOW_OFF",
               "ble_fx_enabled=false","ble_owns_show=false"):
     assert token in render
 assert "ot_om_trigger_overlay(role,combined," in render
-assert "live_input_mask=physical" in sampler
+assert "const uint8_t previous=live_input_mask;" in sampler
+assert "if(published!=previous){live_input_mask=published;target=render_task_handle;}" in sampler
 assert "ot_sw_idf_status_json(wd_json,sizeof(wd_json))" in core
 assert r'\"watchdog\":%s' in core and r'\"hardware_failover\":false' in core
 assert "nvs,      data, nvs,   0x9000,   0x6000" in partition

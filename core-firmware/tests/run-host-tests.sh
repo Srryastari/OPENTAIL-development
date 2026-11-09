@@ -3,6 +3,12 @@ set -eu
 cd "$(dirname "$0")/.."
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/core_logic.c main/arbitration_logic.c tests/test_core_logic.c -o /tmp/opentail-core-alpha-tests
 /tmp/opentail-core-alpha-tests
+# Issue121: turn-only 400ms release hold, fake monotonic clock and unchanged
+# four-sample assertion; all 256 boot masks/arbitration remain host-only.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -I main \
+  main/core_logic.c main/arbitration_logic.c tests/test_signal_debouncer.c \
+  -o /tmp/ot-signal-debouncer-tests
+/tmp/ot-signal-debouncer-tests
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/test_status_logic.c -o /tmp/opentail-status-led-tests
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
