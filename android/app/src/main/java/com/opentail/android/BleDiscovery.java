@@ -264,11 +264,10 @@ final class BleDiscovery {
         // error. Do not publish status on every busy tick (or restart Compose's
         // effect coroutine). Crucially, never overlap any pending ATT action.
         if(previewCommand!=null)return false;
-        if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 ||
-           infoReadPending || infoReadQueued || writePending || nextPacket!=null || readReplyPending ||
-           fxCapsBusy || triggerMapBusy || panelReadPending || panelSnapshotBusy ||
-           panelControlWritePending || panelReadQueued!=0 || panelSnapshotQueuedLane>=0 ||
-           panelCancelQueued || authPending || pairPending || challengePending)return false;
+        if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending || nextPacket!=null ||
+           readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy || authPending || pairPending || challengePending ||
+           panelReadPending || panelSnapshotBusy || panelControlWritePending || panelReadQueued!=0 ||
+           panelSnapshotQueuedLane>=0 || panelCancelQueued)return false;
         frameCapture.request(output);
         return true;
     }
