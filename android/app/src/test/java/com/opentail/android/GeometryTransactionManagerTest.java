@@ -329,6 +329,20 @@ public class GeometryTransactionManagerTest {
         return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
     }
 
+    private static PanelPreviewProtocol.Status idlePanelStatus(int lane,int revision) {
+        byte[] b=new byte[61];b[0]=2;b[1]=0;b[2]=(byte)lane;b[3]=3;
+        put16(b,8,revision);put16(b,10,623);put16(b,12,5000);
+        put16(b,22,revision);put16(b,24,revision);put16(b,26,revision);
+        b[29]=1;
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+    private static void validateSnapshots(LayoutMapping mapping,
+            PanelPreviewProtocol.LaneSnapshot left,PanelPreviewProtocol.LaneSnapshot right) {
+        validateMappingAgainstSnapshots(mapping,
+            new PanelPreviewProtocol.LaneSnapshot[]{left,right},
+            new PanelPreviewProtocol.Status[]{idlePanelStatus(0,7),idlePanelStatus(1,7)});
+    }
+
     @Test public void proposedGs400MappingMustMatchFreshAuthoritativeMapAndFitCapacity() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         // Reuse the existing GS400 fixture setup through the helper below.
@@ -346,7 +360,7 @@ public class GeometryTransactionManagerTest {
         PanelPreviewProtocol.LaneSnapshot left=panelSnapshot(0,623,1,"Left Housing",
             129,1,"Left Top",0,118);
         PanelPreviewProtocol.LaneSnapshot right=panelSnapshot(1,623,0,"",0,0,"",0,0);
-        validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{left,right});
+        validateSnapshots(mapping,left,right);
     }
 
     @Test public void proposedGeometryCannotOverlapAnUnrelatedAuthoritativeZone() throws Exception {
@@ -357,7 +371,7 @@ public class GeometryTransactionManagerTest {
             200,5,"Existing Zone",0,10);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
         try {
-            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{occupied,empty});
+            validateSnapshots(mapping,occupied,empty);
             fail("existing range overlap must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("overlaps an existing CORE Zone"));
@@ -372,7 +386,7 @@ public class GeometryTransactionManagerTest {
             1,7,"Existing Zone",300,10);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
         try {
-            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{zoneCollision,empty});
+            validateSnapshots(mapping,zoneCollision,empty);
             fail("Panel/Zone ID collision must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("collides with an existing Zone ID"));
@@ -380,7 +394,7 @@ public class GeometryTransactionManagerTest {
         PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(1,623,1,"Other",
             200,1,"Other Zone",300,10);
         try {
-            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{panelCollision,empty});
+            validateSnapshots(mapping,panelCollision,empty);
             fail("conflicting existing Panel identity must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("conflicts with authoritative Panel"));
@@ -394,7 +408,7 @@ public class GeometryTransactionManagerTest {
         PanelPreviewProtocol.LaneSnapshot small=panelSnapshot(0,100,0,"",0,0,"",0,0);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
         try {
-            validateMappingAgainstSnapshots(mapping,new PanelPreviewProtocol.LaneSnapshot[]{small,empty});
+            validateSnapshots(mapping,small,empty);
             fail("capacity mismatch must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("active pixel capacity"));
