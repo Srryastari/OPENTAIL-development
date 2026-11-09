@@ -87,7 +87,7 @@ bool ot_pz_pair_store_snapshot(const ot_pz_pair_store_io_t *io,
         OT_PZ_PAIR_NS_ZONE_MAP,OT_PZ_PAIR_STORE_MARKER_KEY,&s->marker,
         sizeof(s->marker));
     if(marker_result==OT_PZ_PAIR_IO_OK)s->has_marker=true;
-    else if(marker_result!=OT_PZ_PAIR_IO_NOT_FOUND&&!s->has_intent)return false;
+    else if(marker_result!=OT_PZ_PAIR_IO_NOT_FOUND)return false;
     if(s->has_marker&&!pair_marker_valid(&s->marker)){
         if(!s->has_intent)return false;
         s->has_marker=false;memset(&s->marker,0,sizeof(s->marker));
