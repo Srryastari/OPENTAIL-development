@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'android/**'
+      - 'docs/SOFTWARE-COMPATIBILITY-MATRIX.json'
       - '.github/workflows/android-exact-head.yml'
   workflow_dispatch:
 permissions:
