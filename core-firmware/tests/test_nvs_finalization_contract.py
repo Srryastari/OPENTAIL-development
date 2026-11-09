@@ -48,7 +48,7 @@ for token in ('nvs_open("ot_trig_cfg",NVS_READWRITE',
               "nvs_set_blob(h,OT_TM_POLICY_KEY","nvs_commit(h)",
               "ot_tm_policy_valid(&stored)","memcmp(&stored,&expected",
               "OT_INPUT_ACTIVE_LOW","OT_DEBOUNCE_TICKS","10u",
-              "OT_TURN_RELEASE_HOLD_US"):
+              "OT_TM_TURN_RELEASE_INPUT_MASK","OT_TURN_RELEASE_HOLD_US"):
     assert token in policy_load,token
 assert "if(!tm_policy_load())" in core
 assert core.index("if(!tm_policy_load())") < core.index("tm_journal_load();")
@@ -56,6 +56,9 @@ assert "#define OT_TM_POLICY_VERSION 1u" in header
 assert '#define OT_TM_POLICY_KEY "policy_v1"' in header
 assert "ot_tm_policy_build" in journal and "ot_tm_policy_valid" in journal
 assert "turn_release_hold_us" in header and "assertion_samples" in header
+assert "turn_release_input_mask" in header and "reserved[3]" in header
+assert "#define OT_TM_TURN_RELEASE_INPUT_MASK 0x0cu" in header
+assert "sizeof(ot_tm_policy_record_t)==24u" in journal
 assert "#define OT_INPUT_ACTIVE_LOW 1" in board
 assert "#define OT_DEBOUNCE_TICKS 4" in board
 assert "#define OT_TURN_RELEASE_HOLD_US UINT64_C(400000)" in logic_header
