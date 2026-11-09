@@ -57,6 +57,10 @@ bool ot_fx_bank_set_overlay_identity(ot_fx_zone_bank_t *bank,
  const ot_om_output_t outputs[OT_OM_OUTPUTS],
  const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
  uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
+bool ot_fx_bank_set_spark_identity(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_spark_style_t *spark);
 bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
  const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],
