@@ -132,6 +132,7 @@ static void fail_closed_mismatch_and_fallback(void){
         &live,&pending,ar,sr));
 
     bad_intent=intent;bad_intent.candidate_revision[0]++;
+    bad_intent.crc=0u;bad_intent.crc=ot_cfg_crc32(&bad_intent,sizeof(bad_intent));
     assert(!ot_pz_pair_journal_recover(&ma,&ms,&la,&ls,&bad_intent,&previous,
         &live,&pending,ar,sr));
     bad_map=ms;bad_map.crc^=1u;
@@ -148,11 +149,10 @@ static void fail_closed_mismatch_and_fallback(void){
     ot_pz_lane_config_set_t short_lanes=cl;
     short_lanes.lanes[0].active_pixels=50u;
     assert(ot_pz_lane_config_set_valid(&short_lanes));
-    assert(!ot_pz_pair_journal_recover(NULL,&ms,NULL,
-        &(ot_pz_lane_journal_t){.magic=OT_PZ_LANE_JOURNAL_MAGIC,
-          .version=OT_PZ_PAIR_SCHEMA_VERSION,.transaction_id=2u,
-          .previous=pl,.candidate=short_lanes,
-          .previous_revision={3u,4u},.candidate_revision={4u,4u}},
+    ot_pz_lane_journal_t short_lane_journal={0};
+    assert(ot_pz_lane_journal_build(&short_lane_journal,&pl,&short_lanes,
+        old_revision,new_revision,2u));
+    assert(!ot_pz_pair_journal_recover(NULL,&ms,NULL,&short_lane_journal,
         &intent,&previous,&live,&pending,ar,sr));
 
     /* No v4 records means the read-only legacy snapshot remains the fallback.
