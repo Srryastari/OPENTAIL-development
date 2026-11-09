@@ -251,6 +251,8 @@ static void test_zone_independence_and_discontiguous_ranges(
         ot_ble_fx_packet_t safety=make_fx(OT_FX_EMBERS,lane,1u);
         assert(ot_fx_bank_apply(bank,&turn,started,false));
         assert(ot_fx_bank_apply(bank,&safety,started,false));
+        bank->zones[lane][0].continuous=true;
+        bank->zones[lane][1].continuous=true;
     }
     assert(render_probe_frame(probe,active,bank,1100u));
     assert(probe->state[0][0].original_clock_initialized);
@@ -365,6 +367,11 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     const uint16_t panel_id=active->outputs[0].zones[0].panel_id;
     assert(original_zone0!=original_zone1);
 
+    /* Reference both continuous effects at the same future timestamp
+     * without changing the active geometry. */
+    render_probe_t original_order_reference=*probe;
+    assert(render_probe_frame(&original_order_reference,active,bank,1158u));
+
     /* Reorder through the real preview candidate and commit promotion. */
     ot_pz_preview_t preview={0};
     assert(ot_pz_preview_begin(&preview,active,0u,9u,9u,false,1150u));
@@ -378,13 +385,13 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     *active=preview.candidate;
     ot_pz_preview_cancel(&preview);
 
-    render_probe_t reordered_reference=*probe;
-    assert(render_probe_frame(&reordered_reference,active,bank,1158u));
     assert(render_probe_frame(probe,active,bank,1158u));
-    assert(memcmp(&reordered_reference.state[0][0],&probe->state[0][0],
+    assert(memcmp(&original_order_reference.state[0][1],&probe->state[0][0],
                   sizeof(probe->state[0][0]))==0);
-    assert(memcmp(&reordered_reference.state[0][1],&probe->state[0][1],
+    assert(memcmp(&original_order_reference.state[0][0],&probe->state[0][1],
                   sizeof(probe->state[0][1]))==0);
+    assert(probe->resolved_bank_index[0][0]==1u);
+    assert(probe->resolved_bank_index[0][1]==0u);
 
     /* A subsequent reorder is cancelled. The committed mapping and both
      * animation clocks must remain unchanged and continue on the next frame. */
