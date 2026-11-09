@@ -146,9 +146,15 @@ public class GeometryTransactionManagerTest {
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
         assertTrue(manager.requestBegin());
         assertTrue(manager.acceptBegin(status(1,95,0,0x55,7,7,7,0,0,0)));
-        assertNotNull(manager.requestCommit(status(1,95,0,0x55,7,7,7,0,0,0)));
+        PanelPreviewProtocol.Status active=status(1,95,0,0x55,7,7,7,0,0,0);
+        assertNotNull(manager.requestCommit(active));
+        assertNull("duplicate COMMIT must not be emitted",manager.requestCommit(active));
         manager.observeStatus(status(2,95,0,0x55,7,8,7,5,1,5));
         assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
+        assertNull("delayed geometry UPDATE must be rejected during COMMITTING",
+            manager.queueUpdate(new byte[]{9},new byte[]{1,2,3}));
+        assertNull("another COMMIT must not be emitted while COMMITTING",
+            manager.requestCommit(status(2,95,0,0x55,7,8,7,5,1,5)));
         // Firmware retains the last rejection diagnostic after COMMITTING.
         // A stale error must not mask the authoritative terminal COMMITTED state.
         manager.observeStatus(status(3,95,0,0x55,8,8,8,5,1,5));
