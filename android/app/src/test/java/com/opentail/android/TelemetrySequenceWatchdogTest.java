@@ -45,6 +45,13 @@ public class TelemetrySequenceWatchdogTest {
             w.observe(status(1,22,1,0,0,0,0,0,0,4));
         assertTrue(gap.hardFault);
         assertTrue(gap.message.contains("missing sequence 4294967295"));
+
+        TelemetrySequenceWatchdog multiGap=new TelemetrySequenceWatchdog();
+        multiGap.observe(status(1,23,0xfffffffdL,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision wrapped=
+            multiGap.observe(status(1,23,2,0,0,0,0,0,0,4));
+        assertTrue(wrapped.hardFault);
+        assertTrue(wrapped.message.contains("4294967294–4294967295, 1–1 (wrap)"));
     }
 
     @Test public void acceptedSequenceJumpAndOutOfOrderCounterAreHardFaults() {
