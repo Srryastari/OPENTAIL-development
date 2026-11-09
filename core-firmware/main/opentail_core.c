@@ -2140,8 +2140,12 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
+         ot_ble_fx_packet_t targeted=*p;
+         targeted.chain_mask=(uint8_t)(1u<<o);
+         targeted.zone_mask=(uint8_t)(1u<<z);
          if(!palette_resolved(p->palette_id) ||
-            !ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
+            !ot_fx_bank_apply_configured_identity(&replacement,&targeted,
+                om_outputs,pz_outputs.outputs,now_ms,true)){
              ready=false;break; /* layout changed: preserve original live scene */
          }
          out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
