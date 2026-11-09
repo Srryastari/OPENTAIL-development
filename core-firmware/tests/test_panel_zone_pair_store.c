@@ -214,6 +214,7 @@ static void reset_marker_and_fail_closed(void){
     assert(!ot_pz_pair_store_recover(&io,&workspace,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
 }
 int main(void){
+    assert(sizeof(workspace)<=16u*1024u);
     initial_migration_cut_matrix();
     durable_boundary_matrix();
     reset_marker_and_fail_closed();
