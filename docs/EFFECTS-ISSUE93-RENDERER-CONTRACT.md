@@ -37,6 +37,12 @@ These are **local renderer inputs**, not an existing BLE wire extension. Old des
 
 See `docs/EFFECTS-ISSUE93-140-ACCEPTANCE.csv` for one row per actual registered effect ID, source identity, metadata-derived color roles, palette flag, exhaustive host render admission at Speed 0/1/128/254/255 and Intensity 0/128/255 and brightness 0/255, upstream source/one-shot golden status, and separate **phone NOT_RUN** evidence. Host matrix = 140×5×3=2100 profiles, both extreme brightness states per profile. Custom palette IDs 73–255 are **not** inferred to be valid colors; they require caller-owned resolved palette data for eligible effects and independent integration proof. The existing source/host golden suite is the independent source-of-truth; this CSV is an index, not a replacement for its logs.
 
+## Physical-trigger override continuity — host-only evidence
+
+`core-firmware/tests/test_effects_oem_safety_matrix.c` now runs the real pure-C WLED Chase renderer beside an uninterrupted reference while the visible pixel is replaced by the output-manager physical overlay. Six cases cover Brake, Left, Right, Hazards-left, Hazards-right and Reverse. The renderer state continues advancing during the override; after release, the next decorative frame must match the uninterrupted reference at the same timestamp. Exact-head host output: `Effects phase restoration: 6 Brake/Left/Right/Hazards/Reverse override cases resumed at uninterrupted phase (host only)`.
+
+The companion source-contract check verifies that CORE renders the decorative frame before applying physical trigger overlays. This proves host-level renderer/overlay phase behavior only. It does **not** prove FreeRTOS scheduling, RMT/DMA completion, electrical override latency, optical WS2815 output, or vehicle behavior; those remain separate physical NOT_RUN gates.
+
 ## P0 remaining investigations — do not claim a phone or vehicle fix
 
 | Symptom | Source-owner finding / next proof | Status |
