@@ -5,6 +5,19 @@
 #include <string.h>
 /* Unified registry: source-pinned WLED adapters first, then the 1D
  * compatibility catalog, then the original OpenTail Embers effect. */
+int ot_effects_1d_find_prior_zone_state(uint16_t panel_id,uint16_t zone_id,
+    uint32_t generation,const uint16_t *prior_panel_ids,
+    const uint16_t *prior_zone_ids,const uint32_t *prior_generations,
+    const bool *prior_active,size_t count){
+    if(!panel_id||!zone_id||!prior_panel_ids||!prior_zone_ids||
+       !prior_generations||!prior_active)return -1;
+    for(size_t i=0;i<count;i++){
+        if(prior_active[i]&&prior_panel_ids[i]==panel_id&&
+           prior_zone_ids[i]==zone_id&&prior_generations[i]==generation)
+            return (int)i;
+    }
+    return -1;
+}
 size_t ot_effects_1d_supported_ids(uint16_t *dst,size_t capacity){
     const size_t count=ot_wled_1d_count();
     for(size_t i=0;dst&&i<count&&i<capacity;i++)
@@ -57,6 +70,16 @@ void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed){
     memset(s,0,sizeof(*s));
     ot_wled_fx_reset(&s->wled);
     ot_particles_1d_reset(&s->particles,seed);
+}
+void ot_effects_1d_move_state(ot_effects_1d_state_t *destination,
+                              ot_effects_1d_state_t *source){
+    if(!destination||!source||destination==source)return;
+    /* Destination may own a prior state; release it before taking source
+     * ownership. The source is zeroed so its scratch pointer cannot be freed
+     * twice by the caller's snapshot cleanup. */
+    ot_effects_1d_reset(destination,0u);
+    *destination=*source;
+    memset(source,0,sizeof(*source));
 }
 static uint32_t rng(ot_particles_1d_t *s){
     uint32_t x=s->seed?s->seed:1u;
