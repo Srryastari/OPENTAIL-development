@@ -88,7 +88,8 @@ continuous_identity=fxbank[fxbank.index("bool ot_fx_bank_apply_continuous_tertia
 assert "bank->zones[o][z].configured=false" not in continuous_identity
 # Saved scenes project identity-owned bank slots back to current logical zones.
 save_scene=core[core.index("bool ot_ble_save_fx_preset("):core.index("bool ot_ble_play_fx_preset(")]
-assert "identity_snapshot[o].zone_count=pz_outputs.outputs[o].zone_count" in save_scene
+assert "const uint8_t count=pz_outputs.outputs[o].zone_count" in save_scene
+assert "identity_snapshot[o].zone_count=count" in save_scene
 assert "identity_snapshot[o].zones[z].panel_id=pz_outputs.outputs[o].zones[z].panel_id" in save_scene
 assert "identity_snapshot[o].zones[z].zone_id=pz_outputs.outputs[o].zones[z].id" in save_scene
 assert "ot_fx_scene_pack(&record,&snapshot,identity_snapshot,now_ms)" in save_scene
