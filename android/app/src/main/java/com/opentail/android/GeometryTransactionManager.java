@@ -564,7 +564,7 @@ final class GeometryTransactionManager {
                     if(existing.id==zone.id||proposedZoneIds.contains(existing.id))continue;
                     for(PanelPreviewProtocol.MapRange range:existing.ranges)
                         if(zone.start<range.start+range.count&&range.start<end)
-                            throw new IllegalArgumentException("Proposed geometry overlaps an unrelated existing CORE Zone");
+                            throw new IllegalArgumentException("Proposed geometry overlaps an existing CORE Zone that is unrelated to the mapped identities");
                 }
                 for(MappedZone other:proposed.zones) {
                     if(other.id==zone.id)continue;

@@ -415,7 +415,7 @@ public class GeometryTransactionManagerTest {
             int baseRevision,int pixels,int active,int staged,int render) {
         byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=(byte)lane;b[3]=3;
         put32(b,4,session);put16(b,8,baseRevision);put16(b,10,pixels);put16(b,12,5000);
-        put16(b,22,active);put16(b,24,staged);put16(b,26,render);b[29]=1;
+        put16(b,22,active);put16(b,24,staged);put16(b,26,render);b[29]=1;put32(b,31,5000);
         return PanelPreviewProtocol.Status.parse(b);
     }
 
