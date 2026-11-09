@@ -444,10 +444,11 @@ public class GeometryTransactionManagerTest {
         } catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("collides with an existing Zone ID"));
         }
+        PanelPreviewProtocol.LaneSnapshot emptyLeft=panelSnapshot(0,623,0,"",0,0,"",0,0);
         PanelPreviewProtocol.LaneSnapshot panelCollision=panelSnapshot(1,623,1,"Other",
             200,1,"Other Zone",300,10);
         try {
-            validateSnapshots(mapping,empty,panelCollision);
+            validateSnapshots(mapping,emptyLeft,panelCollision);
             fail("conflicting existing Panel identity must block preview");
         } catch(IllegalArgumentException expected) {
             assertTrue("Unexpected Panel collision rejection: "+expected.getMessage(),
