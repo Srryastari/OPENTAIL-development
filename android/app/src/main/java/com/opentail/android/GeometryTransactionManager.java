@@ -163,6 +163,72 @@ final class GeometryTransactionManager {
         return new LayoutMapping(lanes);
     }
 
+    /**
+     * Validate the proposed identity/ranges against both authoritative CORE maps
+     * before BEGIN. Existing geometry is never implicitly deleted or overwritten
+     * by a guessed ID; only an exact existing Zone identity may be updated in place.
+     */
+    static void validateMappingAgainstSnapshots(LayoutMapping mapping,
+            PanelPreviewProtocol.LaneSnapshot[] snapshots) {
+        if(mapping==null||snapshots==null||snapshots.length!=2)
+            throw new IllegalArgumentException("Both authoritative output snapshots are required");
+        PanelPreviewProtocol.MapIdentity[] current=new PanelPreviewProtocol.MapIdentity[2];
+        Map<Integer,PanelPreviewProtocol.MapPanel> currentPanels=new HashMap<>();
+        Map<Integer,Integer> panelLanes=new HashMap<>();
+        Map<Integer,PanelPreviewProtocol.MapZone> currentZones=new HashMap<>();
+        Map<Integer,Integer> zoneLanes=new HashMap<>();
+        for(int lane=0;lane<2;lane++) {
+            current[lane]=PanelPreviewProtocol.MapIdentity.parse(snapshots[lane]);
+            if(current[lane].lane!=lane)
+                throw new IllegalArgumentException("Authoritative map lane identity mismatch");
+            for(PanelPreviewProtocol.MapPanel panel:current[lane].panels) {
+                if(currentZones.containsKey(panel.id))
+                    throw new IllegalArgumentException("CORE Panel/Zone ID namespace collision");
+                if(currentPanels.put(panel.id,panel)!=null)
+                    throw new IllegalArgumentException("Duplicate controller-wide Panel ID");
+                panelLanes.put(panel.id,lane);
+            }
+            for(PanelPreviewProtocol.MapZone zone:current[lane].zones) {
+                if(currentPanels.containsKey(zone.id))
+                    throw new IllegalArgumentException("CORE Panel/Zone ID namespace collision");
+                if(currentZones.put(zone.id,zone)!=null)
+                    throw new IllegalArgumentException("Duplicate controller-wide Zone ID");
+                zoneLanes.put(zone.id,lane);
+            }
+        }
+        for(int lane=0;lane<2;lane++) {
+            MappedLane proposed=mapping.lane(lane);
+            PanelPreviewProtocol.MapIdentity active=current[lane];
+            if(proposed.activePixels>active.activePixels)
+                throw new IllegalArgumentException("Output "+(lane+1)+
+                    " layout exceeds CORE's authoritative active pixel capacity");
+            for(MappedPanel panel:proposed.panels) {
+                if(currentZones.containsKey(panel.id))
+                    throw new IllegalArgumentException("Proposed Panel ID collides with an existing Zone ID");
+                PanelPreviewProtocol.MapPanel prior=currentPanels.get(panel.id);
+                if(prior!=null&&(panelLanes.get(panel.id)!=lane||!prior.name.equals(panel.name)))
+                    throw new IllegalArgumentException("Proposed Panel ID conflicts with authoritative Panel identity");
+            }
+            for(MappedZone zone:proposed.zones) {
+                if(currentPanels.containsKey(zone.id))
+                    throw new IllegalArgumentException("Proposed Zone ID collides with an existing Panel ID");
+                PanelPreviewProtocol.MapZone prior=currentZones.get(zone.id);
+                if(prior!=null) {
+                    if(zoneLanes.get(zone.id)!=lane||prior.panelId!=zone.panelId||
+                       prior.ranges.size()!=1)
+                        throw new IllegalArgumentException("Existing Zone ID has a different Panel or multi-range geometry");
+                }
+                long end=(long)zone.start+zone.count;
+                for(PanelPreviewProtocol.MapZone existing:active.zones) {
+                    if(existing.id==zone.id)continue;
+                    for(PanelPreviewProtocol.MapRange range:existing.ranges)
+                        if(zone.start<range.start+range.count&&range.start<end)
+                            throw new IllegalArgumentException("Proposed geometry overlaps an existing CORE Zone");
+                }
+            }
+        }
+    }
+
     private Snapshot lastConfirmed;
     private State state=State.READY;
     private long sessionId,nextSequence=1,pendingSequence;
