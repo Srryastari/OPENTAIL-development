@@ -556,6 +556,10 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
     }else if(e!=ESP_ERR_NVS_NOT_FOUND){
         return false;
     }
+    /* A valid v3 controller journal or reset tombstone is self-contained.
+     * Only consult the older Output Manager journal when it is the actual
+     * migration source; unrelated legacy corruption must not mask valid v3. */
+    if(om_legacy_journal_fault)return false;
     if(!ot_pz_migrate_legacy(om_outputs,om_persistent,previous))return false;
     *candidate=*previous;
     if(om_deferred.pending&&
@@ -608,11 +612,6 @@ static void pz_load(void){
         pz_reset_pending_mask=reset_mask;
         pz_persistent=true;
     }else{
-        if(om_legacy_journal_fault){
-            config_recovery_fault=true;
-            ot_st_set_fault("legacy output journal invalid; no authoritative v4 pair");
-            return;
-        }
         uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
         uint8_t reset_mask=0u;
         if(!pz_load_legacy_snapshot(&workspace->previous,&workspace->candidate,
