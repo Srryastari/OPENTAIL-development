@@ -70,14 +70,33 @@ jobs:
           test -s core-firmware/build/bootloader/bootloader.bin
           test -s core-firmware/build/partition_table/partition-table.bin
           test -s core-firmware/build/flasher_args.json
+          test -s core-firmware/build/ota_data_initial.bin
+          test -s core-firmware/build/isr-evidence/input_edge_isr.symbols.txt
+          test -s core-firmware/build/isr-evidence/input_edge_isr.dis
+          test -s core-firmware/build/isr-evidence/input_edge_isr.audit.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
+          import hashlib, json, os
           build=Path("core-firmware/build")
           refs=json.loads((build/"flasher_args.json").read_text())["flash_files"]
           assert len(refs)>=3
-          assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in refs.values())
-          print("PASS: exact-head ESP32-S3 image and flash manifest; no device flashed")
+          required=set(refs.values()) | {
+              "opentail_core_alpha.elf","opentail_core_alpha.map",
+              "isr-evidence/input_edge_isr.symbols.txt",
+              "isr-evidence/input_edge_isr.dis",
+              "isr-evidence/input_edge_isr.audit.txt",
+          }
+          assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in required)
+          evidence={
+              "commit":os.environ["GITHUB_SHA"],
+              "target":"esp32s3",
+              "esp_idf_version":"v5.5.5",
+              "files":{name:hashlib.sha256((build/name).read_bytes()).hexdigest()
+                       for name in sorted(required)},
+          }
+          (build/"CORE_BUILD_EVIDENCE.json").write_text(json.dumps(evidence,indent=2)+"\\n")
+          print("PASS: exact-head ESP32-S3 image, complete flash manifest, linker map and retained ISR disassembly; no device flashed")
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -88,7 +107,10 @@ jobs:
             core-firmware/build/opentail_core_alpha.map
             core-firmware/build/bootloader/bootloader.bin
             core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/ota_data_initial.bin
             core-firmware/build/flasher_args.json
+            core-firmware/build/CORE_BUILD_EVIDENCE.json
+            core-firmware/build/isr-evidence/
           if-no-files-found: error
           retention-days: 14
 # Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
