@@ -71,6 +71,16 @@ void ot_effects_1d_reset(ot_effects_1d_state_t *s,uint32_t seed){
     ot_wled_fx_reset(&s->wled);
     ot_particles_1d_reset(&s->particles,seed);
 }
+void ot_effects_1d_move_state(ot_effects_1d_state_t *destination,
+                              ot_effects_1d_state_t *source){
+    if(!destination||!source||destination==source)return;
+    /* Destination may own a prior state; release it before taking source
+     * ownership. The source is zeroed so its scratch pointer cannot be freed
+     * twice by the caller's snapshot cleanup. */
+    ot_effects_1d_reset(destination,0u);
+    *destination=*source;
+    memset(source,0,sizeof(*source));
+}
 static uint32_t rng(ot_particles_1d_t *s){
     uint32_t x=s->seed?s->seed:1u;
     x^=x<<13;x^=x>>17;x^=x<<5;s->seed=x;
