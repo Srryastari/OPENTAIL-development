@@ -114,6 +114,7 @@ static void initial_migration_cut_matrix(void){
             previous_revision,candidate_revision,0x0a0au,0u,true,
             phase_hook,&phases));
         assert(phases.last_phase==cut);
+        assert(store.durable_writes==cut);
         recover_expect(&io,&legacy,&legacy,&candidate,cut==3u,cut==3u,
                        cut==3u?0x0a0au:0u,0u);
         ot_pz_pair_store_snapshot_t snapshot={0};
@@ -139,6 +140,7 @@ static void durable_boundary_matrix(void){
         assert(ot_pz_pair_store_begin(&io,&base,&candidate1,r0,r1,0x1001u,0u,
                                       true,NULL,NULL));
         assert(ot_pz_pair_store_finish(&io,0x1001u,NULL,NULL));
+        assert(store.durable_writes==8u);
         phases.cut_after=cut;
         assert(!ot_pz_pair_store_begin(&io,&candidate1,&candidate2,r1,r2,
                                        0x2002u,0u,false,phase_hook,&phases));
