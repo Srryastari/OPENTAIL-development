@@ -69,7 +69,16 @@ All three characteristics require the active authenticated owner connection and 
 - `range_slot` is the current zero-based range-array slot within the zone. `role_flags` bits 0–3 carry the zone role, bits 4–5 carry action (0 upsert, 1 delete range, 2 delete zone, 3 delete panel), and bits 6–7 must be zero. Delete actions require zero start/count and role fields.
 - UPDATE is applied as one candidate snapshot. Invalid IDs, duplicate targets, range overlap, out-of-capacity endpoints, cross-panel moves, and invalid role/action combinations are rejected without changing the previous preview snapshot.
 
-Sequence starts at 1. A strictly newer modular 32-bit sequence is accepted; an identical same-sequence/same-packet duplicate is idempotent; same-sequence/different-payload, stale, and out-of-order packets are rejected. The 5,000 ms geometry-preview lease is renewed only by HEARTBEAT, not by UPDATE. The separate five-byte Pixel Probe diagnostic lease remains 2,000 ms.
+Sequence starts at 1 and only the contiguous next nonzero 32-bit sequence is accepted (UINT32_MAX wraps directly to 1; zero is reserved). Identical same-sequence/same-packet duplicates are counted and never reapplied. Forward gaps, out-of-order packets and same-sequence/different-payload conflicts are rejected; a hard sequence-sync fault blocks subsequent UPDATE and COMMIT until CANCEL, authoritative map reload and a new session. Duplicate packets raise a warning and require status/CRC reconciliation before continuing. The 5,000 ms geometry-preview lease is renewed only by HEARTBEAT, not by UPDATE. The separate five-byte Pixel Probe diagnostic lease remains 2,000 ms.
+
+### Owner-mandated protected COMMITTING and telemetry
+
+- BLE UPDATE admission checks COMMITTING before session/sequence classification. Every delayed UPDATE received after COMMITTING is rejected with explicit error code **5 / COMMITTING_LOCKED** before calling the shadow update API.
+- The COMMITTING state and immutable candidate remain intact after rejected updates. The same error is returned for conflicting BEGIN/CANCEL/HEARTBEAT/COMMIT and legacy geometry writes; only an exact duplicate COMMIT with the same session and CRC is idempotent.
+- The legacy Panel write path and CORE geometry save/reset paths remain blocked while the preview candidate is active/committing. The NVS worker remains the only owner of the preview's durable write.
+- UUID suffix 0x37 now returns a 61-byte version-2 status value. The v1 prefix retains lane/session identity, last accepted sequence, candidate CRC, active/staged/render revisions, error and lease fields. The extension exposes last rejected sequence/reason, saturating missing/out-of-order/duplicate/conflict/COMMITTING-rejection counters, and sequence warning/fault flags. Panel capability feature bit 3 advertises this telemetry.
+- Error codes 5–10 are documented in ISSUE126-PREVIEW-FAULT-INJECTION-ANDROID-TELEMETRY.md. Android must surface sequence warnings immediately in the existing Settings → System area, reconcile the authoritative status/map, and never blindly retry or commit after a hard sequence fault. The approved six-screen UI is unchanged.
+- Host protocol tests and exact-source contract checks have been added for commit-locked delayed, duplicate, gap and out-of-order packets. They remain **pending execution on CI** until the updated workflow completes.
 
 - BEGIN binds the preview to the committed lane revision and its validated active pixel capacity. Unknown/unconfigured capacity cannot start a geometry preview.
 - UPDATE changes only the DRAM shadow candidate; it does not write NVS. CORE snapshots the candidate at a render-frame boundary and continues the existing global Show Mode/effect session.
@@ -125,3 +134,8 @@ The existing STOP command stops Show/Demo/Simulation and clears diagnostics/prev
 - ESP-IDF v5.5.5 ESP32-S3 build and flash-manifest checks are wired into the draft workflow; no device is flashed by CI.
 - Cross-namespace hardware/map migration, reset handshake/tombstone, independent exact-HEAD review, IRAM disassembly confirmation, and physical bench tests remain open.
 - Passing software CI is not physical or road certification.
+
+
+## Owner-mandated brownout endurance gate
+
+The mandatory 100-cycle physical power-cut/recovery test under a measured full-white 944-pixel WS2815 load is specified in ISSUE126-BROWNOUT-100-CYCLE-ACCEPTANCE.md. **NOT RUN.** The final cross-namespace hardware/map journal, verified electrical preflight, boot-ID evidence and physical phase instrumentation must exist before cycle 1. A CI build or host fault simulation cannot satisfy this gate.
