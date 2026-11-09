@@ -53,7 +53,14 @@ final class TelemetrySequenceWatchdog {
         if(current.lastAcceptedSequence!=last.lastAcceptedSequence) {
             long expected=next(last.lastAcceptedSequence);
             if(current.lastAcceptedSequence!=expected) {
-                latchHard("Accepted geometry sequence skipped or moved backwards");
+                if(current.lastAcceptedSequence>expected) {
+                    long lastMissing=current.lastAcceptedSequence-1L;
+                    String range=expected==lastMissing?Long.toString(expected):
+                        expected+"–"+lastMissing;
+                    latchHard("Accepted geometry sequence gap; missing sequence "+range);
+                } else {
+                    latchHard("Accepted geometry sequence moved backwards or violated wrap ordering");
+                }
             }
         }
         if(current.missingCount>last.missingCount)
