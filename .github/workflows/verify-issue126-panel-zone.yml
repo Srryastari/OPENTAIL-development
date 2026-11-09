@@ -95,7 +95,7 @@ jobs:
               "files":{name:hashlib.sha256((build/name).read_bytes()).hexdigest()
                        for name in sorted(required)},
           }
-          (build/"CORE_BUILD_EVIDENCE.json").write_text(json.dumps(evidence,indent=2)+"\\n")
+          (build/"CORE_BUILD_EVIDENCE.json").write_text(json.dumps(evidence,indent=2)+"\n")
           print("PASS: exact-head ESP32-S3 image, complete flash manifest, linker map and retained ISR disassembly; no device flashed")
           PY
       - uses: actions/upload-artifact@v4
