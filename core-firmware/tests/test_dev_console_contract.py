@@ -128,7 +128,7 @@ assert output_http.index("bool busy=") < output_http.index("om_save(next_all)")
 assert "om_save(next_all)" in output_http
 om_save_impl = core.split("static bool om_save(",1)[1].split(
     "#define OT_SHOW_MAX_MS",1)[0]
-assert "pz_save_controller_locked(&candidate)" in om_save_impl
+assert "pz_save_controller_locked(candidate)" in om_save_impl
 assert "pz_preview.active" in om_save_impl
 assert "busy=pz_deferred.pending" in output_ble
 assert output_ble.index("busy=pz_deferred.pending") < output_ble.index(
