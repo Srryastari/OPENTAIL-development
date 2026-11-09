@@ -2884,6 +2884,9 @@ static void pz_promote(uint32_t epoch){
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         if(pz_deferred.pending){
             pz_outputs=workspace->pending.candidate;
+            /* Retire slots owned by deleted zones only after committed geometry
+             * is authoritative. A preview candidate must remain cancellable. */
+            ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs);
             pz_deferred.pending=false;
             applied=true;
         }
