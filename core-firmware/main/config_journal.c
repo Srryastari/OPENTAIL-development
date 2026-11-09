@@ -210,3 +210,210 @@ bool ot_pz_journal_recover(const ot_pz_journal_t *active,
         memcpy(active_revision,staged_revision,sizeof(record->candidate_revision));
     return true;
 }
+
+
+static bool pz_pair_revisions_valid(
+    const uint16_t previous[OT_PZ_OUTPUTS],
+    const uint16_t candidate[OT_PZ_OUTPUTS]){
+    if(!previous||!candidate)return false;
+    bool changed=false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(previous[lane]==0u||candidate[lane]<previous[lane])return false;
+        if(candidate[lane]>previous[lane])changed=true;
+    }
+    return changed;
+}
+static uint32_t pz_map_journal_crc(const ot_pz_map_journal_t *record){
+    ot_pz_map_journal_t copy=*record;copy.crc=0u;
+    return ot_cfg_crc32(&copy,sizeof(copy));
+}
+static uint32_t pz_lane_journal_crc(const ot_pz_lane_journal_t *record){
+    ot_pz_lane_journal_t copy=*record;copy.crc=0u;
+    return ot_cfg_crc32(&copy,sizeof(copy));
+}
+static uint32_t pz_pair_intent_crc(const ot_pz_pair_intent_t *record){
+    ot_pz_pair_intent_t copy=*record;copy.crc=0u;
+    return ot_cfg_crc32(&copy,sizeof(copy));
+}
+bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
+                         const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id){
+    if(!out||!previous||!candidate||!transaction_id||
+       !previous_revision||!candidate_revision||
+       !ot_pz_map_valid(previous)||!ot_pz_map_valid(candidate)||
+       !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
+    ot_pz_map_journal_t next={0};
+    next.magic=OT_PZ_MAP_JOURNAL_MAGIC;
+    next.version=OT_PZ_PAIR_SCHEMA_VERSION;
+    next.transaction_id=transaction_id;
+    next.previous=*previous;next.candidate=*candidate;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(memcmp(&previous->outputs[lane],&candidate->outputs[lane],
+                  sizeof(previous->outputs[lane]))!=0&&
+           candidate_revision[lane]<=previous_revision[lane])return false;
+        next.previous_revision[lane]=previous_revision[lane];
+        next.candidate_revision[lane]=candidate_revision[lane];
+    }
+    next.crc=pz_map_journal_crc(&next);*out=next;return true;
+}
+bool ot_pz_map_journal_valid(const ot_pz_map_journal_t *record){
+    if(!record||record->magic!=OT_PZ_MAP_JOURNAL_MAGIC||
+       record->version!=OT_PZ_PAIR_SCHEMA_VERSION||!record->transaction_id||
+       pz_map_journal_crc(record)!=record->crc||
+       !ot_pz_map_valid(&record->previous)||!ot_pz_map_valid(&record->candidate)||
+       !pz_pair_revisions_valid(record->previous_revision,
+                                record->candidate_revision))return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(memcmp(&record->previous.outputs[lane],&record->candidate.outputs[lane],
+                  sizeof(record->previous.outputs[lane]))!=0&&
+           record->candidate_revision[lane]<=record->previous_revision[lane])
+            return false;
+    return true;
+}
+bool ot_pz_lane_journal_build(ot_pz_lane_journal_t *out,
+                         const ot_pz_lane_config_set_t *previous,
+                         const ot_pz_lane_config_set_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id){
+    if(!out||!previous||!candidate||!transaction_id||
+       !previous_revision||!candidate_revision||
+       !ot_pz_lane_config_set_valid(previous)||
+       !ot_pz_lane_config_set_valid(candidate)||
+       !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
+    ot_pz_lane_journal_t next={0};
+    next.magic=OT_PZ_LANE_JOURNAL_MAGIC;
+    next.version=OT_PZ_PAIR_SCHEMA_VERSION;
+    next.transaction_id=transaction_id;
+    next.previous=*previous;next.candidate=*candidate;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(memcmp(&previous->lanes[lane],&candidate->lanes[lane],
+                  sizeof(previous->lanes[lane]))!=0&&
+           candidate_revision[lane]<=previous_revision[lane])return false;
+        next.previous_revision[lane]=previous_revision[lane];
+        next.candidate_revision[lane]=candidate_revision[lane];
+    }
+    next.crc=pz_lane_journal_crc(&next);*out=next;return true;
+}
+bool ot_pz_lane_journal_valid(const ot_pz_lane_journal_t *record){
+    if(!record||record->magic!=OT_PZ_LANE_JOURNAL_MAGIC||
+       record->version!=OT_PZ_PAIR_SCHEMA_VERSION||!record->transaction_id||
+       pz_lane_journal_crc(record)!=record->crc||
+       !ot_pz_lane_config_set_valid(&record->previous)||
+       !ot_pz_lane_config_set_valid(&record->candidate)||
+       !pz_pair_revisions_valid(record->previous_revision,
+                                record->candidate_revision))return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(memcmp(&record->previous.lanes[lane],&record->candidate.lanes[lane],
+                  sizeof(record->previous.lanes[lane]))!=0&&
+           record->candidate_revision[lane]<=record->previous_revision[lane])
+            return false;
+    return true;
+}
+bool ot_pz_pair_intent_build(ot_pz_pair_intent_t *out,uint32_t transaction_id,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS]){
+    if(!out||!transaction_id||
+       !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
+    ot_pz_pair_intent_t next={0};
+    next.magic=OT_PZ_PAIR_INTENT_MAGIC;
+    next.version=OT_PZ_PAIR_SCHEMA_VERSION;
+    next.transaction_id=transaction_id;
+    memcpy(next.previous_revision,previous_revision,sizeof(next.previous_revision));
+    memcpy(next.candidate_revision,candidate_revision,sizeof(next.candidate_revision));
+    next.crc=pz_pair_intent_crc(&next);*out=next;return true;
+}
+bool ot_pz_pair_intent_valid(const ot_pz_pair_intent_t *record){
+    return record&&record->magic==OT_PZ_PAIR_INTENT_MAGIC&&
+        record->version==OT_PZ_PAIR_SCHEMA_VERSION&&record->transaction_id!=0u&&
+        pz_pair_intent_crc(record)==record->crc&&
+        pz_pair_revisions_valid(record->previous_revision,record->candidate_revision);
+}
+static const ot_pz_map_journal_t *pz_select_map_transaction(
+    const ot_pz_map_journal_t *active,const ot_pz_map_journal_t *staged,
+    uint32_t transaction_id){
+    if(staged&&staged->transaction_id==transaction_id)return staged;
+    if(active&&active->transaction_id==transaction_id)return active;
+    return NULL;
+}
+static const ot_pz_lane_journal_t *pz_select_lane_transaction(
+    const ot_pz_lane_journal_t *active,const ot_pz_lane_journal_t *staged,
+    uint32_t transaction_id){
+    if(staged&&staged->transaction_id==transaction_id)return staged;
+    if(active&&active->transaction_id==transaction_id)return active;
+    return NULL;
+}
+bool ot_pz_pair_journal_recover(
+                         const ot_pz_map_journal_t *map_active,
+                         const ot_pz_map_journal_t *map_staged,
+                         const ot_pz_lane_journal_t *lane_active,
+                         const ot_pz_lane_journal_t *lane_staged,
+                         const ot_pz_pair_intent_t *intent,
+                         const ot_pz_controller_t *legacy_fallback,
+                         ot_pz_controller_t *live,ot_pz_pending_t *pending,
+                         uint16_t active_revision[OT_PZ_OUTPUTS],
+                         uint16_t staged_revision[OT_PZ_OUTPUTS]){
+    if(!live||!pending||!active_revision||!staged_revision||
+       (map_active&&!ot_pz_map_journal_valid(map_active))||
+       (map_staged&&!ot_pz_map_journal_valid(map_staged))||
+       (lane_active&&!ot_pz_lane_journal_valid(lane_active))||
+       (lane_staged&&!ot_pz_lane_journal_valid(lane_staged))||
+       (intent&&!ot_pz_pair_intent_valid(intent)))return false;
+
+    const ot_pz_map_journal_t *map_record=NULL;
+    const ot_pz_lane_journal_t *lane_record=NULL;
+    if(intent){
+        /* The durable pair intent is written only after both stage records.
+         * It authorizes roll-forward across any active/staged write boundary. */
+        map_record=pz_select_map_transaction(map_active,map_staged,intent->transaction_id);
+        lane_record=pz_select_lane_transaction(lane_active,lane_staged,intent->transaction_id);
+        if(!map_record||!lane_record)return false;
+        if(memcmp(map_record->previous_revision,intent->previous_revision,
+                  sizeof(intent->previous_revision))!=0||
+           memcmp(map_record->candidate_revision,intent->candidate_revision,
+                  sizeof(intent->candidate_revision))!=0||
+           memcmp(lane_record->previous_revision,intent->previous_revision,
+                  sizeof(intent->previous_revision))!=0||
+           memcmp(lane_record->candidate_revision,intent->candidate_revision,
+                  sizeof(intent->candidate_revision))!=0)return false;
+    }else if(map_active||lane_active){
+        /* Without a commit intent, orphan stage records are not authoritative.
+         * Both active namespaces must already name the same complete pair. */
+        if(!map_active||!lane_active||
+           map_active->transaction_id!=lane_active->transaction_id||
+           memcmp(map_active->previous_revision,lane_active->previous_revision,
+                  sizeof(map_active->previous_revision))!=0||
+           memcmp(map_active->candidate_revision,lane_active->candidate_revision,
+                  sizeof(map_active->candidate_revision))!=0)return false;
+        map_record=map_active;lane_record=lane_active;
+    }else{
+        if(legacy_fallback&&!ot_pz_valid(legacy_fallback))return false;
+        if(legacy_fallback)*live=*legacy_fallback;
+        else ot_pz_defaults(live);
+        pending->candidate=*live;pending->pending=false;
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+            active_revision[lane]=staged_revision[lane]=1u;
+        return true;
+    }
+
+    ot_pz_controller_t previous,candidate;
+    if(!ot_pz_join(&lane_record->previous,&map_record->previous,&previous)||
+       !ot_pz_join(&lane_record->candidate,&map_record->candidate,&candidate))
+        return false;
+    if(map_record->transaction_id!=lane_record->transaction_id||
+       memcmp(map_record->previous_revision,lane_record->previous_revision,
+              sizeof(map_record->previous_revision))!=0||
+       memcmp(map_record->candidate_revision,lane_record->candidate_revision,
+              sizeof(map_record->candidate_revision))!=0)return false;
+    *live=previous;pending->candidate=candidate;
+    pending->pending=memcmp(&previous,&candidate,sizeof(previous))!=0;
+    memcpy(active_revision,map_record->previous_revision,
+           sizeof(map_record->previous_revision));
+    memcpy(staged_revision,map_record->candidate_revision,
+           sizeof(map_record->candidate_revision));
+    if(!pending->pending)
+        memcpy(active_revision,staged_revision,sizeof(map_record->candidate_revision));
+    return true;
+}
