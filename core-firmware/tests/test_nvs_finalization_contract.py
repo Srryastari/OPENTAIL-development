@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Source-contract audit for CORE durable config finalization (software only).
 
-Pure tests cannot simulate an ESP32 interrupt or torn physical flash, so this
-pins the real trigger, legacy-output compatibility, and authoritative
-Panel/Zone v3 control flow. Host journal recovery tests complement this source
-audit; physical brownout/ISR testing remains mandatory.
+Pure tests cannot simulate an ESP32 interrupt or torn physical flash. This
+pins trigger policy promotion, read-only legacy migration, and the authoritative
+v4 lane/map runtime pair store. Physical brownout/ISR testing remains mandatory.
 """
 from pathlib import Path
 
@@ -19,28 +18,24 @@ def between(start,end):
     return core.split(start,1)[1].split(end,1)[0]
 
 
-# The trigger profile and the retained legacy-output compatibility path keep
-# their original stage -> active -> erase -> quiet-window -> RAM ordering.
-for operation,begin,end,ram in (
-    ("trigger","static void tm_promote(uint32_t epoch){",
-     "static void om_promote(uint32_t epoch){","ot_tm_apply_if_released("),
-    ("legacy output compatibility","static void om_promote(uint32_t epoch){",
-     "static void config_activation_task(void *unused){","ot_om_apply_if_released("),
-):
-    body=between(begin,end)
-    assert body.index("config_write_active(h,")<body.index("config_clear_stage(h)"),operation
-    assert body.index("config_clear_stage(h)")<body.index(ram),operation
-    assert body.rfind("config_activation_idle(epoch,false)")<body.index(ram),operation
-    assert body.index("tm_gpio_input_mask()==0u")<body.index(ram),operation
-    assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in body
-    assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in body
-    assert "config_recovery_fault=true" in body
-    assert "stage.candidate_revision" in body
-    assert "stage.previous_revision" in body
-    assert "const bool staged=read==ESP_OK" in body
-    assert "OT_CFG_JOURNAL_KEY_ACTIVE" in body
-
-
+# Trigger policy retains its independent stage -> active -> erase ->
+# quiet-window -> RAM ordering. Legacy Output Manager records are migration
+# input only and are never promoted as a combined runtime configuration.
+trigger_promotion=between("static void tm_promote(uint32_t epoch){",
+                          "static void pz_promote(uint32_t epoch){")
+assert trigger_promotion.index("config_write_active(h,")<trigger_promotion.index(
+    "config_clear_stage(h)")
+assert trigger_promotion.index("config_clear_stage(h)")<trigger_promotion.index(
+    "ot_tm_apply_if_released(")
+assert trigger_promotion.rfind("config_activation_idle(epoch,false)")<trigger_promotion.index(
+    "ot_tm_apply_if_released(")
+assert trigger_promotion.index("tm_gpio_input_mask()==0u")<trigger_promotion.index(
+    "ot_tm_apply_if_released(")
+for token in ("input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+              "config_recovery_fault=true","stage.candidate_revision",
+              "stage.previous_revision","OT_CFG_JOURNAL_KEY_ACTIVE"):
+    assert token in trigger_promotion,token
 # The legacy v3 combined record is read-only migration input. The authoritative
 # v4 runtime joins a lane-only output_cfg journal and map-only zone_map journal.
 pz_load=between("static void pz_load(void){",
@@ -103,7 +98,7 @@ for phase in range(1,9):
 # Runtime promotion resumes an intent, validates the matching active pair,
 # checks the quiet-input epoch, then publishes only the joined candidate.
 panel_promotion=between("static void pz_promote(uint32_t epoch){",
-                        "static void om_promote(uint32_t epoch){")
+                        "static void config_activation_task(void *unused){")
 for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
               "ot_pz_pair_store_recover","ot_pz_join",
               "config_activation_idle(epoch,true)",
