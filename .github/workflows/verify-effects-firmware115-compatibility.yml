@@ -77,6 +77,12 @@ jobs:
           ref: ${{ env.EFFECTS_SHA }}
           path: approved-effects
           persist-credentials: false
+      - name: Checkout verified Firmware Panel/Zone identity source for independent JNI oracle
+        uses: actions/checkout@v4
+        with:
+          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          path: pinned-firmware127
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
