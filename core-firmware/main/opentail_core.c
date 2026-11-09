@@ -2068,15 +2068,20 @@ static bool fx_slot_key(uint8_t slot,char key[8]){
 }
 bool ot_ble_save_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
- ot_fx_zone_bank_t snapshot={0};bool active;
+ ot_fx_zone_bank_t snapshot={0};
+ ot_pz_output_t panel_snapshot[OT_OM_OUTPUTS]={0};
+ bool active;
  const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
  TickType_t now=xTaskGetTickCount();
  portENTER_CRITICAL(&state_lock);
  active=native_outputs_ready&&ble_fx_enabled&&show_window(now);
- if(active)memcpy(&snapshot,&fx_bank,sizeof(snapshot));
+ if(active){
+  memcpy(&snapshot,&fx_bank,sizeof(snapshot));
+  memcpy(panel_snapshot,pz_outputs.outputs,sizeof(panel_snapshot));
+ }
  portEXIT_CRITICAL(&state_lock);
  ot_fx_scene_record_t record;
- if(!active||!ot_fx_scene_pack(&record,&snapshot,now_ms))return false;
+ if(!active||!ot_fx_scene_pack(&record,&snapshot,panel_snapshot,now_ms))return false;
  nvs_handle_t h;
  if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
  esp_err_t e=nvs_set_blob(h,key,&record,sizeof(record));
