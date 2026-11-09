@@ -69,9 +69,9 @@ The CORE runtime emits a UART phase marker after each of these nine individually
 | 4 | Hardware-lane active record committed and read back |
 | 5 | Map active record committed and read back |
 | 6 | V4 initialization marker committed and read back in `ot_zone_map` |
-| 7 | Hardware-lane staged marker erased and absence verified |
-| 8 | Map staged marker erased and absence verified |
-| 9 | Pair-intent marker cleared and absence verified |
+| 7 | Hardware-lane staged record erased and absence verified |
+| 8 | Map staged record erased and absence verified |
+| 9 | Pair-intent record erased and absence verified |
 
 Also include a controlled interruption after phase 9 but before the final quiet-window/edge-epoch check and RAM publication. This is a separate pre-publication recovery boundary, not a tenth durable NVS phase.
 
