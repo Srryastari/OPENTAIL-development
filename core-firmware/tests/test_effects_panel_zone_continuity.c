@@ -394,19 +394,6 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(render_probe_frame(probe,active,bank,1158u));
     assert(memcmp(&original_order_reference.state[0][1],&probe->state[0][0],
                   sizeof(probe->state[0][0]))==0);
-    if(memcmp(&original_order_reference.state[0][0],&probe->state[0][1],
-               sizeof(probe->state[0][1]))!=0){
-        const ot_effects_1d_state_t *a=&original_order_reference.state[0][0];
-        const ot_effects_1d_state_t *b=&probe->state[0][1];
-        printf("FX-PZ reorder state mismatch: phase=%08x/%08x last=%u/%u prev=%u/%u seed=%u/%u initialized=%u/%u wled=%d particles=%d\\n",
-            a->original_phase_q32,b->original_phase_q32,
-            a->original_last_ms,b->original_last_ms,
-            a->previous_ms,b->previous_ms,
-            a->particles.seed,b->particles.seed,
-            a->initialized,b->initialized,
-            memcmp(&a->wled,&b->wled,sizeof(a->wled)),
-            memcmp(&a->particles,&b->particles,sizeof(a->particles)));
-    }
     assert(memcmp(&original_order_reference.state[0][0],&probe->state[0][1],
                   sizeof(probe->state[0][1]))==0);
     assert(probe->resolved_bank_index[0][0]==1u);
