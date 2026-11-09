@@ -1992,6 +1992,109 @@ final class BleDiscovery {
         },8000L);
     }
 
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelControl() {
+        panelControlQueued=false;
+        if(gatt==null||panelPreviewControl==null||panelControlPacket==null) {
+            GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
+                ?panelGeometryManagers[panelControlLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel control characteristic unavailable");
+            panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+            panelReadQueued=2;pumpQueue();return;
+        }
+        panelControlWritePending=true;panelControlWaitingWrite=true;
+        final BluetoothGatt owner=gatt;final int lease=++panelControlWriteLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelPreviewControl,panelControlPacket,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelPreviewControl.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelPreviewControl.setValue(panelControlPacket);
+                started=owner.writeCharacteristic(panelPreviewControl);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel preview control permission denied");}
+        if(!started) {
+            panelControlWaitingWrite=false;panelControlWritePending=false;
+            GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
+                ?panelGeometryManagers[panelControlLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel control ATT write could not start");
+            panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+            panelReadQueued=2;pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelControlWaitingWrite&&panelControlWriteLease==lease)
+                recoverStalledGatt(owner,"Panel preview control write timed out; reconnect required");
+        },8000L);
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelUpdate() {
+        panelUpdateQueued=false;
+        if(gatt==null||panelPreviewUpdate==null||panelUpdatePacket==null) {
+            GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
+                ?panelGeometryManagers[panelUpdateLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE characteristic unavailable");
+            panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
+        }
+        panelUpdateWritePending=true;
+        final BluetoothGatt owner=gatt;final int lease=++panelUpdateWriteLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelPreviewUpdate,panelUpdatePacket,
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelPreviewUpdate.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                panelPreviewUpdate.setValue(panelUpdatePacket);
+                started=owner.writeCharacteristic(panelPreviewUpdate);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel UPDATE permission denied");}
+        if(!started) {
+            panelUpdateWritePending=false;
+            GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
+                ?panelGeometryManagers[panelUpdateLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE ATT write could not start");
+            panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelUpdateWritePending&&panelUpdateWriteLease==lease)
+                recoverStalledGatt(owner,"Panel UPDATE write completion timed out; reconnect required");
+        },8000L);
+    }
+
+    private void panelControlWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelControlWaitingWrite)return;
+        int lane=panelControlLane,action=panelControlAction;
+        panelControlWaitingWrite=false;panelControlWritePending=false;
+        panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+        if(lane>=0&&lane<2) {
+            GeometryTransactionManager manager=panelGeometryManagers[lane];
+            if(status==BluetoothGatt.GATT_SUCCESS) {
+                if(manager!=null&&action==PANEL_CONTROL_COMMIT)manager.commitWriteCompleted();
+            } else if(manager!=null) {
+                manager.markSynchronizationUncertain("CORE Panel control ATT write failed ("+status+")");
+            }
+        }
+        if(status!=BluetoothGatt.GATT_SUCCESS)
+            notifyStatus("CORE Panel control write failed: "+status);
+        panelReadQueued=2;pumpQueue();
+    }
+
+    private void panelUpdateWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelUpdateWritePending)return;
+        int lane=panelUpdateLane;
+        panelUpdateWritePending=false;panelUpdatePacket=null;panelUpdateLane=-1;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            GeometryTransactionManager manager=lane>=0&&lane<2?panelGeometryManagers[lane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("CORE Panel UPDATE ATT write failed ("+status+")");
+            notifyStatus("CORE Panel UPDATE write failed: "+status);
+        }
+        // ATT write completion is not an application ACK. Always read status-v2.
+        panelReadQueued=2;pumpQueue();
+    }
+
     private void panelCancelWritten(BluetoothGatt owner,int status) {
         if(owner!=gatt||!panelCancelWaitingWrite)return;
         panelCancelWaitingWrite=false;panelControlWritePending=false;
