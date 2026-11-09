@@ -408,15 +408,17 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     /* A subsequent reorder is cancelled. The committed mapping and both
      * animation clocks must remain unchanged and continue on the next frame. */
     const ot_pz_controller_t committed=*active;
+    render_probe_t cancel_reference;
+    clone_render_probe(&cancel_reference,probe);
+    assert(render_probe_frame(&cancel_reference,active,bank,1164u));
     assert(ot_pz_preview_begin(&preview,active,0u,10u,10u,false,1160u));
     swap=preview.candidate.outputs[0].zones[0];
     preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
     preview.candidate.outputs[0].zones[1]=swap;
     assert(ot_pz_valid(&preview.candidate));
+    assert(render_probe_frame(probe,&preview.candidate,bank,1164u));
     ot_pz_preview_cancel(&preview);
     assert(memcmp(active,&committed,sizeof(committed))==0);
-    render_probe_t cancel_reference;
-    clone_render_probe(&cancel_reference,probe);
     assert(render_probe_frame(&cancel_reference,active,bank,1168u));
     assert(render_probe_frame(probe,active,bank,1168u));
     assert(same_effect_state(&cancel_reference.state[0][0],&probe->state[0][0]));
