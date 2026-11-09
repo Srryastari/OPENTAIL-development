@@ -5,8 +5,9 @@ from pathlib import Path
 import subprocess
 def git(*a): return subprocess.check_output(["git",*a],text=True).strip()
 m=json.loads(Path("docs/SOFTWARE-COMPATIBILITY-MATRIX.json").read_text())
+integrated=m.get("integrated_trees",{})
 for area,key in (("android","android"),("core-firmware","firmware")):
-    expected=m["sources"][key]["tree"]
+    expected=integrated.get(area,m["sources"][key]["tree"])
     actual=git("rev-parse","HEAD:"+area)
     assert actual==expected,(area,actual,expected)
 gate=".github/workflows/verify-active-sources.yml"
@@ -23,4 +24,10 @@ print("PASS scoped continuous playback and owner-approved UI changes; all 13 ren
 issue=m["issue93_correction"]
 changed=set(git("diff","--name-only",issue["base_sha"],"HEAD","--","android","core-firmware").splitlines())
 assert changed==set(issue["allowed_android_changes"]),changed
-print("PASS scoped Issue93 correction; all shared renderer/palette and physical gates retained")
+p0=m.get("owner_mandated_p0_addendum")
+if p0:
+    p0_changed=set(git("diff","--name-only",p0["base_sha"],"HEAD","--","android","core-firmware").splitlines())
+    assert p0_changed==set(p0["allowed_changes"]),(p0_changed,set(p0["allowed_changes"]))
+    assert m["release_approval"] is False
+    assert "100/100" in p0["physical_release_gate"] and "BLOCKED" in p0["physical_release_gate"]
+print("PASS scoped Issue93 integration plus exact owner-mandated Android P0 allowlist; physical release remains blocked")
