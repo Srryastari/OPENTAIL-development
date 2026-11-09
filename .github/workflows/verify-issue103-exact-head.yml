@@ -41,21 +41,21 @@ jobs:
                     'scripts/tests/test_core_flash_package.py',
                     '.github/workflows/verify-core-tertiary-ble.yml'):
               assert git('rev-parse','HEAD:'+p)==git('rev-parse',fw+':'+p),p
-           protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
-           owner_p0_java={
-             'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
-             'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
-             'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
-             'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
-             'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
-           }
-           changed_java={p for p in protected if p.startswith('android/app/src/main/java/')}
-           assert changed_java==owner_p0_java,(changed_java,owner_p0_java)
-           assert not any(p.startswith('android/app/src/main/res/') for p in protected)
-           assert not any(p.startswith(('core-firmware/main/ble_', 'core-firmware/main/config_journal.',
+          protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
+          owner_p0_java={
+              'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
+              'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
+              'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
+              'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
+              'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
+          }
+          changed_java={p for p in protected if p.startswith('android/app/src/main/java/')}
+          assert changed_java==owner_p0_java,(changed_java,owner_p0_java)
+          assert not any(p.startswith('android/app/src/main/res/') for p in protected)
+          assert not any(p.startswith(('core-firmware/main/ble_', 'core-firmware/main/config_journal.',
               'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
               'core-firmware/main/ot_version.')) for p in protected)
-           print('PASS: exact reconciled Effects CORE+JNI, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
+          print('PASS: exact reconciled Effects CORE+JNI, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
           PY
       - name: All 140 CORE host golden, speed, third roles, palette, stop, independent original/regression
         run: cd core-firmware && bash tests/run-host-tests.sh

@@ -49,16 +49,16 @@ public class GeometryTransactionManagerTest {
     @Test public void disconnectAndHardSequenceFaultRequireAuthoritativeReload() {
         byte[] original={1,2,3};
         GeometryTransactionManager manager=new GeometryTransactionManager(
-            new GeometryTransactionManager.Snapshot(1,12,original));
+            new GeometryTransactionManager.Snapshot(1,7,original));
         assertTrue(manager.requestBegin());
-        assertTrue(manager.acceptBegin(status(1,91,0,0x10,12,12,12,0,0,0)));
+        assertTrue(manager.acceptBegin(status(1,91,0,0x10,7,7,7,0,0,0)));
         manager.connectionLost();
         assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
         assertTrue(manager.syncUncertain());
         assertArrayEquals(original,manager.lastConfirmed().wire);
         assertFalse(manager.reconcile(status(1,91,0,0x10,12,12,12,0,0,0),
             new GeometryTransactionManager.Snapshot(1,12,original)));
-        assertTrue(manager.reconcile(status(4,91,0,0x10,12,12,12,0,0,0),
+        assertTrue(manager.reconcile(status(4,91,0,0x10,7,7,7,0,0,0),
             new GeometryTransactionManager.Snapshot(1,12,original)));
         assertFalse(manager.syncUncertain());
     }
@@ -88,12 +88,12 @@ public class GeometryTransactionManagerTest {
 
     @Test public void committingRejectDoesNotAbortOrDemoteActiveCommit() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
-            new GeometryTransactionManager.Snapshot(0,3,new byte[]{1}));
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1}));
         assertTrue(manager.requestBegin());
-        assertTrue(manager.acceptBegin(status(1,5,0,0x44,3,3,3,0,0,0)));
+        assertTrue(manager.acceptBegin(status(1,5,0,0x44,7,7,7,0,0,0)));
         assertNotNull(manager.requestCommit(status(1,5,0,0x44,3,3,3,0,0,0)));
         manager.commitWriteCompleted();
-        manager.observeStatus(status(2,5,0,0x44,3,4,3,5,0,5));
+        manager.observeStatus(status(2,5,0,0x44,7,8,7,5,0,5));
         assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
         assertArrayEquals(new byte[]{1},manager.lastConfirmed().wire);
     }
