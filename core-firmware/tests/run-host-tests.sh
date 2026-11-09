@@ -42,6 +42,13 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   tests/test_issue99_frame_quality.c -o /tmp/ot-issue99-quality -lm
 /tmp/ot-issue99-quality
 
+# Issue102: independently verify all eight previously metadata-only RGB3 roles.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c \
+  main/palette_1d.c main/particle_system_1d.c main/wled_1d.c \
+  tests/test_issue102_third_roles.c -o /tmp/ot-issue102-rgb -lm
+/tmp/ot-issue102-rgb
+
 # Compare actual pixel frames against verbatim pinned WLED FX.cpp functions,
 # with independent upstream math/color helpers and a narrow palette=0 shim.
 # Certifies only the enumerated RGB/gamma-off profiles (not full catalog parity).
@@ -88,8 +95,9 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_overlay_engine.c test
 # or trigger implementation changes. Physically verified output stays gated.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
   main/output_manager.c main/core_logic.c main/arbitration_logic.c \
-  main/fx_overlay_engine.c tests/test_effects_oem_safety_matrix.c \
-  -o /tmp/ot-effects-oem-safety && /tmp/ot-effects-oem-safety
+  main/fx_overlay_engine.c main/wled_fx_compat.c \
+  tests/test_effects_oem_safety_matrix.c \
+  -o /tmp/ot-effects-oem-safety -lm && /tmp/ot-effects-oem-safety
 python3 tests/test_effects_render_safety_contract.py
 # The same corrected NVS recovery journal must preserve independently
 # assigned FX zones and never auto-play a saved show after reboot.
