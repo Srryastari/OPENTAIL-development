@@ -379,6 +379,114 @@ final class BleDiscovery {
         panelSnapshotFresh[lane]=false;panelStatusFresh[lane]=false;
         panelSnapshotQueuedLane=lane;pumpQueue();return true;
     }
+    /** Begin only from two fresh, stable, authoritative lane maps/statuses. */
+    boolean beginPanelPreview(int lane,GeometryTransactionManager.LayoutMapping mapping) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           mapping==null||panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        for(int i=0;i<2;i++)
+            if(!panelSnapshotFresh[i]||!panelStatusFresh[i]||
+               panelConfirmedSnapshots[i]==null||panelStatuses[i]==null)return false;
+        PanelPreviewProtocol.LaneSnapshot[] snapshots=panelConfirmedSnapshots.clone();
+        PanelPreviewProtocol.Status[] statuses=panelStatuses.clone();
+        try {GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,snapshots,statuses);}
+        catch(IllegalArgumentException ex){notifyStatus("Panel geometry preflight rejected: "+ex.getMessage());return false;}
+        PanelPreviewProtocol.Status status=statuses[lane];
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        if(manager==null||manager.state()!=GeometryTransactionManager.State.READY||
+           status.state!=PanelPreviewProtocol.STATE_IDLE||status.sessionId!=0)return false;
+        GeometryTransactionManager.Snapshot confirmed=manager.lastConfirmed();
+        if(confirmed==null||confirmed.revision!=snapshots[lane].activeRevision||
+           !Arrays.equals(confirmed.wire,snapshots[lane].wire))return false;
+        if(!manager.requestBegin())return false;
+        byte[] packet;
+        try {packet=PanelPreviewProtocol.begin(lane,status.activeRevision,
+            status.pixelCapacity,panelCapabilities.schemaVersion);}
+        catch(IllegalArgumentException ex) {
+            manager.markSynchronizationUncertain("Panel BEGIN values changed after preflight");
+            return false;
+        }
+        if(queuePanelControl(lane,PANEL_CONTROL_BEGIN,packet))return true;
+        manager.markSynchronizationUncertain("Panel BEGIN could not enter the serialized GATT queue");
+        panelReadQueued=2;pumpQueue();return false;
+    }
+
+    /** One acknowledged UPDATE at a time; callers send the next MTU batch only after status-v2 ACK. */
+    boolean updatePanelPreview(int lane,byte[] candidateWire,
+            PanelPreviewProtocol.UpdateDescriptor[] descriptors) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewUpdate==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        GeometryTransactionManager.Update update;
+        try {update=manager.queueUpdate(candidateWire,descriptors,negotiatedMtu);}
+        catch(IllegalArgumentException|IllegalStateException ex) {
+            notifyStatus("Panel UPDATE rejected before BLE write: "+ex.getMessage());return false;
+        }
+        if(update==null)return false;
+        panelUpdatePacket=update.packet;panelUpdateLane=lane;panelUpdateQueued=true;
+        pumpQueue();return true;
+    }
+
+    boolean commitPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        byte[] packet=manager.requestCommit(status);
+        if(packet==null)return false;
+        if(queuePanelControl(lane,PANEL_CONTROL_COMMIT,packet))return true;
+        manager.markSynchronizationUncertain("Panel COMMIT could not enter the serialized GATT queue");
+        panelReadQueued=2;pumpQueue();return false;
+    }
+
+    boolean heartbeatPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        return queuePanelControl(lane,PANEL_CONTROL_HEARTBEAT,
+            PanelPreviewProtocol.heartbeat(lane,manager.sessionId()));
+    }
+
+    boolean cancelPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelCancelQueued||panelControlQueued||panelControlWritePending||
+           panelUpdateQueued||panelUpdateWritePending)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        manager.markSynchronizationUncertain("Preview cancelled by owner");
+        panelCancelPacket=PanelPreviewProtocol.cancel(lane,manager.sessionId());
+        panelCancelQueued=true;pumpQueue();return true;
+    }
+
+    private boolean queuePanelControl(int lane,int action,byte[] packet) {
+        if(packet==null||lane<0||lane>1||gatt==null||!canControl()||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        panelControlPacket=packet;panelControlLane=lane;panelControlAction=action;
+        panelControlQueued=true;pumpQueue();return true;
+    }
+
     PanelPreviewProtocol.LaneSnapshot lastConfirmedPanelSnapshot(int lane) {
         if(lane<0||lane>1||!panelSnapshotFresh[lane])return null;
         return panelConfirmedSnapshots[lane];
