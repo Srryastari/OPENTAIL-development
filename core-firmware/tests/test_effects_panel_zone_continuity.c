@@ -18,6 +18,13 @@
 #define TEST_PIXELS 16u
 #define TEST_BASE_REVISION 7u
 
+static bool same_wled_rgb(ot_wled_rgb_t a,ot_wled_rgb_t b){
+    return a.r==b.r&&a.g==b.g&&a.b==b.b;
+}
+static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
+    return a.r==b.r&&a.g==b.g&&a.b==b.b;
+}
+
 typedef struct {
     ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
     ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
@@ -345,8 +352,8 @@ static void test_stop_and_physical_priority(ot_fx_zone_bank_t *bank){
     const ot_rgb_t effect={24u,10u,80u};
     assert(ot_om_trigger_overlay(OT_OM_BRAKE,OT_SIG_BRAKE,true,255u,&physical));
     const ot_rgb_t brake=ot_om_trigger_color(OT_OM_BRAKE,OT_SIG_BRAKE,255u);
-    assert(memcmp(&physical,&brake,sizeof(brake))==0);
-    assert(memcmp(&physical,&effect,sizeof(effect))!=0);
+    assert(same_rgb(physical,brake));
+    assert(!same_rgb(physical,effect));
 
     assert(ot_om_trigger_overlay(OT_OM_LEFT,
         (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),true,255u,&physical));
