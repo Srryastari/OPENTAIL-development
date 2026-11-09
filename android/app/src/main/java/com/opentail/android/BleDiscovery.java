@@ -396,6 +396,8 @@ final class BleDiscovery {
     }
     private void panelDisconnected() {
         if(panelWatchdog.hasSession())panelNotify(null,panelWatchdog.markDisconnected());
+        for(GeometryTransactionManager manager:panelGeometryManagers)
+            if(manager!=null)manager.connectionLost();
         panelCapabilities=null;panelLastStatus=null;
         panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
@@ -1653,7 +1655,18 @@ final class BleDiscovery {
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());pumpQueue();return;
         }
         panelLastStatus=current;
+        GeometryTransactionManager manager=panelGeometryManagers[current.lane];
+        if(manager!=null) {
+            manager.observeStatus(current);
+            if(manager.state()==GeometryTransactionManager.State.BEGINNING &&
+               current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acceptBegin(current);
+            else if(manager.state()==GeometryTransactionManager.State.UPDATE_PENDING &&
+                    current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acknowledgeUpdate(current);
+            if(current.lastRejectedReason==PanelPreviewProtocol.ERR_COMMITTING_LOCKED)
+                manager.rejectUpdateDuringCommit(PanelPreviewProtocol.ERR_COMMITTING_LOCKED);
+        }
         TelemetrySequenceWatchdog.Decision decision=panelWatchdog.observe(current);
+        if(manager!=null&&decision.warning)manager.markSynchronizationUncertain(decision.message);
         panelNotify(current,decision);
 
         if(panelReconciliationPending&&panelReconciliationSnapshotVerified) {

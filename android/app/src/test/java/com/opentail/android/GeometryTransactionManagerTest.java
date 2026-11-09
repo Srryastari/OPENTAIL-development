@@ -63,6 +63,29 @@ public class GeometryTransactionManagerTest {
         assertFalse(manager.syncUncertain());
     }
 
+    @Test public void duplicateWarningCanResumeOnlyAfterMatchingAuthoritativeSequenceAndCrc() {
+        byte[] original={3,0,1,2};byte[] edited={3,0,1,9};
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,original));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,55,0,0x1111,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor d=
+            new PanelPreviewProtocol.UpdateDescriptor(1,1,0,10,5,0);
+        byte[] packet=PanelPreviewProtocol.update(0,55,1,
+            new PanelPreviewProtocol.UpdateDescriptor[]{d},247);
+        assertNotNull(manager.queueUpdate(edited,packet));
+        assertTrue(manager.acknowledgeUpdate(status(1,55,1,0x2222,7,7,7,0,0,4)));
+        manager.markSynchronizationUncertain("Duplicate sequence observed");
+        assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
+        assertNull(manager.queueUpdate(edited,packet));
+        assertTrue(manager.reconcile(status(1,55,1,0x2222,7,7,7,0,0,5),
+            new GeometryTransactionManager.Snapshot(0,7,original)));
+        assertEquals(GeometryTransactionManager.State.ACTIVE,manager.state());
+        assertFalse(manager.syncUncertain());
+        assertArrayEquals(edited,manager.candidateCopy());
+        assertArrayEquals(original,manager.lastConfirmed().wire);
+    }
+
     @Test public void committingRejectDoesNotAbortOrDemoteActiveCommit() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,3,new byte[]{1}));

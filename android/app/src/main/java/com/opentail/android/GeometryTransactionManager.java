@@ -46,6 +46,14 @@ final class GeometryTransactionManager {
     synchronized byte[] candidateCopy() { return candidate==null?null:Arrays.copyOf(candidate,candidate.length); }
     synchronized boolean syncUncertain() { return syncUncertain; }
     synchronized String lastError() { return lastError; }
+    synchronized long sessionId() { return sessionId; }
+
+    synchronized void markSynchronizationUncertain(String reason) {
+        syncUncertain=true;
+        lastError=reason==null?"Geometry synchronization is uncertain":reason;
+        if(state!=State.COMMITTING && state!=State.COMMIT_REQUESTED)
+            state=State.RECONCILING;
+    }
 
     synchronized boolean requestBegin() {
         if(state!=State.READY||syncUncertain)return false;
@@ -148,6 +156,37 @@ final class GeometryTransactionManager {
            status.hardSyncFault||status.state==PanelPreviewProtocol.STATE_COMMITTING||
            (status.state==PanelPreviewProtocol.STATE_COMMITTED &&
             status.activeRevision!=status.renderRevision))return false;
+
+        // A recoverable duplicate may resume the same active preview only
+        // when CORE confirms its exact accepted sequence and candidate CRC.
+        if(status.state==PanelPreviewProtocol.STATE_ACTIVE && sessionId!=0 &&
+           status.sessionId==sessionId && candidate!=null &&
+           state!=State.COMMIT_REQUESTED && state!=State.COMMITTING) {
+            if(pendingPacket!=null) {
+                if(status.lastAcceptedSequence!=pendingSequence)return false;
+                pendingPacket=null;pendingSequence=0;
+                nextSequence=next(status.lastAcceptedSequence);
+                candidateCrc32=status.candidateCrc32;
+            } else {
+                long expected=nextSequence==1?0:previous(nextSequence);
+                if(status.lastAcceptedSequence!=expected ||
+                   status.candidateCrc32!=candidateCrc32)return false;
+            }
+            lastConfirmed=copy(authoritative);
+            syncUncertain=false;lastError=null;state=State.ACTIVE;
+            return true;
+        }
+
+        // A new session after cancellation/reload can return the manager to
+        // READY, but the old hard-fault session itself cannot be cleared.
+        if(status.state==PanelPreviewProtocol.STATE_ACTIVE &&
+           state==State.RECONCILING && candidate==null && status.sessionId!=sessionId) {
+            lastConfirmed=copy(authoritative);
+            candidate=null;pendingPacket=null;pendingSequence=0;sessionId=0;
+            targetRevision=-1;syncUncertain=false;lastError=null;state=State.READY;
+            return true;
+        }
+        if(state==State.COMMIT_REQUESTED||state==State.COMMITTING)return false;
         lastConfirmed=copy(authoritative);
         candidate=null;pendingPacket=null;pendingSequence=0;sessionId=0;
         targetRevision=-1;syncUncertain=false;lastError=null;state=State.READY;

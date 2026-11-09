@@ -1152,6 +1152,7 @@ assert(geometryTransactions.includes('ERR_COMMITTING_LOCKED') &&
        geometryTransactions.includes('lastConfirmed') &&
        geometryTransactions.includes('candidateCrc32') &&
        geometryTransactions.includes('connectionLost()') &&
+       geometryTransactions.includes('markSynchronizationUncertain') &&
        geometryTransactions.includes('authoritative geometry snapshot'),
        'Geometry manager must preserve last-confirmed geometry through COMMITTING and uncertain disconnects');
 assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
@@ -1162,7 +1163,10 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('PanelPreviewProtocol.Status.parse(value)') &&
        bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
        bleSource.includes('panelScheduleCommitPoll(owner)') &&
-       bleSource.includes('panelWatchdog.reconcile(current,true)'),
+       bleSource.includes('panelWatchdog.reconcile(current,true)') &&
+       bleSource.includes('manager.observeStatus(current)') &&
+       bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
+       bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot'),
        'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
 const systemSection=compose.split('private fun SettingsPage(')[1].split('private fun SettingsDiagnostics(')[0];
 assert(systemSection.includes('panelSyncWarning.value?.let') &&
