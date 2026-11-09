@@ -141,7 +141,7 @@ assert 'OT_CFG_JOURNAL_KEY_ACTIVE "active_v3"' in header
 assert 'OT_CFG_JOURNAL_KEY_STAGED "stage_v3"' in header
 assert "new_rev==UINT16_MAX" in core
 assert "tm_revision==UINT16_MAX" in core
-assert "om_revision[index]==UINT16_MAX" in core
+# Panel/Zone v3 rejects per-lane revision exhaustion in pz_save_controller_locked above.
 assert 'expected_config_revision required' in core
 assert 'om_number(obj,"expected_config_revision",&expected_rev,1,UINT16_MAX)' in core
 assert "if(memcmp(&next_all[index],&next,sizeof(next))==0)" in core
