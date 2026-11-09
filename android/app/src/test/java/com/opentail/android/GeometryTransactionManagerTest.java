@@ -370,6 +370,14 @@ public class GeometryTransactionManagerTest {
                 idlePanelStatus(1,7,PanelPreviewProtocol.MapIdentity.parse(right).activePixels)});
     }
 
+    @Test public void authoritativeMapRoleAndUpdateWireSentinelAreDistinctValues() {
+        PanelPreviewProtocol.LaneSnapshot snapshot=panelSnapshot(0,623,1,"Housing",
+            129,1,"Top",0,10);
+        PanelPreviewProtocol.MapIdentity map=PanelPreviewProtocol.MapIdentity.parse(snapshot);
+        assertEquals(0xff,map.zones.get(0).role);
+        assertEquals(0x0f,PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE);
+    }
+
     @Test public void proposedGs400MappingMustMatchFreshAuthoritativeMapAndFitCapacity() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         // Reuse the existing GS400 fixture setup through the helper below.
