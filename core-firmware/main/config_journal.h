@@ -101,6 +101,8 @@ bool ot_pz_journal_recover(const ot_pz_journal_t *active,
 
 typedef struct {
     uint32_t magic,version,crc,transaction_id;
+    uint8_t reset_mask;
+    uint8_t reserved[3];
     ot_pz_map_t previous,candidate;
     uint16_t previous_revision[OT_PZ_OUTPUTS];
     uint16_t candidate_revision[OT_PZ_OUTPUTS];
@@ -124,6 +126,11 @@ bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
                          const uint16_t previous_revision[OT_PZ_OUTPUTS],
                          const uint16_t candidate_revision[OT_PZ_OUTPUTS],
                          uint32_t transaction_id);
+bool ot_pz_map_journal_build_reset(ot_pz_map_journal_t *out,
+                         const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id,uint8_t reset_mask);
 bool ot_pz_map_journal_valid(const ot_pz_map_journal_t *record);
 bool ot_pz_lane_journal_build(ot_pz_lane_journal_t *out,
                          const ot_pz_lane_config_set_t *previous,
