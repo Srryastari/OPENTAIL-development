@@ -94,7 +94,7 @@ assert "__atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u" in pz_load
 
 # The exact same portable v4 store used by CORE implements all nine durable
 # write boundaries and is exercised by test_panel_zone_pair_store.c.
-store=pair_store
+store=(root/"main/panel_zone_pair_store.c").read_text()
 store_header=(root/"main/panel_zone_pair_store.h").read_text()
 for token in ("ot_pz_pair_store_begin","ot_pz_pair_store_finish",
               "ot_pz_pair_store_snapshot","ot_pz_pair_store_recover",
