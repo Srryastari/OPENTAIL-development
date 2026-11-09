@@ -52,7 +52,6 @@ assert "ot_effects_1d_reset(&prior_fx_state[old_z],0u)" in render
 assert "for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)" in render
 assert "memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation))" in render
 assert "ot_effects_1d_find_prior_zone_state(" in render
-assert "fx_state[ch][z]=prior_fx_state[prior_index]" in render
 assert "int ot_effects_1d_find_prior_zone_state(" in effects
 assert "void ot_effects_1d_move_state(" in effects
 assert "memset(source,0,sizeof(*source))" in effects
@@ -60,13 +59,27 @@ assert "prior_panel_ids[i]==panel_id" in effects
 assert "prior_zone_ids[i]==zone_id" in effects
 assert "prior_generations[i]==generation" in effects
 assert "old_z==(uint8_t)prior_index" in render
-assert "ot_fx_bank_resolve_zone_identity(&fx_bank_identity[ch]" in render
+assert "ot_fx_bank_resolve_zone_identity(&local_panel[ch],&local_fx_bank" in render
 assert "resolved_fx_bank_index" in render
 assert "bool ot_fx_bank_resolve_zone_identity(" in fxbank
-assert "identity->seen_refresh_ms[bank_z]!=slot->refreshed_ms" in fxbank
-assert "identity->owner_zone_id[bank_z]=owner_zone" in fxbank
+assert "slot->owner_panel_id==zone_cfg->panel_id" in fxbank
+assert "slot->owner_zone_id==zone_cfg->id" in fxbank
+assert "slot->owner_panel_id=panel->zones[zone].panel_id" in fxbank
 assert "if(same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
+
+# All public live mutations resolve current logical zone masks to stable bank slots.
+assert "ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs," in core
+assert "ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req," in core
+assert "ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs," in core
+assert "fx_bank.zones[o][resolved[o][z]].spark=*spark" in core
+assert "fx_bank.zones[o][resolved[o][z]].overlay=*overlay" in core
+assert "ot_fx_bank_apply_configured_identity(&replacement,&targeted," in core
+assert "ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs)" in core
+assert "bool ot_fx_bank_apply_configured_identity(" in fxbank
+assert "bool ot_fx_bank_apply_continuous_tertiary_identity(" in fxbank
+assert "bool ot_fx_bank_set_overlay_identity(" in fxbank
+assert "void ot_fx_bank_prune_orphans(" in fxbank
 
 # The physical safety override is performed after all decorative FX and
 # before logical RGB capture. Decorative calibration must stay strictly
