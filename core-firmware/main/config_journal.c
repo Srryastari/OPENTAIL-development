@@ -41,8 +41,7 @@ bool ot_tm_policy_build(ot_tm_policy_record_t *out,uint8_t input_active_low,
                         uint8_t turn_release_input_mask,uint32_t turn_release_hold_us){
     if(!out||input_active_low>1u||assertion_samples==0u||
        assertion_samples>16u||sample_period_ms==0u||sample_period_ms>100u||
-       turn_release_input_mask==0u||
-       (turn_release_input_mask&~((1u<<OT_IN_COUNT)-1u))!=0u||
+       turn_release_input_mask!=OT_TM_TURN_RELEASE_INPUT_MASK||
        turn_release_hold_us==0u||turn_release_hold_us>1000000u)return false;
     memset(out,0,sizeof(*out));
     out->magic=OT_TM_POLICY_MAGIC;out->version=OT_TM_POLICY_VERSION;
@@ -58,8 +57,7 @@ bool ot_tm_policy_valid(const ot_tm_policy_record_t *record){
         record->version==OT_TM_POLICY_VERSION&&record->input_active_low<=1u&&
         record->assertion_samples>0u&&record->assertion_samples<=16u&&
         record->sample_period_ms>0u&&record->sample_period_ms<=100u&&
-        record->turn_release_input_mask!=0u&&
-        (record->turn_release_input_mask&~((1u<<OT_IN_COUNT)-1u))==0u&&
+        record->turn_release_input_mask==OT_TM_TURN_RELEASE_INPUT_MASK&&
         record->reserved[0]==0u&&record->reserved[1]==0u&&record->reserved[2]==0u&&
         record->turn_release_hold_us>0u&&
         record->turn_release_hold_us<=1000000u&&
