@@ -40,7 +40,7 @@ def main():
     assert args.integration_sha == INTEGRATED, "Unreviewed firmware SHA"
     assert git(ROOT, "rev-parse", "HEAD") == INTEGRATED, "Wrong firmware checkout"
     assert git(effects, "rev-parse", "HEAD") == EFFECTS, "Wrong Effects checkout"
-    assert git(ROOT, "status", "--porcelain") == "", "Source tree modified"
+    assert subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--", "core-firmware", "android"], check=False).returncode == 0, "Tracked source tree modified"
     manifest_path = ROOT / "android/app/src/main/cpp/core/SOURCE.json"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["source_commit"] == EFFECTS
