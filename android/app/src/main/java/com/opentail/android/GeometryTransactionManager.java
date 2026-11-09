@@ -1,6 +1,8 @@
 package com.opentail.android;
 
 import java.util.Arrays;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,6 +69,28 @@ final class GeometryTransactionManager {
                 new PanelPreviewProtocol.UpdateDescriptor[zones.size()];
             for(int i=0;i<zones.size();i++)out[i]=zones.get(i).descriptor();
             return out;
+        }
+
+        /** Deterministic local candidate receipt; CORE's candidate CRC remains authoritative. */
+        byte[] candidateWire() {
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            out.write(lane);out.write(activePixels&0xff);out.write((activePixels>>>8)&0xff);
+            out.write(panels.size());out.write(zones.size());
+            for(MappedPanel panel:panels) {
+                byte[] name=panel.name.getBytes(StandardCharsets.UTF_8);
+                out.write(panel.id&0xff);out.write((panel.id>>>8)&0xff);
+                out.write(Math.min(255,name.length));out.write(name,0,Math.min(255,name.length));
+            }
+            for(MappedZone zone:zones) {
+                byte[] name=zone.name.getBytes(StandardCharsets.UTF_8);
+                out.write(zone.id&0xff);out.write((zone.id>>>8)&0xff);
+                out.write(zone.panelId&0xff);out.write((zone.panelId>>>8)&0xff);
+                out.write(zone.section);out.write(zone.start&0xff);out.write((zone.start>>>8)&0xff);
+                out.write(zone.count&0xff);out.write((zone.count>>>8)&0xff);
+                out.write(zone.roleFlags);out.write(Math.min(255,name.length));
+                out.write(name,0,Math.min(255,name.length));
+            }
+            return out.toByteArray();
         }
 
         /** Split descriptors to the exact negotiated ATT write-command budget. */
