@@ -1704,6 +1704,14 @@ final class BleDiscovery {
         if(panelReconciliationPending&&panelReconciliationSnapshotVerified) {
             if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
                 panelReconciliationSnapshotVerified=false;
+                if(panelTransactionPollAttempts[current.lane]>=40&&
+                   !panelTransactionTimeoutLatched[current.lane]) {
+                    panelTransactionTimeoutLatched[current.lane]=true;
+                    TelemetrySequenceWatchdog.Decision timeout=panelWatchdog.markReconciliationFailed(
+                        "CORE commit remains COMMITTING beyond the bounded acknowledgement window; observing same commit");
+                    if(manager!=null)manager.markSynchronizationUncertain(timeout.message);
+                    panelNotify(current,timeout);
+                }
                 panelScheduleCommitPoll(owner);
                 pumpQueue();return;
             }
