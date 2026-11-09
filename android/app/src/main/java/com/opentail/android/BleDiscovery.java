@@ -2020,7 +2020,6 @@ final class BleDiscovery {
                 ?panelGeometryManagers[panelControlLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel control characteristic unavailable");
             panelStatusExpectedLane=panelControlLane;
-            panelStatusExpectedLane=panelControlLane;
             panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
             panelReadQueued=2;pumpQueue();return;
         }
@@ -2042,6 +2041,7 @@ final class BleDiscovery {
             GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
                 ?panelGeometryManagers[panelControlLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel control ATT write could not start");
+            panelStatusExpectedLane=panelControlLane;
             panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
             panelReadQueued=2;pumpQueue();return;
         }
@@ -2058,7 +2058,6 @@ final class BleDiscovery {
             GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
                 ?panelGeometryManagers[panelUpdateLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE characteristic unavailable");
-            panelStatusExpectedLane=panelUpdateLane;
             panelStatusExpectedLane=panelUpdateLane;
             panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
         }
@@ -2080,6 +2079,7 @@ final class BleDiscovery {
             GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
                 ?panelGeometryManagers[panelUpdateLane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE ATT write could not start");
+            panelStatusExpectedLane=panelUpdateLane;
             panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
         }
         ui.postDelayed(()->{
