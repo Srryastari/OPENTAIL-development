@@ -91,6 +91,9 @@ class ComposeMainActivity : ComponentActivity() {
     private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
+    // Conditional diagnostic only; the approved Settings UI is unchanged when healthy.
+    private val panelSyncWarning = mutableStateOf<String?>(null)
+    private val panelStatusSummary = mutableStateOf("Panel telemetry unavailable")
     private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
     private val paletteV3Supported = mutableStateOf(false)
     private val paletteLoadedSlot = mutableIntStateOf(-1)
@@ -263,6 +266,17 @@ class ComposeMainActivity : ComponentActivity() {
         ble.setInfoListener { version ->
             runOnUiThread { firmwareVersion.value = version }
         }
+        ble.setPanelStatusListener({ status ->
+            runOnUiThread {
+                panelStatusSummary.value = if(status==null) "Panel telemetry disconnected" else
+                    "Panel " + (status.lane+1) + " · session " + status.sessionId +
+                    " · accepted sequence " + status.lastAcceptedSequence
+            }
+        }, { decision ->
+            runOnUiThread {
+                panelSyncWarning.value = if(decision.warning) decision.message else null
+            }
+        })
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
@@ -2278,6 +2292,9 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
             SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
+            panelSyncWarning.value?.let { warning ->
+                Caption("Synchronization warning · " + warning, t)
+            }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             // No reset command exists in the pinned CORE interface. Do not
             // present a local document clear as a successful controller reset.

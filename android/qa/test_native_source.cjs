@@ -14,6 +14,9 @@ const palettes=fs.readFileSync('android/app/src/main/java/com/opentail/android/N
 const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePresetRestore.java','utf8');
 const approved=fs.readFileSync('android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
+const panelProtocol=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java','utf8');
+const panelWatchdog=fs.readFileSync('android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java','utf8');
+const geometryTransactions=fs.readFileSync('android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
@@ -1120,3 +1123,55 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         compose.includes('Text("Controller output"') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
+
+
+// Owner P0: exact Issue #126 Panel v2 telemetry contract, transaction guards,
+// and conditional warning in the already-approved Settings -> System card.
+assert(panelProtocol.includes('STATUS_BYTES = 61') &&
+       panelProtocol.includes('MAP_BYTES = 667') &&
+       panelProtocol.includes('ERR_COMMITTING_LOCKED = 5') &&
+       panelProtocol.includes('CAP_STATUS_V2') &&
+       panelProtocol.includes('lastRejectedSequence') &&
+       panelProtocol.includes('committingRejectCount') &&
+       panelProtocol.includes('candidateCrc32') &&
+       panelProtocol.includes('SnapshotHeader') &&
+       panelProtocol.includes('crc16(byte[] bytes)'),
+       'Android Panel codec must match the documented 61-byte status-v2 and 667-byte map contract');
+assert(panelWatchdog.includes('missingCount>last.missingCount') &&
+       panelWatchdog.includes('outOfOrderCount>last.outOfOrderCount') &&
+       panelWatchdog.includes('duplicateCount>last.duplicateCount') &&
+       panelWatchdog.includes('conflictCount>last.conflictCount') &&
+       panelWatchdog.includes('hardSyncFault') &&
+       panelWatchdog.includes('reconcile(') &&
+       panelWatchdog.includes('hardFaultSession'),
+       'Telemetry watchdog must detect sequence anomalies and require authoritative reconciliation');
+for (const state of ['READY','BEGINNING','ACTIVE','UPDATE_PENDING','COMMIT_REQUESTED','COMMITTING','RECONCILING','ERROR']) {
+  assert(geometryTransactions.includes(state),'Geometry transaction state missing: '+state);
+}
+assert(geometryTransactions.includes('ERR_COMMITTING_LOCKED') &&
+       geometryTransactions.includes('lastConfirmed') &&
+       geometryTransactions.includes('candidateCrc32') &&
+       geometryTransactions.includes('connectionLost()') &&
+       geometryTransactions.includes('authoritative geometry snapshot'),
+       'Geometry manager must preserve last-confirmed geometry through COMMITTING and uncertain disconnects');
+assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf31') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf32') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf35') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf37') &&
+       bleSource.includes('PanelPreviewProtocol.Status.parse(value)') &&
+       bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
+       bleSource.includes('panelScheduleCommitPoll(owner)') &&
+       bleSource.includes('panelWatchdog.reconcile(current,true)'),
+       'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
+const systemSection=compose.split('private fun SettingsPage(')[1].split('private fun SettingsDiagnostics(')[0];
+assert(systemSection.includes('panelSyncWarning.value?.let') &&
+       systemSection.includes('Synchronization warning') &&
+       !systemSection.includes('Panel Diagnostics') &&
+       compose.includes('setPanelStatusListener('),
+       'Sequence warnings must appear conditionally in existing Settings -> System without a new screen');
+for (const file of [
+  'android/app/src/test/java/com/opentail/android/PanelPreviewProtocolTest.java',
+  'android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java',
+  'android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java'
+]) assert(fs.existsSync(file),'P0 Android regression suite missing: '+file);
