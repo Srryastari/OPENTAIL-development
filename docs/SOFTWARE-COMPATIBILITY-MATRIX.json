@@ -501,7 +501,7 @@
   "integrated_trees": {
     "android": "5238e11f02e876439cf3f7e41a875d4c2ef14b31",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b",
-    "core_firmware": "9c7ccf9d4381f2ea0d7e83404c4e753b5ca4b2f0"
+    "core_firmware": "c216acde4c0abed85a9d20747f810c82d33586ea"
   },
   "owner_mandated_p0_addendum": {
     "base_sha": "1a9cfc4b25ef57bda38a7861ac5548c3747d9605",
@@ -516,7 +516,7 @@
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
       "android/qa/test_native_source.cjs"
     ],
-    "firmware_contract_sha": "c809163463f6b6b44509c954b2b0e54918ce69e9",
+    "firmware_contract_sha": "5e52149c31147b5415e7b760b32d2a38f093cfa5",
     "protocol": {
       "status_v2_bytes": 61,
       "map_wire_bytes": 667,
