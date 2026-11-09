@@ -142,8 +142,13 @@ static void fail_closed_mismatch_and_fallback(void){
         &live,&pending,ar,sr));
     assert(!ot_pz_pair_journal_recover(&ma,NULL,&la,NULL,&intent,&previous,
         &live,&pending,ar,sr));
-    assert(!ot_pz_pair_journal_recover(&ma,&ms,&la,&ls,NULL,&previous,
-        &live,&pending,ar,sr));
+    ot_pz_lane_journal_t mismatched_active=la;
+    mismatched_active.transaction_id=9u;
+    mismatched_active.crc=0u;
+    mismatched_active.crc=ot_cfg_crc32(&mismatched_active,sizeof(mismatched_active));
+    assert(ot_pz_lane_journal_valid(&mismatched_active));
+    assert(!ot_pz_pair_journal_recover(&ma,NULL,&mismatched_active,NULL,NULL,
+        &previous,&live,&pending,ar,sr));
 
     bad_intent=intent;bad_intent.candidate_revision[0]++;
     bad_intent.crc=0u;bad_intent.crc=ot_cfg_crc32(&bad_intent,sizeof(bad_intent));
