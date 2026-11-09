@@ -15,8 +15,8 @@ final class PanelPreviewProtocol {
     // Firmware's four-bit UPDATE role sentinel for OT_PZ_ROLE_UNASSIGNED.
     // PR #127 must normalize 0x0f to 0xff before accepting/storing the role.
     static final int ROLE_UNASSIGNED_WIRE = 0x0f;
-    // Fail closed until Firmware normalizes the 4-bit sentinel before role validation.
-    static final boolean CORE_UNASSIGNED_ROLE_UPDATE_SUPPORTED = false;
+    // Firmware PR #127 exact HEAD f646b399 normalizes this sentinel; host proof PASS.
+    static final boolean CORE_UNASSIGNED_ROLE_UPDATE_SUPPORTED = true;
     static final int OP_BEGIN = 0x01, OP_UPDATE = 0x02, OP_COMMIT = 0x03,
                      OP_CANCEL = 0x04, OP_HEARTBEAT = 0x05;
     static final int ERR_COMMITTING_LOCKED = 5, ERR_SEQUENCE_GAP = 6,
