@@ -178,6 +178,9 @@ assert store.index("OT_PZ_LANE_KEY_ACTIVE") < store.index(
     "OT_PZ_MAP_KEY_ACTIVE")
 for phase in range(1,10):
     assert f"phase_context,{phase}u" in store
+assert "if(s->map_active.reset_mask&(1u<<lane))return true;" in store
+pair_store_tests=(root/"tests/test_panel_zone_pair_store.c").read_text()
+assert "reset_marker_first_write_and_idempotence" in pair_store_tests
 
 # The ESP-IDF adapter commits one NVS key per durable phase. There is no
 # multi-key "atomic batch" abstraction hiding an untested internal write.
