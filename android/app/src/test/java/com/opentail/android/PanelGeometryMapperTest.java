@@ -1,11 +1,13 @@
 package com.opentail.android;
 
 import android.content.SharedPreferences;
+import org.json.JSONObject;
+import org.json.JSONArray;
 import org.junit.Test;
 import java.lang.reflect.Proxy;
 import static org.junit.Assert.*;
 
-/** Pure local Layout -> CORE Panel/Zone identity mapping tests. */
+/** Pure Layout -> CORE Panel/Zone identity mapping tests. */
 public class PanelGeometryMapperTest {
     private static final class Storage {
         String persisted,pending;
@@ -40,15 +42,18 @@ public class PanelGeometryMapperTest {
     }
 
     private static NativeProject zone(NativeProject p,String name,int pixels,
-                                      int lane,int section,int panel,String panelName) {
+                                      int lane,int section,int panel,String panelName) throws Exception {
         assertTrue(p.addZone(name,pixels));
         String id=p.zone(p.zoneCount()-1).optString("id");
         assertTrue(p.mapZoneToOutputSlot(id,lane,section));
-        assertTrue(p.setPhysicalPanel(id,panel,panelName));
+        JSONObject document=new JSONObject(p.exportJson());
+        JSONObject z=document.getJSONArray("layout").getJSONObject(p.zoneCount()-1);
+        z.put("physicalPanelId",panel).put("physicalPanelName",panelName);
+        assertTrue("valid explicit panel metadata",p.importJson(document.toString()));
         return p;
     }
 
-    private static NativeProject gs400Layout() {
+    private static NativeProject gs400Layout() throws Exception {
         NativeProject p=new NativeProject(new Storage().prefs);
         // Four logical sections share each housing Panel; trunk is its own Panel.
         zone(p,"Left Top",118,0,0,1,"Left Housing");
@@ -64,9 +69,10 @@ public class PanelGeometryMapperTest {
         return p;
     }
 
-    @Test public void gs400LayoutMapsSectionsToHousingAndSeparateTrunkPanels() {
-        PanelGeometryMapper.Mapping m=PanelGeometryMapper.build(gs400Layout());
-        PanelGeometryMapper.Lane left=m.lane(0),right=m.lane(1);
+    @Test public void gs400LayoutMapsSectionsToHousingAndSeparateTrunkPanels() throws Exception {
+        GeometryTransactionManager.LayoutMapping m=
+            GeometryTransactionManager.mapLayout(gs400Layout());
+        GeometryTransactionManager.MappedLane left=m.lane(0),right=m.lane(1);
         assertEquals(623,left.activePixels);assertEquals(623,right.activePixels);
         assertEquals(2,left.panels.size());assertEquals(2,right.panels.size());
         assertEquals(5,left.zones.size());assertEquals(5,right.zones.size());
@@ -99,39 +105,52 @@ public class PanelGeometryMapperTest {
         assertTrue(p.addZone("Unassigned panel",10));
         String id=p.zone(0).optString("id");
         assertTrue(p.mapZoneToOutputSlot(id,0,0));
-        try { PanelGeometryMapper.build(p);fail("Panel identity must not be guessed"); }
+        try { GeometryTransactionManager.mapLayout(p);fail("Panel identity must not be guessed"); }
         catch(IllegalStateException expected) {
             assertTrue(expected.getMessage().contains("explicit CORE Panel identity"));
         }
     }
 
-    @Test public void panelIdentityIsControllerWideAndReassignmentClearsStaleIdentity() {
+    @Test public void panelIdsAreControllerWideAndCannotBeReusedAcrossOutputs() throws Exception {
         NativeProject p=new NativeProject(new Storage().prefs);
-        assertTrue(p.addZone("Left",10));
-        String id=p.zone(0).optString("id");
-        assertTrue(p.mapZoneToOutputSlot(id,0,0));
-        assertTrue(p.setPhysicalPanel(id,7,"Left Housing"));
-        assertFalse(p.setPhysicalPanel(id,7,"Right Housing"));
-        assertTrue(p.mapZoneToOutputSlot(id,1,0));
-        assertFalse(p.zone(0).has("physicalPanelId"));
-        assertFalse(p.zone(0).has("physicalPanelName"));
-        try { PanelGeometryMapper.build(p);fail("New output needs explicit Panel identity"); }
-        catch(IllegalStateException expected) {}
+        zone(p,"Left",10,0,0,7,"Left Housing");
+        zone(p,"Right",10,1,0,7,"Right Housing");
+        try { GeometryTransactionManager.mapLayout(p);fail("Panel IDs are controller-wide"); }
+        catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("controller-wide"));
+        }
     }
 
-    @Test public void rejectsPixelCapacityAndPanelOrZoneCountOverflow() {
+    @Test public void rejectsPixelCapacityAndPanelOrZoneCountOverflow() throws Exception {
         NativeProject p=new NativeProject(new Storage().prefs);
         zone(p,"Too long",2001,0,0,1,"Housing");
-        try { PanelGeometryMapper.build(p);fail("pixel capacity"); }
+        try { GeometryTransactionManager.mapLayout(p);fail("pixel capacity"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("2,000-pixel"));
         }
 
         NativeProject tooMany=new NativeProject(new Storage().prefs);
         for(int i=0;i<5;i++)zone(tooMany,"Panel "+i,1,0,i,i+1,"Panel "+i);
-        try { PanelGeometryMapper.build(tooMany);fail("panel capacity"); }
+        try { GeometryTransactionManager.mapLayout(tooMany);fail("panel capacity"); }
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("four-Panel"));
+        }
+    }
+
+    @Test public void rejectsConflictingPanelNamesAndPanelIdsOutsideWireRange() throws Exception {
+        NativeProject p=new NativeProject(new Storage().prefs);
+        zone(p,"Top",10,0,0,1,"Housing");
+        zone(p,"Bottom",10,0,1,1,"Trunk");
+        try { GeometryTransactionManager.mapLayout(p);fail("conflicting panel names"); }
+        catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("conflicting names"));
+        }
+
+        NativeProject invalid=new NativeProject(new Storage().prefs);
+        zone(invalid,"Invalid",10,0,0,128,"Housing");
+        try { GeometryTransactionManager.mapLayout(invalid);fail("panel ID wire range"); }
+        catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Panel identity"));
         }
     }
 }
