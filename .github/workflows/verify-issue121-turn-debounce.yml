@@ -36,6 +36,7 @@ jobs:
               "core-firmware/main/opentail_core.c",
               "core-firmware/tests/run-host-tests.sh",
               "core-firmware/tests/test_signal_debouncer.c",
+              "core-firmware/tests/test_turn_edge_queue_concurrency.py",
               "core-firmware/tests/test_trigger_runtime_contract.py",
               "core-firmware/tests/test_single_watchdog_contract.py",
               "docs/ISSUE121-TURN-SIGNAL-DEBOUNCE.md",
@@ -56,6 +57,7 @@ jobs:
             tests/test_signal_debouncer.c -o /tmp/ot-signal-debouncer
           /tmp/ot-signal-debouncer
           python3 tests/test_trigger_runtime_contract.py
+          python3 tests/test_turn_edge_queue_concurrency.py
           python3 tests/test_nvs_finalization_contract.py
       - name: Full CORE host regression including Effects, BLE, NVS, STOP and watchdog
         run: cd core-firmware && bash tests/run-host-tests.sh
