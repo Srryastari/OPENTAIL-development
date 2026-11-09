@@ -3,7 +3,7 @@
 # products. They are no longer embedded, synchronized or versioned with CORE.
 idf_component_register(
     SRCS "opentail_core.c" "core_logic.c" "arbitration_logic.c"
-         "output_manager.c" "trigger_manager.c" "config_journal.c" "panel_zone.c" "panel_zone_protocol.c" "panel_zone_diag.c" "show_logic.c"
+         "output_manager.c" "trigger_manager.c" "config_journal.c" "panel_zone.c" "panel_zone_pair_store.c" "panel_zone_protocol.c" "panel_zone_diag.c" "show_logic.c"
          "wled_fx_compat.c" "wled_1d.c" "ble_fx_command.c"
          "particle_system_1d.c" "fx_overlay_engine.c" "effects_1d.c" "ot_auto_effects.c"
          "fx_preset_record.c" "palette_1d.c" "palette_profile.c" "palette_transfer.c" "palette_ble_v3.c"
