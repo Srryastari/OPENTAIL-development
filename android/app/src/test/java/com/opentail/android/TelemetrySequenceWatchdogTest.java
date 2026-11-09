@@ -41,7 +41,9 @@ public class TelemetrySequenceWatchdogTest {
     @Test public void acceptedSequenceJumpAndOutOfOrderCounterAreHardFaults() {
         TelemetrySequenceWatchdog jump=new TelemetrySequenceWatchdog();
         jump.observe(status(1,20,1,0,0,0,0,0,0,4));
-        assertTrue(jump.observe(status(1,20,3,0,0,0,0,0,0,4)).hardFault);
+        TelemetrySequenceWatchdog.Decision gap=jump.observe(status(1,20,3,0,0,0,0,0,0,4));
+        assertTrue(gap.hardFault);
+        assertTrue(gap.message.contains("missing sequence 2"));
         TelemetrySequenceWatchdog order=new TelemetrySequenceWatchdog();
         order.observe(status(1,21,2,0,0,0,0,0,0,4));
         assertTrue(order.observe(status(1,21,2,0,1,0,0,0,7,7)).hardFault);
