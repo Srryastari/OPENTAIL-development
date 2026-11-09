@@ -269,8 +269,7 @@ class ComposeMainActivity : ComponentActivity() {
         ble.setPanelStatusListener({ status ->
             runOnUiThread {
                 panelStatusSummary.value = if(status==null) "Panel telemetry disconnected" else
-                    "Panel " + (status.lane+1) + " · session " + status.sessionId +
-                    " · accepted sequence " + status.lastAcceptedSequence
+                    status.diagnosticSummary()
             }
         }, { decision ->
             runOnUiThread {
