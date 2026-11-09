@@ -373,6 +373,8 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     const uint16_t original_zone1=active->outputs[0].zones[1].id;
     const uint16_t panel_id=active->outputs[0].zones[0].panel_id;
     assert(original_zone0!=original_zone1);
+    uint8_t *moving_scratch=probe->state[0][1].wled.scratch;
+    assert(moving_scratch!=NULL);
 
     /* Reference both continuous effects at the same future timestamp
      * without changing the active geometry. */
@@ -398,9 +400,7 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
                              &probe->state[0][0]));
     assert(same_effect_state(&original_order_reference.state[0][0],
                              &probe->state[0][1]));
-    assert(probe->state[0][0].wled.scratch==
-           original_order_reference.state[0][1].wled.scratch ||
-           probe->state[0][0].wled.scratch!=NULL);
+    assert(probe->state[0][0].wled.scratch==moving_scratch);
     assert(probe->resolved_bank_index[0][0]==1u);
     assert(probe->resolved_bank_index[0][1]==0u);
     release_render_probe(&original_order_reference);
