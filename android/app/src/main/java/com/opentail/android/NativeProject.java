@@ -168,11 +168,13 @@ final class NativeProject {
                     throw new JSONException("Panel identity requires an assigned output, ID 1..127 and name");
                 int panelId=z.optInt("physicalPanelId");
                 String panelName=z.optString("physicalPanelName");
-                Integer priorLane=physicalPanelLanes.putIfAbsent(panelId,z.optInt("physicalOutput"));
-                String priorName=physicalPanels.putIfAbsent(panelId,panelName);
+                Integer priorLane=physicalPanelLanes.get(panelId);
+                String priorName=physicalPanels.get(panelId);
                 if ((priorLane!=null && priorLane.intValue()!=z.optInt("physicalOutput")) ||
                     (priorName!=null && !priorName.equals(panelName)))
                     throw new JSONException("Panel ID must identify one named panel on one output");
+                if(priorLane==null)physicalPanelLanes.put(panelId,z.optInt("physicalOutput"));
+                if(priorName==null)physicalPanels.put(panelId,panelName);
             }
             lastEnd = start + length;
         }
