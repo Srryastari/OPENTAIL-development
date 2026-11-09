@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "effects_1d.h"
@@ -23,6 +24,35 @@ static bool same_wled_rgb(ot_wled_rgb_t a,ot_wled_rgb_t b){
 }
 static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
     return a.r==b.r&&a.g==b.g&&a.b==b.b;
+}
+static bool same_effect_state(const ot_effects_1d_state_t *a,
+                               const ot_effects_1d_state_t *b){
+    if(!a||!b||a->wled.scratch_bytes!=b->wled.scratch_bytes||
+       a->wled.scratch_magic!=b->wled.scratch_magic)return false;
+    if(a->wled.scratch_bytes&&(!a->wled.scratch||!b->wled.scratch||
+       memcmp(a->wled.scratch,b->wled.scratch,a->wled.scratch_bytes)!=0))
+        return false;
+    ot_effects_1d_state_t ac=*a,bc=*b;
+    ac.wled.scratch=NULL;bc.wled.scratch=NULL;
+    return memcmp(&ac,&bc,sizeof(ac))==0;
+}
+static void clone_render_probe(render_probe_t *dst,const render_probe_t *src){
+    *dst=*src;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        for(unsigned zone=0;zone<OT_OM_ZONES;zone++){
+            const ot_wled_fx_state_t *from=&src->state[lane][zone].wled;
+            ot_wled_fx_state_t *to=&dst->state[lane][zone].wled;
+            if(from->scratch&&from->scratch_bytes){
+                to->scratch=malloc(from->scratch_bytes);
+                assert(to->scratch);
+                memcpy(to->scratch,from->scratch,from->scratch_bytes);
+            }
+        }
+}
+static void release_render_probe(render_probe_t *probe){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
+            ot_effects_1d_reset(&probe->state[lane][zone],0u);
 }
 
 typedef struct {
@@ -222,7 +252,7 @@ static void test_zone_independence_and_discontiguous_ranges(
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         const uint32_t started=1000u+lane*40u;
         ot_ble_fx_packet_t turn=make_fx(OT_FX_DIMENSIONAL_RIFT,lane,0u);
-        ot_ble_fx_packet_t safety=make_fx(OT_FX_EMBERS,lane,1u);
+        ot_ble_fx_packet_t safety=make_fx(OT_WLED_RIPPLE,lane,1u);
         assert(ot_fx_bank_apply(bank,&turn,started,false));
         assert(ot_fx_bank_apply(bank,&safety,started,false));
         bank->zones[lane][0].continuous=true;
@@ -233,8 +263,8 @@ static void test_zone_independence_and_discontiguous_ranges(
     assert(probe->state[1][0].original_clock_initialized);
     assert(probe->state[0][0].original_phase_q32!=
            probe->state[1][0].original_phase_q32);
-    assert(probe->state[0][1].initialized);
-    assert(probe->state[1][1].initialized);
+    assert(probe->state[0][1].wled.scratch!=NULL);
+    assert(probe->state[1][1].wled.scratch!=NULL);
     assert(probe->state[0][0].particles.seed!=
            probe->state[0][1].particles.seed);
     assert(bank->zones[0][0].generation!=bank->zones[0][1].generation);
@@ -276,8 +306,9 @@ static void test_preview_phase_commit_cancel_and_unaffected_zone(
 
     /* Compare independent clones at the same timestamp. Zone 1 is unchanged
      * and must produce byte-identical reference frames during zone 0 editing. */
-    render_probe_t reference=*probe;
-    render_probe_t previewed=*probe;
+    render_probe_t reference,previewed;
+    clone_render_probe(&reference,probe);
+    clone_render_probe(&previewed,probe);
     assert(render_probe_frame(&reference,active,bank,1110u));
     assert(render_probe_frame(&previewed,&preview.candidate,bank,1110u));
     const unsigned untouched[]={3u,4u,5u,12u,13u,14u};
@@ -331,6 +362,8 @@ static void test_preview_phase_commit_cancel_and_unaffected_zone(
     assert(previewed.state[0][0].original_phase_q32!=phase_before_cancel);
     assert(bank->zones[0][0].generation==generation);
     assert(bank->zones[0][0].started_ms==started);
+    release_render_probe(&reference);
+    release_render_probe(&previewed);
 }
 
 static void test_identity_state_survives_reorder_delete_and_cancel(
@@ -343,7 +376,8 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
 
     /* Reference both continuous effects at the same future timestamp
      * without changing the active geometry. */
-    render_probe_t original_order_reference=*probe;
+    render_probe_t original_order_reference;
+    clone_render_probe(&original_order_reference,probe);
     assert(render_probe_frame(&original_order_reference,active,bank,1158u));
 
     /* Reorder through the real preview candidate and commit promotion. */
@@ -360,12 +394,16 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     ot_pz_preview_cancel(&preview);
 
     assert(render_probe_frame(probe,active,bank,1158u));
-    assert(memcmp(&original_order_reference.state[0][1],&probe->state[0][0],
-                  sizeof(probe->state[0][0]))==0);
-    assert(memcmp(&original_order_reference.state[0][0],&probe->state[0][1],
-                  sizeof(probe->state[0][1]))==0);
+    assert(same_effect_state(&original_order_reference.state[0][1],
+                             &probe->state[0][0]));
+    assert(same_effect_state(&original_order_reference.state[0][0],
+                             &probe->state[0][1]));
+    assert(probe->state[0][0].wled.scratch==
+           original_order_reference.state[0][1].wled.scratch ||
+           probe->state[0][0].wled.scratch!=NULL);
     assert(probe->resolved_bank_index[0][0]==1u);
     assert(probe->resolved_bank_index[0][1]==0u);
+    release_render_probe(&original_order_reference);
 
     /* A subsequent reorder is cancelled. The committed mapping and both
      * animation clocks must remain unchanged and continue on the next frame. */
@@ -377,17 +415,18 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(ot_pz_valid(&preview.candidate));
     ot_pz_preview_cancel(&preview);
     assert(memcmp(active,&committed,sizeof(committed))==0);
-    render_probe_t cancel_reference=*probe;
+    render_probe_t cancel_reference;
+    clone_render_probe(&cancel_reference,probe);
     assert(render_probe_frame(&cancel_reference,active,bank,1168u));
     assert(render_probe_frame(probe,active,bank,1168u));
-    assert(memcmp(&cancel_reference.state[0][0],&probe->state[0][0],
-                  sizeof(probe->state[0][0]))==0);
-    assert(memcmp(&cancel_reference.state[0][1],&probe->state[0][1],
-                  sizeof(probe->state[0][1]))==0);
+    assert(same_effect_state(&cancel_reference.state[0][0],&probe->state[0][0]));
+    assert(same_effect_state(&cancel_reference.state[0][1],&probe->state[0][1]));
+    release_render_probe(&cancel_reference);
 
     /* Delete the first ordered zone. The other zone shifts from index 1 to 0;
      * its renderer state and its bank-owned effect slot must follow its IDs. */
-    render_probe_t delete_reference=*probe;
+    render_probe_t delete_reference;
+    clone_render_probe(&delete_reference,probe);
     assert(render_probe_frame(&delete_reference,active,bank,1176u));
     const ot_pz_range_update_t delete_first={
         .panel_id=panel_id,.zone_id=original_zone1,.range_id=0u,
@@ -403,8 +442,8 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     *active=preview.candidate;
     ot_pz_preview_cancel(&preview);
     assert(render_probe_frame(probe,active,bank,1176u));
-    assert(memcmp(&delete_reference.state[0][1],&probe->state[0][0],
-                  sizeof(probe->state[0][0]))==0);
+    assert(same_effect_state(&delete_reference.state[0][1],&probe->state[0][0]));
+    release_render_probe(&delete_reference);
     assert(probe->prior_zone_id[0][0]==original_zone0);
     assert(probe->resolved_bank_index[0][0]==0u);
 }
