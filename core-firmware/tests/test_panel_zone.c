@@ -216,6 +216,79 @@ static void capacity_cases(void){
     }
     assert(ot_pz_valid(&cfg)); /* 1,246 total pixels, 623 per output */
 }
+static void storage_split_roundtrip(void){
+    ot_pz_controller_t runtime;ot_pz_defaults(&runtime);
+    ot_pz_output_t *left=&runtime.outputs[0];make_output(left,0u,100u);
+    (void)snprintf(left->name,sizeof(left->name),"Left physical lane");
+    left->color_order=OT_OM_RGB;left->rgb_gain[0]=177u;
+    left->white_gain[2]=222u;left->gamma_enabled=true;
+    make_panel(left,0u,101u,"Left housing");
+    make_zone(left,0u,201u,101u,OT_OM_BRAKE,"Brake",0u,40u);
+    make_zone(left,1u,202u,101u,OT_OM_LEFT,"Turn",40u,60u);
+    left->zones[1].range_count=2u;
+    left->zones[1].ranges[1]=(ot_pz_range_t){80u,20u};
+    ot_pz_output_t *right=&runtime.outputs[1];make_output(right,1u,80u);
+    (void)snprintf(right->name,sizeof(right->name),"Right physical lane");
+    right->color_order=OT_OM_GRB;right->rgb_gain[1]=199u;
+    make_panel(right,1u,111u,"Right housing");
+    make_zone(right,0u,211u,111u,OT_OM_REVERSE,"Reverse",0u,80u);
+    assert(ot_pz_valid(&runtime));
+
+    ot_pz_lane_config_set_t hardware={0};ot_pz_map_t geometry={0};
+    assert(ot_pz_split(&runtime,&hardware,&geometry));
+    assert(ot_pz_lane_config_set_valid(&hardware));
+    assert(ot_pz_map_valid(&geometry));
+    assert(sizeof(ot_pz_map_output_t)<sizeof(ot_pz_output_t));
+    assert(hardware.lanes[0].lane_id==0u&&hardware.lanes[1].lane_id==1u);
+    assert(geometry.outputs[0].lane_id==0u&&geometry.outputs[1].lane_id==1u);
+    assert(hardware.lanes[0].active_pixels==100u);
+    assert(hardware.lanes[0].color_order==OT_OM_RGB);
+    assert(hardware.lanes[0].rgb_gain[0]==177u);
+    assert(hardware.lanes[0].white_gain[2]==222u);
+    assert(hardware.lanes[0].gamma_enabled);
+    assert(geometry.outputs[0].panel_count==1u);
+    assert(geometry.outputs[0].zone_count==2u);
+    assert(geometry.outputs[0].zones[1].range_count==2u);
+    assert(geometry.outputs[0].zones[1].ranges[1].start==80u);
+    assert(memcmp(geometry.outputs[0].panels,left->panels,
+                  sizeof(left->panels))==0);
+    assert(memcmp(geometry.outputs[0].zones,left->zones,
+                  sizeof(left->zones))==0);
+
+    ot_pz_controller_t joined={0};
+    assert(ot_pz_join(&hardware,&geometry,&joined));
+    assert(memcmp(&joined,&runtime,sizeof(runtime))==0);
+
+    /* Hardware edits cannot mutate the map record; geometry edits cannot
+     * mutate the physical lane record. The joined view validates both. */
+    ot_pz_lane_config_set_t changed_hardware=hardware;
+    changed_hardware.lanes[0].color_order=OT_OM_BGR;
+    changed_hardware.lanes[0].active_pixels=120u;
+    assert(memcmp(&geometry.outputs[0],&((ot_pz_map_t){.outputs={
+        geometry.outputs[0],geometry.outputs[1]}}).outputs[0],
+        sizeof(geometry.outputs[0]))==0);
+    ot_pz_map_t changed_geometry=geometry;
+    changed_geometry.outputs[0].zones[0].ranges[0].count=35u;
+    assert(hardware.lanes[0].active_pixels==100u);
+    assert(hardware.lanes[0].color_order==OT_OM_RGB);
+    assert(ot_pz_join(&changed_hardware,&changed_geometry,&joined));
+    assert(joined.outputs[0].active_pixels==120u);
+    assert(joined.outputs[0].color_order==OT_OM_BGR);
+    assert(joined.outputs[0].zones[0].ranges[0].count==35u);
+
+    ot_pz_lane_config_set_t wrong_lane=hardware;
+    wrong_lane.lanes[1].lane_id=0u;
+    assert(!ot_pz_join(&wrong_lane,&geometry,&joined));
+    ot_pz_map_t wrong_map_lane=geometry;
+    wrong_map_lane.outputs[1].lane_id=0u;
+    assert(!ot_pz_map_valid(&wrong_map_lane));
+    ot_pz_lane_config_set_t short_lane=hardware;
+    short_lane.lanes[0].active_pixels=10u;
+    assert(!ot_pz_join(&short_lane,&geometry,&joined));
+    ot_pz_lane_config_set_t bad_order=hardware;
+    bad_order.lanes[0].color_order=0xffu;
+    assert(!ot_pz_lane_config_set_valid(&bad_order));
+}
 static void wire_roundtrip(void){
     ot_pz_controller_t cfg;ot_pz_defaults(&cfg);
     ot_pz_output_t *o=&cfg.outputs[1];make_output(o,1,100);
@@ -235,7 +308,7 @@ static void wire_roundtrip(void){
 }
 int main(void){
     defaults_and_fallback();hierarchy_and_ranges();invalid_maps();
-    legacy_migration();capacity_cases();wire_roundtrip();
+    legacy_migration();capacity_cases();storage_split_roundtrip();wire_roundtrip();
     puts("PASS Issue126 Panel/Zone model: migration, ranges, fallback, 256 masks, 1,246 pixels, 2,048/lane and v3 codec");
     return 0;
 }
