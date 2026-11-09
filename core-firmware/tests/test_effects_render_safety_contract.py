@@ -10,6 +10,7 @@ core=(root/"main/opentail_core.c").read_text()
 output=(root/"main/output_manager.c").read_text()
 effects=(root/"main/effects_1d.c").read_text()
 overlay=(root/"main/fx_overlay_engine.c").read_text()
+fxbank=(root/"main/fx_zone_bank.c").read_text()
 render_start=core.index("static void led_task(")
 render=core[render_start:]
 def ordered(blob,items):
@@ -57,8 +58,11 @@ assert "prior_panel_ids[i]==panel_id" in effects
 assert "prior_zone_ids[i]==zone_id" in effects
 assert "prior_generations[i]==generation" in effects
 assert "old_z==(uint8_t)prior_index" in render
-assert "fx_bank_owner_zone_id" in render and "fx_bank_owner_panel_id" in render
+assert "ot_fx_bank_resolve_zone_identity(&fx_bank_identity[ch]" in render
 assert "resolved_fx_bank_index" in render
+assert "bool ot_fx_bank_resolve_zone_identity(" in fxbank
+assert "identity->seen_refresh_ms[bank_z]!=slot->refreshed_ms" in fxbank
+assert "identity->owner_zone_id[bank_z]=owner_zone" in fxbank
 assert "if(same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
