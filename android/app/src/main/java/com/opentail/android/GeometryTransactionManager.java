@@ -292,7 +292,6 @@ final class GeometryTransactionManager {
     synchronized byte[] candidateCopy() { return candidate==null?null:Arrays.copyOf(candidate,candidate.length); }
     synchronized boolean syncUncertain() { return syncUncertain; }
     synchronized String lastError() { return lastError; }
-    synchronized long sessionId() { return sessionId; }
 
     synchronized void markSynchronizationUncertain(String reason) {
         syncUncertain=true;
