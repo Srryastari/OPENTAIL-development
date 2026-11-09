@@ -336,7 +336,7 @@ assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
 assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
 assert "ot_pz_pair_store_begin(&pz_pair_store_io,&previous,candidate," in core
 assert "ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id," in core
-assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and "OT_PZ_PAIR_NS_ZONE_MAP" in core
+assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and '"ot_zone_map"' in core
 assert "pz_save_controller_locked(&candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
