@@ -16,6 +16,32 @@ static void make_packet(uint8_t *p,unsigned count,uint32_t seq){
         d[5]=10u;d[6]=0u;d[7]=(uint8_t)OT_OM_DECORATIVE;
     }
 }
+static void role_sentinel_semantics(void){
+    ot_pz_controller_t committed;
+    ot_pz_defaults(&committed);
+    committed.outputs[0].active_pixels=100u;
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,100u));
+    const ot_pz_range_update_t unassigned={
+        .panel_id=1u,.zone_id=2u,.range_id=0u,.start=0u,.count=10u,
+        .role_flags=0x0fu
+    };
+    assert(ot_pz_preview_apply_updates(&preview,0u,&unassigned,1u,
+                                       1u,1u,false,101u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].role==OT_PZ_ROLE_UNASSIGNED);
+    ot_pz_preview_cancel(&preview);
+
+    memset(&preview,0,sizeof(preview));
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,100u));
+    ot_pz_range_update_t off=unassigned;
+    off.panel_id=3u;off.zone_id=4u;off.role_flags=0x00u;
+    assert(ot_pz_preview_apply_updates(&preview,0u,&off,1u,
+                                       1u,1u,false,101u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].role==OT_OM_OFF);
+    ot_pz_preview_cancel(&preview);
+}
 static void control_packets(void){
     ot_pz_tx_control_packet_t parsed={0};
     const uint8_t begin[8]={0xfe,0x01,1u,0x34,0x12,0x80,0x00,0x03};
@@ -115,5 +141,6 @@ int main(void){
     assert(ot_pz_tx_update_admit(false,false,true,101u,11u,101u,12u)==
            OT_PZ_TX_UPDATE_REJECT_CONFLICT);
     control_packets();
+    role_sentinel_semantics();
     return 0;
 }
