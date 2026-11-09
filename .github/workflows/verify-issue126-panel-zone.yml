@@ -61,7 +61,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
-          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf && chmod -R a+rwX build
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf && chmod a+rwx build
       - name: Verify application and flash manifest
         run: |
           test -s core-firmware/build/opentail_core_alpha.bin
