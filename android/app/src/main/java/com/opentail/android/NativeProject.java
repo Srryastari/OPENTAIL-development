@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -128,6 +130,8 @@ final class NativeProject {
         JSONArray layout = candidate.getJSONArray("layout");
         if (layout.length() > MAX_ZONES) throw new JSONException("Too many design zones");
         Set<String> ids = new HashSet<>();
+        Map<Integer,String> physicalPanels = new HashMap<>();
+        Map<Integer,Integer> physicalPanelLanes = new HashMap<>();
         long lastEnd = 0;
         for (int i = 0; i < layout.length(); i++) {
             JSONObject z = layout.getJSONObject(i);
@@ -154,6 +158,21 @@ final class NativeProject {
                        other.optInt("physicalSection",-1)==z.optInt("physicalSection"))
                         throw new JSONException("Two design zones cannot own one physical section");
                 }
+            }
+            if (z.has("physicalPanelId") || z.has("physicalPanelName")) {
+                if (!z.has("physicalOutput") ||
+                    !wholeNumber(z.opt("physicalPanelId"), 1, 127) ||
+                    !(z.opt("physicalPanelName") instanceof String) ||
+                    z.optString("physicalPanelName").trim().isEmpty() ||
+                    z.optString("physicalPanelName").length()>48)
+                    throw new JSONException("Panel identity requires an assigned output, ID 1..127 and name");
+                int panelId=z.optInt("physicalPanelId");
+                String panelName=z.optString("physicalPanelName");
+                Integer priorLane=physicalPanelLanes.putIfAbsent(panelId,z.optInt("physicalOutput"));
+                String priorName=physicalPanels.putIfAbsent(panelId,panelName);
+                if ((priorLane!=null && priorLane.intValue()!=z.optInt("physicalOutput")) ||
+                    (priorName!=null && !priorName.equals(panelName)))
+                    throw new JSONException("Panel ID must identify one named panel on one output");
             }
             lastEnd = start + length;
         }
@@ -289,6 +308,30 @@ final class NativeProject {
         for (int i = 0; i < zoneCount(); i++)
             count += zones().optJSONObject(i).optInt("length", 0);
         return count;
+    }
+
+    /**
+     * Attach an explicit CORE Panel identity to an already assigned physical section.
+     * This is local authoring metadata only; it never sends BLE or mutates CORE.
+     */
+    synchronized boolean setPhysicalPanel(String id,int panelId,String panelName) {
+        int index=indexOfZone(id);
+        if(index<0 || panelId<1 || panelId>127 || panelName==null ||
+           panelName.trim().isEmpty() || panelName.length()>48 ||
+           zone(index).optInt("physicalOutput",-1)<0) return false;
+        try {
+            zone(index).put("physicalPanelId",panelId)
+                .put("physicalPanelName",panelName.trim());
+            return save();
+        } catch(JSONException e) { restoreCommitted(); return false; }
+    }
+
+    synchronized boolean clearPhysicalPanel(String id) {
+        int index=indexOfZone(id);
+        if(index<0)return false;
+        JSONObject z=zone(index);
+        z.remove("physicalPanelId");z.remove("physicalPanelName");
+        return save();
     }
 
     synchronized JSONObject zone(int index) { return zones().optJSONObject(index); }
