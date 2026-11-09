@@ -8,6 +8,57 @@ bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms){
         (slot->standalone||slot->continuous|| (uint32_t)(now_ms-slot->refreshed_ms) <
                                  (uint32_t)slot->request.ttl_sec*1000u);
 }
+bool ot_fx_bank_resolve_zone_identity(ot_fx_zone_identity_map_t *identity,
+ const ot_pz_output_t *panel_output,const ot_fx_zone_bank_t *bank,
+ unsigned output,uint32_t now_ms,uint8_t resolved_indices[OT_OM_ZONES]){
+ if(!identity||!panel_output||!bank||!resolved_indices||
+    output>=OT_OM_OUTPUTS||panel_output->zone_count>OT_OM_ZONES)return false;
+ memset(resolved_indices,0xff,OT_OM_ZONES*sizeof(resolved_indices[0]));
+ for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+  const ot_fx_zone_slot_t *slot=&bank->zones[output][bank_z];
+  if(!ot_fx_slot_active(slot,now_ms)){
+   identity->seen_generation[bank_z]=slot->generation;
+   identity->seen_refresh_ms[bank_z]=slot->refreshed_ms;
+   identity->owner_zone_id[bank_z]=0u;
+   identity->owner_panel_id[bank_z]=0u;
+   continue;
+  }
+  if(identity->seen_generation[bank_z]!=slot->generation||
+     identity->seen_refresh_ms[bank_z]!=slot->refreshed_ms||
+     identity->owner_zone_id[bank_z]==0u||
+     identity->owner_panel_id[bank_z]==0u){
+   const uint16_t owner_zone=bank_z<panel_output->zone_count?
+       panel_output->zones[bank_z].id:0u;
+   const uint16_t owner_panel=bank_z<panel_output->zone_count?
+       panel_output->zones[bank_z].panel_id:0u;
+   if(owner_zone&&owner_panel){
+    for(unsigned other=0;other<OT_OM_ZONES;other++){
+     if(other==bank_z)continue;
+     if(identity->owner_zone_id[other]==owner_zone&&
+        identity->owner_panel_id[other]==owner_panel){
+      identity->owner_zone_id[other]=0u;
+      identity->owner_panel_id[other]=0u;
+     }
+    }
+   }
+   identity->seen_generation[bank_z]=slot->generation;
+   identity->seen_refresh_ms[bank_z]=slot->refreshed_ms;
+   identity->owner_zone_id[bank_z]=owner_zone;
+   identity->owner_panel_id[bank_z]=owner_panel;
+  }
+ }
+ for(unsigned zone=0;zone<panel_output->zone_count;zone++){
+  const ot_pz_zone_t *zone_cfg=&panel_output->zones[zone];
+  for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+   if(identity->owner_zone_id[bank_z]==zone_cfg->id&&
+      identity->owner_panel_id[bank_z]==zone_cfg->panel_id&&
+      ot_fx_slot_active(&bank->zones[output][bank_z],now_ms)){
+    resolved_indices[zone]=(uint8_t)bank_z;break;
+   }
+  }
+ }
+ return true;
+}
 bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
                       uint32_t now_ms,bool standalone){
     if(!bank||!request||request->chain_mask==0||
