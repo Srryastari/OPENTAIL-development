@@ -245,14 +245,25 @@ bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
                          const uint16_t previous_revision[OT_PZ_OUTPUTS],
                          const uint16_t candidate_revision[OT_PZ_OUTPUTS],
                          uint32_t transaction_id){
+    return ot_pz_map_journal_build_reset(out,previous,candidate,
+        previous_revision,candidate_revision,transaction_id,0u);
+}
+bool ot_pz_map_journal_build_reset(ot_pz_map_journal_t *out,
+                         const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id,uint8_t reset_mask){
+    const uint8_t valid_mask=(uint8_t)((1u<<OT_PZ_OUTPUTS)-1u);
     if(!out||!previous||!candidate||!transaction_id||
        !previous_revision||!candidate_revision||
+       (reset_mask&~valid_mask)!=0u||
        !ot_pz_map_valid(previous)||!ot_pz_map_valid(candidate)||
        !pz_pair_revisions_valid(previous_revision,candidate_revision))return false;
     ot_pz_map_journal_t next={0};
     next.magic=OT_PZ_MAP_JOURNAL_MAGIC;
     next.version=OT_PZ_PAIR_SCHEMA_VERSION;
     next.transaction_id=transaction_id;
+    next.reset_mask=reset_mask;
     next.previous=*previous;next.candidate=*candidate;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         if(memcmp(&previous->outputs[lane],&candidate->outputs[lane],
@@ -264,8 +275,11 @@ bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
     next.crc=pz_map_journal_crc(&next);*out=next;return true;
 }
 bool ot_pz_map_journal_valid(const ot_pz_map_journal_t *record){
+    const uint8_t valid_mask=(uint8_t)((1u<<OT_PZ_OUTPUTS)-1u);
     if(!record||record->magic!=OT_PZ_MAP_JOURNAL_MAGIC||
        record->version!=OT_PZ_PAIR_SCHEMA_VERSION||!record->transaction_id||
+       (record->reset_mask&~valid_mask)!=0u||
+       record->reserved[0]!=0u||record->reserved[1]!=0u||record->reserved[2]!=0u||
        pz_map_journal_crc(record)!=record->crc||
        !ot_pz_map_valid(&record->previous)||!ot_pz_map_valid(&record->candidate)||
        !pz_pair_revisions_valid(record->previous_revision,
