@@ -55,7 +55,7 @@ config_worker = core.split("static void config_activation_task(", 1)[1].split(
     "static void input_sampler_task(", 1)[0]
 assert "pz_preview_commit_requested" in config_worker
 assert "pz_preview_commit_worker_active=true" in config_worker
-assert "pz_save_controller_locked(&preview_candidate)" in config_worker
+assert "pz_save_controller_locked(&pz_pair_workspace.candidate)" in config_worker
 assert "pz_preview_commit_worker_active=false" in config_worker
 
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
@@ -135,7 +135,7 @@ for token in ("ot_pz_pair_store_finish", "ot_pz_pair_store_snapshot",
               "config_activation_idle(epoch,true)",
               "input_quiet_samples>=OT_DEBOUNCE_TICKS",
               "live_input_mask==0u", "tm_gpio_input_mask()==0u",
-              "input_edge_epoch,__ATOMIC_ACQUIRE", "pz_outputs=recovered_pending.candidate"):
+              "input_edge_epoch,__ATOMIC_ACQUIRE", "pz_outputs=workspace->pending.candidate"):
     assert token in panel_promotion, token
 assert "config_recovery_fault=true" in panel_promotion
 assert "nvs_open(" not in panel_promotion
@@ -207,15 +207,15 @@ for token in ("opcode==0xffu&&lane==0xaau", "opcode==0xffu&&lane==0xabu",
     assert token in ble, token
 for token in ("OT_PZ_RESET_TOMBSTONE_KEY", "pz_reset_tombstone_valid",
               "pz_reset_pending_mask", "pz_reset_challenge.expires_ms",
-              "ot_pz_pair_store_mark_reset", "readback.map_active.reset_mask"):
+              "ot_pz_pair_store_mark_reset", "readback->map_active.reset_mask"):
     assert token in core, token
 assert "reset_v3" in core
 assert "pz_reset_tombstone_set_handle" not in core
 assert "pz_reset_tombstone_write_handle" not in core
 reset_confirm = core.split("int ot_ble_panel_reset_confirm(", 1)[1].split(
     "int ot_ble_panel_save(", 1)[0]
-assert "candidate.outputs[lane].panel_count=0u" in reset_confirm
-assert "candidate.outputs[lane].zone_count=0u" in reset_confirm
+assert "candidate->outputs[lane].panel_count=0u" in reset_confirm
+assert "candidate->outputs[lane].zone_count=0u" in reset_confirm
 assert "ot_pz_pair_store_mark_reset" in reset_confirm
 assert "nvs_open(" not in reset_confirm
 assert "ot_tm_defaults" not in reset_confirm
