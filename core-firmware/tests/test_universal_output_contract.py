@@ -14,8 +14,15 @@ output_impl = (root / "output_manager.c").read_text(encoding="utf-8")
 # and optional gamma path; do not fork another magic 32-channel ceiling.
 assert '#include "board_config.h"' in output_impl
 assert '.brightness_cap=OT_MAX_BRIGHTNESS' in output_impl
-assert 'if(brightness>OT_MAX_BRIGHTNESS)' in output_impl
-assert 'if(n>OT_MAX_BRIGHTNESS)' in output_impl
+# Requests and trigger colors retain the full 8-bit range. The single
+# reported software ceiling is applied once, ratio-preservingly, at the final
+# CORE RGB boundary rather than silently pre-clamping individual color paths.
+assert "static inline ot_rgb_t ot_om_limit_brightness" in output
+assert "if(peak<=ceiling)return color;" in output
+assert "color.r=(uint8_t)(((uint32_t)color.r*ceiling+(uint32_t)peak/2u)/peak);" in output
+assert "ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS)" in core
+assert "if(brightness>OT_MAX_BRIGHTNESS)" not in output_impl
+assert "if(n>OT_MAX_BRIGHTNESS)" not in output_impl
 core = (root / "opentail_core.c").read_text(encoding="utf-8")
 kconfig = (root / "Kconfig.projbuild").read_text(encoding="utf-8")
 
