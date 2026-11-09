@@ -11,6 +11,21 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Reserve startup headroom; renderer and sampler task stacks stay unchanged.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
+# ESP32-S3 N16R8: 16 MB flash, 8 MB octal PSRAM. Make PSRAM
+# available to normal heap allocations so radio/HTTP buffers do not consume
+# all internal RAM reserved for FreeRTOS task stacks and RMT/DMA needs.
+# Task stacks themselves MUST remain internal (flash/NVS cache-off safety).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_MEMTEST=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=n
+
 # BLE show and output manager over authorized GATT, Wi-Fi remains full Studio transport
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
