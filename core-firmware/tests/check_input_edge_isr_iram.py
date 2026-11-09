@@ -108,6 +108,6 @@ audit_lines = [
 ]
 audit_lines.extend(f"  {target.split('+', 1)[0].strip()}: {symbols[target.split('+', 1)[0].strip()]}"
                    for target in targets)
-(evidence_dir / "input_edge_isr.audit.txt").write_text("\\n".join(audit_lines) + "\\n")
+(evidence_dir / "input_edge_isr.audit.txt").write_text("\n".join(audit_lines) + "\n")
 print(f"Saved linked ISR evidence: {evidence_dir}")
 print("PASS: input_edge_isr linked in IRAM; ISR data in DRAM; direct calls IRAM-safe")
