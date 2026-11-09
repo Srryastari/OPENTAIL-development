@@ -46,7 +46,8 @@ final class GeometryTransactionManager {
         final String name;
         MappedZone(int id,int panelId,int section,int start,int count,String name) {
             this.id=id;this.panelId=panelId;this.section=section;this.start=start;
-            this.count=count;this.name=name;this.roleFlags=0x0f; // CORE UNASSIGNED
+            this.count=count;this.name=name;
+            this.roleFlags=PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE;
         }
         PanelPreviewProtocol.UpdateDescriptor descriptor() {
             return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,0,start,count,roleFlags);
