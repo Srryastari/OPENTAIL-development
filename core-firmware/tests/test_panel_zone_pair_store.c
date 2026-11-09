@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include "panel_zone_pair_store.h"
@@ -52,6 +53,17 @@ static bool phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
 }
 static ot_pz_pair_store_io_t make_io(fake_store_t *store){
     return (ot_pz_pair_store_io_t){store,fake_read,fake_write_commit,fake_erase_commit};
+}
+typedef struct {
+    uint32_t magic,version,crc;
+    uint8_t payload[13];
+} crc_fixture_t;
+static void zeroed_crc_compatibility(void){
+    crc_fixture_t record={0x12345678u,7u,0xabcdef01u,
+        {0u,1u,2u,3u,4u,5u,6u,7u,8u,9u,10u,11u,12u}};
+    crc_fixture_t copy=record;copy.crc=0u;
+    assert(ot_cfg_crc32_zeroed(&record,sizeof(record),offsetof(crc_fixture_t,crc),
+                               sizeof(record.crc))==ot_cfg_crc32(&copy,sizeof(copy)));
 }
 static void make_runtime(ot_pz_controller_t *cfg,uint16_t pixels,uint8_t order,
                          uint16_t range_count){
@@ -215,6 +227,7 @@ static void reset_marker_and_fail_closed(void){
 }
 int main(void){
     assert(sizeof(workspace)<=16u*1024u);
+    zeroed_crc_compatibility();
     initial_migration_cut_matrix();
     durable_boundary_matrix();
     reset_marker_and_fail_closed();
