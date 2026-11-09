@@ -10,6 +10,7 @@ typedef struct {
     unsigned durable_writes;
 } fake_store_t;
 typedef struct {uint8_t cut_after,last_phase;uint32_t transaction_id;} phase_state_t;
+static ot_pz_pair_store_workspace_t workspace;
 
 static fake_blob_t *blob_for(fake_store_t *s,ot_pz_pair_namespace_t ns,const char *key){
     if(ns==OT_PZ_PAIR_NS_OUTPUT_CFG){
@@ -82,7 +83,7 @@ static void recover_expect(const ot_pz_pair_store_io_t *io,
     ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
     uint16_t active[OT_PZ_OUTPUTS]={0},staged[OT_PZ_OUTPUTS]={0};
     bool intent=false;uint32_t tx=0u;uint8_t reset=0u;
-    assert(ot_pz_pair_store_recover(io,fallback,&live,&pending,active,staged,
+    assert(ot_pz_pair_store_recover(io,&workspace,fallback,&live,&pending,active,staged,
                                     &intent,&tx,&reset));
     assert(memcmp(&live,expected_live,sizeof(live))==0);
     assert(pending.pending==expected_pending);
@@ -99,16 +100,15 @@ static void initial_migration_cut_matrix(void){
     for(uint8_t cut=1u;cut<=3u;cut++){
         fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
         phase_state_t phases={.cut_after=cut};
-        assert(!ot_pz_pair_store_begin(&io,&legacy,&candidate,
+        assert(!ot_pz_pair_store_begin(&io,&workspace,&legacy,&candidate,
             previous_revision,candidate_revision,0x0a0au,0u,true,
             phase_hook,&phases));
         assert(phases.last_phase==cut);
         assert(store.durable_writes==cut);
         recover_expect(&io,&legacy,&legacy,&candidate,cut==3u,cut==3u,
                        cut==3u?0x0a0au:0u,0u);
-        ot_pz_pair_store_snapshot_t snapshot={0};
-        assert(ot_pz_pair_store_snapshot(&io,&snapshot));
-        assert(!snapshot.has_marker);
+        assert(ot_pz_pair_store_snapshot(&io,&workspace));
+        assert(!workspace.snapshot.has_marker);
     }
 }
 static void durable_boundary_matrix(void){
@@ -126,12 +126,12 @@ static void durable_boundary_matrix(void){
     for(uint8_t cut=1u;cut<=3u;cut++){
         fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
         phase_state_t phases={0};
-        assert(ot_pz_pair_store_begin(&io,&base,&candidate1,r0,r1,0x1001u,0u,
+        assert(ot_pz_pair_store_begin(&io,&workspace,&base,&candidate1,r0,r1,0x1001u,0u,
                                       true,NULL,NULL));
-        assert(ot_pz_pair_store_finish(&io,0x1001u,NULL,NULL));
+        assert(ot_pz_pair_store_finish(&io,&workspace,0x1001u,NULL,NULL));
         assert(store.durable_writes==9u);
         phases.cut_after=cut;
-        assert(!ot_pz_pair_store_begin(&io,&candidate1,&candidate2,r1,r2,
+        assert(!ot_pz_pair_store_begin(&io,&workspace,&candidate1,&candidate2,r1,r2,
                                        0x2002u,0u,false,phase_hook,&phases));
         assert(phases.last_phase==cut);
         if(cut<3u)
@@ -174,13 +174,12 @@ static void reset_marker_and_fail_closed(void){
     const uint16_t old_rev[OT_PZ_OUTPUTS]={1u,1u},new_rev[OT_PZ_OUTPUTS]={2u,1u};
     assert(ot_pz_pair_store_begin(&io,&base,&candidate,old_rev,new_rev,
                                   0x3003u,1u,true,NULL,NULL));
-    ot_pz_pair_store_snapshot_t staged={0};
-    assert(ot_pz_pair_store_snapshot(&io,&staged));
-    assert(staged.has_lane_stage&&staged.has_map_stage&&staged.has_intent);
+    assert(ot_pz_pair_store_snapshot(&io,&workspace));
+    assert(workspace.snapshot.has_lane_stage&&workspace.snapshot.has_map_stage&&workspace.snapshot.has_intent);
     /* Reset changes only geometry: lane electrical configuration is byte-identical. */
-    assert(memcmp(&staged.lane_stage.previous,&staged.lane_stage.candidate,
+    assert(memcmp(&workspace.snapshot.lane_stage.previous,&staged.lane_stage.candidate,
                   sizeof(staged.lane_stage.previous))==0);
-    assert(memcmp(&staged.map_stage.previous.outputs[0],
+    assert(memcmp(&workspace.snapshot.map_stage.previous.outputs[0],
                   &staged.map_stage.candidate.outputs[0],
                   sizeof(staged.map_stage.previous.outputs[0]))!=0);
     assert(memcmp(&staged.map_stage.previous.outputs[1],
@@ -188,14 +187,13 @@ static void reset_marker_and_fail_closed(void){
                   sizeof(staged.map_stage.previous.outputs[1]))==0);
     assert(staged.map_stage.reset_mask==1u);
     assert(ot_pz_pair_store_finish(&io,0x3003u,NULL,NULL));
-    assert(ot_pz_pair_store_mark_reset(&io,0u));
+    assert(ot_pz_pair_store_mark_reset(&io,&workspace,0u));
     recover_expect(&io,&base,&base,&candidate,true,false,0x3003u,1u);
-    ot_pz_pair_store_snapshot_t active={0};
-    assert(ot_pz_pair_store_snapshot(&io,&active));
-    assert(active.has_lane_active&&active.has_map_active&&active.has_marker);
-    assert(memcmp(&active.lane_active.previous,&active.lane_active.candidate,
+    assert(ot_pz_pair_store_snapshot(&io,&workspace));
+    assert(workspace.snapshot.has_lane_active&&workspace.snapshot.has_map_active&&workspace.snapshot.has_marker);
+    assert(memcmp(&workspace.snapshot.lane_active.previous,&active.lane_active.candidate,
                   sizeof(active.lane_active.previous))==0);
-    assert(active.map_active.candidate.outputs[0].panel_count==0u);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].panel_count==0u);
     assert(active.map_active.candidate.outputs[0].zone_count==0u);
     assert(active.map_active.reset_mask==1u);
     /* A completed v4 active pair without its initialization marker is
@@ -205,12 +203,12 @@ static void reset_marker_and_fail_closed(void){
     ot_pz_pair_store_io_t missing_marker_io=make_io(&missing_marker_store);
     ot_pz_controller_t missing_live={0};ot_pz_pending_t missing_pending={0};
     uint16_t missing_ar[2]={0},missing_sr[2]={0};
-    assert(!ot_pz_pair_store_recover(&missing_marker_io,&base,&missing_live,
+    assert(!ot_pz_pair_store_recover(&missing_marker_io,&workspace,&base,&missing_live,
         &missing_pending,missing_ar,missing_sr,NULL,NULL,NULL));
     store.map_active.bytes[0]^=0x01u;
     ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
     uint16_t ar[2]={0},sr[2]={0};
-    assert(!ot_pz_pair_store_recover(&io,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
+    assert(!ot_pz_pair_store_recover(&io,&workspace,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
     /* If both active records disappear after v4 initialization, the durable
      * marker prevents fallback to stale legacy combined configuration. */
     store.map_active.present=false;store.lane_active.present=false;
