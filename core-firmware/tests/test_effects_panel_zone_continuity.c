@@ -27,10 +27,7 @@ static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
 
 typedef struct {
     ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint32_t bank_seen_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint32_t bank_seen_refresh_ms[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint16_t bank_owner_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint16_t bank_owner_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    ot_fx_zone_identity_map_t bank_identity[OT_PZ_OUTPUTS];
     uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
     ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
     ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
@@ -108,52 +105,9 @@ static bool render_probe_frame(render_probe_t *probe,
         ot_layout_t layout;
         if(!ot_om_layout(&output,&layout))return false;
 
-        /* Mirror CORE's stable bank-slot ownership. A generation change is a
-         * new command for the current zone at that bank index; unchanged slots
-         * remain attached to their previous Panel/Zone identity after compaction. */
-        for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
-            const ot_fx_zone_slot_t *slot=&bank->zones[lane][bank_z];
-            if(!ot_fx_slot_active(slot,now_ms)){
-                probe->bank_seen_generation[lane][bank_z]=slot->generation;
-                probe->bank_seen_refresh_ms[lane][bank_z]=slot->refreshed_ms;
-                probe->bank_owner_zone_id[lane][bank_z]=0u;
-                probe->bank_owner_panel_id[lane][bank_z]=0u;
-                continue;
-            }
-            if(probe->bank_seen_generation[lane][bank_z]!=slot->generation||
-               probe->bank_seen_refresh_ms[lane][bank_z]!=slot->refreshed_ms||
-               probe->bank_owner_zone_id[lane][bank_z]==0u||
-               probe->bank_owner_panel_id[lane][bank_z]==0u){
-                const uint16_t owner_zone=bank_z<panel_out->zone_count?
-                    panel_out->zones[bank_z].id:0u;
-                const uint16_t owner_panel=bank_z<panel_out->zone_count?
-                    panel_out->zones[bank_z].panel_id:0u;
-                for(unsigned other=0;other<OT_OM_ZONES;other++){
-                    if(other==bank_z)continue;
-                    if(probe->bank_owner_zone_id[lane][other]==owner_zone&&
-                       probe->bank_owner_panel_id[lane][other]==owner_panel){
-                        probe->bank_owner_zone_id[lane][other]=0u;
-                        probe->bank_owner_panel_id[lane][other]=0u;
-                    }
-                }
-                probe->bank_seen_generation[lane][bank_z]=slot->generation;
-                probe->bank_seen_refresh_ms[lane][bank_z]=slot->refreshed_ms;
-                probe->bank_owner_zone_id[lane][bank_z]=owner_zone;
-                probe->bank_owner_panel_id[lane][bank_z]=owner_panel;
-            }
-        }
-        memset(probe->resolved_bank_index[lane],0xff,
-               sizeof(probe->resolved_bank_index[lane]));
-        for(unsigned zone=0;zone<output.zone_count;zone++){
-            const ot_pz_zone_t *zone_cfg=&panel_out->zones[zone];
-            for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
-                if(probe->bank_owner_zone_id[lane][bank_z]==zone_cfg->id&&
-                   probe->bank_owner_panel_id[lane][bank_z]==zone_cfg->panel_id&&
-                   ot_fx_slot_active(&bank->zones[lane][bank_z],now_ms)){
-                    probe->resolved_bank_index[lane][zone]=(uint8_t)bank_z;break;
-                }
-            }
-        }
+        if(!ot_fx_bank_resolve_zone_identity(&probe->bank_identity[lane],
+            panel_out,bank,lane,now_ms,probe->resolved_bank_index[lane]))
+            return false;
 
         uint8_t zone_map[OT_PZ_MAX_PIXELS];
         uint16_t logical_map[OT_PZ_MAX_PIXELS];
