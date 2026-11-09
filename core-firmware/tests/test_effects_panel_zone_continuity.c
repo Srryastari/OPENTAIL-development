@@ -36,6 +36,20 @@ static bool same_effect_state(const ot_effects_1d_state_t *a,
     ac.wled.scratch=NULL;bc.wled.scratch=NULL;
     return memcmp(&ac,&bc,sizeof(ac))==0;
 }
+
+typedef struct {
+    ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    ot_fx_zone_identity_map_t bank_identity[OT_PZ_OUTPUTS];
+    uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
+    ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
+    uint8_t prior_pixel_zone_map[OT_PZ_OUTPUTS][OT_PZ_MAX_PIXELS];
+    uint16_t prior_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint16_t prior_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint32_t prior_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    bool prior_active[OT_PZ_OUTPUTS][OT_OM_ZONES];
+} render_probe_t;
+
 static void clone_render_probe(render_probe_t *dst,const render_probe_t *src){
     *dst=*src;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
@@ -54,19 +68,6 @@ static void release_render_probe(render_probe_t *probe){
         for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
             ot_effects_1d_reset(&probe->state[lane][zone],0u);
 }
-
-typedef struct {
-    ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    ot_fx_zone_identity_map_t bank_identity[OT_PZ_OUTPUTS];
-    uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
-    ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
-    uint8_t prior_pixel_zone_map[OT_PZ_OUTPUTS][OT_PZ_MAX_PIXELS];
-    uint16_t prior_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint16_t prior_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    uint32_t prior_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
-    bool prior_active[OT_PZ_OUTPUTS][OT_OM_ZONES];
-} render_probe_t;
 
 static void make_output(ot_pz_output_t *out,unsigned lane){
     memset(out,0,sizeof(*out));
