@@ -190,10 +190,10 @@ typedef struct {
 } ot_pz_reset_challenge_t;
 static ot_pz_reset_challenge_t pz_reset_challenge;
 static uint8_t pz_reset_pending_mask;
-static volatile bool pz_pair_commit_pending;
-static volatile uint32_t pz_pair_transaction_id;
-static volatile uint8_t pz_pair_commit_phase;
-static volatile uint32_t pz_pair_commit_phase_txn;
+static bool pz_pair_commit_pending;
+static uint32_t pz_pair_transaction_id;
+static uint8_t pz_pair_commit_phase;
+static uint32_t pz_pair_commit_phase_txn;
 static void pz_promote(uint32_t epoch);
 static void pz_preview_cancel_pending_locked(void);
 static bool config_activation_idle(uint32_t epoch,bool allow_show);
@@ -571,8 +571,10 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
 static void pz_load(void){
     ot_pz_defaults(&pz_outputs);
     pz_deferred.pending=false;pz_persistent=false;
-    pz_pair_commit_pending=false;pz_pair_transaction_id=0u;
-    pz_pair_commit_phase=0u;pz_pair_commit_phase_txn=0u;
+    __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_transaction_id,0u,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_commit_phase,0u,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_commit_phase_txn,0u,__ATOMIC_RELAXED);
     pz_reset_pending_mask=0u;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         pz_revision[lane]=pz_active_revision[lane]=1u;
@@ -596,10 +598,10 @@ static void pz_load(void){
             pz_deferred.pending=false;pz_persistent=false;
             ot_st_set_fault("v4 lane/map pair recovery mismatch");return;
         }
-        pz_pair_commit_pending=intent_pending;
-        pz_pair_transaction_id=transaction_id;
-        pz_pair_commit_phase=intent_pending?0u:8u;
-        pz_pair_commit_phase_txn=transaction_id;
+        __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
+        __atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:8u,__ATOMIC_RELEASE);
+        __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+        __atomic_store_n(&pz_pair_commit_pending,intent_pending,__ATOMIC_RELEASE);
         pz_reset_pending_mask=reset_mask;
         pz_persistent=true;
     }else{
@@ -647,7 +649,8 @@ static void pz_load(void){
         pz_deferred.pending=changed;
         memcpy(pz_active_revision,previous_revision,sizeof(pz_active_revision));
         memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
-        pz_pair_commit_pending=true;pz_pair_transaction_id=transaction_id;
+        __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
+        __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
         pz_reset_pending_mask=reset_mask;pz_persistent=true;
     }
     /* All legacy output settings have been joined into the v4 pair. The old
@@ -664,7 +667,7 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     uint8_t reset_mask=0u;
     bool busy=false;
     portENTER_CRITICAL(&state_lock);
-    busy=pz_deferred.pending||pz_pair_commit_pending||
+    busy=pz_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
          (pz_preview.active&&!pz_preview.committing);
     previous=pz_outputs;
     memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
@@ -704,7 +707,7 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     pz_persistent=true;
     pz_refresh_legacy_projection_locked();
     portEXIT_CRITICAL(&state_lock);
-    pz_pair_transaction_id=transaction_id;
+    __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
     __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
     return true;
 }
@@ -2769,8 +2772,9 @@ static void tm_promote(uint32_t epoch){
 }
 static void pz_promote(uint32_t epoch){
     if(!config_activation_idle(epoch,true))return;
-    uint32_t transaction_id=__atomic_load_n(&pz_pair_transaction_id,__ATOMIC_ACQUIRE);
     if(__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)){
+        const uint32_t transaction_id=__atomic_load_n(
+            &pz_pair_transaction_id,__ATOMIC_RELAXED);
         if(!ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id,
                                     pz_pair_phase_hook,NULL)){
             config_recovery_fault=true;
@@ -2829,7 +2833,7 @@ static void pz_promote(uint32_t epoch){
                sizeof(pz_active_revision));
         memcpy(pz_revision,snapshot.map_active.candidate_revision,
                sizeof(pz_revision));
-        pz_pair_commit_pending=false;pz_persistent=true;
+        __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);pz_persistent=true;
         if(effective_reset_mask){
             pz_reset_pending_mask&=(uint8_t)~effective_reset_mask;
             pz_reset_challenge.active=false;
