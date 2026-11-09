@@ -196,6 +196,14 @@ for token in ("OT_PZ_RESET_TOMBSTONE_KEY", "pz_reset_tombstone_valid",
 assert "reset_v3" in core
 assert "pz_reset_tombstone_set_handle" not in core
 assert "pz_reset_tombstone_write_handle" not in core
+reset_confirm = core.split("int ot_ble_panel_reset_confirm(", 1)[1].split(
+    "int ot_ble_panel_save(", 1)[0]
+assert "candidate.outputs[lane].panel_count=0u" in reset_confirm
+assert "candidate.outputs[lane].zone_count=0u" in reset_confirm
+assert "ot_pz_pair_store_mark_reset" in reset_confirm
+assert "nvs_open(" not in reset_confirm
+assert "ot_tm_defaults" not in reset_confirm
+assert "ot_ble_delete_fx_preset" not in reset_confirm
 
 print("PASS Issue126 static runtime, namespace, ISR telemetry, brightness and reset contracts")
 
