@@ -137,4 +137,4 @@ assert "pending->profile=r->candidate" in journal
 assert "pending->outputs,r->candidate" in journal
 assert "*live=r->previous" in journal
 assert "memcpy(live,r->previous" in journal
-print("PASS: trigger, legacy compatibility, authoritative Panel/Zone v3 NVS finalization, recovery, revision and readback contracts")
+print("PASS: trigger, legacy migration, authoritative v4 lane/map pair finalization, recovery, revision and readback contracts")
