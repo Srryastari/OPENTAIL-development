@@ -22,6 +22,8 @@ The CORE runtime now implements the v4 hardware-only/map-only cross-namespace pa
 
 The same portable pair-store state machine is called by CORE and exercised by `tests/test_panel_zone_pair_store.c`. It performs the eight durable phases below, verifies each committed record by readback, and resumes idempotently while the pair-intent marker exists. Host fault injection now cuts after each durable phase and checks that recovery selects a complete previous or candidate generation. This is software evidence only; exact-head ESP-IDF build/review and physical electrical acceptance remain separate gates.
 
+The v4 initialization marker is committed atomically with the map-active record in phase 5. It prevents an erased/missing active pair from silently falling back to stale v3 geometry. If the marker exists but the authoritative active pair is incomplete, CORE fails closed.
+
 The runtime emits a UART marker after each durable commit/readback:
 `PZ_PAIR_PHASE phase=<1..8> transaction=<32-bit-id>`.
 The existing `GET /api/v1/status` response exposes `config_commit_phase`, `config_commit_transaction_id`, and `config_commit_pending` so a bench logger/relay can correlate the cut with the transaction. The marker is emitted after the named phase is durable; it does not itself interrupt power.
