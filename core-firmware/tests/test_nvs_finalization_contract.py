@@ -112,6 +112,22 @@ assert store.index("OT_PZ_LANE_KEY_ACTIVE") < store.index(
 for phase in range(1,10):
     assert f"phase_context,{phase}u" in store
 
+# The ESP-IDF adapter commits one NVS key per durable phase. There is no
+# multi-key "atomic batch" abstraction hiding an untested internal write.
+nvs_write=between("static bool pz_pair_nvs_write_commit(",
+                  "static bool pz_pair_nvs_erase_commit(")
+assert nvs_write.count("nvs_set_blob(")==1
+assert "nvs_commit(h)" in nvs_write
+assert "pz_pair_nvs_write_batch_commit" not in core
+pair_finish=store.split("bool ot_pz_pair_store_finish(",1)[1].split(
+    "bool ot_pz_pair_store_mark_reset(",1)[0]
+for token in ("OT_PZ_MAP_KEY_ACTIVE","phase_context,5u",
+              "OT_PZ_PAIR_STORE_MARKER_KEY","phase_context,6u",
+              "OT_PZ_LANE_KEY_STAGED","phase_context,7u",
+              "OT_PZ_MAP_KEY_STAGED","phase_context,8u",
+              "OT_PZ_PAIR_INTENT_KEY","phase_context,9u"):
+    assert token in pair_finish,token
+
 # Runtime promotion resumes an intent, validates the matching active pair,
 # checks the quiet-input epoch, then publishes only the joined candidate.
 panel_promotion=between("static void pz_promote(uint32_t epoch){",
