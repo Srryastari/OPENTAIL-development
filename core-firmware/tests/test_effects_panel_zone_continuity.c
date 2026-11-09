@@ -242,6 +242,10 @@ static void test_production_identity_lookup(void){
         panel_ids,zone_ids,generations,active,3u)==-1);
     assert(ot_effects_1d_find_prior_zone_state(200u,300u,33u,
         panel_ids,zone_ids,generations,active,3u)==-1);
+    const uint32_t wrapped_generations[3]={11u,22u,0u};
+    const bool wrapped_active[3]={true,true,true};
+    assert(ot_effects_1d_find_prior_zone_state(200u,300u,0u,
+        panel_ids,zone_ids,wrapped_generations,wrapped_active,3u)==2);
     assert(ot_effects_1d_find_prior_zone_state(0u,201u,22u,
         panel_ids,zone_ids,generations,active,3u)==-1);
 }
