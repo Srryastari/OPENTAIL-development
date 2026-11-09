@@ -92,6 +92,18 @@ final class PanelPreviewProtocol {
                    (activeRevision==baseRevision ||
                     activeRevision==((baseRevision+1L)&0xffffL));
         }
+
+        /** Compact owner-facing sequence evidence for the existing System warning. */
+        String diagnosticSummary() {
+            return "Panel " + (lane+1) + " · session " + sessionId +
+                " · accepted " + lastAcceptedSequence +
+                " · rejected " + lastRejectedSequence + " (reason " + lastRejectedReason + ")" +
+                " · missing " + missingCount + " · out-of-order " + outOfOrderCount +
+                " · duplicates " + duplicateCount + " · conflicts " + conflictCount +
+                " · COMMITTING rejects " + committingRejectCount +
+                (warningObserved ? " · warning latched" : "") +
+                (hardSyncFault ? " · hard sync fault" : "");
+        }
     }
 
     static final class SnapshotHeader {
