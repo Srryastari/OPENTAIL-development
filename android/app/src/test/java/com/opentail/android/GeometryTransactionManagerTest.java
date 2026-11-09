@@ -3,6 +3,7 @@ package com.opentail.android;
 import org.junit.Test;
 import android.content.SharedPreferences;
 import org.json.JSONObject;
+import java.util.List;
 import java.lang.reflect.Proxy;
 import static org.junit.Assert.*;
 
@@ -298,5 +299,37 @@ public class GeometryTransactionManagerTest {
         catch(IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("Panel identity"));
         }
+    }
+
+    @Test public void panelDescriptorBatchesRespectNegotiatedAttMtuAndFirmwareLimit() throws Exception {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        for(int i=0;i<5;i++)
+            mappedZone(project,"Section "+i,10,0,i,1,"Housing");
+        MappedLane lane=mapLayout(project).lane(0);
+
+        List<PanelPreviewProtocol.UpdateDescriptor[]> at23=lane.descriptorBatches(23);
+        assertEquals(5,at23.size());
+        for(PanelPreviewProtocol.UpdateDescriptor[] batch:at23) {
+            assertEquals(1,batch.length);
+            assertTrue(PanelPreviewProtocol.update(0,9,1,batch,23).length<=20);
+        }
+
+        List<PanelPreviewProtocol.UpdateDescriptor[]> at31=lane.descriptorBatches(31);
+        assertEquals(3,at31.size());
+        assertEquals(2,at31.get(0).length);
+        assertEquals(2,at31.get(1).length);
+        assertEquals(1,at31.get(2).length);
+        for(PanelPreviewProtocol.UpdateDescriptor[] batch:at31)
+            assertTrue(PanelPreviewProtocol.update(0,9,1,batch,31).length<=28);
+
+        List<PanelPreviewProtocol.UpdateDescriptor[]> at46=lane.descriptorBatches(46);
+        assertEquals(2,at46.size());
+        assertEquals(4,at46.get(0).length);
+        assertEquals(1,at46.get(1).length);
+        for(PanelPreviewProtocol.UpdateDescriptor[] batch:at46)
+            assertTrue(PanelPreviewProtocol.update(0,9,1,batch,46).length<=43);
+
+        try { lane.descriptorBatches(22);fail("below minimum ATT MTU"); }
+        catch(IllegalArgumentException expected) {}
     }
 }
