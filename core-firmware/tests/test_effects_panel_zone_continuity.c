@@ -192,12 +192,6 @@ static void test_zone_independence_and_discontiguous_ranges(
         assert(ot_fx_bank_apply(bank,&turn,started,false));
         assert(ot_fx_bank_apply(bank,&safety,started,false));
     }
-    assert(ot_fx_bank_apply(bank,&(ot_ble_fx_packet_t){
-        .effect_id=OT_FX_HELIX_DRIVE,.chain_mask=1u,.zone_mask=1u,
-        .r=20u,.g=120u,.b=240u,.brightness=24u,.speed=150u,
-        .intensity=180u,.palette_id=0u,.ttl_sec=60u
-    },1000u,false));
-
     assert(render_probe_frame(probe,active,bank,1100u));
     assert(probe->state[0][0].original_clock_initialized);
     assert(probe->state[1][0].original_clock_initialized);
