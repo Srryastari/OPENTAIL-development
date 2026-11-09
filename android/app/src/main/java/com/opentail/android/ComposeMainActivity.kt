@@ -2294,6 +2294,7 @@ class ComposeMainActivity : ComponentActivity() {
             SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
             panelSyncWarning.value?.let { warning ->
                 Caption("Synchronization warning · " + warning, t)
+                Caption(panelStatusSummary.value, t)
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
             // No reset command exists in the pinned CORE interface. Do not
