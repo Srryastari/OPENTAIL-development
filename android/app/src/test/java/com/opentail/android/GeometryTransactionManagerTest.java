@@ -49,7 +49,7 @@ public class GeometryTransactionManagerTest {
     @Test public void disconnectAndHardSequenceFaultRequireAuthoritativeReload() {
         byte[] original={1,2,3};
         GeometryTransactionManager manager=new GeometryTransactionManager(
-            new GeometryTransactionManager.Snapshot(1,7,original));
+            new GeometryTransactionManager.Snapshot(0,7,original));
         assertTrue(manager.requestBegin());
         assertTrue(manager.acceptBegin(status(1,91,0,0x10,7,7,7,0,0,0)));
         manager.connectionLost();
@@ -57,9 +57,9 @@ public class GeometryTransactionManagerTest {
         assertTrue(manager.syncUncertain());
         assertArrayEquals(original,manager.lastConfirmed().wire);
         assertFalse(manager.reconcile(status(1,91,0,0x10,7,7,7,0,0,0),
-            new GeometryTransactionManager.Snapshot(1,7,original)));
+            new GeometryTransactionManager.Snapshot(0,7,original)));
         assertTrue(manager.reconcile(status(4,91,0,0x10,7,7,7,0,0,0),
-            new GeometryTransactionManager.Snapshot(1,7,original)));
+            new GeometryTransactionManager.Snapshot(0,7,original)));
         assertFalse(manager.syncUncertain());
     }
 

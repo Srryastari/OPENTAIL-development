@@ -127,7 +127,11 @@ final class TelemetrySequenceWatchdog {
         if(authoritative.hardSyncFault)return false;
         if(hardFault && authoritative.lane==hardFaultLane &&
            authoritative.sessionId==hardFaultSession)return false;
-        if(authoritative.activeRevision!=authoritative.renderRevision)return false;
+        if(authoritative.activeRevision!=authoritative.renderRevision) {
+            warning=true;
+            if(message==null)message="CORE render revision has not caught up with the authoritative geometry";
+            return false;
+        }
         if(authoritative.state==PanelPreviewProtocol.STATE_ACTIVE &&
            authoritative.lastAcceptedSequence!=last.lastAcceptedSequence)return false;
         last=authoritative;warning=false;hardFault=false;message=null;

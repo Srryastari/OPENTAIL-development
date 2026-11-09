@@ -98,11 +98,19 @@ public class TelemetrySequenceWatchdogTest {
         assertTrue(w.reconcile(fresh,true));
     }
 
+    private static PanelPreviewProtocol.Status statusWithRender(int state,long session,long seq,int render) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=0;b[3]=3;
+        put32(b,4,session);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,seq);put32(b,18,0x1234);put16(b,22,7);put16(b,24,7);put16(b,26,render);
+        b[29]=1;b[60]=(byte)(seq==0?0:4);
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
     @Test public void renderRevisionMismatchPreventsTelemetryReconciliation() {
         TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
-        PanelPreviewProtocol.Status active=status(1,63,0,0x10,7,7,7,0,0,0);
+        PanelPreviewProtocol.Status active=statusWithRender(1,63,0,7);
         w.observe(active);
-        PanelPreviewProtocol.Status staleRender=status(1,63,0,0x10,7,7,6,0,0,0);
+        PanelPreviewProtocol.Status staleRender=statusWithRender(1,63,0,6);
         assertFalse(w.reconcile(staleRender,true));
         assertTrue(w.snapshot().warning);
     }

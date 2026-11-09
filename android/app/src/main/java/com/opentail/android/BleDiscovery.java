@@ -1709,11 +1709,16 @@ final class BleDiscovery {
                     panelGeometryManagers[current.lane]=manager;
                 } else managerReconciled=manager.reconcile(current,confirmed);
             }
-            boolean reconciled=stable&&managerReconciled&&panelWatchdog.reconcile(current,true);
+            boolean watchdogReconciled=stable&&managerReconciled&&panelWatchdog.reconcile(current,true);
+            boolean reconciled=stable&&managerReconciled&&watchdogReconciled;
             TelemetrySequenceWatchdog.Decision reconciliationFailure=null;
-            if(stable&&!managerReconciled)
-                reconciliationFailure=panelWatchdog.markReconciliationFailed(
-                    "CORE telemetry sequence/candidate CRC does not match the authoritative geometry snapshot");
+            if(stable&&!reconciled) {
+                String why=!managerReconciled
+                    ?"CORE telemetry sequence/candidate CRC does not match the authoritative geometry snapshot"
+                    :"CORE telemetry watchdog rejected the authoritative geometry reconciliation";
+                reconciliationFailure=panelWatchdog.markReconciliationFailed(why);
+                if(manager!=null)manager.markSynchronizationUncertain(why);
+            }
             panelReconciliationPending=false;
             panelReconciliationSnapshotVerified=false;
             if(reconciled) {
