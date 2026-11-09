@@ -58,13 +58,13 @@ static void test_phase_continuity_behind_physical_overrides(void){
         uint32_t calls_before_override=0u;
         for(unsigned frame=0;frame<3u;frame++){
             const uint32_t now=1000u+frame*16u;
+            if(frame==1u)calls_before_override=live.call;
             assert(ot_wled_fx_render(&cfg,&live,now,live_frame,16u));
             assert(ot_wled_fx_render(&cfg,&reference,now,reference_frame,16u));
             /* Chase owns no dynamic scratch; compare the complete source state. */
             assert(live.scratch==NULL&&reference.scratch==NULL);
             assert(memcmp(&live,&reference,sizeof(live))==0);
             if(frame==1u){
-                calls_before_override=live.call;
                 ot_rgb_t visible={live_frame[0].r,live_frame[0].g,live_frame[0].b};
                 assert(ot_om_trigger_overlay(cases[c].role,cases[c].mask,
                                              true,OT_MAX_BRIGHTNESS,&visible));
