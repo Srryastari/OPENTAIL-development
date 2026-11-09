@@ -499,7 +499,7 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_trees": {
-    "android": "fcc0b6061e13bf9e7fdc931529ba102188cf7ebd",
+    "android": "baa2ddd81144a0cd2172b6881c00b8453478598b",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
   },
   "owner_mandated_p0_addendum": {
@@ -515,7 +515,7 @@
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
       "android/qa/test_native_source.cjs"
     ],
-    "firmware_contract_sha": "1666369777c8d959b4771a833e6888f66cec5942",
+    "firmware_contract_sha": "b1761976a3cabf917858ed5064187c1334637002",
     "protocol": {
       "status_v2_bytes": 61,
       "map_wire_bytes": 667,
