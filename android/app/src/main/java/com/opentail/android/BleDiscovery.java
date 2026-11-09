@@ -311,6 +311,7 @@ final class BleDiscovery {
     private volatile boolean panelReadPending=false;
     private volatile int panelReadKind=0,panelReadWatchLease=0;
     private volatile int panelStatusExpectedLane=-1;
+    private int panelStatusReadRetries=0,panelStatusRetryLease=0;
     private volatile int panelSnapshotQueuedLane=-1;
     private volatile boolean panelSnapshotBusy=false,panelSnapshotWaitingWrite=false,
                              panelSnapshotWaitingRead=false,panelSnapshotAbortForStop=false;
@@ -373,6 +374,7 @@ final class BleDiscovery {
     boolean readPanelStatus() {
         if(!canControl() || panelPreviewStatus==null || panelCapabilities==null ||
            !panelCapabilities.supportsPreviewV2())return false;
+        panelStatusReadRetries=0;panelStatusRetryLease++;
         panelReadQueued=2;pumpQueue();return true;
     }
     boolean readPanelLaneSnapshot(int lane) {
@@ -524,7 +526,7 @@ final class BleDiscovery {
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
         panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
-        panelStatusExpectedLane=-1;
+        panelStatusExpectedLane=-1;panelStatusReadRetries=0;panelStatusRetryLease++;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
         panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
         panelSnapshotWatchLease++;panelCancelQueued=false;
@@ -1796,6 +1798,21 @@ final class BleDiscovery {
         pumpQueue();
     }
 
+    private void panelRetryStatusRead(BluetoothGatt owner) {
+        if(panelStatusReadRetries>=3) {
+            notifyStatus("CORE Panel status retries exhausted; reconnect or request a fresh status read");
+            return;
+        }
+        panelStatusReadRetries++;
+        final int lease=++panelStatusRetryLease;
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelStatusRetryLease==lease&&
+               !panelReadPending&&panelReadQueued==0) {
+                panelReadQueued=2;pumpQueue();
+            }
+        },250L);
+    }
+
     private void panelStatusRead(BluetoothGatt owner,byte[] value,int status) {
         if(owner!=gatt)return;
         if(panelReadPending&&panelReadKind==2){panelReadPending=false;panelReadKind=0;panelReadWatchLease++;}
@@ -1809,7 +1826,7 @@ final class BleDiscovery {
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("CORE Panel status read failed: "+status);
-            panelReadQueued=2;pumpQueue();return;
+            panelRetryStatusRead(owner);pumpQueue();return;
         }
         final PanelPreviewProtocol.Status current;
         try{current=PanelPreviewProtocol.Status.parse(value);}
@@ -1822,7 +1839,7 @@ final class BleDiscovery {
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());
-            panelReadQueued=2;pumpQueue();return;
+            panelRetryStatusRead(owner);pumpQueue();return;
         }
         if(panelStatusExpectedLane>=0&&current.lane!=panelStatusExpectedLane) {
             panelStatusFresh[panelStatusExpectedLane]=false;
@@ -1831,6 +1848,7 @@ final class BleDiscovery {
             pumpQueue();return;
         }
         panelStatusExpectedLane=-1;
+        panelStatusReadRetries=0;panelStatusRetryLease++;
         panelLastStatus=current;
         panelStatuses[current.lane]=current;
         panelStatusFresh[current.lane]=true;
