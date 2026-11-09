@@ -461,6 +461,20 @@ static bool pz_pair_nvs_write_commit(void *context,
     nvs_close(h);
     return e==ESP_OK;
 }
+static bool pz_pair_nvs_write_batch_commit(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key_a,const void *data_a,
+        size_t size_a,const char *key_b,const void *data_b,size_t size_b){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
+    nvs_handle_t h;
+    if(nvs_open(storage_namespace,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,key_a,data_a,size_a);
+    if(e==ESP_OK)e=nvs_set_blob(h,key_b,data_b,size_b);
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    return e==ESP_OK;
+}
 static bool pz_pair_nvs_erase_commit(void *context,
         ot_pz_pair_namespace_t name_space,const char *key){
     (void)context;
@@ -478,6 +492,7 @@ static const ot_pz_pair_store_io_t pz_pair_store_io={
     .context=NULL,
     .read=pz_pair_nvs_read,
     .write_commit=pz_pair_nvs_write_commit,
+    .write_batch_commit=pz_pair_nvs_write_batch_commit,
     .erase_commit=pz_pair_nvs_erase_commit
 };
 static bool pz_pair_phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
