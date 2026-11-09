@@ -408,40 +408,119 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(probe->resolved_bank_index[0][0]==1u);
     assert(probe->resolved_bank_index[0][1]==0u);
 
-    /* A new effect refresh addressed to current zone index 0 must update its
-     * identity-owned bank slot 1, not overwrite the old index-0 owner's slot. */
+    /* Same-effect parameter refresh to reordered B resolves to bank slot 1.
+     * It changes parameters but retains B's generation/start/phase and leaves
+     * A's effect, generation and renderer phase untouched. */
     ot_om_output_t current_outputs[OT_OM_OUTPUTS]={0};
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
         assert(ot_pz_to_fx_view(&active->outputs[o],o,&current_outputs[o]));
     const uint32_t zone1_generation=bank->zones[0][1].generation;
-    const uint32_t zone0_generation=bank->zones[0][0].generation;
     const uint32_t zone1_started=bank->zones[0][1].started_ms;
+    const uint32_t zone0_generation=bank->zones[0][0].generation;
+    const uint32_t zone0_started=bank->zones[0][0].started_ms;
+    ot_fx_zone_bank_t same_reference_bank=*bank;
+    render_probe_t same_reference;
+    clone_render_probe(&same_reference,probe);
+    assert(render_probe_frame(&same_reference,active,&same_reference_bank,1160u));
     ot_ble_fx_packet_t refresh=make_fx(OT_WLED_RIPPLE,0u,0u);
+    refresh.speed=37u;refresh.intensity=71u;refresh.brightness=33u;
     assert(ot_fx_bank_apply_configured_identity(bank,&refresh,current_outputs,
         active->outputs,1160u,false));
+    assert(bank->zones[0][1].request.effect_id==OT_WLED_RIPPLE);
+    assert(bank->zones[0][1].request.speed==37u);
+    assert(bank->zones[0][1].request.intensity==71u);
     assert(bank->zones[0][1].generation==zone1_generation);
     assert(bank->zones[0][1].started_ms==zone1_started);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
     assert(bank->zones[0][0].generation==zone0_generation);
-    assert(bank->zones[0][0].owner_zone_id==original_zone0);
-    assert(bank->zones[0][1].owner_zone_id==original_zone1);
+    assert(bank->zones[0][0].started_ms==zone0_started);
+    assert(render_probe_frame(probe,active,bank,1160u));
+    assert(same_effect_state(&same_reference.state[0][1],&probe->state[0][1]));
+    assert(probe->state[0][0].wled.scratch==moving_scratch);
+    release_render_probe(&same_reference);
 
-    const ot_fx_overlay_config_t overlay={
+    /* Replacing B with a different effect must reset only B. A continues at
+     * the exact same renderer phase as an uninterrupted reference. */
+    const uint32_t b_generation_before_replace=bank->zones[0][1].generation;
+    const uint32_t a_generation_before_replace=bank->zones[0][0].generation;
+    const uint32_t a_started_before_replace=bank->zones[0][0].started_ms;
+    ot_fx_zone_bank_t replacement_reference_bank=*bank;
+    render_probe_t replacement_reference;
+    clone_render_probe(&replacement_reference,probe);
+    assert(render_probe_frame(&replacement_reference,active,
+                              &replacement_reference_bank,1168u));
+    ot_ble_fx_packet_t replacement=make_fx(OT_FX_EMBERS,0u,0u);
+    assert(ot_fx_bank_apply_configured_identity(bank,&replacement,current_outputs,
+        active->outputs,1168u,false));
+    assert(bank->zones[0][1].request.effect_id==OT_FX_EMBERS);
+    assert(bank->zones[0][1].generation!=b_generation_before_replace);
+    assert(bank->zones[0][1].started_ms==1168u);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+    assert(bank->zones[0][0].generation==a_generation_before_replace);
+    assert(bank->zones[0][0].started_ms==a_started_before_replace);
+    assert(render_probe_frame(probe,active,bank,1168u));
+    assert(same_effect_state(&replacement_reference.state[0][1],
+                             &probe->state[0][1]));
+    release_render_probe(&replacement_reference);
+
+    /* Sparkle and overlay-only updates target B's stable slot 1, not current
+     * index 0's old slot. A's accents remain byte-for-byte unchanged. */
+    const ot_fx_spark_style_t a_spark={
+        .style=1u,.peak=19u,.color={11u,22u,33u}
+    };
+    const ot_fx_spark_style_t b_spark={
+        .style=2u,.peak=7u,.color={44u,55u,66u}
+    };
+    bank->zones[0][0].spark=a_spark;
+    assert(ot_fx_bank_set_spark_identity(bank,current_outputs,active->outputs,
+        1u,1u,1170u,&b_spark));
+    assert(memcmp(&bank->zones[0][1].spark,&b_spark,sizeof(b_spark))==0);
+    assert(memcmp(&bank->zones[0][0].spark,&a_spark,sizeof(a_spark))==0);
+
+    const ot_fx_overlay_config_t a_overlay={
+        .style=OT_FX_OVERLAY_FLARES,.peak=6u,.density=80u,
+        .radius=3u,.fade_ms=180u,.color={20u,30u,40u}
+    };
+    const ot_fx_overlay_config_t b_overlay={
         .style=OT_FX_OVERLAY_SPARKS,.peak=8u,.density=100u,
         .radius=4u,.fade_ms=120u,.color={255u,255u,255u}
     };
+    bank->zones[0][0].overlay=a_overlay;
     assert(ot_fx_bank_set_overlay_identity(bank,current_outputs,active->outputs,
-        1u,1u,1161u,&overlay));
-    assert(bank->zones[0][1].overlay.style==OT_FX_OVERLAY_SPARKS);
-    assert(bank->zones[0][0].overlay.style==OT_FX_OVERLAY_OFF);
+        1u,1u,1171u,&b_overlay));
+    assert(memcmp(&bank->zones[0][1].overlay,&b_overlay,sizeof(b_overlay))==0);
+    assert(memcmp(&bank->zones[0][0].overlay,&a_overlay,sizeof(a_overlay))==0);
 
-    ot_fx_zone_bank_t continuous_bank=*bank;
-    ot_ble_fx_packet_t continuous=make_fx(OT_WLED_RIPPLE,0u,0u);
-    assert(ot_fx_bank_apply_continuous_tertiary_identity(&continuous_bank,
-        &continuous,current_outputs,active->outputs,NULL,1162u));
-    assert(continuous_bank.zones[0][1].continuous);
-    assert(!continuous_bank.zones[0][0].continuous);
-    assert(continuous_bank.zones[0][1].owner_zone_id==original_zone1);
+    /* A continuous update to B must not clear A's separate continuous slot. */
+    assert(bank->zones[0][0].configured&&bank->zones[0][0].continuous);
+    const uint32_t continuous_a_generation=bank->zones[0][0].generation;
+    ot_ble_fx_packet_t continuous=make_fx(OT_FX_EMBERS,0u,0u);
+    continuous.speed=91u;
+    assert(ot_fx_bank_apply_continuous_tertiary_identity(bank,&continuous,
+        current_outputs,active->outputs,NULL,1172u));
+    assert(bank->zones[0][1].continuous);
+    assert(bank->zones[0][1].request.effect_id==OT_FX_EMBERS);
+    assert(bank->zones[0][1].owner_zone_id==original_zone1);
+    assert(bank->zones[0][0].configured&&bank->zones[0][0].continuous);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+    assert(bank->zones[0][0].generation==continuous_a_generation);
 
+    /* Saved-scene restoration also binds each selected current zone to its
+     * logical owner instead of persisting the transient bank index. */
+    ot_fx_zone_bank_t restored_bank;
+    ot_fx_bank_reset(&restored_bank);
+    ot_ble_fx_packet_t saved_b=make_fx(OT_FX_EMBERS,0u,0u);
+    ot_ble_fx_packet_t saved_a=make_fx(OT_FX_DIMENSIONAL_RIFT,0u,1u);
+    assert(ot_fx_bank_apply_configured_identity(&restored_bank,&saved_b,
+        current_outputs,active->outputs,1173u,true));
+    assert(ot_fx_bank_apply_configured_identity(&restored_bank,&saved_a,
+        current_outputs,active->outputs,1174u,true));
+    assert(restored_bank.zones[0][0].owner_zone_id==original_zone1);
+    assert(restored_bank.zones[0][1].owner_zone_id==original_zone0);
+    assert(restored_bank.zones[0][0].request.effect_id==OT_FX_EMBERS);
+    assert(restored_bank.zones[0][1].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+
+    assert(render_probe_frame(probe,active,bank,1174u));
     release_render_probe(&original_order_reference);
 
     /* A subsequent reorder is cancelled. The committed mapping and both
