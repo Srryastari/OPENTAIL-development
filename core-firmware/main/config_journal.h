@@ -18,6 +18,7 @@
 #define OT_TM_POLICY_MAGIC 0x4f54504cu
 #define OT_TM_POLICY_VERSION 1u
 #define OT_TM_POLICY_KEY "policy_v1"
+#define OT_TM_TURN_RELEASE_INPUT_MASK 0x0cu /* physical IN3 + IN4 */
 
 /* V1 is read-only migration input (original #46 draft). */
 typedef struct {
@@ -40,6 +41,8 @@ typedef struct {
     uint8_t assertion_samples;
     uint16_t sample_period_ms;
     uint32_t turn_release_hold_us;
+    uint8_t turn_release_input_mask;
+    uint8_t reserved[3];
 } ot_tm_policy_record_t;
 typedef struct {
     uint32_t magic,version,crc;
@@ -51,7 +54,7 @@ uint32_t ot_cfg_crc32(const void *data,size_t bytes);
 uint32_t ot_cfg_crc32_zeroed(const void *data,size_t bytes,size_t zero_offset,size_t zero_bytes);
 bool ot_tm_policy_build(ot_tm_policy_record_t *out,uint8_t input_active_low,
                         uint8_t assertion_samples,uint16_t sample_period_ms,
-                        uint32_t turn_release_hold_us);
+                        uint8_t turn_release_input_mask,uint32_t turn_release_hold_us);
 bool ot_tm_policy_valid(const ot_tm_policy_record_t *record);
 bool ot_tm_journal_build(ot_tm_journal_t *out,const ot_tm_profile_t *previous,
                          const ot_tm_profile_t *candidate);
