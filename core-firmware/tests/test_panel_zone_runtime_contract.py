@@ -192,3 +192,27 @@ assert "OT_PZ_TX_STATUS_V2_BYTES 61u" in protocol_header
 assert "OT_PZ_MAX_RANGES_PER_ZONE,0x0fu" in ble
 
 print("PASS Owner P0 protected-COMMITTING and sequence-watchdog source contracts")
+
+
+# The COMMITTING protocol lock is published before CORE queues the durable save.
+assert "panel_preview_tx.committing=true;" in control_handler
+assert control_handler.index("panel_preview_tx.committing=true;") < control_handler.index(
+    "ot_ble_panel_preview_commit(")
+assert "panel_preview_reject_committing_update(&update)" in update_handler
+assert "panel_preview_missing_before(update.sequence)" in update_handler
+committing_classifier = ble.split("static void panel_preview_reject_committing_update(", 1)[1].split(
+    "static bool panel_preview_session_matches(", 1)[0]
+for token in ("OT_PZ_TX_SEQUENCE_DUPLICATE", "OT_PZ_TX_SEQUENCE_GAP",
+              "OT_PZ_TX_SEQUENCE_OUT_OF_ORDER", "OT_PZ_TX_SEQUENCE_CONFLICT",
+              "duplicate_count", "missing_sequence_count", "out_of_order_count",
+              "conflict_count"):
+    assert token in committing_classifier, token
+
+# A random per-boot identity is available to the physical endurance log via /status.
+core = (ROOT / "main/opentail_core.c").read_text()
+assert "core_boot_id=esp_random()" in core
+status_endpoint = core.split("static esp_err_t status_get(", 1)[1].split(
+    "static esp_err_t caps_get(", 1)[0]
+assert "boot_id" in status_endpoint and "core_boot_id" in status_endpoint
+
+print("PASS owner addendum commit race, delayed sequence telemetry and boot identity contracts")
