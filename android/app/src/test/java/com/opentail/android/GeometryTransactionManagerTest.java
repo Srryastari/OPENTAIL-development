@@ -417,7 +417,7 @@ public class GeometryTransactionManagerTest {
     }
 
     @Test public void proposedGeometryCannotOverlapAnUnrelatedAuthoritativeZone() throws Exception {
-        NativeProject project=new FakeProjectStorageProject().project();
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
         GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot occupied=panelSnapshot(0,623,5,"Existing",
@@ -432,7 +432,7 @@ public class GeometryTransactionManagerTest {
     }
 
     @Test public void proposedPanelIdsCannotCollideWithExistingZonesOrDifferentPanels() throws Exception {
-        NativeProject project=new FakeProjectStorageProject().project();
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
         GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot zoneCollision=panelSnapshot(0,623,7,"Other",
@@ -455,7 +455,7 @@ public class GeometryTransactionManagerTest {
     }
 
     @Test public void proposedGeometryCannotExceedAuthoritativeActivePixelCapacity() throws Exception {
-        NativeProject project=new FakeProjectStorageProject().project();
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
         GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot small=panelSnapshot(0,100,0,"",0,0,"",0,0);
