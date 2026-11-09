@@ -41,93 +41,76 @@ for operation,begin,end,ram in (
     assert "OT_CFG_JOURNAL_KEY_ACTIVE" in body
 
 
-# Authoritative Panel/Zone v3 load/migration uses ot_zone_map and the v3
-# previous/candidate journal. A corrupt v3 record must fail closed rather
-# than falling back to stale embedded legacy zone definitions.
+# The legacy v3 combined record is read-only migration input. The authoritative
+# v4 runtime joins a lane-only output_cfg journal and map-only zone_map journal.
 pz_load=between("static void pz_load(void){",
                 "static bool pz_save_controller_locked(")
-assert 'nvs_open("ot_zone_map",NVS_READONLY' in pz_load
-assert "ot_pz_journal_recover(" in pz_load
-assert "pz_stage_legacy_migration()" in pz_load
-assert "Corrupt v3 data never falls back to legacy embedded zones" in pz_load
-assert "pz_reset_tombstone_valid" in pz_load
-assert "OT_PZ_RESET_TOMBSTONE_KEY" in pz_load
-assert "pz_reset_pending_mask=tombstone.reset_mask" in pz_load
+for token in ("ot_pz_pair_store_snapshot", "ot_pz_pair_store_recover",
+              "ot_pz_pair_store_begin", "pz_load_legacy_snapshot",
+              "om_deferred.pending=false"):
+    assert token in pz_load,token
+legacy_load=between("static bool pz_load_legacy_snapshot(",
+                    "static void pz_load(void){")
+assert 'nvs_open("ot_zone_map",NVS_READONLY' in legacy_load
+assert "ot_pz_journal_recover(" in legacy_load
+assert "pz_reset_tombstone_valid" in legacy_load
+assert "OT_PZ_RESET_TOMBSTONE_KEY" in legacy_load
+assert "nvs_set_blob(" not in legacy_load and "nvs_commit(" not in legacy_load
 
-legacy_migration=between("static bool pz_stage_legacy_migration(void){",
-                         "static void pz_load(void){")
-assert "ot_pz_migrate_legacy(om_outputs,om_persistent,&previous)" in legacy_migration
-assert "ot_pz_journal_build(&migration,&previous,&candidate," in legacy_migration
-assert 'nvs_open("ot_zone_map",NVS_READWRITE' in legacy_migration
-assert "nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED,&migration,sizeof(migration))" in legacy_migration
-assert "nvs_commit(h)" in legacy_migration
-assert 'nvs_open("ot_output_cfg",NVS_READWRITE' not in legacy_migration
-
-# Saving a new Panel/Zone map writes and verifies the staged journal before
-# publishing any candidate or revision to RAM.
+# The runtime save delegates to the shared pair-store implementation. No RAM
+# candidate/revision is published unless lane stage, map stage and pair intent
+# each commit and read back successfully.
 pz_save=between("static bool pz_save_controller_locked(",
                 "/* Legacy output writes are lossless")
-assert "ot_pz_journal_build(&staged,&previous,candidate," in pz_save
-assert 'nvs_open("ot_zone_map",NVS_READWRITE' in pz_save
-stage_write=pz_save.index("nvs_set_blob(h,OT_PZ_JOURNAL_KEY_STAGED")
-stage_commit=pz_save.index("if(e==ESP_OK)e=nvs_commit(h)",stage_write)
-stage_readback=pz_save.index("nvs_get_blob(h,OT_PZ_JOURNAL_KEY_STAGED",stage_commit)
-ram_publish=pz_save.index("pz_deferred.candidate=*candidate;")
-assert stage_write<stage_commit<stage_readback<ram_publish
-assert "ot_pz_journal_valid(&readback)" in pz_save
-assert "memcmp(&readback,&staged,sizeof(staged))!=0" in pz_save
-assert "candidate_revision[lane]==UINT16_MAX" in pz_save
-assert "pz_revision,candidate_revision" in pz_save
-assert "No RAM mutation before verified durable stage" in pz_save
+assert "ot_pz_pair_store_begin" in pz_save
+assert "previous_revision" in pz_save and "candidate_revision" in pz_save
+assert "reset_mask" in pz_save
+assert pz_save.index("ot_pz_pair_store_begin") < pz_save.index(
+    "pz_deferred.candidate=*candidate;")
+assert "pz_pair_commit_pending" in pz_save
+assert "nvs_open(" not in pz_save and "nvs_set_blob(" not in pz_save
 
-# Panel/Zone promotion is distinct from the legacy output promoter. The
-# candidate cannot become active until active_v3 readback, reset tombstone
-# durability (when applicable), stage erasure, and a fresh quiet GPIO/epoch
-# check have all succeeded.
+# The exact same portable v4 store used by CORE implements all eight durable
+# write boundaries and is exercised by test_panel_zone_pair_store.c.
+store=(root/"main/panel_zone_pair_store.c").read_text()
+store_header=(root/"main/panel_zone_pair_store.h").read_text()
+for token in ("ot_pz_pair_store_begin","ot_pz_pair_store_finish",
+              "ot_pz_pair_store_snapshot","ot_pz_pair_store_recover",
+              "ot_pz_pair_store_mark_reset","write_verified","erase_verified"):
+    assert token in store,token
+for token in ("OT_PZ_LANE_KEY_STAGED","OT_PZ_MAP_KEY_STAGED",
+              "OT_PZ_PAIR_INTENT_KEY","OT_PZ_LANE_KEY_ACTIVE",
+              "OT_PZ_MAP_KEY_ACTIVE"):
+    assert token in store_header or token in store,token
+assert store.index("OT_PZ_LANE_KEY_STAGED") < store.index(
+    "OT_PZ_MAP_KEY_STAGED") < store.index("OT_PZ_PAIR_INTENT_KEY")
+assert store.index("OT_PZ_LANE_KEY_ACTIVE") < store.index(
+    "OT_PZ_MAP_KEY_ACTIVE")
+for phase in range(1,9):
+    assert f"phase_context,{phase}u" in store
+
+# Runtime promotion resumes an intent, validates the matching active pair,
+# checks the quiet-input epoch, then publishes only the joined candidate.
 panel_promotion=between("static void pz_promote(uint32_t epoch){",
                         "static void om_promote(uint32_t epoch){")
-for token in (
-    'nvs_open("ot_zone_map",NVS_READWRITE',
-    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage)",
-    "pz_deferred.pending",
-    "pz_revision,stage.candidate_revision",
-    "pz_active_revision,stage.previous_revision",
-    "memcmp(&pz_outputs,&stage.previous,sizeof(pz_outputs))",
-    "memcmp(&pz_deferred.candidate,&stage.candidate,sizeof(pz_deferred.candidate))",
-    "config_activation_idle(epoch,true)",
-    "input_quiet_samples>=OT_DEBOUNCE_TICKS",
-    "live_input_mask==0u",
-    "tm_gpio_input_mask()==0u",
-    "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
-    "config_recovery_fault=true",
-):
+for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
+              "ot_pz_pair_store_recover","ot_pz_join",
+              "config_activation_idle(epoch,true)",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "live_input_mask==0u","tm_gpio_input_mask()==0u",
+              "input_edge_epoch,__ATOMIC_ACQUIRE",
+              "pz_outputs=recovered_pending.candidate",
+              "config_recovery_fault=true"):
     assert token in panel_promotion,token
-active_write=panel_promotion.index("config_write_panel_active(h,&stage)")
-active_readback=panel_promotion.index(
-    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active_readback)")
-tombstone=panel_promotion.index("pz_reset_tombstone_write_handle(")
-stage_erase=panel_promotion.index("config_clear_panel_stage(h)")
-fresh_quiet=panel_promotion.index("if(!config_activation_idle(epoch,true))",stage_erase)
-ram_publish=panel_promotion.index("pz_outputs=stage.candidate")
-assert active_write<active_readback<tombstone<stage_erase<fresh_quiet<ram_publish
-assert "pz_refresh_legacy_projection_locked();" in panel_promotion
-assert "pz_active_revision,stage.candidate_revision" in panel_promotion
-assert "pz_deferred.pending=false" in panel_promotion
+assert "nvs_open(" not in panel_promotion
 
-# The portable journal validates CRCs and monotonic per-lane revisions and
-# restores the previous image when either the staged or active recovery copy
-# is the last durable record.
-assert "ot_pz_journal_build" in journal
-assert "ot_pz_journal_valid" in journal
-assert "ot_pz_journal_recover" in journal
-pz_recover=journal.split("bool ot_pz_journal_recover(",1)[1]
-assert "ot_pz_journal_valid(active)" in pz_recover
-assert "ot_pz_journal_valid(staged)" in pz_recover
-assert "promotion_copy" in pz_recover and "next_transaction" in pz_recover
-assert "*live=record->previous;" in pz_recover
-assert "pending->candidate=record->candidate;" in pz_recover
-assert "pending->pending=staged!=NULL||" in pz_recover
-assert "candidate_revision[lane]<=previous_revision[lane]" in journal
+# Hardware phase marker and status endpoint are present; physical cycles are
+# still separate and cannot be inferred from these software assertions.
+assert "PZ_PAIR_PHASE phase=%u transaction=%08lx" in core
+status=between("static esp_err_t status_get(","static esp_err_t caps_get(")
+for token in ("config_commit_phase","config_commit_transaction_id",
+              "config_commit_pending"):
+    assert token in status,token
 
 # Legacy trigger/output records remain explicitly versioned migration input;
 # do not reinterpret old blobs or erase unrelated namespaces.
