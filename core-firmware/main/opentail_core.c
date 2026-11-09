@@ -263,7 +263,7 @@ static bool tm_policy_load(void){
             e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
         }
     }else if(e==ESP_OK){
-        if(size!=sizeof(stored))e=ESP_ERR_NVS_INVALID_SIZE;
+        if(size!=sizeof(stored))e=ESP_ERR_INVALID_SIZE;
         else e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
     }
     nvs_close(h);
