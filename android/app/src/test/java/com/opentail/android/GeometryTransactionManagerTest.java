@@ -417,6 +417,26 @@ public class GeometryTransactionManagerTest {
         }
     }
 
+    @Test public void transactionManagerOwnsContiguousUpdateSequenceNumbers() {
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,new byte[]{1,2,3}));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,88,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor descriptor=
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,10,0x0f);
+        GeometryTransactionManager.Update first=manager.queueUpdate(
+            new byte[]{1},new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+        assertNotNull(first);
+        assertEquals(1,PanelPreviewProtocol.u32(first.packet,7));
+        assertEquals(19,first.packet.length);
+        assertTrue(manager.acknowledgeUpdate(status(1,88,1,0x20,7,7,7,0,0,4)));
+        GeometryTransactionManager.Update second=manager.queueUpdate(
+            new byte[]{2},new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+        assertNotNull(second);
+        assertEquals(2,PanelPreviewProtocol.u32(second.packet,7));
+        assertEquals(19,second.packet.length);
+    }
+
     @Test public void panelDescriptorBatchesRespectNegotiatedAttMtuAndFirmwareLimit() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         for(int i=0;i<5;i++)
