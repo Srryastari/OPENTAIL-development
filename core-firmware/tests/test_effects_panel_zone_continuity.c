@@ -407,6 +407,41 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(probe->state[0][0].wled.scratch==moving_scratch);
     assert(probe->resolved_bank_index[0][0]==1u);
     assert(probe->resolved_bank_index[0][1]==0u);
+
+    /* A new effect refresh addressed to current zone index 0 must update its
+     * identity-owned bank slot 1, not overwrite the old index-0 owner's slot. */
+    ot_om_output_t current_outputs[OT_OM_OUTPUTS]={0};
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+        assert(ot_pz_to_fx_view(&active->outputs[o],o,&current_outputs[o]));
+    const uint32_t zone1_generation=bank->zones[0][1].generation;
+    const uint32_t zone0_generation=bank->zones[0][0].generation;
+    const uint32_t zone1_started=bank->zones[0][1].started_ms;
+    ot_ble_fx_packet_t refresh=make_fx(OT_WLED_RIPPLE,0u,0u);
+    assert(ot_fx_bank_apply_configured_identity(bank,&refresh,current_outputs,
+        active->outputs,1160u,false));
+    assert(bank->zones[0][1].generation==zone1_generation);
+    assert(bank->zones[0][1].started_ms==zone1_started);
+    assert(bank->zones[0][0].generation==zone0_generation);
+    assert(bank->zones[0][0].owner_zone_id==original_zone0);
+    assert(bank->zones[0][1].owner_zone_id==original_zone1);
+
+    const ot_fx_overlay_config_t overlay={
+        .style=OT_FX_OVERLAY_SPARKS,.peak=8u,.density=100u,
+        .radius=4u,.fade_ms=120u,.color={255u,255u,255u}
+    };
+    assert(ot_fx_bank_set_overlay_identity(bank,current_outputs,active->outputs,
+        1u,1u,1161u,&overlay));
+    assert(bank->zones[0][1].overlay.style==OT_FX_OVERLAY_SPARKS);
+    assert(bank->zones[0][0].overlay.style==OT_FX_OVERLAY_OFF);
+
+    ot_fx_zone_bank_t continuous_bank=*bank;
+    ot_ble_fx_packet_t continuous=make_fx(OT_WLED_RIPPLE,0u,0u);
+    assert(ot_fx_bank_apply_continuous_tertiary_identity(&continuous_bank,
+        &continuous,current_outputs,active->outputs,NULL,1162u));
+    assert(continuous_bank.zones[0][1].continuous);
+    assert(!continuous_bank.zones[0][0].continuous);
+    assert(continuous_bank.zones[0][1].owner_zone_id==original_zone1);
+
     release_render_probe(&original_order_reference);
 
     /* A subsequent reorder is cancelled. The committed mapping and both
@@ -446,6 +481,7 @@ static void test_identity_state_survives_reorder_delete_and_cancel(
     assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
     preview.committing=true;
     *active=preview.candidate;
+    ot_fx_bank_prune_orphans(bank,active->outputs);
     ot_pz_preview_cancel(&preview);
     assert(render_probe_frame(probe,active,bank,1176u));
     assert(same_effect_state(&delete_reference.state[0][1],&probe->state[0][0]));
