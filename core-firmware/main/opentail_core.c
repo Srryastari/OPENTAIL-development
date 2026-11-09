@@ -1781,30 +1781,40 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     ready=native_outputs_ready;
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=continuous?ot_fx_bank_apply_continuous_tertiary(&fx_bank,req,om_outputs,
-            tertiary,now_ms):
-            ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
+        ready=continuous?
+            ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req,
+                om_outputs,pz_outputs.outputs,tertiary,now_ms):
+            ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs,
+                pz_outputs.outputs,now_ms,standalone);
+        uint8_t resolved[OT_OM_OUTPUTS][OT_OM_ZONES];
+        for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++){
+            memset(resolved[o],0xff,sizeof(resolved[o]));
+            if((req->chain_mask&(1u<<o))&&
+               !ot_fx_bank_resolve_zone_identity(&pz_outputs.outputs[o],
+                   &fx_bank,o,now_ms,resolved[o]))ready=false;
+        }
         if(ready&&spark){
-            /* Optional sparkle tuning is transient per-zone state. Preserve
-             * legacy fixed-size BLE FX packets and saved NVS profile layout. */
+            /* Optional sparkle tuning is transient per-logical-zone state. */
             for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
                 if(!(req->chain_mask&(1u<<o)))continue;
                 for(unsigned z=0;z<om_outputs[o].zone_count;z++){
                     if(!(req->zone_mask&(1u<<z))||
                        om_outputs[o].zones[z].pixels==0||
-                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
-                    fx_bank.zones[o][z].spark=*spark;
+                       om_outputs[o].zones[z].role==OT_OM_OFF||
+                       resolved[o][z]>=OT_OM_ZONES)continue;
+                    fx_bank.zones[o][resolved[o][z]].spark=*spark;
                 }
             }
         }
-    }
-    if(ready&&overlay){
-        for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-            if(!(req->chain_mask&(1u<<o)))continue;
-            for(unsigned z=0;z<om_outputs[o].zone_count;z++){
-                if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
-                   om_outputs[o].zones[z].role==OT_OM_OFF)continue;
-                fx_bank.zones[o][z].overlay=*overlay;
+        if(ready&&overlay){
+            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+                if(!(req->chain_mask&(1u<<o)))continue;
+                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
+                    if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
+                       om_outputs[o].zones[z].role==OT_OM_OFF||
+                       resolved[o][z]>=OT_OM_ZONES)continue;
+                    fx_bank.zones[o][resolved[o][z]].overlay=*overlay;
+                }
             }
         }
     }
