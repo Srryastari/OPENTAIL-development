@@ -437,65 +437,52 @@ assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (
     root / "trigger_manager.h").read_text()
 assert "ot_tm_ble_decode(" in gatt and "ot_tm_ble_encode(" in gatt
 
-# P1 #45: Independent exact-source fence for the corrected durable
-# transaction on Firmware #49. This checks actual ordering and readback;
-# NVS/interrupt power-fault injection is an additional hardware requirement.
+# P1 #45 trigger policy retains its own journal and release-gated RAM publish.
 trigger_promotion=between(core,"static void tm_promote(uint32_t epoch){",
-                         "static void om_promote(uint32_t epoch){")
-output_promotion=between(core,"static void om_promote(uint32_t epoch){",
-                        "static void config_activation_task(void *unused){")
-for kind,operation,helper in (
-    ("trigger",trigger_promotion,"ot_tm_apply_if_released("),
-    ("output geometry",output_promotion,"ot_om_apply_if_released("),
-):
-    active_write=operation.index("config_write_active(h,")
-    stage_erase=operation.index("config_clear_stage(h)")
-    after_erase_idle=operation.index("config_activation_idle(epoch,false)",stage_erase)
-    ram_apply=operation.index(helper)
-    assert active_write < stage_erase < after_erase_idle < ram_apply, (
-        f"{kind}: RAM publication must follow durable stage erasure and "
-        "fresh GPIO/epoch qualification (P1 issue #45)"
-    )
-    assert "if(!config_clear_stage(h))" in operation, kind
-    assert "config_recovery_fault=true;" in operation, kind
-    assert "tm_gpio_input_mask()==0u" in operation, kind
-    assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in operation, kind
-    assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in operation, kind
-    assert "stage.previous_revision" in operation and "stage.candidate_revision" in operation, kind
+                          "static void pz_promote(uint32_t epoch){")
+active_write=trigger_promotion.index("config_write_active(h,")
+stage_erase=trigger_promotion.index("config_clear_stage(h)")
+after_erase_idle=trigger_promotion.index("config_activation_idle(epoch,false)",stage_erase)
+ram_apply=trigger_promotion.index("ot_tm_apply_if_released(")
+assert active_write < stage_erase < after_erase_idle < ram_apply
+for token in ("if(!config_clear_stage(h))","config_recovery_fault=true;",
+              "tm_gpio_input_mask()==0u",
+              "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "stage.previous_revision","stage.candidate_revision"):
+    assert token in trigger_promotion, token
 
-# Issue #126 authoritative Panel/Zone v3 promotion uses its own journal keys
-# and allow_show=True so a saved layout can activate without stopping Show Mode.
+# Issue #126 v4 runtime promotion finishes the coordinated lane/map journal,
+# verifies both active records, and publishes only the joined candidate after
+# a fresh quiet-input/epoch check. No combined v3 runtime promotion remains.
 panel_promotion=between(core,"static void pz_promote(uint32_t epoch){",
-                        "static void om_promote(uint32_t epoch){")
-for token in (
-    'nvs_open("ot_zone_map",NVS_READWRITE',
-    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,&stage)",
-    "pz_deferred.pending",
-    "pz_revision,stage.candidate_revision",
-    "pz_active_revision,stage.previous_revision",
-    "config_activation_idle(epoch,true)",
-    "tm_gpio_input_mask()==0u",
-    "live_input_mask==0u",
-    "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
-    "input_quiet_samples>=OT_DEBOUNCE_TICKS",
-    "pz_outputs=stage.candidate",
-):
+                        "static void config_activation_task(void *unused){")
+for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
+              "ot_pz_pair_store_recover","ot_pz_join",
+              "config_activation_idle(epoch,true)",
+              "tm_gpio_input_mask()==0u","live_input_mask==0u",
+              "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "pz_outputs=recovered_pending.candidate",
+              "ot_pz_pair_store_mark_reset"):
     assert token in panel_promotion, token
-panel_active_write=panel_promotion.index("config_write_panel_active(h,&stage)")
-panel_active_readback=panel_promotion.index(
-    "pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,&active_readback)")
-panel_stage_erase=panel_promotion.index("config_clear_panel_stage(h)")
-panel_fresh_quiet=panel_promotion.index(
-    "if(!config_activation_idle(epoch,true))",panel_stage_erase)
-panel_ram_publish=panel_promotion.index("pz_outputs=stage.candidate")
-assert panel_active_write<panel_active_readback<panel_stage_erase
-assert panel_stage_erase<panel_fresh_quiet<panel_ram_publish
-assert panel_promotion.index("pz_reset_tombstone_write_handle(")<panel_stage_erase
+assert "nvs_open(" not in panel_promotion
+assert "config_recovery_fault=true;" in panel_promotion
+panel_finish=panel_promotion.index("ot_pz_pair_store_finish")
+panel_snapshot=panel_promotion.index("ot_pz_pair_store_snapshot")
+panel_recover=panel_promotion.index("ot_pz_pair_store_recover")
+panel_quiet=panel_promotion.index("if(!config_activation_idle(epoch,true))")
+panel_publish=panel_promotion.index("pz_outputs=recovered_pending.candidate")
+assert panel_finish<panel_snapshot<panel_recover<panel_quiet<panel_publish
+
 panel_recovery=between(core,"static void pz_load(void){",
                        "static bool pz_save_controller_locked(")
-assert "ot_pz_journal_recover(" in panel_recovery
-assert "Corrupt v3 data never falls back to legacy embedded zones" in panel_recovery
-
+for token in ("ot_pz_pair_store_snapshot","ot_pz_pair_store_recover",
+              "ot_pz_pair_store_begin","pz_load_legacy_snapshot",
+              "v4_authoritative","pz_pair_commit_pending"):
+    assert token in panel_recovery, token
+assert "Corrupt v3 data never falls back to legacy embedded zones" not in panel_recovery
+assert "static void om_promote(" not in core
 # On power-loss recovery, an active-only journal still restores previous
 # mapping/geometry and holds the candidate pending; stage deletion does
 # not authorize a fresh boot to change Brake/Turn/Reverse behavior.
