@@ -6,7 +6,7 @@
 #define FAKE_BYTES 4096u
 typedef struct {bool present;size_t size;uint8_t bytes[FAKE_BYTES];} fake_blob_t;
 typedef struct {
-    fake_blob_t lane_active,lane_stage,map_active,map_stage,intent;
+    fake_blob_t lane_active,lane_stage,map_active,map_stage,intent,marker;
     unsigned durable_writes;
 } fake_store_t;
 typedef struct {uint8_t cut_after,last_phase;uint32_t transaction_id;} phase_state_t;
@@ -19,6 +19,7 @@ static fake_blob_t *blob_for(fake_store_t *s,ot_pz_pair_namespace_t ns,const cha
         if(strcmp(key,OT_PZ_MAP_KEY_ACTIVE)==0)return &s->map_active;
         if(strcmp(key,OT_PZ_MAP_KEY_STAGED)==0)return &s->map_stage;
         if(strcmp(key,OT_PZ_PAIR_INTENT_KEY)==0)return &s->intent;
+        if(strcmp(key,OT_PZ_PAIR_STORE_MARKER_KEY)==0)return &s->marker;
     }
     return NULL;
 }
@@ -38,6 +39,16 @@ static bool fake_write_commit(void *context,ot_pz_pair_namespace_t ns,
     memcpy(b->bytes,data,size);b->size=size;b->present=true;s->durable_writes++;
     return true;
 }
+static bool fake_write_batch_commit(void *context,ot_pz_pair_namespace_t ns,
+        const char *key_a,const void *data_a,size_t size_a,
+        const char *key_b,const void *data_b,size_t size_b){
+    fake_store_t *s=context;fake_blob_t *a=blob_for(s,ns,key_a);
+    fake_blob_t *b=blob_for(s,ns,key_b);
+    if(!a||!b||!data_a||!data_b||size_a>FAKE_BYTES||size_b>FAKE_BYTES)return false;
+    memcpy(a->bytes,data_a,size_a);a->size=size_a;a->present=true;
+    memcpy(b->bytes,data_b,size_b);b->size=size_b;b->present=true;
+    s->durable_writes++;return true;
+}
 static bool fake_erase_commit(void *context,ot_pz_pair_namespace_t ns,const char *key){
     fake_store_t *s=context;fake_blob_t *b=blob_for(s,ns,key);
     if(!b)return false;
@@ -49,7 +60,8 @@ static bool phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
     return state->cut_after!=phase;
 }
 static ot_pz_pair_store_io_t make_io(fake_store_t *store){
-    return (ot_pz_pair_store_io_t){store,fake_read,fake_write_commit,fake_erase_commit};
+    return (ot_pz_pair_store_io_t){store,fake_read,fake_write_commit,
+                                  fake_write_batch_commit,fake_erase_commit};
 }
 static void make_runtime(ot_pz_controller_t *cfg,uint16_t pixels,uint8_t order,
                          uint16_t range_count){
@@ -132,9 +144,10 @@ static void durable_boundary_matrix(void){
         recover_expect(&io,&base,&candidate1,&candidate2,true,false,0x2002u,0u);
         ot_pz_pair_store_snapshot_t snapshot;
         assert(ot_pz_pair_store_snapshot(&io,&snapshot));
-        assert(snapshot.has_lane_active&&snapshot.has_map_active);
+        assert(snapshot.has_lane_active&&snapshot.has_map_active&&snapshot.has_marker);
         assert(!snapshot.has_lane_stage&&!snapshot.has_map_stage&&!snapshot.has_intent);
         assert(snapshot.lane_active.transaction_id==snapshot.map_active.transaction_id);
+        assert(snapshot.marker.transaction_id==snapshot.map_active.transaction_id);
     }
 }
 static void reset_marker_and_fail_closed(void){
@@ -168,7 +181,7 @@ static void reset_marker_and_fail_closed(void){
     recover_expect(&io,&base,&base,&candidate,true,false,0x3003u,1u);
     ot_pz_pair_store_snapshot_t active={0};
     assert(ot_pz_pair_store_snapshot(&io,&active));
-    assert(active.has_lane_active&&active.has_map_active);
+    assert(active.has_lane_active&&active.has_map_active&&active.has_marker);
     assert(memcmp(&active.lane_active.previous,&active.lane_active.candidate,
                   sizeof(active.lane_active.previous))==0);
     assert(active.map_active.candidate.outputs[0].panel_count==0u);
@@ -177,6 +190,10 @@ static void reset_marker_and_fail_closed(void){
     store.map_active.bytes[0]^=0x01u;
     ot_pz_controller_t live={0};ot_pz_pending_t pending={0};
     uint16_t ar[2]={0},sr[2]={0};
+    assert(!ot_pz_pair_store_recover(&io,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
+    /* If both active records disappear after v4 initialization, the durable
+     * marker prevents fallback to stale legacy combined configuration. */
+    store.map_active.present=false;store.lane_active.present=false;
     assert(!ot_pz_pair_store_recover(&io,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
 }
 int main(void){
