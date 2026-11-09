@@ -31,6 +31,14 @@ typedef struct {
     ot_fx_zone_slot_t zones[OT_OM_OUTPUTS][OT_OM_ZONES];
     uint32_t next_generation;
 } ot_fx_zone_bank_t;
+/* Renderer-owned identity map for indexed effect slots. Slots retain their
+ * logical Panel/Zone owner while the public command ABI remains index-based. */
+typedef struct {
+    uint32_t seen_generation[OT_OM_ZONES];
+    uint32_t seen_refresh_ms[OT_OM_ZONES];
+    uint16_t owner_zone_id[OT_OM_ZONES];
+    uint16_t owner_panel_id[OT_OM_ZONES];
+} ot_fx_zone_identity_map_t;
 
 void ot_fx_bank_reset(ot_fx_zone_bank_t *bank);
 bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
@@ -45,6 +53,9 @@ bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
  const ot_om_output_t outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
  uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
+bool ot_fx_bank_resolve_zone_identity(ot_fx_zone_identity_map_t *identity,
+ const ot_pz_output_t *panel_output,const ot_fx_zone_bank_t *bank,
+ unsigned output,uint32_t now_ms,uint8_t resolved_indices[OT_OM_ZONES]);
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms);
 void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank);
 void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank);
