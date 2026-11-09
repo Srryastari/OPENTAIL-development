@@ -153,7 +153,8 @@ final class GeometryTransactionManager {
     synchronized boolean reconcile(PanelPreviewProtocol.Status status,Snapshot authoritative) {
         if(status==null||authoritative==null||authoritative.lane!=lastConfirmed.lane||
            status.lane!=lastConfirmed.lane||authoritative.revision!=status.activeRevision||
-           status.hardSyncFault||status.state==PanelPreviewProtocol.STATE_COMMITTING||
+           (status.hardSyncFault&&status.state!=PanelPreviewProtocol.STATE_CANCELLED)||
+           status.state==PanelPreviewProtocol.STATE_COMMITTING||
            (status.state==PanelPreviewProtocol.STATE_COMMITTED &&
             status.activeRevision!=status.renderRevision))return false;
 
@@ -179,6 +180,9 @@ final class GeometryTransactionManager {
 
         // A new session after cancellation/reload can return the manager to
         // READY, but the old hard-fault session itself cannot be cleared.
+        if(status.state==PanelPreviewProtocol.STATE_ACTIVE &&
+           state==State.RECONCILING && candidate==null && status.sessionId==sessionId)
+            return false;
         if(status.state==PanelPreviewProtocol.STATE_ACTIVE &&
            state==State.RECONCILING && candidate==null && status.sessionId!=sessionId) {
             lastConfirmed=copy(authoritative);

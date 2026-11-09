@@ -56,10 +56,10 @@ public class GeometryTransactionManagerTest {
         assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
         assertTrue(manager.syncUncertain());
         assertArrayEquals(original,manager.lastConfirmed().wire);
-        assertFalse(manager.reconcile(status(1,91,0,0x10,12,12,12,0,0,0),
-            new GeometryTransactionManager.Snapshot(1,12,original)));
+        assertFalse(manager.reconcile(status(1,91,0,0x10,7,7,7,0,0,0),
+            new GeometryTransactionManager.Snapshot(1,7,original)));
         assertTrue(manager.reconcile(status(4,91,0,0x10,7,7,7,0,0,0),
-            new GeometryTransactionManager.Snapshot(1,12,original)));
+            new GeometryTransactionManager.Snapshot(1,7,original)));
         assertFalse(manager.syncUncertain());
     }
 
@@ -86,14 +86,30 @@ public class GeometryTransactionManagerTest {
         assertArrayEquals(original,manager.lastConfirmed().wire);
     }
 
+    @Test public void hardFaultRequiresCancelAndVerifiedReloadBeforeNewSession() {
+        byte[] original={1,2,3};
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,original));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,92,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.Status fault=status(1,92,0,0x10,7,7,7,10,0,2);
+        manager.observeStatus(fault);
+        assertEquals(GeometryTransactionManager.State.RECONCILING,manager.state());
+        assertFalse(manager.reconcile(fault,new GeometryTransactionManager.Snapshot(0,7,original)));
+        PanelPreviewProtocol.Status cancelled=status(4,92,0,0x10,7,7,7,10,0,2);
+        assertTrue(manager.reconcile(cancelled,new GeometryTransactionManager.Snapshot(0,7,original)));
+        assertEquals(GeometryTransactionManager.State.READY,manager.state());
+        assertFalse(manager.syncUncertain());
+    }
+
     @Test public void committingRejectDoesNotAbortOrDemoteActiveCommit() {
         GeometryTransactionManager manager=new GeometryTransactionManager(
             new GeometryTransactionManager.Snapshot(0,7,new byte[]{1}));
         assertTrue(manager.requestBegin());
         assertTrue(manager.acceptBegin(status(1,5,0,0x44,7,7,7,0,0,0)));
-        assertNotNull(manager.requestCommit(status(1,5,0,0x44,3,3,3,0,0,0)));
+        assertNotNull(manager.requestCommit(status(1,5,0,0x44,7,7,7,0,0,0)));
         manager.commitWriteCompleted();
-        manager.observeStatus(status(2,5,0,0x44,7,8,7,5,0,5));
+        manager.observeStatus(status(2,5,0,0x44,7,8,7,5,0,1));
         assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
         assertArrayEquals(new byte[]{1},manager.lastConfirmed().wire);
     }

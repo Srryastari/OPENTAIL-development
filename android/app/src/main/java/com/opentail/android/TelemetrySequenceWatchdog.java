@@ -84,7 +84,14 @@ final class TelemetrySequenceWatchdog {
 
     synchronized Decision markDisconnected() {
         warning=true;
-        if(message==null)message="BLE disconnected during a Panel transaction; authoritative reconciliation required";
+        if(last!=null && last.state==PanelPreviewProtocol.STATE_ACTIVE && last.sessionId!=0) {
+            hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId;
+            message="BLE disconnected during an active geometry preview; cancel and reload committed geometry";
+        } else if(last!=null && last.state==PanelPreviewProtocol.STATE_COMMITTING) {
+            message="BLE disconnected during COMMITTING; poll CORE until the durable transaction is terminal";
+        } else if(message==null) {
+            message="BLE disconnected during a Panel transaction; authoritative reconciliation required";
+        }
         return decision(last);
     }
 

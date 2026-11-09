@@ -329,6 +329,7 @@ final class BleDiscovery {
     private int triggerMapBaseRevision;
     private Consumer<NativeTriggerMappingCodec.Snapshot> triggerMapListener;
     private volatile boolean mtuNegotiating=false;
+    private volatile int negotiatedMtu=23;
     private volatile boolean infoReadPending=false;
     private BluetoothGattCharacteristic coreInfo;
     private boolean infoReadQueued=false;
@@ -357,12 +358,13 @@ final class BleDiscovery {
         panelSnapshotListener=listener;
     }
     boolean canReadPanelPreview() {
-        return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
-               panelPreviewStatus!=null && panelConfigCommand!=null && panelConfigReply!=null;
+        return canControl() && negotiatedMtu>=64 && panelCapabilities!=null &&
+               panelCapabilities.supportsPreviewV2() && panelPreviewStatus!=null &&
+               panelConfigCommand!=null && panelConfigReply!=null;
     }
     boolean readPanelStatus() {
-        if(!canControl() || panelPreviewStatus==null || panelCapabilities==null ||
-           !panelCapabilities.supportsPreviewV2())return false;
+        if(!canControl() || negotiatedMtu<64 || panelPreviewStatus==null ||
+           panelCapabilities==null || !panelCapabilities.supportsPreviewV2())return false;
         panelReadQueued=2;pumpQueue();return true;
     }
     boolean readPanelLaneSnapshot(int lane) {
@@ -398,7 +400,7 @@ final class BleDiscovery {
         if(panelWatchdog.hasSession())panelNotify(null,panelWatchdog.markDisconnected());
         for(GeometryTransactionManager manager:panelGeometryManagers)
             if(manager!=null)manager.connectionLost();
-        panelCapabilities=null;panelLastStatus=null;
+        panelCapabilities=null;panelLastStatus=null;negotiatedMtu=23;
         panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
@@ -1419,6 +1421,7 @@ final class BleDiscovery {
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
                 connecting = false;
                 connected = true;
+                negotiatedMtu=23;
                 notifyStatus("BLE connected · negotiating MTU…");
                 try { mtuNegotiating=connection.requestMtu(247); }
                 catch (SecurityException ex) { mtuNegotiating=false; }
@@ -1444,6 +1447,7 @@ final class BleDiscovery {
         @SuppressWarnings("MissingPermission")
         @Override public void onMtuChanged(BluetoothGatt connection, int mtu, int status) {
             if(stopped || connection!=gatt)return;
+            negotiatedMtu=status==BluetoothGatt.GATT_SUCCESS?mtu:23;
             if(mtuNegotiating){
                 mtuNegotiating=false;
                 notifyStatus("BLE MTU "+mtu+"; discovering services…");
@@ -1634,8 +1638,10 @@ final class BleDiscovery {
         }
         try {
             panelCapabilities=PanelPreviewProtocol.Capabilities.parse(value);
-            if(panelCapabilities.supportsPreviewV2()) {
+            if(panelCapabilities.supportsPreviewV2() && negotiatedMtu>=64) {
                 panelReadQueued=2;
+            } else if(panelCapabilities.supportsPreviewV2()) {
+                notifyStatus("CORE Panel telemetry v2 requires a negotiated BLE MTU of at least 64 bytes");
             } else notifyStatus("CORE Panel preview v2 is not fully advertised; geometry editing remains read-only");
         } catch(IllegalArgumentException ex) {
             panelCapabilities=null;notifyStatus("Invalid CORE Panel capabilities: "+ex.getMessage());
