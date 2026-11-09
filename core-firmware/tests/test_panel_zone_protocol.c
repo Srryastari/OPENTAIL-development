@@ -82,13 +82,38 @@ int main(void){
     assert(!ot_pz_tx_parse_update(packet,19u,23u,&parsed));
 
     assert(ot_pz_tx_sequence_check(false,0u,0u,1u,11u)==OT_PZ_TX_SEQUENCE_NEW);
-    assert(ot_pz_tx_sequence_check(false,0u,0u,101u,11u)==OT_PZ_TX_SEQUENCE_STALE);
+    assert(ot_pz_tx_sequence_check(false,0u,0u,101u,11u)==OT_PZ_TX_SEQUENCE_GAP);
     assert(ot_pz_tx_sequence_check(true,101u,11u,101u,11u)==OT_PZ_TX_SEQUENCE_DUPLICATE);
     assert(ot_pz_tx_sequence_check(true,101u,11u,101u,12u)==OT_PZ_TX_SEQUENCE_CONFLICT);
-    assert(ot_pz_tx_sequence_check(true,101u,11u,103u,13u)==OT_PZ_TX_SEQUENCE_NEW);
-    assert(ot_pz_tx_sequence_check(true,103u,13u,102u,12u)==OT_PZ_TX_SEQUENCE_STALE);
-    assert(ot_pz_tx_sequence_check(true,UINT32_MAX-1u,1u,1u,2u)==OT_PZ_TX_SEQUENCE_NEW);
+    assert(ot_pz_tx_sequence_check(true,101u,11u,102u,13u)==OT_PZ_TX_SEQUENCE_NEW);
+    assert(ot_pz_tx_sequence_check(true,101u,11u,103u,13u)==OT_PZ_TX_SEQUENCE_GAP);
+    assert(ot_pz_tx_sequence_check(true,103u,13u,102u,12u)==OT_PZ_TX_SEQUENCE_OUT_OF_ORDER);
+    assert(ot_pz_tx_sequence_check(true,UINT32_MAX-1u,1u,1u,2u)==OT_PZ_TX_SEQUENCE_GAP);
+    assert(ot_pz_tx_sequence_check(true,UINT32_MAX,1u,1u,2u)==OT_PZ_TX_SEQUENCE_NEW);
     assert(ot_pz_tx_sequence_check(true,10u,1u,0u,2u)==OT_PZ_TX_SEQUENCE_STALE);
+
+    /* A delayed packet, duplicate, gap or reorder arriving after COMMIT is
+     * accepted must be rejected before replay classification or mutation. */
+    assert(ot_pz_tx_update_admit(true,false,true,101u,11u,102u,12u)==
+           OT_PZ_TX_UPDATE_REJECT_COMMITTING); /* delayed next packet */
+    assert(ot_pz_tx_update_admit(true,false,true,101u,11u,101u,11u)==
+           OT_PZ_TX_UPDATE_REJECT_COMMITTING); /* duplicate */
+    assert(ot_pz_tx_update_admit(true,false,true,101u,11u,103u,13u)==
+           OT_PZ_TX_UPDATE_REJECT_COMMITTING); /* missing sequence */
+    assert(ot_pz_tx_update_admit(true,false,true,103u,13u,102u,12u)==
+           OT_PZ_TX_UPDATE_REJECT_COMMITTING); /* delayed/out of order */
+    assert(ot_pz_tx_update_admit(false,true,true,101u,11u,102u,12u)==
+           OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED);
+    assert(ot_pz_tx_update_admit(false,false,true,101u,11u,102u,12u)==
+           OT_PZ_TX_UPDATE_ACCEPT);
+    assert(ot_pz_tx_update_admit(false,false,true,101u,11u,101u,11u)==
+           OT_PZ_TX_UPDATE_REJECT_DUPLICATE);
+    assert(ot_pz_tx_update_admit(false,false,true,101u,11u,103u,13u)==
+           OT_PZ_TX_UPDATE_REJECT_GAP);
+    assert(ot_pz_tx_update_admit(false,false,true,103u,13u,102u,12u)==
+           OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER);
+    assert(ot_pz_tx_update_admit(false,false,true,101u,11u,101u,12u)==
+           OT_PZ_TX_UPDATE_REJECT_CONFLICT);
     control_packets();
     return 0;
 }
