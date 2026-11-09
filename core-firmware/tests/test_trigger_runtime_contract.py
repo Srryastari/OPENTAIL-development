@@ -334,8 +334,8 @@ assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
 # in their dedicated namespaces. The legacy Output Manager is a compatibility
 # projection; accepted geometry saves stage the real cross-namespace pair first.
 assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
-assert "ot_pz_pair_store_begin(&pz_pair_store_io,&previous,candidate," in core
-assert "ot_pz_pair_store_finish(&pz_pair_store_io,transaction_id," in core
+assert "ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,previous,candidate," in core
+assert "ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id," in core
 assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and '"ot_zone_map"' in core
 assert "pz_save_controller_locked(&candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
@@ -463,7 +463,7 @@ for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
               "tm_gpio_input_mask()==0u","live_input_mask==0u",
               "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
               "input_quiet_samples>=OT_DEBOUNCE_TICKS",
-              "pz_outputs=recovered_pending.candidate",
+              "pz_outputs=workspace->pending.candidate",
 ):
     assert token in panel_promotion, token
 assert "nvs_open(" not in panel_promotion
@@ -472,7 +472,7 @@ panel_finish=panel_promotion.index("ot_pz_pair_store_finish")
 panel_snapshot=panel_promotion.index("ot_pz_pair_store_snapshot")
 panel_recover=panel_promotion.index("ot_pz_pair_store_recover")
 panel_quiet=panel_promotion.rindex("if(!config_activation_idle(epoch,true))")
-panel_publish=panel_promotion.index("pz_outputs=recovered_pending.candidate")
+panel_publish=panel_promotion.index("pz_outputs=workspace->pending.candidate")
 assert panel_finish<panel_snapshot<panel_recover<panel_quiet<panel_publish
 
 panel_recovery=between(core,"static void pz_load(void){",
