@@ -268,11 +268,6 @@ static int pz_find_panel(const ot_pz_output_t *out,uint16_t panel_id){
         if(out->panels[i].id==panel_id)return (int)i;
     return -1;
 }
-static int pz_find_zone(const ot_pz_output_t *out,uint16_t zone_id){
-    for(unsigned i=0;i<out->zone_count;i++)
-        if(out->zones[i].id==zone_id)return (int)i;
-    return -1;
-}
 /* UPDATE has one byte per ID. Resolve the low-byte alias to the full stable
  * ID; multiple matches are rejected rather than guessed. */
 static int pz_find_panel_wire(const ot_pz_output_t *out,uint8_t wire_id){
