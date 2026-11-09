@@ -198,7 +198,7 @@ final class BleDiscovery {
     void cancelPaletteTransfer(){palette.abortForStop();}
     private boolean paletteGate(){
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
-           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelReadQueued!=0||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
            panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
@@ -266,7 +266,7 @@ final class BleDiscovery {
         if(previewCommand!=null)return false;
         if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending || nextPacket!=null ||
            readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy || authPending || pairPending || challengePending ||
-           panelReadPending || panelSnapshotBusy || panelControlWritePending || panelReadQueued!=0 ||
+           panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
            panelSnapshotQueuedLane>=0 || panelCancelQueued)return false;
         frameCapture.request(output);
         return true;
@@ -427,7 +427,7 @@ final class BleDiscovery {
     private boolean triggerMapAvailable(){
         if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
         if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
-           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelReadQueued!=0||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
            panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry trigger mapping");return false;
@@ -686,7 +686,7 @@ final class BleDiscovery {
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
         if(index>=0 && index<=1 && deferBehindFrame(()->saveOutput(index,json)))return true;
         if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
-           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelReadQueued!=0||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
            panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
@@ -1019,7 +1019,7 @@ final class BleDiscovery {
         if(deferBehindFrame(()->fxPreset(action,slot)))return;
         // Explicit preset NVS actions cannot be overwritten by live FX coalescing.
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
-           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelReadQueued!=0||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
            panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
@@ -1064,7 +1064,7 @@ final class BleDiscovery {
             return;
         }
         if (writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
-            panelReadPending || panelSnapshotBusy || panelControlWritePending || panelReadQueued!=0 ||
+            panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
             frameCapture.busy() || palette.busy() || nextPacket!=null) {
             if (stop) {
@@ -1108,7 +1108,7 @@ final class BleDiscovery {
     }
     private void pumpQueue(){
         if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
-           panelReadPending||panelSnapshotBusy||panelControlWritePending||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||
            frameCapture.busy()||palette.busy()||authPending||pairPending||challengePending)return;
         // Preserve existing STOP-before-FX order. Never prioritize a read
         // over a previously queued safety STOP.
@@ -1140,6 +1140,14 @@ final class BleDiscovery {
         }
         if(panelCancelQueued) {
             startPanelCancel();
+            return;
+        }
+        if(panelControlQueued) {
+            startPanelControl();
+            return;
+        }
+        if(panelUpdateQueued) {
+            startPanelUpdate();
             return;
         }
         if(panelSnapshotQueuedLane>=0) {
