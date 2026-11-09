@@ -279,13 +279,21 @@ refresh = between(core, "static void request_render_refresh(void){", "static uin
 assert "task=render_task_handle;" in refresh
 assert "portEXIT_CRITICAL(&state_lock);" in refresh
 assert refresh.index("portEXIT_CRITICAL(&state_lock);") < refresh.index("xTaskNotifyGive(task)")
-for begin, end in (("static esp_err_t show_stop(httpd_req_t *r){", "/* Provision an ephemeral"),
-                   ("static esp_err_t stop_post(httpd_req_t *r) {", "/* CORE ships only its own")):
-    op = between(core, begin, end)
-    assert op.index("portEXIT_CRITICAL(&state_lock);") < op.index("request_render_refresh();")
-    assert "live_input_mask=0" not in op
+show_stop = between(core, "static esp_err_t show_stop(httpd_req_t *r){",
+                  "/* Provision an ephemeral")
+assert show_stop.index("portEXIT_CRITICAL(&state_lock);") < show_stop.index(
+    "request_render_refresh();")
+assert "live_input_mask=0" not in show_stop
+stop_post = between(core, "static esp_err_t stop_post(httpd_req_t *r) {",
+                    "/* CORE ships only its own")
+assert "core_stop_all_sources();" in stop_post
+stop_core = between(core, "static void core_stop_all_sources(void){",
+                    "void ot_ble_stop_show(void){")
+assert stop_core.index("portEXIT_CRITICAL(&state_lock);") < stop_core.index(
+    "request_render_refresh();")
+assert "live_input_mask=0" not in stop_core
 ble_stop = between(core, "void ot_ble_stop_show(void){", "/* Eight opt-in named-by-slot")
-assert "if(refresh_requested)request_render_refresh();" in ble_stop
+assert "core_stop_all_sources();" in ble_stop
 disconnect_stop = between(core, "void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
 assert "if(owned_before)request_render_refresh();" in disconnect_stop
 # Accepted show, FX, demo and synthetic trigger updates must wake the
