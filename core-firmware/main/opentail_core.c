@@ -3046,8 +3046,7 @@ static void led_task(void *p) {
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
     /* Reused per-output snapshot prevents in-place overwrite during zone reorder. */
     static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
-    /* Keep each indexed FX slot attached to its stable logical identity. */
-    static ot_fx_zone_identity_map_t fx_bank_identity[OT_CHAIN_COUNT];
+    /* Current logical zones resolve to stable identity-owned FX bank slots. */
     static uint8_t resolved_fx_bank_index[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
@@ -3147,9 +3146,8 @@ static void led_task(void *p) {
        for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
            memset(resolved_fx_bank_index[ch],0xff,sizeof(resolved_fx_bank_index[ch]));
            if(local_fx_enabled&&
-              !ot_fx_bank_resolve_zone_identity(&fx_bank_identity[ch],
-                  &local_panel[ch],&local_fx_bank,ch,render_now_ms,
-                  resolved_fx_bank_index[ch])){
+              !ot_fx_bank_resolve_zone_identity(&local_panel[ch],
+                  &local_fx_bank,ch,render_now_ms,resolved_fx_bank_index[ch])){
                ot_st_set_fault("invalid FX Panel/Zone identity map");
                local_fx_enabled=false;
            }
