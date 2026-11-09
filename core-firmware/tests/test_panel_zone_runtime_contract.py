@@ -188,7 +188,9 @@ assert "ot_input_diag_uuid" in ble
 assert "input_diag_access" in ble
 assert "conn!=active_conn||!authorized" in ble
 assert "while(depth>high" not in core
-assert "if(depth>high)(void)__atomic_compare_exchange_n" in core
+assert "if(depth>high)(void)ot_isr_dram_cas(" in core
+assert "xt_utils_compare_and_set(word,previous,next)" in core
+assert "ot_isr_dram_fence();" in core
 assert "DRAM_ATTR volatile uint32_t input_edge_epoch" in core
 
 # Full 8-bit requests are accepted, then limited once at the final CORE RGB boundary.
