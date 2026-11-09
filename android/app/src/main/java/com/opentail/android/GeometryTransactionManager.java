@@ -119,17 +119,21 @@ final class GeometryTransactionManager {
         if(project==null)throw new IllegalArgumentException("Layout project is required");
         @SuppressWarnings("unchecked")
         List<JSONObject>[] assigned=new List[]{new ArrayList<>(),new ArrayList<>()};
-        boolean anyExplicitPanel=false,allExplicitPanel=true;
+        boolean anyExplicitPanel=false,allExplicitPanel=true,partialPanelMetadata=false;
         for(int i=0;i<project.zoneCount();i++) {
             JSONObject zone=project.zone(i);
             int lane=zone.optInt("physicalOutput",-1);
             if(lane<0)continue;
             if(lane>1)throw new IllegalArgumentException("Physical output is outside the two-lane contract");
-            boolean explicit=zone.has("physicalPanelId")&&zone.has("physicalPanelName");
+            boolean hasId=zone.has("physicalPanelId"),hasName=zone.has("physicalPanelName");
+            boolean explicit=hasId&&hasName;
+            partialPanelMetadata|=hasId!=hasName;
             anyExplicitPanel|=explicit;
             allExplicitPanel&=explicit;
             assigned[lane].add(zone);
         }
+        if(partialPanelMetadata)
+            throw new IllegalStateException("Panel identity requires both ID and name");
         boolean exactGs400Profile=!anyExplicitPanel&&isExactGs400Layout(assigned);
         if(anyExplicitPanel&&!allExplicitPanel)
             throw new IllegalStateException("Every assigned section must have an explicit CORE Panel identity");
