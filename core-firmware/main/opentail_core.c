@@ -583,7 +583,10 @@ static void pz_load(void){
         config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
         ot_st_set_fault("v4 lane/map pair journal invalid");return;
     }
-    const bool v4_authoritative=snapshot.has_intent||
+    /* The durable marker is written with map-active in phase 5. Its
+     * presence alone proves v4 ownership: if either active journal is missing,
+     * recovery must fail closed rather than resurrect stale v3 geometry. */
+    const bool v4_authoritative=snapshot.has_marker||snapshot.has_intent||
         snapshot.has_map_active||snapshot.has_lane_active;
     if(v4_authoritative){
         bool intent_pending=false;uint32_t transaction_id=0u;uint8_t reset_mask=0u;
