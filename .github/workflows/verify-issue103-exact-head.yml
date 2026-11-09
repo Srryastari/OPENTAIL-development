@@ -14,6 +14,7 @@ permissions:
   contents: read
 jobs:
   sources-and-140-core:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +55,7 @@ jobs:
         run: python3 -m unittest -v scripts/tests/test_core_flash_package.py
 
   android-jni-140-oracle:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: sources-and-140-core
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -89,6 +91,7 @@ jobs:
           if-no-files-found: error
 
   esp-idf555-complete-package:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: sources-and-140-core
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -125,6 +128,7 @@ jobs:
           if-no-files-found: error
 
   recheck-downloaded-package:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: esp-idf555-complete-package
     runs-on: ubuntu-latest
     steps:
