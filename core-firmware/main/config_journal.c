@@ -1,5 +1,7 @@
 #include "config_journal.h"
 #include <string.h>
+_Static_assert(sizeof(ot_tm_policy_record_t)==20u,
+               "trigger policy NVS record ABI changed");
 uint32_t ot_cfg_crc32(const void *data,size_t bytes){
     if(!data)return 0u;
     const uint8_t *p=(const uint8_t*)data;uint32_t crc=0xffffffffu;
