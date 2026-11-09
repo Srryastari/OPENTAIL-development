@@ -71,7 +71,12 @@ demo = core.split("static esp_err_t demo_post(httpd_req_t *r) {",1)[1].split(
 assert 'bounded_int(obj,"ttl_ms",3000,100,OT_DEMO_MAX_MS)' in demo
 stop = core.split("static esp_err_t stop_post(httpd_req_t *r) {",1)[1].split(
     "extern const uint8_t ot_dev_console_start[]",1)[0]
-assert 'sim_mask=0' in stop and 'live_input_mask=0' not in stop
+stop_core = core.split("static void core_stop_all_sources(void){",1)[1].split(
+    "void ot_ble_stop_show(void){",1)[0]
+assert "core_stop_all_sources();" in stop
+assert 'sim_mask=0u' in stop_core and 'live_input_mask=0' not in stop_core
+assert 'gpio_set_level' not in stop_core
+assert "geometry_commit_active" in stop_core
 disconnect = core.split("void ot_ble_disconnect_show(void){",1)[1].split(
     "static esp_err_t status_get(",1)[0]
 assert 'live_input_mask=0' not in disconnect
