@@ -101,6 +101,26 @@ static void recover_expect(const ot_pz_pair_store_io_t *io,
         assert(memcmp(&pending.candidate,expected_candidate,sizeof(*expected_candidate))==0);
     assert(intent==expected_intent&&tx==expected_tx&&reset==expected_reset);
 }
+static void initial_migration_cut_matrix(void){
+    ot_pz_controller_t legacy,candidate;
+    make_runtime(&legacy,100u,OT_OM_GRB,100u);
+    make_runtime(&candidate,80u,OT_OM_RGB,80u);
+    const uint16_t previous_revision[OT_PZ_OUTPUTS]={1u,1u};
+    const uint16_t candidate_revision[OT_PZ_OUTPUTS]={2u,1u};
+    for(uint8_t cut=1u;cut<=3u;cut++){
+        fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
+        phase_state_t phases={.cut_after=cut};
+        assert(!ot_pz_pair_store_begin(&io,&legacy,&candidate,
+            previous_revision,candidate_revision,0x0a0au,0u,true,
+            phase_hook,&phases));
+        assert(phases.last_phase==cut);
+        recover_expect(&io,&legacy,&legacy,&candidate,cut==3u,cut==3u,
+                       cut==3u?0x0a0au:0u,0u);
+        ot_pz_pair_store_snapshot_t snapshot={0};
+        assert(ot_pz_pair_store_snapshot(&io,&snapshot));
+        assert(!snapshot.has_marker);
+    }
+}
 static void durable_boundary_matrix(void){
     ot_pz_controller_t base,candidate1,candidate2;
     make_runtime(&base,100u,OT_OM_GRB,100u);
@@ -197,6 +217,7 @@ static void reset_marker_and_fail_closed(void){
     assert(!ot_pz_pair_store_recover(&io,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
 }
 int main(void){
+    initial_migration_cut_matrix();
     durable_boundary_matrix();
     reset_marker_and_fail_closed();
     puts("PASS Issue126 v4 runtime pair store: all eight durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
