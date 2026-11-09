@@ -130,6 +130,8 @@ static TickType_t sim_deadline=0;
 static ot_demo_t demo={OT_DEMO_OFF,{0,0,0},0};
 static TickType_t demo_deadline=0;
 static uint32_t frame_index=0;
+/* Random per-boot diagnostic identity; never used as a security credential. */
+static uint32_t core_boot_id=0u;
 static uint32_t measured_fps=0;
 static uint16_t adaptive_target_fps=OT_FPS_PREFERRED_HIGH;
 static uint32_t frame_window_start_ms=0,frame_window_frames=0;
@@ -2155,8 +2157,9 @@ static esp_err_t status_get(httpd_req_t *r) {
     char buf[2500];char led_json[384],wd_json[420];
     ot_st_format_json(led_json,sizeof(led_json));
     ot_sw_idf_status_json(wd_json,sizeof(wd_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
-       OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
+       OT_FW,(unsigned long)core_boot_id,elf_sha256,
+       ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
@@ -3420,6 +3423,9 @@ static void led_task(void *p) {
 #error "OpenTail app_main requires at least 8192 bytes of main-task stack"
 #endif
 void app_main(void) {
+    core_boot_id=esp_random();
+    if(core_boot_id==0u)core_boot_id=1u;
+    ESP_LOGI(TAG,"CORE boot identity: %08lx",(unsigned long)core_boot_id);
     ot_sw_idf_boot_record();
     ESP_LOGW(TAG,"CORE %s BENCH ONLY: one ESP watchdog, NO redundant lights.",OT_FW);
     ESP_ERROR_CHECK(nvs_flash_init());
