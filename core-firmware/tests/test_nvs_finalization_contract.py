@@ -110,6 +110,12 @@ assert "ot_pz_controller_t previous,candidate;" not in journal.split(
 assert "ot_cfg_crc32_zeroed" in journal and "ot_cfg_crc32_zeroed" in header
 assert "ot_pz_journal_t active={0},stage={0}" not in legacy_load
 assert "ot_pz_reset_tombstone_t tombstone={0}" not in legacy_load
+# The no-change save path already persists the reset bit. Reset confirmation
+# must not issue a second identical map-active NVS write after that save.
+reset_confirm=between("int ot_ble_panel_reset_confirm(",
+                      "int ot_ble_panel_save(")
+assert "ot_pz_pair_store_mark_reset" not in reset_confirm
+assert "ot_pz_pair_store_mark_reset" in save_impl
 assert "__atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u" in pz_load
 
 # The exact same portable v4 store used by CORE implements all nine durable
