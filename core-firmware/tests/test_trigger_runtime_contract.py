@@ -471,7 +471,7 @@ assert "config_recovery_fault=true;" in panel_promotion
 panel_finish=panel_promotion.index("ot_pz_pair_store_finish")
 panel_snapshot=panel_promotion.index("ot_pz_pair_store_snapshot")
 panel_recover=panel_promotion.index("ot_pz_pair_store_recover")
-panel_quiet=panel_promotion.index("if(!config_activation_idle(epoch,true))")
+panel_quiet=panel_promotion.rindex("if(!config_activation_idle(epoch,true))")
 panel_publish=panel_promotion.index("pz_outputs=recovered_pending.candidate")
 assert panel_finish<panel_snapshot<panel_recover<panel_quiet<panel_publish
 
