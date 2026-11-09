@@ -119,14 +119,29 @@ int main(void){
     b.tertiary=(ot_wled_rgb_t){255,255,0};
     ot_wled_fx_state_t popcorn_black={0},popcorn_legacy={0};
     unsigned popcorn_black_pixels=0u;
+    unsigned max_enabled_green_pixels=0u;
+    unsigned max_legacy_green_pixels=0u;
     for(uint32_t t=0u;t<60000u;t+=16u){
         assert(ot_wled_fx_render(&a,&popcorn_black,t,p,257u));
         assert(ot_wled_fx_render(&b,&popcorn_legacy,t,q,257u));
-        for(unsigned k=0u;k<257u;k++)
+        unsigned enabled_green_pixels=0u,legacy_green_pixels=0u;
+        for(unsigned k=0u;k<257u;k++){
             if(eq(p[k],(ot_wled_rgb_t){0,0,0}) &&
                eq(q[k],a.foreground))popcorn_black_pixels++;
+            if(eq(p[k],a.background))enabled_green_pixels++;
+            if(eq(q[k],a.background))legacy_green_pixels++;
+        }
+        if(enabled_green_pixels>max_enabled_green_pixels)
+            max_enabled_green_pixels=enabled_green_pixels;
+        if(legacy_green_pixels>max_legacy_green_pixels)
+            max_legacy_green_pixels=legacy_green_pixels;
     }
     assert(popcorn_black_pixels>0u);
+    /* Green may appear only on at most 21 authored particles when RGB3 is
+     * active; the empty field must be black. The legacy path still fills
+     * the field with its configured green background. */
+    assert(max_enabled_green_pixels<=21u);
+    assert(max_legacy_green_pixels>200u);
     ot_wled_fx_reset(&popcorn_black);ot_wled_fx_reset(&popcorn_legacy);
 
     /* Solid Glitter's legacy default remains white; explicit RGB black is
