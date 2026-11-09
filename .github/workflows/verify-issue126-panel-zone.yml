@@ -74,6 +74,9 @@ jobs:
           test -s core-firmware/build/isr-evidence/input_edge_isr.symbols.txt
           test -s core-firmware/build/isr-evidence/input_edge_isr.dis
           test -s core-firmware/build/isr-evidence/input_edge_isr.audit.txt
+          # The ESP-IDF container emits root-owned build artifacts; restore
+          # runner ownership before writing the exact-head evidence manifest.
+          sudo chown -R "$(id -u):$(id -g)" core-firmware/build
           python3 - <<'PY'
           import json
           from pathlib import Path
