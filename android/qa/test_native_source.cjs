@@ -1243,3 +1243,19 @@ for (const file of [
   'android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java',
   'android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java'
 ]) assert(fs.existsSync(file),'P0 Android regression suite missing: '+file);
+
+\n// Disconnect/reconnect regression: old GATT session and its authoritative
+// Panel/Zone aliases must never leak into the next verified controller readback.
+const disconnectBlock=bleSource.split('private void panelDisconnected() {')[1]?.split('boolean canMapTriggers()')[0]||'';
+const disconnectedStatusBlock=compose.split('if (!ble.isConnected()) {')[1]?.split('if (!ble.canControl())')[0]||'';
+assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
+       disconnectBlock.includes('panelConfirmedSnapshots[lane]=null;') &&
+       bleSource.includes('new GeometryTransactionManager(') &&
+       bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
+       disconnectedStatusBlock.includes('clearPanelGeometryPreview(') &&
+       disconnectedStatusBlock.includes('panelGeometryLoadInProgress = false') &&
+       disconnectedStatusBlock.includes('Refresh CORE') &&
+       compose.includes('private fun queuePanelGeometryDraftUpdate()') &&
+       compose.includes('panelGeometryQueuedTarget=target') &&
+       compose.includes('Wait for all draft updates to be acknowledged before Commit'),
+       'Live Layout must invalidate disconnected managers and shadow drafts, reload verified CORE map, and serialize rapid edits');

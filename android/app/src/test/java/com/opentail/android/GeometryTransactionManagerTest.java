@@ -773,4 +773,69 @@ public class GeometryTransactionManagerTest {
         assertEquals(0,upsert[18]&255);
     }
 
+    @Test public void rapidZoneEditsRemainSerializedAndCannotCommitUnacknowledgedGeometry() {
+        byte[] confirmed={3,1,4};
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,confirmed));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,107,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor descriptor=
+            new PanelPreviewProtocol.UpdateDescriptor(0x8001,0x4001,0,0,15,0);
+        for(int sequence=1;sequence<=8;sequence++) {
+            byte[] current={(byte)sequence};
+            GeometryTransactionManager.Update sent=manager.queueUpdate(current,
+                new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23);
+            assertNotNull("serialized edit "+sequence,sent);
+            assertEquals(sequence,PanelPreviewProtocol.u32(sent.packet,7));
+            assertNull("overlapping write must not replace a pending packet",
+                manager.queueUpdate(new byte[]{99},
+                    new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23));
+            assertNull("unacknowledged edit cannot be committed",
+                manager.requestCommit(status(1,107,sequence-1,0x10+sequence,7,7,7,0,0,0)));
+            assertArrayEquals("shadow UPDATE must not replace confirmed map",
+                confirmed,manager.lastConfirmed().wire);
+            assertTrue("authoritative acknowledgment "+sequence,
+                manager.acknowledgeUpdate(status(1,107,sequence,0x10+sequence,7,7,7,0,0,4)));
+        }
+        assertArrayEquals(new byte[]{8},manager.candidateCopy());
+        assertNotNull(manager.requestCommit(status(1,107,8,0x18,7,7,7,0,0,4)));
+        manager.observeStatus(status(2,107,8,0x18,7,8,7,5,9,4));
+        assertEquals(GeometryTransactionManager.State.COMMITTING,manager.state());
+        assertNull("delayed UPDATE during COMMITTING must be refused",
+            manager.queueUpdate(new byte[]{10},
+                new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23));
+        assertArrayEquals(confirmed,manager.lastConfirmed().wire);
+        manager.observeStatus(status(3,107,8,0x18,8,8,8,5,9,4));
+        assertArrayEquals(confirmed,manager.lastConfirmed().wire);
+        assertTrue(manager.reconcile(status(3,107,8,0x18,8,8,8,5,9,4),
+            new GeometryTransactionManager.Snapshot(0,8,new byte[]{8})));
+        assertArrayEquals(new byte[]{8},manager.lastConfirmed().wire);
+    }
+
+    @Test public void disconnectDropsPreviewAndFreshSimulatedReadbackReplacesOldManager() {
+        byte[] oldWire={7,7,7};
+        GeometryTransactionManager old=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,oldWire));
+        assertTrue(old.requestBegin());
+        assertTrue(old.acceptBegin(status(1,108,0,0x10,7,7,7,0,0,0)));
+        old.connectionLost();
+        assertEquals(GeometryTransactionManager.State.RECONCILING,old.state());
+        assertArrayEquals(oldWire,old.lastConfirmed().wire);
+        assertFalse(old.requestBegin());
+
+        // Simulate the GATT reconnect lifecycle: old session managers are
+        // discarded; the verified new snapshot is the sole geometry authority.
+        PanelPreviewProtocol.LaneSnapshot migrated=panelSnapshot(
+            0,20,0x8001,"Housing",0x4001,0x8001,"Top",0,20,0);
+        assertEquals(0x8001,PanelPreviewProtocol.MapIdentity.parse(migrated).panels.get(0).id);
+        GeometryTransactionManager fresh=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,migrated.wire));
+        assertEquals(GeometryTransactionManager.State.READY,fresh.state());
+        assertArrayEquals(migrated.wire,fresh.lastConfirmed().wire);
+        assertFalse(java.util.Arrays.equals(old.lastConfirmed().wire,
+            fresh.lastConfirmed().wire));
+        assertTrue(fresh.requestBegin());
+        assertTrue(fresh.acceptBegin(status(1,109,0,0x10,7,7,7,0,0,0)));
+    }
+
 }

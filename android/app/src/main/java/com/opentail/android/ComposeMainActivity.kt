@@ -267,7 +267,22 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilitiesAfterAuth()
-            if (!ble.isConnected()) firmwareVersion.value = null
+            if (!ble.isConnected()) {
+                firmwareVersion.value = null
+                // A preview session cannot survive a lost GATT connection.
+                // Keep local Layout edits, but discard all pending shadow-map
+                // batches; only fresh CORE readback can start the next preview.
+                val hadPreview = panelGeometryMapping != null
+                val wasLoading = panelGeometryLoadInProgress
+                panelGeometryLoadInProgress = false
+                panelGeometryLoadLane = -1
+                if (hadPreview)
+                    clearPanelGeometryPreview("CORE disconnected; unsaved Layout remains local. Reconnect and Refresh CORE to load authoritative geometry.")
+                else if (wasLoading) {
+                    panelGeometryMessage.value = "CORE disconnected during readback; reconnect and Refresh CORE."
+                    panelGeometryRevision.intValue++
+                }
+            }
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list

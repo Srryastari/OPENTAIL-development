@@ -536,8 +536,16 @@ final class BleDiscovery {
     }
     private void panelDisconnected() {
         if(panelWatchdog.hasSession())panelNotify(null,panelWatchdog.markDisconnected());
-        for(GeometryTransactionManager manager:panelGeometryManagers)
-            if(manager!=null)manager.connectionLost();
+        // The old BLE session is no longer authoritative. A reconnect may
+        // discover another controller or a newer committed map, even if the
+        // previous manager was READY. Never reuse that manager's revision or
+        // its Panel/Zone aliases to authorize a new BEGIN.
+        for(int lane=0;lane<2;lane++) {
+            if(panelGeometryManagers[lane]!=null)
+                panelGeometryManagers[lane].connectionLost();
+            panelGeometryManagers[lane]=null;
+            panelConfirmedSnapshots[lane]=null;
+        }
         panelCapabilities=null;panelLastStatus=null;
         panelStatuses[0]=null;panelStatuses[1]=null;
         panelStatusFresh[0]=false;panelStatusFresh[1]=false;
