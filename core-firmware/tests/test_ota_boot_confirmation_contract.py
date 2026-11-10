@@ -85,7 +85,11 @@ assert 'boot_enrollment_ready?"available":"disabled"' in start_ble
 assert "__atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE)" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&ble_radio_ever_ready,true")
-assert "else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in ble
+assert "else{" in advertise
+assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in advertise
+assert "BLE advertising ACTIVE: OpenTail CORE" in advertise
+assert advertise.index("ble_gap_adv_start(") < advertise.index(
+    "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)")
 assert "__atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);" in ble
 assert 'if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}' in ble
 # GAP callbacks must only clear the actual owner session. Disconnects
