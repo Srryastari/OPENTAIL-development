@@ -35,8 +35,12 @@ required_config={
     "CONFIG_SPIRAM_USE_MALLOC":"y",
     "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP":"y",
     "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM":"n",
-    "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL":"4096",
+    "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL":"1024",
     "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL":"32768",
+    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM":"12",
+    "CONFIG_ESP_WIFI_RX_BA_WIN":"12",
+    "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM":"8",
+    "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM":"16",
     "CONFIG_ESPTOOLPY_FLASHSIZE_16MB":"y",
 }
 for option,value in required_config.items():
@@ -53,7 +57,8 @@ for fn in ("heap_caps_get_free_size", "heap_caps_get_largest_free_block",
            "heap_caps_get_minimum_free_size"):
     assert fn+"(internal_caps)" in source, "missing internal heap telemetry: "+fn
     assert fn+"(MALLOC_CAP_SPIRAM)" in source, "missing PSRAM telemetry: "+fn
-for stage in ('early-boot','pre-render-task','post-render-task','post-wifi',
+for stage in ('early-boot','pre-render-task','post-render-task','pre-ble',
+              'pre-wifi','post-wifi',
               'post-ble','post-http','render-create-failed'):
     assert 'ot_boot_heap_snapshot("'+stage+'")' in boot, stage
 # Real pixel rendering is the priority: after GPIO ISR, sampler and configured
@@ -74,5 +79,9 @@ assert "ot_boot_psram_ready()" in boot
 assert "sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init()" in boot
 assert 'Renderer task READY: frame timer and single-ESP render watchdog registered' in source
 assert "if(!ot_sw_idf_watch_render())" in source
+assert boot.index("ble_startup_ready=ot_ble_start();") < boot.index(
+    "xTaskCreate(config_activation_task")
+assert boot.index("ble_startup_ready=ot_ble_start();") < boot.index(
+    "const bool wifi_started=wifi_ap_init();")
 assert "ot_sw_idf_watch_inputs()" in boot
-print("PASS P0 N16R8 boot: octal 8MB PSRAM malloc + internal-only stacks, exact heap telemetry, radio-after-render allocation order, fail-closed PSRAM guard, watchdog and stack sizes retained; HOST SOURCE CONTRACT (physical log required)")
+print("PASS P0 N16R8 boot: octal 8MB PSRAM malloc + internal-only stacks, exact heap telemetry, renderer-before-BLE-before-Wi-Fi allocation order, fail-closed PSRAM guard, watchdog and stack sizes retained; HOST SOURCE CONTRACT (physical log required)")
