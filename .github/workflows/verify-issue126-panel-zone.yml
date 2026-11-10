@@ -117,7 +117,11 @@ jobs:
               "CONFIG_SPIRAM_SPEED_80M=y", "CONFIG_SPIRAM_BOOT_INIT=y",
               "CONFIG_SPIRAM_MEMTEST=y", "CONFIG_SPIRAM_USE_MALLOC=y",
               "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y",
-              "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096",
+              "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024",
+              "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=12",
+              "CONFIG_ESP_WIFI_RX_BA_WIN=12",
+              "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8",
+              "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
               "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768",
               "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
               "CONFIG_ESP_TASK_WDT_EN=y", "CONFIG_ESP_TASK_WDT_PANIC=y",
@@ -140,7 +144,7 @@ jobs:
               assert Path(offsets[offset]).name==name,(
                   hex(offset),offsets[offset],name)
           assert 0x9000 not in offsets,"MUST NOT overwrite live NVS at 0x9000"
-          print("PASS: generated ESP-IDF config enables 8MB octal PSRAM, internal task stacks, 16MB flash, unchanged WDT")
+          print("PASS: generated ESP-IDF config enables 8MB octal PSRAM, BLE-primary secondary Wi-Fi budget, internal task stacks, 16MB flash, unchanged WDT")
           print("PASS: actual flasher_args image offsets (NVS untouched): ",
                 {hex(offset):offsets[offset] for offset in sorted(offsets)})
           required=set(refs.values()) | {
