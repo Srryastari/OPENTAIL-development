@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the exact v0.1.31 ESP32-S3 main-task stack bootloop regression.
+"""Guard the exact v0.1.32 ESP32-S3 main-task stack bootloop regression.
 
 A passing host test does NOT establish physical boot. Serial must confirm
 app_main advances past SPI status LED initialization and starts services.
@@ -37,10 +37,13 @@ required_config={
     "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM":"n",
     "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL":"1024",
     "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL":"32768",
-    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM":"12",
-    "CONFIG_ESP_WIFI_RX_BA_WIN":"12",
-    "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM":"8",
+    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM":"6",
+    "CONFIG_ESP_WIFI_RX_BA_WIN":"6",
+    "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM":"6",
     "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM":"16",
+    "CONFIG_ESP_WIFI_IRAM_OPT":"n",
+    "CONFIG_ESP_WIFI_RX_IRAM_OPT":"n",
+    "CONFIG_LWIP_IRAM_OPTIMIZATION":"n",
     "CONFIG_ESPTOOLPY_FLASHSIZE_16MB":"y",
 }
 for option,value in required_config.items():

@@ -118,9 +118,9 @@ jobs:
               "CONFIG_SPIRAM_MEMTEST=y", "CONFIG_SPIRAM_USE_MALLOC=y",
               "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y",
               "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024",
-              "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=12",
-              "CONFIG_ESP_WIFI_RX_BA_WIN=12",
-              "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8",
+              "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6",
+              "CONFIG_ESP_WIFI_RX_BA_WIN=6",
+              "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6",
               "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
               "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768",
               "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
@@ -131,6 +131,8 @@ jobs:
               "N16R8 generated sdkconfig is inconsistent: ",
               sorted(required_config-actual))
           assert "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y" not in actual
+          disabled={"CONFIG_ESP_WIFI_IRAM_OPT","CONFIG_ESP_WIFI_RX_IRAM_OPT","CONFIG_LWIP_IRAM_OPTIMIZATION"}
+          assert all(f"# {key} is not set" in actual for key in disabled), sorted(disabled)
           offsets={int(k,0):v for k,v in refs.items()}
           # These are image offsets, not a request to erase NVS at 0x9000.
           expected_offsets={

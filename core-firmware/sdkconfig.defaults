@@ -33,10 +33,14 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # a throughput benchmark. Match the RX BA window to static RX buffers.
 # Retain AMPDU reception, full Wi-Fi/HTTP and OTA; bound per-session
 # internal DMA buffer demand so BLE HCI and the 8KB safety renderer coexist.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=12
-CONFIG_ESP_WIFI_RX_BA_WIN=12
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+# Low-IRAM, low-DMA secondary 2-client Wi-Fi; BLE and RMT remain active.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_LWIP_IRAM_OPTIMIZATION=n
 CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=n
 
 # BLE show and output manager over authorized GATT, Wi-Fi remains full Studio transport

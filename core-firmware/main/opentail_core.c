@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_wifi_default.h"
 #include "nvs_flash.h"
 #include "cJSON.h"
 #include "led_strip.h"
@@ -2465,6 +2466,26 @@ static bool http_start(void) {
     }
     return true;
 }
+/* On physical 9cc47fc1 Wi-Fi beacon allocation failed, then IDF 5.5.5
+ * ieee80211_hostap_attach dereferenced NULL. Do not start optional Wi-Fi
+ * when it would consume the internal DMA heap required by primary control.
+ * Memory thresholds are provisional and must pass physical coexistence. */
+static bool wifi_heap_start_preflight(void){
+    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const uint32_t dma=MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA;
+    const size_t total=heap_caps_get_free_size(internal);
+    const size_t largest=heap_caps_get_largest_free_block(internal);
+    const size_t dma_total=heap_caps_get_free_size(dma);
+    const size_t dma_largest=heap_caps_get_largest_free_block(dma);
+    ESP_LOGI(TAG,"Wi-Fi AP pre-start internal free=%u largest=%u; DMA free=%u largest=%u; PSRAM free=%u",
+        (unsigned)total,(unsigned)largest,(unsigned)dma_total,
+        (unsigned)dma_largest,(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    if(total<24576u || largest<4096u || dma_total<12288u || dma_largest<2048u){
+        ESP_LOGE(TAG,"Wi-Fi AP preflight low-memory fault; BLE/RMT/physical triggers remain active");
+        return false;
+    }
+    return true;
+}
 static bool wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
     size_t n=strlen(psk);
@@ -2475,16 +2496,20 @@ static bool wifi_ap_init(void) {
         ESP_LOGE(TAG,"CORE Wi-Fi networking init failed: %s",esp_err_to_name(e));
         return false;
     }
-    if(!esp_netif_create_default_wifi_ap()){
+    esp_netif_t *const wifi_netif=esp_netif_create_default_wifi_ap();
+    if(!wifi_netif){
         ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed");
         return false;
     }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
+    init.mgmt_sbuf_num=8; /* IDF 5.5.5 permits 6..32; secondary AP has two clients. */
     e=esp_wifi_init(&init);
     if(e!=ESP_OK){
         ESP_LOGE(TAG,"CORE Wi-Fi driver init failed: %s",esp_err_to_name(e));
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
+    ot_boot_heap_snapshot("wifi-driver-initialized");
     wifi_config_t conf={0};
     strncpy((char*)conf.ap.ssid,OT_AP_SSID,sizeof(conf.ap.ssid)-1);
     conf.ap.ssid_len=strlen(OT_AP_SSID);
@@ -2494,9 +2519,12 @@ static bool wifi_ap_init(void) {
     conf.ap.authmode=WIFI_AUTH_WPA2_PSK;
     e=esp_wifi_set_mode(WIFI_MODE_AP);
     if(e==ESP_OK)e=esp_wifi_set_config(WIFI_IF_AP,&conf);
+    if(e==ESP_OK && !wifi_heap_start_preflight())e=ESP_ERR_NO_MEM;
     if(e==ESP_OK)e=esp_wifi_start();
     if(e!=ESP_OK){
-        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s",esp_err_to_name(e));
+        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s; BLE remains primary",esp_err_to_name(e));
+        (void)esp_wifi_deinit();
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
     ot_st_wifi_ready();
