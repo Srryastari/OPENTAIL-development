@@ -13,6 +13,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/te
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
 python3 tests/test_main_stack_boot_contract.py
+# Owner COM9 P0: BLE controller HCI must reserve internal memory before SoftAP.
+python3 tests/test_ble_hci_boot_contract.py
 # #113: deterministic single-ESP crash streak/stable boot and exact progress
 # gates. Actual WDT reset timing/GPIO/optics requires a powered-board test.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
