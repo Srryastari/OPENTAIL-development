@@ -34,6 +34,13 @@ assert renderer < mutex < ble_init < promoter < wifi < http, (
     "BLE primary HCI memory must be allocated before Wi-Fi and config worker")
 assert at('ot_boot_heap_snapshot("pre-ble")') < ble_init
 assert ble_init < at('ot_boot_heap_snapshot("post-ble")')
+assert "esp_timer_get_time()+2000000LL" in boot
+assert "while(!ot_ble_radio_ever_ready()" in boot
+assert "vTaskDelay(pdMS_TO_TICKS(10));" in boot
+assert 'BLE-primary advertising confirmed before Wi-Fi allocation' in boot
+assert 'BLE HCI started but advertising not confirmed in 2000ms; Wi-Fi diagnostics still starting' in boot
+assert ble_init < at("if(ble_startup_ready){") < promoter
+assert at("if(ble_startup_ready){") < wifi
 assert at('ot_boot_heap_snapshot("pre-wifi")') < wifi
 assert wifi < at('ot_boot_heap_snapshot("post-wifi")')
 assert at('ot_boot_heap_snapshot("post-wifi")') < http
