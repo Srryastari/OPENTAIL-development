@@ -35,7 +35,13 @@ wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static bool in
 assert "ESP_ERROR_CHECK(" not in wifi
 assert "abort();" not in wifi
 assert "return false;" in wifi and "return true;" in wifi
-assert "if(!esp_netif_create_default_wifi_ap())" in wifi
+# Keep explicit failure handling and cleanup for the owned Wi-Fi AP netif.
+# Wi-Fi is an optional diagnostic transport and must not panic the renderer.
+assert "esp_netif_t *const wifi_netif=esp_netif_create_default_wifi_ap();" in wifi
+assert "if(!wifi_netif)" in wifi
+assert "esp_netif_destroy_default_wifi(wifi_netif)" in wifi
+assert "wifi_heap_start_preflight()" in wifi
+assert "esp_wifi_deinit()" in wifi
 # Trigger GPIO setup is a fail-closed prerequisite for physical rendering.
 # Bad input pin configuration must not panic-loop or emit lighting based on
 # untrusted GPIO levels. Diagnostic Wi-Fi/BLE may still start for bench repair.
