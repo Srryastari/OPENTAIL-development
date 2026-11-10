@@ -3693,22 +3693,28 @@ void app_main(void) {
         }
         /* OTA validation remains deferred until led_task finishes its first full frame. */
     }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
-    /* Networking and configuration workers must never starve the safety
-     * renderer's contiguous internal task-stack allocation during boot. */
+    /* BLE is the primary owner/control channel. Hardware observations
+     * showed Wi-Fi SoftAP consumed ~87 kB internal RAM before NimBLE HCI
+     * initialization and the internal low-water fell to 272 bytes. Reserve
+     * controller/HCI resources BEFORE Wi-Fi, while keeping both transports.
+     * The small mutex must exist before any BLE GATT callback can save config;
+     * the 5120-byte configuration worker may start after BLE registration. */
     om_write_mutex=xSemaphoreCreateMutex();
     if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
-    else{
+    ot_boot_heap_snapshot("pre-ble");
+    ble_startup_ready=ot_ble_start();
+    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
+    ot_boot_heap_snapshot("post-ble");
+    if(om_write_mutex){
         config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
             5120,NULL,5,NULL)==pdPASS;
         if(!config_promotion_ready)
             ot_st_set_fault("durable configuration promoter failed to start");
     }
+    ot_boot_heap_snapshot("pre-wifi");
     const bool wifi_started=wifi_ap_init();
     if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
     ot_boot_heap_snapshot("post-wifi");
-    ble_startup_ready=ot_ble_start();
-    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
-    ot_boot_heap_snapshot("post-ble");
     http_startup_ready=wifi_started&&http_start();
     if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
     ot_boot_heap_snapshot("post-http");
