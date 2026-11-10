@@ -1,6 +1,9 @@
 name: Codex integrated CORE exact-head software gates
 on:
+  # This matrix pins PR88's selected Android87/Effects80/Trigger83/Firmware84 trees.
+  # Do not run it against independent successors such as the PR112 -> PR115 lineage.
   pull_request:
+    branches: [firmware/failover-essential-policy-20261031]
   workflow_dispatch:
 permissions:
   contents: read

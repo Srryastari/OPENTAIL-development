@@ -1,0 +1,170 @@
+name: Effects #120 exact Firmware127 integrated compatibility
+on:
+  pull_request:
+    branches: [firmware/issue113-single-esp-progress-wdt-20261103]
+    paths:
+      - 'scripts/tests/test_effects_watchdog_compatibility.py'
+      - '.github/workflows/verify-effects-firmware115-compatibility.yml'
+      - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
+  push:
+    branches: [effects/fw115-compatibility-no-code-20261108]
+    paths:
+      - 'scripts/tests/test_effects_watchdog_compatibility.py'
+      - '.github/workflows/verify-effects-firmware115-compatibility.yml'
+      - 'docs/EFFECTS-FIRMWARE115-COMPATIBILITY-SIGNOFF.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  INTEGRATED_SHA: a3769fec0dc731ad36d25ff0f5f949d31543b7ab
+  EFFECTS_SHA: 601155a196a692792e60fd399505fdc676dc57d9
+
+jobs:
+  exact-source-and-full-140-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout approved integrated Firmware CORE
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.INTEGRATED_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout current test-only PR120 evidence
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: compat-pr
+          persist-credentials: false
+      - name: Checkout approved Effects110 renderer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EFFECTS_SHA }}
+          path: approved-effects
+          persist-credentials: false
+      - name: Strict original byte provenance / SHA256 / JNI contract and stable identities
+        run: python3 compat-pr/scripts/tests/test_effects_watchdog_compatibility.py --effects-dir approved-effects --integration-sha "$INTEGRATED_SHA"
+      - name: Full integrated CORE host suite (all 140 / goldens / Geometry / NVS / STOP / FX-PZ / watchdog)
+        run: bash core-firmware/tests/run-host-tests.sh
+      - name: Two-output synthetic watchdog/render timing stress
+        run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
+            core-firmware/main/ot_single_watchdog.c core-firmware/main/effects_1d.c \
+            core-firmware/main/ot_auto_effects.c core-firmware/main/wled_fx_compat.c \
+            core-firmware/main/palette_1d.c core-firmware/main/particle_system_1d.c \
+            core-firmware/main/wled_1d.c \
+            compat-pr/core-firmware/tests/test_effect_watchdog_compat.c \
+            -lm -o /tmp/ot-effects-fw127-wdt-compat
+          /tmp/ot-effects-fw127-wdt-compat
+      - name: Safety and source manifests
+        run: |
+          python3 core-firmware/tests/test_single_watchdog_contract.py
+          python3 core-firmware/tests/test_effects_render_safety_contract.py
+          python3 core-firmware/tests/test_effect_capabilities_manifest.py
+          python3 core-firmware/tests/test_nvs_finalization_contract.py
+
+  android-jni-140-parity-and-apk:
+    needs: exact-source-and-full-140-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.INTEGRATED_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EFFECTS_SHA }}
+          path: approved-effects
+          persist-credentials: false
+      - name: Checkout verified Firmware Panel/Zone identity source for independent JNI oracle
+        uses: actions/checkout@v4
+        with:
+          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          path: pinned-firmware127
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Native JNI manifest, BLE 13/6, Geometry and UI contracts
+        run: |
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - name: Independent 140-effect JNI/CORE golden oracle and 13 tertiary roles
+        run: |
+          python3 android/qa/test_full_offline_preview.py \
+            --core-dir approved-effects \
+            --continuity-dir approved-effects \
+            --color-dir approved-effects > effects-fw127-jni-140-report.json
+      - name: Native Android JUnit
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+      - name: Exact source Android debug APK compile
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: effects-fw127-jni-140-report-and-debug-apk
+          path: |
+            effects-fw127-jni-140-report.json
+            android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  independent-trigger-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.INTEGRATED_SHA }}
+          persist-credentials: false
+      - name: Active-low input, ISR queue, OEM arbitration and NVS/STOP
+        run: |
+          python3 core-firmware/tests/test_trigger_runtime_contract.py
+          python3 core-firmware/tests/test_nvs_finalization_contract.py
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Icore-firmware/main \
+            core-firmware/main/trigger_manager.c core-firmware/main/core_logic.c \
+            core-firmware/main/arbitration_logic.c core-firmware/main/output_manager.c \
+            core-firmware/main/show_logic.c core-firmware/tests/test_trigger_manager.c \
+            -o /tmp/ot-effects-fw127-trigger
+          /tmp/ot-effects-fw127-trigger
+
+  esp-idf555-and-complete-bench-package:
+    needs: exact-source-and-full-140-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.INTEGRATED_SHA }}
+          persist-credentials: false
+      - name: Compile immutable integrated Firmware127 with ESP-IDF v5.5.5
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Package and verify four-image bench archive
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip" \
+            --source-sha "$INTEGRATED_SHA"
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip" \
+            --sha256-file "core-firmware/releases/opentail-effects-fw127-compat-$INTEGRATED_SHA.zip.sha256" \
+            --source-sha "$INTEGRATED_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: effects-fw127-four-image-bench-package
+          path: |
+            core-firmware/releases/opentail-effects-fw127-compat-*.zip
+            core-firmware/releases/opentail-effects-fw127-compat-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+# Test-only integration snapshot; hardware RMT/TWDT/optics/vehicle checks NOT_RUN.

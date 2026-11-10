@@ -21,12 +21,13 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Exact HEAD, frozen 106 lineage, immutable renderer and firmware ZIP provenance
+      - name: Exact HEAD, frozen 106 lineage, exact PR112 protected-source baseline and firmware ZIP provenance
         env:
           PIN: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$PIN"
           git merge-base --is-ancestor db7bcdff187197c0493b5c38991870224f2c244a HEAD
+          git merge-base --is-ancestor 1a300767d985343d060faf344bff2da772dca88f HEAD
           python3 - <<'PY'
           import subprocess
           def git(*args):
@@ -41,7 +42,10 @@ jobs:
                     'scripts/tests/test_core_flash_package.py',
                     '.github/workflows/verify-core-tertiary-ble.yml'):
               assert git('rev-parse','HEAD:'+p)==git('rev-parse',fw+':'+p),p
-          protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
+          integration_base='1a300767d985343d060faf344bff2da772dca88f'
+          # PR112's authenticated 13-mode tertiary BLE additions are an approved
+          # immutable integration baseline. Guard only new changes after that exact SHA.
+          protected=git('diff','--name-only',integration_base,'HEAD').splitlines()
           assert not any(p.startswith(('android/app/src/main/java/','android/app/src/main/res/',
              'core-firmware/main/ble_', 'core-firmware/main/config_journal.',
              'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
