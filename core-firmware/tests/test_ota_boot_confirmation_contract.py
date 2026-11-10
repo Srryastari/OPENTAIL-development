@@ -85,6 +85,8 @@ assert 'boot_enrollment_ready?"available":"disabled"' in start_ble
 assert "__atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE)" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&ble_radio_ever_ready,true")
+advertise = ble.split("static void advertise(void){", 1)[1].split(
+    "static int gap_event(struct ble_gap_event *ev,void *arg){", 1)[0]
 assert "else{" in advertise
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in advertise
 assert "BLE advertising ACTIVE: OpenTail CORE" in advertise
