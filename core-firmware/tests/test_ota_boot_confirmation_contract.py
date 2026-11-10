@@ -37,8 +37,12 @@ assert "abort();" not in wifi
 assert "return false;" in wifi and "return true;" in wifi
 # Keep explicit failure handling and cleanup for the owned Wi-Fi AP netif.
 # Wi-Fi is an optional diagnostic transport and must not panic the renderer.
-assert "esp_netif_t *const wifi_netif=esp_netif_create_default_wifi_ap();" in wifi
+assert "esp_netif_t *const wifi_netif=esp_netif_new(&ap_cfg);" in wifi
 assert "if(!wifi_netif)" in wifi
+assert "esp_netif_attach_wifi_ap(wifi_netif)" in wifi
+assert "esp_wifi_set_default_wifi_ap_handlers()" in wifi
+assert "esp_netif_create_default_wifi_ap()" not in wifi
+assert "ESP_NETIF_DEFAULT_WIFI_AP()" in wifi
 assert "esp_netif_destroy_default_wifi(wifi_netif)" in wifi
 assert "wifi_heap_start_preflight()" in wifi
 assert "esp_wifi_deinit()" in wifi

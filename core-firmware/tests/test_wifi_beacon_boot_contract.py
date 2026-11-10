@@ -13,6 +13,11 @@ assert wifi.index("esp_wifi_set_config(")<wifi.index("wifi_heap_start_preflight(
 assert "init.mgmt_sbuf_num=8;" in wifi
 assert "esp_wifi_deinit()" in wifi
 assert "esp_netif_destroy_default_wifi(wifi_netif)" in wifi
+assert "esp_netif_attach_wifi_ap(wifi_netif)" in wifi
+assert "esp_wifi_set_default_wifi_ap_handlers()" in wifi
+assert "esp_netif_create_default_wifi_ap()" not in wifi
+assert "esp_netif_new(&ap_cfg)" in wifi
+assert wifi.index("wifi_heap_start_preflight()") < wifi.index("esp_netif_init()")
 assert "BLE remains primary" in wifi
 assert "MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA" in s
 for k,v in {"ESP_WIFI_STATIC_RX_BUFFER_NUM":"6","ESP_WIFI_RX_BA_WIN":"6",

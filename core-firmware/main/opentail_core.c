@@ -2492,15 +2492,32 @@ static bool wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
     size_t n=strlen(psk);
     if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");return false;}
+    if(!wifi_heap_start_preflight())return false;
     esp_err_t e=esp_netif_init();
     if(e==ESP_OK)e=esp_event_loop_create_default();
     if(e!=ESP_OK){
         ESP_LOGE(TAG,"CORE Wi-Fi networking init failed: %s",esp_err_to_name(e));
         return false;
     }
-    esp_netif_t *const wifi_netif=esp_netif_create_default_wifi_ap();
+    /* The ESP-IDF default AP helper contains assert/ESP_ERROR_CHECK paths,
+     * which would panic on an OPTIONAL network allocation/handler failure.
+     * Perform its public steps with checked return values instead. */
+    const esp_netif_config_t ap_cfg=ESP_NETIF_DEFAULT_WIFI_AP();
+    esp_netif_t *const wifi_netif=esp_netif_new(&ap_cfg);
     if(!wifi_netif){
-        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed");
+        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed (no netif)");
+        return false;
+    }
+    e=esp_netif_attach_wifi_ap(wifi_netif);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP driver attach failed: %s",esp_err_to_name(e));
+        esp_netif_destroy(wifi_netif);
+        return false;
+    }
+    e=esp_wifi_set_default_wifi_ap_handlers();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP event handlers failed: %s",esp_err_to_name(e));
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
