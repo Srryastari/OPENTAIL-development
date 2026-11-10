@@ -791,7 +791,8 @@ public class GeometryTransactionManagerTest {
                 manager.queueUpdate(new byte[]{99},
                     new PanelPreviewProtocol.UpdateDescriptor[]{descriptor},23));
             assertNull("unacknowledged edit cannot be committed",
-                manager.requestCommit(status(1,107,sequence-1,0x10+sequence,7,7,7,0,0,0)));
+                manager.requestCommit(status(1,107,sequence-1,0x10+sequence,7,7,7,0,0,
+                    sequence==1?0:4)));
             assertArrayEquals("shadow UPDATE must not replace confirmed map",
                 confirmed,manager.lastConfirmed().wire);
             assertTrue("authoritative acknowledgment "+sequence,
