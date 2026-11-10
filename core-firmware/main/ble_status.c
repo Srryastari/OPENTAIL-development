@@ -28,6 +28,8 @@
 #include "palette_ble_v3.h"
 #include "palette_profile.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
@@ -60,6 +62,7 @@ void ot_ble_session_hex(char out[33]){
 }
 #if CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ENABLED
 #include "nimble/nimble_port.h"
+#include "esp_bt.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
@@ -69,6 +72,33 @@ void ot_ble_session_hex(char out[33]){
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 static const char *TAG="OT_BLE";
+/* P0 N16R8 BLE HCI memory evidence. The hook cannot log or allocate:
+ * it may be invoked inside a heap allocator critical section. Snapshot
+ * best-effort failure details here and report only after nimble_port_init().
+ * This callback is NOT a replacement for inspecting controller-specific
+ * initialization errors in the new physical boot trace. */
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_count;
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_size;
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_caps;
+static const char *volatile ble_alloc_fail_caller;
+static void IRAM_ATTR ble_alloc_failed(size_t size,uint32_t caps,const char *caller){
+    ble_alloc_fail_size=(uint32_t)size;
+    ble_alloc_fail_caps=caps;
+    ble_alloc_fail_caller=caller;
+    ble_alloc_fail_count++;
+}
+static void ble_hci_heap_snapshot(const char *stage){
+    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const uint32_t dma=MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA;
+    ESP_LOGI(TAG,"BLE HCI heap %s: internal free=%u largest=%u min_ever=%u; DMA free=%u largest=%u; PSRAM free=%u",
+        stage,
+        (unsigned)heap_caps_get_free_size(internal),
+        (unsigned)heap_caps_get_largest_free_block(internal),
+        (unsigned)heap_caps_get_minimum_free_size(internal),
+        (unsigned)heap_caps_get_free_size(dma),
+        (unsigned)heap_caps_get_largest_free_block(dma),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
 static uint8_t addr_type;
 static uint16_t active_conn=BLE_HS_CONN_HANDLE_NONE;
 static bool authorized=false;
@@ -1231,7 +1261,10 @@ static void advertise(void){
     p.itvl_min=48;p.itvl_max=96; /* 30-60 ms */
     rc=ble_gap_adv_start(addr_type,NULL,BLE_HS_FOREVER,&p,gap_event,NULL);
     if(rc)ESP_LOGE(TAG,"Advertising failed: %d",rc);
-    else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
+    else{
+        __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
+        ESP_LOGI(TAG,"BLE advertising ACTIVE: OpenTail CORE, owner authentication required");
+    }
 }
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
@@ -1297,9 +1330,30 @@ bool ot_ble_start(void){
     }
     esp_fill_random(token,sizeof(token));
     token_ready=true;
+    ble_alloc_fail_count=0u;
+    ble_alloc_fail_size=0u;
+    ble_alloc_fail_caps=0u;
+    ble_alloc_fail_caller=NULL;
+    const esp_err_t hook_err=heap_caps_register_failed_alloc_callback(ble_alloc_failed);
+    if(hook_err!=ESP_OK)
+        ESP_LOGW(TAG,"BLE HCI allocation failure hook unavailable: %s",esp_err_to_name(hook_err));
+    ble_hci_heap_snapshot("before-nimble-port-init");
+    /* On IDF 5.5.5, nimble_port_init() brings up the BLE controller
+     * and esp_nimble_hci_init(). Its ESP_FAIL return can hide the original
+     * HCI failure. Record heap capability deficits and controller state. */
     esp_err_t err=nimble_port_init();
+    ble_hci_heap_snapshot(err==ESP_OK?"after-nimble-port-init":"nimble-port-init-failed");
     if(err==ESP_OK)ble_att_set_preferred_mtu(247);
-    if(err!=ESP_OK){token_ready=false;ESP_LOGE(TAG,"NimBLE init failed: %s",esp_err_to_name(err));return false;}
+    if(err!=ESP_OK){
+        token_ready=false;
+        ESP_LOGE(TAG,"NimBLE HCI/controller init failed: %s (0x%x); controller_status=%u; heap_alloc_fail_count=%u last_size=%u caps=0x%lx caller=%s",
+            esp_err_to_name(err),(unsigned)err,
+            (unsigned)esp_bt_controller_get_status(),
+            (unsigned)ble_alloc_fail_count,(unsigned)ble_alloc_fail_size,
+            (unsigned long)ble_alloc_fail_caps,
+            ble_alloc_fail_caller?ble_alloc_fail_caller:"none-observed");
+        return false;
+    }
     ble_svc_gap_init();ble_svc_gatt_init();
     int rc=ble_svc_gap_device_name_set("OpenTail CORE");
     if(!rc)rc=ble_gatts_count_cfg(services);
