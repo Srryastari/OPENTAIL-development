@@ -3705,6 +3705,22 @@ void app_main(void) {
     ble_startup_ready=ot_ble_start();
     if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
     ot_boot_heap_snapshot("post-ble");
+    /* NimBLE radio advertising is asynchronous to nimble_port_init().
+     * Give the BLE-primary host a bounded opportunity to establish its
+     * advertising buffers BEFORE the secondary Wi-Fi AP consumes RAM.
+     * Non-blocking for safety: input sampler/render tasks run independently.
+     * Timeout does not disable Wi-Fi diagnostics; OTA still requires a
+     * real successful BLE advertisement and completed RMT frame. */
+    if(ble_startup_ready){
+        const int64_t ble_adv_deadline_us=esp_timer_get_time()+2000000LL;
+        while(!ot_ble_radio_ever_ready() &&
+              esp_timer_get_time()<ble_adv_deadline_us)
+            vTaskDelay(pdMS_TO_TICKS(10));
+        if(ot_ble_radio_ever_ready())
+            ESP_LOGI(TAG,"BLE-primary advertising confirmed before Wi-Fi allocation");
+        else
+            ESP_LOGW(TAG,"BLE HCI started but advertising not confirmed in 2000ms; Wi-Fi diagnostics still starting");
+    }
     if(om_write_mutex){
         config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
             5120,NULL,5,NULL)==pdPASS;
