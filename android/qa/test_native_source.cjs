@@ -1244,7 +1244,8 @@ for (const file of [
   'android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java'
 ]) assert(fs.existsSync(file),'P0 Android regression suite missing: '+file);
 
-\n// Disconnect/reconnect regression: old GATT session and its authoritative
+
+// Disconnect/reconnect regression: old GATT session and its authoritative
 // Panel/Zone aliases must never leak into the next verified controller readback.
 const disconnectBlock=bleSource.split('private void panelDisconnected() {')[1]?.split('boolean canMapTriggers()')[0]||'';
 const disconnectedStatusBlock=compose.split('if (!ble.isConnected()) {')[1]?.split('if (!ble.canControl())')[0]||'';
