@@ -11,7 +11,8 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path.cwd()
-INTEGRATED = "dff7fe070b134daaaad09a8fb989f76a6c5bda39"
+INTEGRATED = "a3769fec0dc731ad36d25ff0f5f949d31543b7ab"
+BASELINE = "dff7fe070b134daaaad09a8fb989f76a6c5bda39"
 EFFECTS = "601155a196a692792e60fd399505fdc676dc57d9"
 IDENTITY = "97f4e2fd29df5aa9249292cee2649404fc98ed48"
 NAMES = (
@@ -40,6 +41,8 @@ def main():
     assert args.integration_sha == INTEGRATED, "Unreviewed firmware SHA"
     assert git(ROOT, "rev-parse", "HEAD") == INTEGRATED, "Wrong firmware checkout"
     assert git(effects, "rev-parse", "HEAD") == EFFECTS, "Wrong Effects checkout"
+    assert subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", BASELINE, INTEGRATED], check=False).returncode == 0, "Approved baseline is not an ancestor"
+    assert '#define OT_FW_VERSION "0.1.32-alpha"' in (ROOT / "core-firmware/main/ot_version.h").read_text(), "Expected 0.1.32-alpha version"
     assert subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--", "core-firmware", "android"], check=False).returncode == 0, "Tracked source tree modified"
     manifest_path = ROOT / "android/app/src/main/cpp/core/SOURCE.json"
     manifest = json.loads(manifest_path.read_text())
