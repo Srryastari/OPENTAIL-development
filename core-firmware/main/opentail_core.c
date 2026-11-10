@@ -2466,6 +2466,8 @@ static bool http_start(void) {
     }
     return true;
 }
+/* Wi-Fi initialization precedes the out-of-line boot heap definition. */
+static void ot_boot_heap_snapshot(const char *phase);
 /* On physical 9cc47fc1 Wi-Fi beacon allocation failed, then IDF 5.5.5
  * ieee80211_hostap_attach dereferenced NULL. Do not start optional Wi-Fi
  * when it would consume the internal DMA heap required by primary control.
