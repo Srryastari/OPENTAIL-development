@@ -60,6 +60,15 @@ assert "httpd_stop(server);" in http
 assert "return false;" in http and "return true;" in http
 assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
 assert render_alloc < startup.index("ble_startup_ready=ot_ble_start();")
+# BLE-primary radio resource admission must precede the much larger Wi-Fi
+# SoftAP buffer allocations, but OTA still needs real BLE advertising plus
+# completed RMT frames and watchdog stability before confirmation.
+assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index(
+    "const bool wifi_started=wifi_ap_init();")
+assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index(
+    "xTaskCreate(config_activation_task")
+assert startup.index("om_write_mutex=xSemaphoreCreateMutex();") < startup.index(
+    "ble_startup_ready=ot_ble_start();")
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
 assert "bool ot_ble_start(void)" in ble
 assert "bool ot_ble_radio_ever_ready(void)" in ble
