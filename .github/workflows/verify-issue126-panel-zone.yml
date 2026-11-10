@@ -174,6 +174,18 @@ jobs:
           (build/"CORE_BUILD_EVIDENCE.json").write_text(json.dumps(evidence,indent=2)+"\n")
           print("PASS: exact-head ESP32-S3 image, complete flash manifest, linker map and retained ISR disassembly; no device flashed")
           PY
+      - name: Package verified COM9 EasyFlash root (NO FLASH)
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$PIN" --version 0.1.32-alpha
+          (cd core-firmware/build/EasyFlash && python3 verify_sha256.py)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          path: core-firmware/build/EasyFlash/
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: opentail-issue126-bench-build-${{ github.event.pull_request.head.sha || github.sha }}
@@ -191,3 +203,22 @@ jobs:
           retention-days: 14
 # Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
 # thermal behavior, vehicle optics, STOP hardware, or road safety.
+
+  easyflash-windows-check:
+    needs: esp-idf-5-5-5
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          path: EasyFlash
+      - name: Validate downloaded ZIP-root scripts and checksums (NO FLASH)
+        shell: pwsh
+        run: |
+          foreach ($file in @('01_FLASH_COM9.bat','02_CAPTURE_BOOT_LOG_COM9.bat','INSTALL_ESPTOOL.bat','START_HERE.txt','flasher_args.json','release_manifest.json')) {
+            if (!(Test-Path "EasyFlash/$file")) { throw "Missing root file: $file" }
+          }
+          python EasyFlash/verify_sha256.py
+          if ($LASTEXITCODE -ne 0) { throw 'EasyFlash SHA-256 failure' }
+          $m = Get-Content EasyFlash/release_manifest.json -Raw | ConvertFrom-Json
+          if ($m.erase_nvs -or $m.road_safe -or $m.version -ne '0.1.32-alpha') { throw 'Unsafe manifest' }
