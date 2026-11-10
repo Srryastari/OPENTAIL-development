@@ -16,7 +16,7 @@ on:
 permissions:
   contents: read
 env:
-  INTEGRATED_SHA: dff7fe070b134daaaad09a8fb989f76a6c5bda39
+  INTEGRATED_SHA: a3769fec0dc731ad36d25ff0f5f949d31543b7ab
   EFFECTS_SHA: 601155a196a692792e60fd399505fdc676dc57d9
 
 jobs:
