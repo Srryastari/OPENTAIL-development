@@ -1260,3 +1260,21 @@ assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
        compose.includes('panelGeometryQueuedTarget=target') &&
        compose.includes('Wait for all draft updates to be acknowledged before Commit'),
        'Live Layout must invalidate disconnected managers and shadow drafts, reload verified CORE map, and serialize rapid edits');
+
+
+// Physical bench regression: Reload must not stack a local/project editor
+// beneath a second CORE-output editor, and output selection must route PLAY.
+const layoutEditor = compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+const unifiedEditor = compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(layoutEditor?.includes('if (outputs[captureOutput.intValue] == null) {') &&
+       layoutEditor.includes('HardwareOutputEditor(t)') &&
+       unifiedEditor?.includes('liveChainMask.intValue = 1') &&
+       unifiedEditor.includes('liveChainMask.intValue = 2') &&
+       unifiedEditor.includes('Play selected effect on Output ') &&
+       unifiedEditor.includes('liveZoneMask.intValue = 255') &&
+       unifiedEditor.includes('No playable CORE zones') &&
+       unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
+       unifiedEditor.includes('"Saving…" else "Save"') &&
+       !unifiedEditor.includes('if (confirm) AlertDialog'),
+       'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');

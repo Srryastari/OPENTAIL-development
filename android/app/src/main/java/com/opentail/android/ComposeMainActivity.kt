@@ -91,6 +91,7 @@ class ComposeMainActivity : ComponentActivity() {
     private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
     private val outputMessage = mutableStateOf("No device output read yet")
+    private val savingOutput = mutableIntStateOf(-1)
     // Conditional diagnostic only; the approved Settings UI is unchanged when healthy.
     private val panelSyncWarning = mutableStateOf<String?>(null)
     private val panelStatusSummary = mutableStateOf("Panel telemetry unavailable")
@@ -288,6 +289,7 @@ class ComposeMainActivity : ComponentActivity() {
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 coreTriggerMapping.value = null // never reuse another controller's physical input mapping
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
+                savingOutput.intValue = -1
                 paletteV3Supported.value = false
                 paletteLoadedSlot.intValue = -1
                 paletteLoadedRevision.longValue = -1L
@@ -387,6 +389,11 @@ class ComposeMainActivity : ComponentActivity() {
                 val response = JSONObject(raw)
                 outputMessage.value = response.optString("message", "CORE output result")
                 val index = response.optInt("index", -1)
+                if (index == savingOutput.intValue) {
+                    // A successful admission is not durable evidence. The
+                    // configuration reply arrives after byte-identical readback.
+                    savingOutput.intValue = -1
+                }
                 if (response.optBoolean("ok") && index in 0..1)
                     response.optJSONObject("output")?.let {
                         outputs[index] = JSONObject(it.toString())
@@ -1649,6 +1656,10 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 Caption(panelGeometryMessage.value,t)
             }
+            // Render one zone-editor surface at a time. A CORE Reload
+            // replaces local-only zone cards with authoritative physical
+            // zone cards; never stack two unrelated zone editors.
+            if (outputs[captureOutput.intValue] == null) {
             for(i in 0 until zoneCount) {
                 val z=project.zone(i) ?: continue
                 val id=z.optString("id")
@@ -1766,8 +1777,9 @@ class ComposeMainActivity : ComponentActivity() {
                 if (created!=null) { editingId=created; layoutMessage="" }
                 else layoutMessage="Could not add zone"
             }
-            // Saved controller output editing is inline in the same Layout card.
-            // Saving still requires explicit authenticated confirmation/readback.
+            }
+            // The same Layout card becomes CORE-backed after Reload; live
+            // editing remains volatile until the explicit Save.
             HardwareOutputEditor(t)
         }
         if (choosingDelete) AlertDialog(containerColor=t.surface, 
@@ -2847,7 +2859,6 @@ class ComposeMainActivity : ComponentActivity() {
         var draftText by remember(index, outputs[index]) {
             mutableStateOf(outputs[index]?.toString().orEmpty())
         }
-        var confirm by remember { mutableStateOf(false) }
         var structureVersion by remember(index, outputs[index]) { mutableIntStateOf(0) }
         val draft = runCatching { JSONObject(draftText) }.getOrNull()
         fun edit(change: (JSONObject) -> Unit) {
@@ -2891,15 +2902,40 @@ class ComposeMainActivity : ComponentActivity() {
             Caption("Load the saved output, edit its zones, then Save to CORE to apply.", t)
             Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Pill("Output 1", t, index == 0) { index = 0; captureOutput.intValue = 0; invalidateCoreFrame() }
-                Pill("Output 2", t, index == 1) { index = 1; captureOutput.intValue = 1; invalidateCoreFrame() }
+                Pill("Output 1", t, index == 0) {
+                    index = 0; captureOutput.intValue = 0
+                    liveChainMask.intValue = 1
+                    invalidateCoreFrame()
+                }
+                Pill("Output 2", t, index == 1) {
+                    index = 1; captureOutput.intValue = 1
+                    liveChainMask.intValue = 2
+                    invalidateCoreFrame()
+                }
             }
             Pill("Reload output " + (index + 1) + " from CORE", t) {
                 if (ble.canConfigure()) ble.readOutput(index)
                 else outputMessage.value = "Connect and authorize BLE before loading hardware"
             }
             Caption(outputMessage.value, t)
-            if (draft == null) Caption("Nothing has been read from this output. No settings will be sent until you explicitly confirm Save.", t)
+            if (savingOutput.intValue == index) Caption("Saving… waiting for CORE confirmation and matching readback", t)
+            if (draft == null) Caption("Nothing loaded for this output. Reload from CORE; new projects default to 0 LEDs.", t)
+            else {
+                val eligible = (0 until (draft.optJSONArray("zones")?.length() ?: 0))
+                    .any { z ->
+                        val zone = draft.optJSONArray("zones")?.optJSONObject(z)
+                        zone != null && zone.optInt("pixels", 0) > 0 &&
+                            zone.optString("role", "off") != "off"
+                    }
+                if (!eligible) Caption("No playable CORE zones: assign a non-Off lighting role to at least one populated zone.", t)
+                Pill("Play selected effect on Output " + (index + 1), t,
+                    enabled=ble.canControl() && eligible) {
+                    liveChainMask.intValue = 1 shl index
+                    liveZoneMask.intValue = 255
+                    offlinePreview.value = false
+                    previewCurrentEffect()
+                }
+            }
         }
         if (draft == null) return
         val zones = draft.optJSONArray("zones") ?: JSONArray()
@@ -3110,28 +3146,21 @@ class ComposeMainActivity : ComponentActivity() {
             }
             Caption(if (valid) "Ready to save; no changes sent yet." else
                 "Cannot save: " + validationError, t)
-            if (valid) Pill("Save to CORE · verify readback", t, true) { confirm = true }
-        }
-        if (confirm) AlertDialog(containerColor=t.surface, 
-            onDismissRequest = { confirm = false },
-            title = { Text("Apply saved hardware output settings?") },
-            text = { Text("Stop all shows and release physical inputs before applying. Changes affect only output " +
-                (index + 1) + ". CORE must acknowledge flash persistence and return identical BLE readback.") },
-            confirmButton = { Pill("Save", t, true) {
+            if (valid) Pill(if (savingOutput.intValue == index) "Saving…" else "Save", t, true,
+                enabled=savingOutput.intValue < 0) {
                 try {
                     BleConfigCodec.encode(JSONObject(draftText))
-                    if (ble.canConfigure()) {
-                        if (ble.saveOutput(index, draftText))
-                            outputMessage.value = "Save requested · verifying hardware readback"
-                        else
-                            outputMessage.value = "Save request rejected · see BLE status"
-                    } else outputMessage.value = "Not authorized — no settings sent"
+                    if (!ble.canConfigure()) {
+                        outputMessage.value = "Not authorized — no settings sent"
+                    } else if (ble.saveOutput(index, draftText)) {
+                        savingOutput.intValue = index
+                        outputMessage.value = "Saving… verifying matching CORE readback"
+                    } else outputMessage.value = "Save request rejected · see BLE status"
                 } catch (ex: Exception) {
                     outputMessage.value = "Save rejected: " + (ex.message ?: "invalid draft")
                 }
-                confirm = false
-            } },
-            dismissButton = { Pill("Cancel", t) { confirm = false } }
-        )
+            }
+        }
+
     }
 }
