@@ -24,6 +24,12 @@ render=core.split("static void led_task(void *p) {",1)[1]
 assert "if(local_panel[ch].active_pixels!=0u)" in render
 assert "c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u)" in render
 assert "ot_pz_diag_render(&local_diag" in render
+assert "PIXEL_PROBE_ACCEPT" in core and "PIXEL_PROBE_REJECT" in core
+assert "PIXEL_PROBE_RMT_DONE" in core and "PIXEL_PROBE_NONBLACK_FRAME" in core
+assert "probe_rmt_first_frame_generation" in core
+assert "probe_rmt_bright_frame_generation" in core
+assert "probe_nonblack[ch]=true" in render
+assert "if(local_panel[ch].active_pixels!=0u)" in render
 assert "led_strip_refresh_async(strip[ch])" in render
 assert "led_strip_refresh_async_done(strip[ch])" in render
 assert "OT_OUT_LEFT_GPIO 16" in (root/"main/board_config.h").read_text()

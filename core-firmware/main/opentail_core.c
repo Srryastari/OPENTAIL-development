@@ -183,6 +183,10 @@ static uint8_t pz_preview_commit_lane=0u;
 static bool pz_preview_commit_requested=false;
 static bool pz_preview_commit_worker_active=false;
 static ot_pz_diag_state_t pz_diag;
+/* Volatile first-pixel evidence. No NVS or BLE wire fields. */
+static uint32_t probe_generation[OT_CHAIN_COUNT]={0u};
+static uint32_t probe_rmt_first_frame_generation[OT_CHAIN_COUNT]={0u};
+static uint32_t probe_rmt_bright_frame_generation[OT_CHAIN_COUNT]={0u};
 #define OT_PZ_RESET_TOMBSTONE_MAGIC 0x4f54525au
 #define OT_PZ_RESET_TOMBSTONE_VERSION 1u
 #define OT_PZ_RESET_TOMBSTONE_KEY "reset_v3"
@@ -1481,11 +1485,30 @@ bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         lengths[lane]=pz_outputs.outputs[lane].active_pixels?
             pz_outputs.outputs[lane].active_pixels:OT_PZ_MAX_PIXELS;
-    if(native_outputs_ready)
+    const bool ready=native_outputs_ready&&!config_recovery_fault&&
+                     !ot_sw_idf_decorative_inhibited();
+    if(ready)
         accepted=ot_pz_diag_probe(&pz_diag,packet,size,authenticated,
                                   capability_seen,lengths,now_ms);
+    uint32_t generation=0u;
+    if(accepted){
+        const unsigned selected=(unsigned)packet[1]-1u;
+        generation=++probe_generation[selected];
+        if(generation==0u)generation=++probe_generation[selected];
+    }
+    const uint32_t fault_mask=output_runtime_fault_mask;
     portEXIT_CRITICAL(&state_lock);
-    if(accepted)request_render_refresh();
+    if(accepted){
+        ESP_LOGI(TAG,"PIXEL_PROBE_ACCEPT lane=%u gpio=%u pixel=%u color=%u lease_ms=%u generation=%lu; no RMT credit yet",
+            (unsigned)packet[1],(unsigned)out_pin[(unsigned)packet[1]-1u],
+            (unsigned)((((uint16_t)packet[2])<<8)|packet[3]),
+            (unsigned)packet[4],(unsigned)OT_PZ_DIAG_LEASE_MS,(unsigned long)generation);
+        request_render_refresh();
+    }else{
+        ESP_LOGW(TAG,"PIXEL_PROBE_REJECT ready=%u fault_mask=0x%lx authenticated=%u caps=%u packet_size=%u",
+            (unsigned)ready,(unsigned long)fault_mask,(unsigned)authenticated,
+            (unsigned)capability_seen,(unsigned)size);
+    }
     return accepted;
 }
 void ot_ble_diag_disconnect(void){
@@ -3241,6 +3264,7 @@ static void led_task(void *p) {
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_pz_output_t local_panel[OT_PZ_OUTPUTS];
        ot_pz_diag_state_t local_diag={0};ot_tm_profile_t local_tm;
+       uint32_t local_probe_generation[OT_CHAIN_COUNT]={0u};
        portENTER_CRITICAL(&state_lock);
        /* Repeated reset: no decorative effect replay during recovery.
         * OEM physical GPIO trigger overlays remain authoritative. */
@@ -3271,6 +3295,8 @@ static void led_task(void *p) {
        }
        (void)ot_pz_diag_expire(&pz_diag,(uint32_t)(esp_timer_get_time()/1000LL));
        local_diag=pz_diag;
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+           local_probe_generation[ch]=probe_generation[ch];
        if(before_deadline(now,demo_deadline)) local_demo=demo;
        if(show_window(now)){
            local_show=native_show;show_started=native_show_started_ms;
@@ -3315,6 +3341,7 @@ static void led_task(void *p) {
            bool frame_ready[OT_CHAIN_COUNT]={false};
            bool frame_submitted[OT_CHAIN_COUNT]={false};
            bool frame_captured[OT_CHAIN_COUNT]={false};
+           bool probe_nonblack[OT_CHAIN_COUNT]={false};
            bool any_output_completed=false;
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
@@ -3543,6 +3570,10 @@ static void led_task(void *p) {
                    /* One final ratio-preserving ceiling covers solid/show,
                     * Startup/Shutdown, effects, trigger and diagnostics. */
                    c=ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS);
+                   if(diagnostic_here&&local_diag.mode==OT_PZ_DIAG_PROBE&&
+                      local_diag.lane==(uint8_t)ch&&local_diag.endpoint==px&&
+                      (c.r!=0u||c.g!=0u||c.b!=0u))
+                       probe_nonblack[ch]=true;
                    if(frame_captured[ch])
                        ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
@@ -3587,10 +3618,32 @@ static void led_task(void *p) {
                /* A failed lane must not throttle the surviving vehicle lights. */
                if(render_pixels[ch]>longest_pixels)
                    longest_pixels=(uint16_t)render_pixels[ch];
+               bool probe_first_frame=false,probe_first_bright=false;
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
                pz_render_revision[ch]=local_active_revision[ch];
+               if(local_diag.mode==OT_PZ_DIAG_PROBE&&local_diag.lane==(uint8_t)ch&&
+                  local_probe_generation[ch]!=0u&&
+                  (int32_t)(frame_ms-local_diag.expires_ms)<0){
+                   if(probe_rmt_first_frame_generation[ch]!=local_probe_generation[ch]){
+                       probe_rmt_first_frame_generation[ch]=local_probe_generation[ch];
+                       probe_first_frame=true;
+                   }
+                   if(probe_nonblack[ch]&&
+                      probe_rmt_bright_frame_generation[ch]!=local_probe_generation[ch]){
+                       probe_rmt_bright_frame_generation[ch]=local_probe_generation[ch];
+                       probe_first_bright=true;
+                   }
+               }
                portEXIT_CRITICAL(&state_lock);
+               if(probe_first_frame)
+                   ESP_LOGI(TAG,"PIXEL_PROBE_RMT_DONE lane=%u gpio=%u generation=%lu nonblack=%u (driver only, not optical proof)",
+                     (unsigned)(ch+1u),(unsigned)out_pin[ch],
+                     (unsigned long)local_probe_generation[ch],(unsigned)probe_nonblack[ch]);
+               if(probe_first_bright)
+                   ESP_LOGI(TAG,"PIXEL_PROBE_NONBLACK_FRAME lane=%u gpio=%u generation=%lu pixel=%u (driver only, not optical proof)",
+                     (unsigned)(ch+1u),(unsigned)out_pin[ch],
+                     (unsigned long)local_probe_generation[ch],(unsigned)local_diag.endpoint);
            }
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
