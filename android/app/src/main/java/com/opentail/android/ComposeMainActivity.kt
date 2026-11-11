@@ -3149,7 +3149,7 @@ class ComposeMainActivity : ComponentActivity() {
             Pill("Test LEDs · O"+(index+1),t,
                 enabled=ble.canControl() && eligible) {
                 liveChainMask.intValue=1 shl index
-                liveZoneMask.intValue=255
+                liveZoneMask.intValue = 255
                 offlinePreview.value=false
                 previewCurrentEffect()
             }
