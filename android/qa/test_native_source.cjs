@@ -1267,13 +1267,14 @@ assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
 const layoutEditor = compose.split('private fun LayoutPage(t: Tone) {')[1]
   ?.split('private fun refreshPanelGeometry()')[0];
 const unifiedEditor = compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
-assert(layoutEditor?.includes('if (outputs[captureOutput.intValue] == null) {') &&
+assert(layoutEditor?.includes('val selectedReadback = outputs[captureOutput.intValue]') &&
        layoutEditor.includes('HardwareOutputEditor(t)') &&
+       layoutEditor.includes('linked zones are edited inside the cards above') &&
        unifiedEditor?.includes('liveChainMask.intValue = 1') &&
        unifiedEditor.includes('liveChainMask.intValue = 2') &&
        unifiedEditor.includes('Play selected effect on Output ') &&
        unifiedEditor.includes('liveZoneMask.intValue = 255') &&
-       unifiedEditor.includes('No playable CORE zones') &&
+       unifiedEditor.includes('No playable saved CORE zones yet') &&
        unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
