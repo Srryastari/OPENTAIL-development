@@ -1066,9 +1066,14 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     const bool raw_active=tm_gpio_input_mask()!=0;
     TickType_t now=xTaskGetTickCount();
-    ot_pz_controller_t candidate;ot_om_output_t current={0};bool busy,stale,exhausted;
+    /* BLE runs this callback on the NimBLE host stack. The former local
+     * full controller copy compounded nested v4 journal/NVS stack usage.
+     * Every writer, including the promoter, owns om_write_mutex before
+     * touching the pair-store scratch; keep the copy in bounded static BSS. */
+    ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;
+    ot_om_output_t current={0};bool busy,stale,exhausted;
     portENTER_CRITICAL(&state_lock);
-    candidate=pz_outputs;
+    *candidate=pz_outputs;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
         pz_preview.active||raw_active||live_input_mask||
         (before_deadline(now,sim_deadline)&&sim_mask)||
@@ -1081,18 +1086,31 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     /* V1 cannot express panel boundaries or multi-range zones. Refuse a
      * destructive downgrade; simple one-panel contiguous profiles remain
      * fully writable through the unchanged 261-byte v1 codec. */
-    if(!ot_pz_to_legacy(&candidate.outputs[index],index,&current)){
+    if(!ot_pz_to_legacy(&candidate->outputs[index],index,&current)){
         xSemaphoreGive(om_write_mutex);return 3;
     }
     if(memcmp(&current,next,sizeof(current))==0){
         xSemaphoreGive(om_write_mutex);return 0;
     }
+    /* The conversion helper validates against the same locked controller.
+     * No active RAM or NVS state changes unless the journal starts safely. */
     ot_pz_output_t replacement={0};
-    if(!ot_pz_from_legacy_output(next,index,&candidate,&replacement)){
+    if(!ot_pz_from_legacy_output(next,index,candidate,&replacement)){
         xSemaphoreGive(om_write_mutex);return 1;
     }
-    candidate.outputs[index]=replacement;
-    const bool saved=pz_save_controller_locked(&candidate);
+    candidate->outputs[index]=replacement;
+    const int64_t save_started_us=esp_timer_get_time();
+    const UBaseType_t stack_floor=uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG,"BLE_OUTPUT_SAVE_BEGIN lane=%u base_revision=%u stack_hwm=%u internal_heap=%u",
+        (unsigned)(index+1u),(unsigned)base_revision,(unsigned)stack_floor,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    const bool saved=pz_save_controller_locked(candidate);
+    const uint32_t elapsed_ms=(uint32_t)((esp_timer_get_time()-save_started_us)/1000LL);
+    ESP_LOGI(TAG,"BLE_OUTPUT_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx stack_hwm=%u",
+        (unsigned)(index+1u),(unsigned)saved,(unsigned long)elapsed_ms,
+        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
+        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
     xSemaphoreGive(om_write_mutex);
     return saved?0:4;
 }
@@ -3479,7 +3497,12 @@ static void led_task(void *p) {
                    const bool decorated=fx_here||legacy_here||demo_here;
                    bool trigger_here=false;
                    if(zone<0||role==OT_PZ_ROLE_UNASSIGNED){
-                       c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u);
+                       /* An entirely unconfigured output has ZERO physical
+                        * pixels and must stay inert. Only an explicitly sized
+                        * output permits road-signal fallback in unassigned
+                        * ranges. Pixel Probe is evaluated independently below. */
+                       if(local_panel[ch].active_pixels!=0u)
+                           c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u);
                        trigger_here=c.r!=0u||c.g!=0u||c.b!=0u;
                    }else if(role!=OT_OM_OFF){
                        trigger_here=ot_om_trigger_overlay(role,combined,decorated,

@@ -198,6 +198,7 @@ python3 tests/test_wled_catalog.py
 python3 tests/check_effects_release.py --audit
 python3 tests/test_version_identity.py
 python3 tests/test_wifi_beacon_boot_contract.py
+python3 tests/test_physical_save_probe_contract.py
 python3 tests/test_http_stop_contract.py
 python3 tests/test_dev_console_contract.py
 python3 tests/test_nvs_finalization_contract.py
