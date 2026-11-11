@@ -1298,6 +1298,17 @@ assert(savedRedTest &&
        !savedRedTest.includes('ble.saveOutput('),
        'Saved Output test must emit independent, gated volatile Solid Red and never write NVS');
 
+// Readback timing must be collected from real monotonic ATT progression,
+// not predicted from output pixel count or substituted for CRC/revision proof.
+assert(bleSource.includes('private String cfgTimingDetail()') &&
+       bleSource.includes('cfgRequestedMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgTransferMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgReadbackMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgReadFragments++;') &&
+       bleSource.includes('"+cfgTimingDetail(),output,cfgIndex') &&
+       bleSource.includes('Arrays.equals(cfgBytes,cfgExpected)'),
+       'Measure real readback fragments and latency without bypassing verified controller readback');
+
 // Regression: a lost GATT confirmation must not erase draft role/count edits,
 // silently retry flash writes, or call an unverified commit "Saved".
 assert(unifiedEditor.includes('var choosingRole by remember(index,i)') &&
