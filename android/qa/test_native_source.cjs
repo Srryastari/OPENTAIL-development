@@ -762,7 +762,7 @@ assert(compose.includes('NativeProjectDocumentIo.readBounded(reader)') &&
 for (const required of [
  'private static boolean wholeNumber(Object value, long min, long max)',
  '!wholeNumber(z.opt("start"), 0, 999999)',
- '!wholeNumber(z.opt("length"), 1, 10000)',
+ '!wholeNumber(z.opt("length"), 0, 10000)',
  '!wholeNumber(step.opt("ms"), 50, 600000)'
 ]) assert(model.includes(required), 'Strict universal layout/sequence import regression: '+required);
 assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers'),

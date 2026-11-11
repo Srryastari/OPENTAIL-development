@@ -211,6 +211,6 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Controller output"') &&
+        compose.includes('Text("Output " + (index+1) + " · Panels & zones"') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');

@@ -66,6 +66,7 @@ jobs:
               'android/app/src/main/java/com/opentail/android/BleConfigCodec.java',
               'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
               'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
+              'android/app/src/main/java/com/opentail/android/NativeProject.java',
               'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
               'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
               'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
@@ -73,6 +74,12 @@ jobs:
           }
           changed_java={p for p in protected if p.startswith('android/app/src/main/java/')}
           assert changed_java==owner_p0_java,(changed_java,owner_p0_java)
+          # NativeProject is explicitly in scope for the owner-mandated
+          # empty/zero-LED commissioning default, not arbitrary source drift.
+          native_model=git('show','HEAD:android/app/src/main/java/com/opentail/android/NativeProject.java')
+          assert 'wholeNumber(z.opt("length"), 0, 10000)' in native_model
+          assert 'zoneCount() >= MAX_ZONES || length < 0' in native_model
+          assert 'index < 0 || length < 0' in native_model
           assert not any(p.startswith('android/app/src/main/res/') for p in protected)
           allowed_ble_contract={
               'core-firmware/main/ble_fx_command.c',
