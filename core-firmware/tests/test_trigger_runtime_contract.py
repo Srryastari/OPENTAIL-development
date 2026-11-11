@@ -382,7 +382,7 @@ assert "tm_revision++;" in save
 for begin, end, persist in (
     ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save("),
     ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
-     "pz_save_controller_locked(&candidate)"),
+     "pz_save_controller_locked(candidate)"),
 ):
     saving = between(core, begin, end)
     assert "const bool raw_active=tm_gpio_input_mask()!=0;" in saving
@@ -408,7 +408,7 @@ assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("http_start
 for begin,end,persist in (
     ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save(next_all)"),
     ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
-     "pz_save_controller_locked(&candidate)"),
+     "pz_save_controller_locked(candidate)"),
     ("static int tm_commit(", "bool ot_ble_trigger_get(", "tm_save(next)"),
 ):
     op = between(core,begin,end)
