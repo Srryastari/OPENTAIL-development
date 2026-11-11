@@ -534,7 +534,7 @@ assert(outputRead &&
        bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
        bleSource.includes('CORE snapshot ATT timed out; reconnect required') &&
        bleSource.includes('clearQueuedOutputRead();') &&
-       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
+       bleSource.includes('if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
@@ -1324,6 +1324,7 @@ assert(bleSource.includes('PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a9
        bleSource.includes('if (pixelProbeWritePending || writePending || readReplyPending') &&
        bleSource.includes('if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy') &&
        bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
+       bleSource.includes('panelDisconnected(); // also clear stale Panel/Probe capability and in-flight diagnostic lease') &&
        compose.includes('ble.setPixelProbeListener { result ->') &&
        unifiedEditor.includes('Pill("Check first LED · O"') &&
        unifiedEditor.includes('enabled=ble.canProbeFirstPixel()') &&
