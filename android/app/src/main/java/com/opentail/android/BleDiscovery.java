@@ -866,8 +866,15 @@ final class BleDiscovery {
             cfgKnownRevision[index]=-1;
             cfgLatest[index]=null;
         }
+        boolean wasSaving=cfgSaving;
         cfgBusy=false;cfgSaving=false;cfgWaitingWrite=false;cfgWaitingRead=false;
-        cfgWatchdog++;cfgNotify(false,message,null,index);pumpQueue();
+        cfgWatchdog++;
+        // A GATT 133 or lost ACK can arrive after flash commit. Treat the
+        // result as unknown; never issue an automatic second write.
+        cfgNotify(false,wasSaving?
+            message+" · Save unverified; reconnect and Reload before retrying.":
+            message,null,index);
+        pumpQueue();
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
     private boolean cfgSend(byte[] packet){
