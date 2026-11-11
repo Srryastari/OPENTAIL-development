@@ -1267,7 +1267,7 @@ assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
 const layoutEditor = compose.split('private fun LayoutPage(t: Tone) {')[1]
   ?.split('private fun refreshPanelGeometry()')[0];
 const unifiedEditor = compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
-assert(layoutEditor?.includes('val selectedReadback = outputs[captureOutput.intValue]') &&
+assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captureOutput.intValue]') &&
        layoutEditor.includes('HardwareOutputEditor(t)') &&
        layoutEditor.includes('linked zones are edited inside the cards above') &&
        unifiedEditor?.includes('liveChainMask.intValue = 1') &&
@@ -1280,6 +1280,18 @@ assert(layoutEditor?.includes('val selectedReadback = outputs[captureOutput.intV
        !unifiedEditor.includes('if (confirm) AlertDialog'),
        'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
 
+// Regression: a lost GATT confirmation must not erase draft role/count edits,
+// silently retry flash writes, or call an unverified commit "Saved".
+assert(unifiedEditor.includes('var choosingRole by remember(index,i)') &&
+       unifiedEditor.includes('if(i != selectedZone.coerceIn(0,zones.length()-1)) continue') &&
+       unifiedEditor.includes('LaunchedEffect(index,pixelCount)') &&
+       unifiedEditor.includes('LaunchedEffect(index,i,count)') &&
+       compose.includes('outputDrafts[index] = confirmed.toString()') &&
+       compose.includes('outputDrafts[index] = draftText') &&
+       bleSource.includes('Save unverified; reconnect and Reload before retrying.') &&
+       !bleSource.includes('cfgFail("BLE config write failed: "+status);saveOutput('),
+       'BLE-133 reconciliation or single selected zone editing regressed');
+
 // Overseer 4 Layout acceptance: one Output / Panel / Zone editor and
 // zero-LED first-run drafts, without making a fake saved CORE output.
 const finalLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
@@ -1288,7 +1300,8 @@ const finalOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1
 assert(finalLayout && finalOutput &&
   finalLayout.includes('HardwareOutputEditor(t)') &&
   finalLayout.includes('linked zones are edited inside the cards above') &&
-  finalLayout.includes('0 until (selectedReadback.optJSONArray("zones")?.length() ?: 0)) continue') &&
+  finalLayout.includes('z.optInt("physicalSection",-1) in 0 until draftZoneCount) continue') &&
+  finalLayout.includes('if(showingUnlinked) for(i in 0 until zoneCount)') &&
   finalOutput.includes('val index = captureOutput.intValue') &&
   finalOutput.includes('val authoritativeMap = runCatching') &&
   finalOutput.includes('coreZone.panelId') &&
@@ -1303,7 +1316,8 @@ assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
   model.includes('index < 0 || length < 0') &&
   finalLayout.includes('CapsuleSlider(n, 0, 10000, t,') &&
   finalOutput.includes('.put("pixels",0)') &&
-  finalOutput.includes('mutableStateOf(outputs[index]?.toString() ?: JSONObject()') &&
+  finalOutput.includes('mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()') &&
+  finalOutput.includes('SideEffect { layoutDraftZoneCounts[index] = zones.length() }') &&
   finalOutput.includes('if(pixelCount==0) "Empty draft (0 LEDs)') &&
   finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
   bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
