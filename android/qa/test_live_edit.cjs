@@ -143,8 +143,12 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
 assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
-       hardwareBlock.includes('Save to CORE · verify readback'),
- 'Persistent hardware mapping requires explicit validated commit and readback.');
+       hardwareBlock.includes('savingOutput.intValue = index') &&
+       hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
+       hardwareBlock.includes('"Saving…" else "Save"') &&
+       compose.includes('if (index == savingOutput.intValue)') &&
+       ble.includes('if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected)))'),
+  'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
        ble.includes('||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
