@@ -1273,13 +1273,30 @@ assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captur
        layoutEditor.includes('linked zones are edited inside the cards above') &&
        unifiedEditor?.includes('liveChainMask.intValue=1') &&
        unifiedEditor.includes('liveChainMask.intValue=2') &&
-       unifiedEditor.includes('Pill("Test LEDs · O"') &&
-       unifiedEditor.includes('liveZoneMask.intValue = 255') &&
+       unifiedEditor.includes('Pill("Test Solid Red · O"') &&
+       unifiedEditor.includes('testSavedOutputSolidRed(index)') &&
+       compose.includes('private fun testSavedOutputSolidRed(index: Int)') &&
+       compose.includes('foreground = 0xffff0000.toInt(), background = 0xff000000.toInt()') &&
+       compose.includes('effectId = 0, chainMask = 1 shl index, zoneMask = 255') &&
+       compose.includes('brightness = 24, speed = 128, intensity = 128, paletteId = 0') &&
        unifiedEditor.includes('To test, assign LEDs and a lighting role other than Off') &&
        unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
        'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
+
+// An explicit physical red test cannot inherit an unrelated Show Mode
+// effect, palette, color, brightness, or unsaved output draft.
+const savedRedTest = compose.split('private fun testSavedOutputSolidRed(index: Int) {')[1]
+  ?.split('private val importer =')[0];
+assert(savedRedTest &&
+       savedRedTest.includes('if (0 !in supportedIds.value || !ble.canContinuousFx())') &&
+       savedRedTest.includes('livePreview.update(LiveBlePreview.Frame(') &&
+       savedRedTest.includes('ble.lastConfirmedPanelSnapshot(index) != null') &&
+       !savedRedTest.includes('previewCurrentEffect(') &&
+       !savedRedTest.includes('prefs.getInt(') &&
+       !savedRedTest.includes('ble.saveOutput('),
+       'Saved Output test must emit independent, gated volatile Solid Red and never write NVS');
 
 // Regression: a lost GATT confirmation must not erase draft role/count edits,
 // silently retry flash writes, or call an unverified commit "Saved".
