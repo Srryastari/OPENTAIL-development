@@ -421,7 +421,7 @@ class ComposeMainActivity : ComponentActivity() {
                                 panelGeometryDraftValid) commitPanelGeometryPreview()
                             else panelGeometryMessage.value="Output saved; waiting for live layout preview updates before geometry commit"
                         }
-                        invalidateCoreFrame()
+                        invalidateCoreFrame() // the saved/readback output may have changed
                     }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
         }
