@@ -212,7 +212,7 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Outputs",color=t.fg') &&
+        compose.includes('Text("Output",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
 
@@ -222,4 +222,8 @@ assert(hardwareBlock.includes('ble.readOutputIfReady(index)') &&
        compose.includes('if(advancedOpen) {') &&
        compose.includes('layoutLiveEditPending.value=true') &&
        project.includes('updateZoneOrganization(String id, String field, String text)'),
-       'Owner minimal universal Layout: no mandatory Reload, hidden advanced, live edit and freeform light labels');
+       hardwareBlock.includes('Pill("Remove zone",t)') &&
+       hardwareBlock.includes('if(outputToolsOpen) Pill("Test Solid Red') &&
+       hardwareBlock.includes('if(outputToolsOpen) Pill("Check first LED') &&
+       compose.includes('lastAutoGeometryRefresh.intValue!=modelRevision'),
+       'Owner minimal Layout: single output chooser, visible removal, diagnostics under More, bounded auto-reload');

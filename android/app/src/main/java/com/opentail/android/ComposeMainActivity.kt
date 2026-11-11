@@ -94,6 +94,9 @@ class ComposeMainActivity : ComponentActivity() {
     // only verified controller readback is allowed to replace them.
     private val outputDrafts = mutableStateMapOf<Int, String>()
     private val outputDirty = mutableStateMapOf<Int, Boolean>()
+    private val outputLoadStatus = mutableStateMapOf<Int, String>()
+    private val layoutAdvancedOpen = mutableStateOf(false)
+    private val lastAutoGeometryRefresh = mutableIntStateOf(-1)
     private val layoutLiveEditPending = mutableStateOf(false)
     private val outputReadbackEpoch = mutableStateMapOf<Int, Int>()
     private val layoutDraftZoneCounts = mutableStateMapOf<Int, Int>()
@@ -443,6 +446,8 @@ class ComposeMainActivity : ComponentActivity() {
                 outputMessage.value = response.optString("message", "CORE output result")
                 val index = response.optInt("index", -1)
                 val completedSave = index == savingOutput.intValue
+                if(index in 0..1)
+                    outputLoadStatus[index] = if(response.optBoolean("ok")) "ready" else "error"
                 if (completedSave) {
                     // Only byte-identical readback is durable confirmation.
                     savingOutput.intValue = -1
@@ -1762,10 +1767,18 @@ class ComposeMainActivity : ComponentActivity() {
             layoutLiveEditPending.value) {
             if(layoutLiveEditPending.value && panelGeometryMapping==null &&
                 !panelGeometryCommitRequested && !panelGeometryCancelRequested &&
-                !panelGeometryLoadInProgress && ble.canReadPanelPreview()) {
+                ble.canReadPanelPreview()) {
                 delay(180)
-                if(ble.panelGeometryReady()) startPanelGeometryPreview()
-                else refreshPanelGeometry()
+                if(ble.panelGeometryReady()) {
+                    // Only one BEGIN for each prepared edit; status updates
+                    // must not continuously restart a default read/preview.
+                    layoutLiveEditPending.value=false
+                    startPanelGeometryPreview()
+                } else if(!panelGeometryLoadInProgress &&
+                    lastAutoGeometryRefresh.intValue!=modelRevision) {
+                    lastAutoGeometryRefresh.intValue=modelRevision
+                    refreshPanelGeometry()
+                }
             } else if(panelGeometryMapping!=null &&
                 !panelGeometryCommitRequested && !panelGeometryCancelRequested) {
                 delay(180)
@@ -1779,6 +1792,7 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         Title("Layout", t)
+        EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember(projectLoadRevision.intValue) {
             mutableStateOf<String?>(null) // collapse cards on Layout page entry
@@ -1787,18 +1801,14 @@ class ComposeMainActivity : ComponentActivity() {
         var choosingDelete by remember { mutableStateOf(false) }
         var showingUnlinked by remember { mutableStateOf(false) }
         var layoutMessage by remember { mutableStateOf("") }
-        var directoryOpen by remember { mutableStateOf(false) }
-        var advancedOpen by remember { mutableStateOf(false) }
+        val advancedOpen=layoutAdvancedOpen.value
         Panel(t) {
             HardwareOutputEditor(t)
-            Pill(if(directoryOpen) "Hide lighting directory" else "Lighting directory",t,directoryOpen) {
-                directoryOpen=!directoryOpen
-            }
-            if(directoryOpen) LightingDirectory(t)
-            Pill(if(advancedOpen) "Hide advanced settings" else "Advanced settings",t,advancedOpen) {
-                advancedOpen=!advancedOpen
+            Pill(if(advancedOpen) "Less" else "More",t,advancedOpen) {
+                layoutAdvancedOpen.value=!advancedOpen
             }
             if(advancedOpen) {
+            LightingDirectory(t)
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text("Controller / Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 Caption(project.pixelCount().toString()+" LEDs",t)
@@ -3037,8 +3047,9 @@ class ComposeMainActivity : ComponentActivity() {
     private fun HardwareOutputEditor(t: Tone) {
         val outputLimit = BleConfigCodec.MAX_LEDS_PER_OUTPUT
         val index = captureOutput.intValue
-        var outputToolsOpen by remember(index) { mutableStateOf(false) }
+        val outputToolsOpen=layoutAdvancedOpen.value
         var autoReadStarted by remember(index) { mutableStateOf(false) }
+        var choosingOutput by remember { mutableStateOf(false) }
         // Read the selected output automatically after BLE authorization.
         // Never overwrite an unsaved draft or start a second ATT transaction.
         LaunchedEffect(index, bleMessage.value, outputs[index]) {
@@ -3051,10 +3062,12 @@ class ComposeMainActivity : ComponentActivity() {
                     if(!ble.canConfigure()) return@LaunchedEffect
                     if(ble.readOutputIfReady(index)) {
                         autoReadStarted=true
+                        outputLoadStatus[index]="loading"
                         return@LaunchedEffect
                     }
                     delay(300)
                 }
+                outputLoadStatus[index]="busy"
             }
         }
         fun outputTab(which:Int):String {
@@ -3161,25 +3174,33 @@ class ComposeMainActivity : ComponentActivity() {
         }
 
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Outputs",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
-            Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Output",color=t.fg,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
+                Pill(outputTab(index)+"  ▼",t,true) { choosingOutput=!choosingOutput }
+            }
+            if(choosingOutput) Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                 Pill(outputTab(0),t,index==0) {
                     captureOutput.intValue=0
+                    choosingOutput=false
                     liveChainMask.intValue=1
                     invalidateCoreFrame()
                 }
                 Pill(outputTab(1),t,index==1) {
                     captureOutput.intValue=1
+                    choosingOutput=false
                     liveChainMask.intValue=2
                     invalidateCoreFrame()
                 }
             }
             val currentName=runCatching { JSONObject(draftText).optString("name") }.getOrDefault("")
             Caption("O"+(index+1)+" · "+currentName.ifBlank { "Unnamed output" },t)
-            if(outputs[index]==null && ble.canConfigure())
-                Caption("Reading controller settings automatically…",t)
-            else if(outputs[index]==null)
-                Caption("Offline draft · 0 LEDs until configured",t)
+            if(outputs[index]==null && ble.canConfigure()) {
+                if(outputLoadStatus[index]=="loading")
+                    Caption("Reading saved output…",t)
+                else Caption("Saved output unavailable. Draft is retained; Save requires confirmed readback.",t)
+            } else if(outputs[index]==null) Caption("Not connected · local draft retained",t)
+            else Caption("Saved controller output · "+
+                outputs[index]!!.optInt("pixels",0)+" LEDs",t)
             if(outputDirty[index]==true) Caption("Unsaved changes",t)
             if (savingOutput.intValue == index) Caption("Saving… verifying controller readback", t)
             if(outputMessage.value.isNotBlank()) Caption(outputMessage.value.replace("CORE","controller"),t)
@@ -3190,16 +3211,16 @@ class ComposeMainActivity : ComponentActivity() {
                     zone != null && zone.optInt("pixels",0)>0 &&
                         zone.optString("role","off")!="off"
                 }
-            Pill("Test Solid Red · O"+(index+1),t,
+            if(outputToolsOpen) Pill("Test Solid Red · O"+(index+1),t,
                 enabled=ble.canControl() && eligible) {
                 testSavedOutputSolidRed(index)
             }
-            if(!eligible && confirmed!=null)
+            if(outputToolsOpen && !eligible && confirmed!=null)
                 Caption("Solid Red needs a saved non-Off zone. The hardware check below does not.",t)
             // Firmware's existing authenticated 0xAA diagnostic drives just
             // physical pixel zero for two seconds, even if the saved role is Off.
             // It never saves, reboots or creates a zone.
-            Pill("Check first LED · O"+(index+1),t,
+            if(outputToolsOpen) Pill("Check first LED · O"+(index+1),t,
                 enabled=ble.canProbeFirstPixel()) {
                 if(ble.probeFirstPixel(index))
                     outputMessage.value="Checking first LED on O"+(index+1)+
@@ -3285,9 +3306,7 @@ class ComposeMainActivity : ComponentActivity() {
                 } else if(outputs[index]==null) "Loading controller…" else
                     if(outputDirty[index]==true) "Unsaved" else "Controller confirmed",t)
             }
-            Pill(if(outputToolsOpen) "Hide advanced output tools" else "Advanced output tools",t,outputToolsOpen) {
-                outputToolsOpen=!outputToolsOpen
-            }
+            // Detailed configuration and diagnostics share Layout's single More disclosure.
         }
         if(zones.length()>0) {
             val current=selectedZone.coerceIn(0,zones.length()-1)
@@ -3320,10 +3339,9 @@ class ComposeMainActivity : ComponentActivity() {
             Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 val coreZone=authoritativeMap?.zones?.getOrNull(i)
                 val corePanel=authoritativeMap?.panels?.firstOrNull { it.id==coreZone?.panelId }
-                Text("Panel " + (corePanel?.name ?: "unassigned") +
-                     " · Zone " + (i + 1),color=t.fg,fontWeight=FontWeight.SemiBold)
-                if(coreZone!=null)
-                    Caption("CORE identities · Panel " + coreZone.panelId +
+                Text("Zone "+(i+1)+" · "+zone.optString("name","Unnamed"),color=t.fg,fontWeight=FontWeight.SemiBold)
+                if(outputToolsOpen && coreZone!=null)
+                    Caption("Controller identities · Panel " + coreZone.panelId +
                         " · Zone " + coreZone.id,t)
                 if(outputToolsOpen) Caption("Start " + from + " · end " +
                     (if(count>0) cursor-1 else "empty") + " · next " + cursor,t)
@@ -3482,9 +3500,7 @@ class ComposeMainActivity : ComponentActivity() {
                     "Off disables effects in this zone. Choose a role, then Save."
                     else "Draft role: " + selectedRole.replace('_',' ') +
                         " · Only active after confirmed Save.",t)
-                if(outputToolsOpen) Pill("Remove zone", t) {
-                    pendingRemoveSection=i
-                }
+                // Removal belongs beside Add Zone below, not in a hidden menu.
                 // Destructive action is confirmed once for the unified zone.
             }
         }
@@ -3528,6 +3544,7 @@ class ComposeMainActivity : ComponentActivity() {
                 (part?.optInt("pixels", 0) ?: 0) to rolePixelColor(part?.optString("role", "off") ?: "off")
             })
             if(outputToolsOpen) Caption("Draft edits are local; an active live preview streams to the controller without flash writes.",t)
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             if (zones.length() < 8) Pill("+ Add zone", t) {
                 val newSection=zones.length()
                 val label="Zone " + (newSection+1)
@@ -3549,6 +3566,10 @@ class ComposeMainActivity : ComponentActivity() {
                 layoutLiveEditPending.value=true
                 selectedZone=newSection
                 choosingZone=false
+            }
+            if(zones.length()>0) Pill("Remove zone",t) {
+                pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)
+            }
             }
             if(outputToolsOpen) Pill("Fit last zone to remaining pixels", t) {
                 edit {

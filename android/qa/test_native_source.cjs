@@ -1148,7 +1148,7 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Outputs",color=t.fg') &&
+        compose.includes('Text("Output",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
 
@@ -1385,5 +1385,10 @@ assert(finalLayout.includes('LightingDirectory(t)') &&
   compose.includes('if (completedSave || outputDirty[index] != true)') &&
   model.includes('updateZoneOrganization(String id, String field, String text)') &&
   model.includes('z.optString(key).length() > 64') &&
-  !finalLayout.includes('EffectsPreview(t, selectedEffect.intValue)'),
-  'Universal lighting directory, simple O1/O2 selector, automatic reads, and single guarded Save must stay intact');
+  finalLayout.includes('EffectsPreview(t, selectedEffect.intValue)'),
+  finalOutput.includes('Pill("Remove zone",t)') &&
+  finalOutput.includes('pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)') &&
+  finalOutput.includes('if(outputToolsOpen) Pill("Check first LED') &&
+  finalOutput.includes('outputLoadStatus[index]=="loading"') &&
+  compose.includes('lastAutoGeometryRefresh.intValue!=modelRevision'),
+  'One-card Output/Zone editing must expose zone removal, restore locked preview and terminate loading attempts safely');
