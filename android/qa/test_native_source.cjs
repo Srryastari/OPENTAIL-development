@@ -1279,7 +1279,7 @@ assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captur
        compose.includes('foreground = 0xffff0000.toInt(), background = 0xff000000.toInt()') &&
        compose.includes('effectId = 0, chainMask = 1 shl index, zoneMask = 255') &&
        compose.includes('brightness = 24, speed = 128, intensity = 128, paletteId = 0') &&
-       unifiedEditor.includes('To test, assign LEDs and a lighting role other than Off') &&
+       unifiedEditor.includes('Solid Red needs a saved non-Off zone. The hardware check below does not.') &&
        unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
