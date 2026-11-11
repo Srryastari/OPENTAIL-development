@@ -3302,7 +3302,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 Caption(if(!valid) {
-                    if(pixelCount==0) "0 LEDs · add LEDs before saving" else validationError
+                    if(pixelCount==0) "Empty draft · current firmware cannot persist 0 LEDs" else validationError
                 } else if(outputs[index]==null) "Loading controller…" else
                     if(outputDirty[index]==true) "Unsaved" else "Controller confirmed",t)
             }

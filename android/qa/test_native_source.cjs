@@ -1371,7 +1371,7 @@ assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
   finalOutput.includes('.put("pixels",0)') &&
   finalOutput.includes('mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()') &&
   finalOutput.includes('SideEffect { layoutDraftZoneCounts[index] = zones.length() }') &&
-  finalOutput.includes('if(pixelCount==0) "0 LEDs · add LEDs before saving"') &&
+  finalOutput.includes('if(pixelCount==0) "Empty draft · current firmware cannot persist 0 LEDs"') &&
   finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
   bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
   'Zero LED drafts must stay inert; saved CORE state still requires readback');
