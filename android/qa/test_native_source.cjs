@@ -93,7 +93,8 @@ assert(bleSource.includes('frameCapture.cancel();clearPreviewCommand();palette.r
         bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
         bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
        bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
-       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
+       compose.includes('private val outputDrafts = mutableStateMapOf<Int, String>()') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
        'Clear stale CORE output UI and prevent conflicting GATT operations');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
