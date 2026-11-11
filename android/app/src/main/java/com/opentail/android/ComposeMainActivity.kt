@@ -1774,10 +1774,10 @@ class ComposeMainActivity : ComponentActivity() {
                         if(advanced) {
                             Caption(project.previewZoneOffsets(id, n),t)
                             ZoneDotPreview(t,n,reverse)
+                            val activePixel=selectedPixel.coerceIn(0,(n-1).coerceAtLeast(0))
                             if(n==0) Caption("Empty zone · add LEDs to edit individual pixels",t)
                             else {
                                 val pixelLimit=n-1
-                                val activePixel=selectedPixel.coerceIn(0,pixelLimit)
                                 ValueSlider("Pixel",activePixel,pixelLimit.coerceAtLeast(1),t) { selectedPixel=it.coerceIn(0,pixelLimit) }
                                 PaletteEditor("Pixel "+activePixel,android.graphics.Color.parseColor(project.pixelColor(id,activePixel)),t) { color ->
                                     val hex=String.format("#%06X",color and 0xffffff)
@@ -1787,7 +1787,7 @@ class ComposeMainActivity : ComponentActivity() {
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                 Pill("Move ↑",t) { if(project.moveZone(i,i-1)) refresh() }
                                 Pill("Move ↓",t) { if(project.moveZone(i,i+1)) refresh() }
-                                Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
+                                if(n>0) Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
                             }
                         }
                     }
