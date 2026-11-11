@@ -1131,6 +1131,7 @@ final class BleDiscovery {
         autoReconnectLease++;autoReconnectBudget=1;infoReadPending=false;
         stopScan();
         frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback
+        panelDisconnected(); // also clear stale Panel/Probe capability and in-flight diagnostic lease
         clearQueuedOutputRead();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
