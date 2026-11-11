@@ -236,6 +236,47 @@ class ComposeMainActivity : ComponentActivity() {
         ))
     }
 
+    // Repeatable bench-only light test. Do not inherit Show Modes colors,
+    // brightness, palette, effect selection or an unsaved Output draft.
+    // This is a volatile command request, NOT proof of light output.
+    private fun testSavedOutputSolidRed(index: Int) {
+        val confirmed = outputs[index]
+        val eligible = confirmed?.optJSONArray("zones")?.let { zones ->
+            (0 until zones.length()).any { z ->
+                val zone = zones.optJSONObject(z)
+                zone != null && zone.optInt("pixels", 0) > 0 &&
+                    zone.optString("role", "off") != "off"
+            }
+        } ?: false
+        if (index !in 0..1 || !ble.canControl() || !eligible) {
+            outputMessage.value = "Red test unavailable: authorize BLE and confirm a non-Off saved zone"
+            return
+        }
+        if (0 !in supportedIds.value || !ble.canContinuousFx()) {
+            outputMessage.value = "Red test unavailable: controller Solid/continuous capability not confirmed"
+            return
+        }
+        invalidateCoreFrame()
+        offlinePreview.value = false // explicit bench Test exits offline preview
+        liveChainMask.intValue = 1 shl index
+        liveZoneMask.intValue = 255
+        if (!livePreview.isArmed() && !livePreview.arm()) {
+            outputMessage.value = "Red test unavailable: controller playback could not be armed"
+            return
+        }
+        liveArmed.value = true
+        livePreview.update(LiveBlePreview.Frame(
+            effectId = 0, chainMask = 1 shl index, zoneMask = 255,
+            foreground = 0xffff0000.toInt(), background = 0xff000000.toInt(),
+            brightness = 24, speed = 128, intensity = 128, paletteId = 0
+        ))
+        val panelKnown = ble.lastConfirmedPanelSnapshot(index) != null
+        outputMessage.value = "Solid Red requested on O" + (index + 1) +
+            " (24/255 bench cap). Check BLE FX reply; " +
+            (if (panelKnown) "confirm active Panel/Zone routing."
+             else "Panel v4 geometry not read back; Output v1 alone cannot prove playback.")
+    }
+
     private val importer = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -3146,12 +3187,9 @@ class ComposeMainActivity : ComponentActivity() {
                     zone != null && zone.optInt("pixels",0)>0 &&
                         zone.optString("role","off")!="off"
                 }
-            Pill("Test LEDs · O"+(index+1),t,
+            Pill("Test Solid Red · O"+(index+1),t,
                 enabled=ble.canControl() && eligible) {
-                liveChainMask.intValue=1 shl index
-                liveZoneMask.intValue = 255
-                offlinePreview.value=false
-                previewCurrentEffect()
+                testSavedOutputSolidRed(index)
             }
             if(!eligible && confirmed!=null)
                 Caption("To test, assign LEDs and a lighting role other than Off, then Save.",t)
