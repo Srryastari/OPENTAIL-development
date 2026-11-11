@@ -62,6 +62,9 @@ final class BleDiscovery {
     private static final UUID PANEL_CAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf30");
     private static final UUID PANEL_CFG_CMD_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf31");
     private static final UUID PANEL_CFG_RSP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf32");
+    // Firmware #127 Panel v4's authenticated two-second white/cyan Pixel Probe.
+    // This diagnostic does not alter zones, ownership, flash or Show Modes.
+    private static final UUID PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf33");
     private static final UUID PANEL_PREVIEW_CONTROL_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf35");
     private static final UUID PANEL_PREVIEW_UPDATE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf36");
     private static final UUID PANEL_PREVIEW_STATUS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf37");
@@ -294,6 +297,10 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic panelCapabilitiesCharacteristic;
     private BluetoothGattCharacteristic panelConfigCommand,panelConfigReply;
     private BluetoothGattCharacteristic panelPreviewControl,panelPreviewUpdate,panelPreviewStatus;
+    private BluetoothGattCharacteristic pixelProbeCharacteristic;
+    private volatile boolean pixelProbeWritePending=false;
+    private volatile int pixelProbeWatchLease=0,pixelProbeLane=-1;
+    private Consumer<String> pixelProbeListener;
     private PanelPreviewProtocol.Capabilities panelCapabilities;
     private final TelemetrySequenceWatchdog panelWatchdog=new TelemetrySequenceWatchdog();
     private PanelPreviewProtocol.Status panelLastStatus;
@@ -367,6 +374,84 @@ final class BleDiscovery {
     }
     void setPanelSnapshotListener(Consumer<PanelPreviewProtocol.LaneSnapshot> listener) {
         panelSnapshotListener=listener;
+    }
+    void setPixelProbeListener(Consumer<String> listener) { pixelProbeListener=listener; }
+    private void probeNotify(String message) {
+        final BluetoothGatt owner=gatt;
+        notifyStatus(message);
+        if(pixelProbeListener!=null)ui.post(()->{
+            if(!stopped && owner==gatt && pixelProbeListener!=null)
+                pixelProbeListener.accept(message);
+        });
+    }
+    boolean canProbeFirstPixel() {
+        return canControl() && panelCapabilities!=null &&
+               (panelCapabilities.flags&1)!=0 && pixelProbeCharacteristic!=null;
+    }
+    /** White fixed pixel zero for two seconds, unlike a role-gated Solid FX.
+     * This is firmware's existing 0xAA five-byte diagnostic, not a new opcode,
+     * not a moving sweep, and never a durable config write.
+     */
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    boolean probeFirstPixel(int lane) {
+        if(lane<0||lane>1||!canProbeFirstPixel()) {
+            probeNotify("Pixel probe unavailable: authorize BLE and read Panel capabilities");
+            return false;
+        }
+        // A probe is optional. Never interrupt or overlap another ATT action;
+        // STOP remains queued ahead of all subsequent diagnostics.
+        if(pixelProbeWritePending||cfgBusy||queuedOutputRead>=0||
+           writePending||readReplyPending||fxCapsBusy||infoReadPending||infoReadQueued||
+           triggerMapBusy||panelReadPending||panelSnapshotBusy||
+           panelControlWritePending||panelUpdateWritePending||
+           panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
+           panelSnapshotQueuedLane>=0||panelCancelQueued||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           authPending||pairPending||challengePending||gatt==null) {
+            probeNotify("Pixel probe busy: finish the current BLE transfer and retry");
+            return false;
+        }
+        // [0xAA, output (one-based), index high, index low, white].
+        // Only pixel zero is probed; all other LEDs retain their normal state.
+        final byte[] packet=new byte[]{(byte)0xaa,(byte)(lane+1),0,0,1};
+        final BluetoothGatt owner=gatt;
+        pixelProbeWritePending=true;
+        pixelProbeLane=lane;
+        final int lease=++pixelProbeWatchLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(pixelProbeCharacteristic,packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                pixelProbeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                pixelProbeCharacteristic.setValue(packet);
+                started=owner.writeCharacteristic(pixelProbeCharacteristic);
+            }
+        }catch(SecurityException ex) {
+            pixelProbeWritePending=false;
+            pixelProbeLane=-1;
+            pixelProbeWatchLease++;
+            probeNotify("Pixel probe failed: Bluetooth write permission missing");
+            return false;
+        }
+        if(!started) {
+            pixelProbeWritePending=false;
+            pixelProbeLane=-1;
+            pixelProbeWatchLease++;
+            probeNotify("Pixel probe failed: GATT write did not start");
+            return false;
+        }
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && pixelProbeWritePending &&
+               lease==pixelProbeWatchLease) {
+                pixelProbeWritePending=false;pixelProbeLane=-1;
+                pixelProbeWatchLease++;
+                probeNotify("Pixel probe timed out; BLE state uncertain, reconnect before retry");
+                recoverStalledGatt(owner,"Pixel probe ATT write timeout");
+            }
+        },8000L);
+        return true;
     }
     boolean canReadPanelPreview() {
         return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
@@ -552,6 +637,8 @@ final class BleDiscovery {
         panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
         panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
+        pixelProbeCharacteristic=null;pixelProbeWritePending=false;
+        pixelProbeLane=-1;pixelProbeWatchLease++;
         panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
         panelStatusExpectedLane=-1;panelStatusReadRetries=0;panelStatusRetryLease++;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
@@ -1253,7 +1340,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
+        if (pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
             panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
             frameCapture.busy() || palette.busy() || nextPacket!=null) {
@@ -1297,7 +1384,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
-        if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
+        if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
            panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||
            frameCapture.busy()||palette.busy()||authPending||pairPending||challengePending)return;
         // Preserve existing STOP-before-FX order. Never prioritize a read
@@ -1712,6 +1799,8 @@ final class BleDiscovery {
             panelCapabilitiesCharacteristic=service.getCharacteristic(PANEL_CAP_UUID);
             panelConfigCommand=service.getCharacteristic(PANEL_CFG_CMD_UUID);
             panelConfigReply=service.getCharacteristic(PANEL_CFG_RSP_UUID);
+            pixelProbeCharacteristic=service.getCharacteristic(PIXEL_PROBE_UUID);
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
             panelPreviewControl=service.getCharacteristic(PANEL_PREVIEW_CONTROL_UUID);
             panelPreviewUpdate=service.getCharacteristic(PANEL_PREVIEW_UPDATE_UUID);
             panelPreviewStatus=service.getCharacteristic(PANEL_PREVIEW_STATUS_UUID);
@@ -1795,6 +1884,17 @@ final class BleDiscovery {
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if(stopped || connection!=gatt)return;
+            if (PIXEL_PROBE_UUID.equals(characteristic.getUuid())) {
+                if(!pixelProbeWritePending)return;
+                final int lane=pixelProbeLane;
+                pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+                probeNotify(status==BluetoothGatt.GATT_SUCCESS?
+                    "Pixel 0 white probe accepted by CORE on O"+(lane+1)+
+                    "; 2-second lease, actual illumination still requires physical check":
+                    "Pixel 0 probe rejected on O"+(lane+1)+" (GATT "+status+")");
+                pumpQueue();
+                return;
+            }
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
             if (PALETTE_CMD_UUID.equals(characteristic.getUuid())) {palette.written(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {ui.post(()->frameCapture.written(connection,status));return;}
