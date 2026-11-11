@@ -777,6 +777,19 @@ final class BleDiscovery {
     private final int[] cfgKnownRevision=new int[]{-1,-1};
     private final byte[][] cfgLatest=new byte[2][];
     private volatile int cfgWatchdog=0;
+    // Monotonic physical BLE timing. These are measurements, not fabricated
+    // guarantees of flash persistence or on-device light output.
+    private long cfgRequestedMs=0L,cfgTransferMs=0L,cfgReadbackMs=0L;
+    private int cfgReadFragments=0;
+    private String cfgTimingDetail() {
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(cfgRequestedMs<=0L)return "";
+        long elapsed=Math.max(0L,now-cfgRequestedMs);
+        long queue=cfgTransferMs>0L?Math.max(0L,cfgTransferMs-cfgRequestedMs):0L;
+        long readback=cfgReadbackMs>0L?Math.max(0L,now-cfgReadbackMs):0L;
+        return " · BLE "+elapsed+" ms (queue "+queue+" ms, readback "+
+            readback+" ms, "+cfgReadFragments+" fragments)";
+    }
     void setConfigListener(java.util.function.Consumer<String> listener){configListener=listener;}
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
     /** Non-destructive automatic read after authorization. Busy GATT
@@ -798,6 +811,8 @@ final class BleDiscovery {
         if(cfgBusy || queuedOutputRead>=0){
             cfgNotify(false,"Output configuration read/save already in progress",null,index);return;
         }
+        cfgRequestedMs=android.os.SystemClock.elapsedRealtime();
+        cfgTransferMs=0L;cfgReadbackMs=0L;cfgReadFragments=0;
         // Preview frames are optional telemetry. Unlike a write or STOP, a
         // read-only Output Manager reload should queue rather than fail while
         // the Layout's auto-refreshing LED Preview owns the GATT operation.
@@ -826,6 +841,8 @@ final class BleDiscovery {
     }
     private void beginOutputRead(int index){
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
+        cfgTransferMs=android.os.SystemClock.elapsedRealtime();
+        cfgReadbackMs=cfgTransferMs;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     private String configReadBlocker(){
@@ -851,6 +868,8 @@ final class BleDiscovery {
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
         cfgExpected=Arrays.copyOf(cfgBytes,cfgBytes.length);
+        cfgRequestedMs=android.os.SystemClock.elapsedRealtime();
+        cfgTransferMs=cfgRequestedMs;cfgReadbackMs=0L;cfgReadFragments=0;
         cfgBusy=true;cfgSaving=true;cfgIndex=index;cfgPhase=3;cfgOffset=0;
         cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];cfgSaveBase=cfgRevision;
         return cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
@@ -937,6 +956,7 @@ final class BleDiscovery {
             int offset=(packet[4]&255)|((packet[5]&255)<<8),count=packet.length-6;
             if(offset!=cfgOffset||count<1||count>14||offset+count>cfgBytes.length){cfgFail("BLE output chunk missing or out of order");return;}
             System.arraycopy(packet,6,cfgBytes,offset,count);cfgOffset+=count;
+            cfgReadFragments++;
             if(cfgOffset<cfgBytes.length){cfgReadNext();return;}
             if(BleConfigCodec.crc16(cfgBytes)!=cfgCrc){cfgFail("BLE output read checksum mismatch");return;}
             try{
@@ -952,11 +972,11 @@ final class BleDiscovery {
                 }
                 cfgKnownRevision[cfgIndex]=cfgRevision;cfgLatest[cfgIndex]=Arrays.copyOf(cfgBytes,cfgBytes.length);
                 cfgBusy=false;cfgWatchdog++;
-                cfgNotify(true,cfgSaving?
+                cfgNotify(true,(cfgSaving?
                     (cfgRevision==cfgSaveBase?
                         "CORE active output already matched; no new revision committed":
                         "Saved to CORE and active output verified over BLE"):
-                    "Loaded active output from CORE over BLE",output,cfgIndex);
+                    "Loaded active output from CORE over BLE")+cfgTimingDetail(),output,cfgIndex);
                 cfgSaving=false;pumpQueue();return;
             }catch(Exception e){cfgFail("CORE returned invalid output: "+e.getMessage());return;}
         }
@@ -966,6 +986,7 @@ final class BleDiscovery {
             cfgPhase=5;cfgSend(new byte[]{2,5,(byte)cfgIndex});return;
         }
         if(cfgPhase==5 && opcode==0x85){
+            cfgReadbackMs=android.os.SystemClock.elapsedRealtime();
             cfgPhase=1;cfgSend(new byte[]{2,1,(byte)cfgIndex});return;
         }
         cfgFail("Unexpected BLE configuration state");
