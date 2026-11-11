@@ -289,6 +289,8 @@ class ComposeMainActivity : ComponentActivity() {
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 coreTriggerMapping.value = null // never reuse another controller's physical input mapping
                 outputs.clear() // readback from a disconnected/unauthorized controller is not current
+                if (savingOutput.intValue >= 0)
+                    outputMessage.value = "CORE disconnected during Save; reload before trusting stored geometry"
                 savingOutput.intValue = -1
                 paletteV3Supported.value = false
                 paletteLoadedSlot.intValue = -1
