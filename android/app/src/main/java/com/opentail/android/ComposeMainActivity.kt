@@ -434,6 +434,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPixelProbeListener { result ->
+            runOnUiThread { outputMessage.value=result }
+        }
         ble.setConfigListener { raw ->
             try {
                 val response = JSONObject(raw)
@@ -3192,7 +3195,16 @@ class ComposeMainActivity : ComponentActivity() {
                 testSavedOutputSolidRed(index)
             }
             if(!eligible && confirmed!=null)
-                Caption("To test, assign LEDs and a lighting role other than Off, then Save.",t)
+                Caption("Solid Red needs a saved non-Off zone. The hardware check below does not.",t)
+            // Firmware's existing authenticated 0xAA diagnostic drives just
+            // physical pixel zero for two seconds, even if the saved role is Off.
+            // It never saves, reboots or creates a zone.
+            Pill("Check first LED · O"+(index+1),t,
+                enabled=ble.canProbeFirstPixel()) {
+                if(ble.probeFirstPixel(index))
+                    outputMessage.value="Checking first LED on O"+(index+1)+
+                        " (white, 2 seconds) · waiting for controller ATT result"
+            }
         }
         if (draft == null) return
         val zones = draft.optJSONArray("zones") ?: JSONArray()
