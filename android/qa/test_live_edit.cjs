@@ -17,7 +17,7 @@ assert(zoneBlock && triggerBlock && effectBlock && hardwareBlock);
 
 for(const required of [
   'project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.editZone(id,label,n,reverse)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
@@ -134,7 +134,7 @@ assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview
 assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('fun adjustOutput(') &&
        hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
-       hardwareBlock.includes('next.put("pixels", total)') &&
+       hardwareBlock.includes('next.put("pixels",total)') &&
        hardwareBlock.includes('it.put("pixels", remaining)') &&
        hardwareBlock.includes('structureVersion++') &&
        hardwareBlock.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&

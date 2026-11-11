@@ -501,7 +501,7 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_trees": {
-    "android": "b1a04de396d55fd5b0e731f21d241c04cf2418e3",
+    "android": "355199af1f41f2b7c37c532ca83188c64f3f3ca2",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
   },
   "owner_mandated_p0_addendum": {
