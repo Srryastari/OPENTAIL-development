@@ -131,8 +131,9 @@ om_save_impl = core.split("static bool om_save(",1)[1].split(
 assert "pz_save_controller_locked(candidate)" in om_save_impl
 assert "pz_preview.active" in om_save_impl
 assert "busy=pz_deferred.pending" in output_ble
+assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in output_ble
 assert output_ble.index("busy=pz_deferred.pending") < output_ble.index(
-    "pz_save_controller_locked(&candidate)")
+    "pz_save_controller_locked(candidate)")
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
 get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
