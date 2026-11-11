@@ -150,7 +150,8 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        ble.includes('if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected)))'),
   'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
+       compose.includes('outputDrafts[index] = confirmed.toString()') &&
        ble.includes('||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
        'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
