@@ -548,4 +548,23 @@ public class NativeProjectCommitTest {
         assertEquals(before,model.exportJson());
     }
 
+    @Test public void universalLightingLabelsPersistAndKeepZeroLedDraft() {
+        Storage store=new Storage();
+        NativeProject model=new NativeProject(store.prefs);
+        assertTrue(model.addZoneAt("Driver mirror puddle",0,0));
+        String id=model.zone(0).optString("id");
+        assertTrue(model.updateZoneOrganization(id,"location","Front / Driver mirror"));
+        assertTrue(model.updateZoneOrganization(id,"assembly","Mirror"));
+        assertTrue(model.updateZoneOrganization(id,"lightingType","Puddle"));
+        assertFalse(model.updateZoneOrganization(id,"unsupported","bad"));
+        assertEquals(0,model.zone(0).optInt("length"));
+        NativeProject loaded=new NativeProject(store.prefs);
+        assertEquals("Mirror",loaded.zone(0).optString("assembly"));
+        assertEquals("Front / Driver mirror",loaded.zone(0).optString("location"));
+        assertEquals("Puddle",loaded.zone(0).optString("lightingType"));
+        store.fail=true;
+        assertFalse(loaded.updateZoneOrganization(id,"assembly","Should roll back"));
+        assertEquals("Mirror",loaded.zone(0).optString("assembly"));
+    }
+
 }

@@ -93,6 +93,8 @@ class ComposeMainActivity : ComponentActivity() {
     // Editing drafts are retained across GATT disconnects and navigation;
     // only verified controller readback is allowed to replace them.
     private val outputDrafts = mutableStateMapOf<Int, String>()
+    private val outputDirty = mutableStateMapOf<Int, Boolean>()
+    private val layoutLiveEditPending = mutableStateOf(false)
     private val outputReadbackEpoch = mutableStateMapOf<Int, Int>()
     private val layoutDraftZoneCounts = mutableStateMapOf<Int, Int>()
     private val outputMessage = mutableStateOf("No device output read yet")
@@ -396,19 +398,30 @@ class ComposeMainActivity : ComponentActivity() {
                 val response = JSONObject(raw)
                 outputMessage.value = response.optString("message", "CORE output result")
                 val index = response.optInt("index", -1)
-                if (index == savingOutput.intValue) {
-                    // A successful admission is not durable evidence. The
-                    // configuration reply arrives after byte-identical readback.
+                val completedSave = index == savingOutput.intValue
+                if (completedSave) {
+                    // Only byte-identical readback is durable confirmation.
                     savingOutput.intValue = -1
                 }
                 if (response.optBoolean("ok") && index in 0..1)
                     response.optJSONObject("output")?.let {
                         val confirmed = JSONObject(it.toString())
                         outputs[index] = confirmed
-                        outputDrafts[index] = confirmed.toString()
-                        outputReadbackEpoch[index] = (outputReadbackEpoch[index] ?: 0) + 1
+                        // Initial/reconnect reads must not erase an edited draft.
+                        if (completedSave || outputDirty[index] != true) {
+                            outputDrafts[index] = confirmed.toString()
+                            outputDirty[index] = false
+                            outputReadbackEpoch[index] = (outputReadbackEpoch[index] ?: 0) + 1
+                        }
                         layoutDraftZoneCounts[index] = confirmed.optJSONArray("zones")?.length() ?: 0
-                        invalidateCoreFrame() // the saved/readback output may have changed
+                        if(completedSave && panelGeometryMapping!=null) {
+                            // Persist a live geometry preview through the same
+                            // owner's Save action, only after output readback.
+                            if(panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
+                                panelGeometryDraftValid) commitPanelGeometryPreview()
+                            else panelGeometryMessage.value="Output saved; waiting for live layout preview updates before geometry commit"
+                        }
+                        invalidateCoreFrame()
                     }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
         }
@@ -1618,12 +1631,99 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun LightingDirectory(t: Tone) {
+        val version=revision.intValue
+        val count=remember(version) { project.zoneCount() }
+        var query by remember { mutableStateOf("") }
+        var expanded by remember { mutableStateOf<String?>(null) }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+            horizontalArrangement=Arrangement.SpaceBetween) {
+            Text("Your lighting",color=t.fg,fontWeight=FontWeight.SemiBold)
+            Pill("+ Add light",t) {
+                val place=project.zoneCount()
+                if(project.addZoneAt("New light",0,place)) {
+                    expanded=project.zone(place)?.optString("id")
+                    refresh()
+                }
+            }
+        }
+        Caption("Any light, any vehicle. Empty lights stay unassigned at 0 LEDs.",t)
+        Field(query,"Search lights or locations",t) { query=it }
+        val indices=(0 until count).filter { i ->
+            val z=project.zone(i)
+            z!=null && listOf("name","assembly","location","lightingType").any { key ->
+                z.optString(key,"").contains(query,true)
+            }
+        }.sortedWith(compareBy({ i:Int -> project.zone(i)?.optString("location","")?.lowercase().orEmpty() },
+                               { i:Int -> project.zone(i)?.optString("assembly","")?.lowercase().orEmpty() },
+                               { i:Int -> project.zone(i)?.optString("name","")?.lowercase().orEmpty() }))
+        var previousLocation:String?=null
+        for(i in indices) {
+            val z=project.zone(i) ?: continue
+            val id=z.optString("id")
+            val location=z.optString("location","").ifBlank { "Not yet located" }
+            if(previousLocation!=location) {
+                Caption(location,t)
+                previousLocation=location
+            }
+            val output=z.optInt("physicalOutput",-1)
+            val section=z.optInt("physicalSection",-1)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                .background(t.raised).padding(10.dp),
+                verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.fillMaxWidth().clickable { expanded=if(expanded==id) null else id },
+                    verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(z.optString("name"),color=t.fg,fontWeight=FontWeight.SemiBold)
+                        Caption(listOf(z.optString("assembly",""),z.optString("lightingType",""))
+                            .filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Uncategorized" }+
+                            " · "+z.optInt("length",0)+" LEDs"+
+                            (if(output in 0..1) " · O"+(output+1) else " · Unassigned"),t)
+                    }
+                    UiIcon(if(expanded==id)"up" else "down",t.muted)
+                }
+                if(expanded==id) {
+                    Field(z.optString("name"),"Light / zone name",t) { value ->
+                        if(value.trim().isNotEmpty() &&
+                            project.editZone(id,value,z.optInt("length",0),
+                                z.optBoolean("reverse",false)))refresh()
+                    }
+                    Field(z.optString("location",""),"Location (any vehicle area)",t) {
+                        if(project.updateZoneOrganization(id,"location",it))refresh()
+                    }
+                    Field(z.optString("assembly",""),"Assembly (headlight, mirror, HVAC...)",t) {
+                        if(project.updateZoneOrganization(id,"assembly",it))refresh()
+                    }
+                    Field(z.optString("lightingType",""),"Function (halo, strobe, backlight...)",t) {
+                        if(project.updateZoneOrganization(id,"lightingType",it))refresh()
+                    }
+                    if(output in 0..1) Pill("Open O"+(output+1)+
+                        (if(section>=0) " · Zone "+(section+1) else ""),t) {
+                        captureOutput.intValue=output
+                        expanded=null
+                    }
+                    else Caption("Not wired or assigned. Configure its output and zone when installed.",t)
+                }
+            }
+        }
+        if(count==0) Caption("No lights yet. Add a light to start with 0 LEDs.",t)
+    }
+
+    @Composable
     private fun LayoutPage(t: Tone) {
         val modelRevision = revision.intValue
         val zoneCount = remember(modelRevision) { project.zoneCount() }
         val geometryEpoch = panelGeometryEpoch.intValue
-        LaunchedEffect(modelRevision,geometryEpoch) {
-            if(panelGeometryMapping!=null&&!panelGeometryCommitRequested&&!panelGeometryCancelRequested) {
+        LaunchedEffect(modelRevision,geometryEpoch,panelGeometryRevision.intValue,
+            layoutLiveEditPending.value) {
+            if(layoutLiveEditPending.value && panelGeometryMapping==null &&
+                !panelGeometryCommitRequested && !panelGeometryCancelRequested &&
+                !panelGeometryLoadInProgress && ble.canReadPanelPreview()) {
+                delay(180)
+                if(ble.panelGeometryReady()) startPanelGeometryPreview()
+                else refreshPanelGeometry()
+            } else if(panelGeometryMapping!=null &&
+                !panelGeometryCommitRequested && !panelGeometryCancelRequested) {
                 delay(180)
                 queuePanelGeometryDraftUpdate()
             }
@@ -1635,7 +1735,6 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         Title("Layout", t)
-        EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
         var editingId by remember(projectLoadRevision.intValue) {
             mutableStateOf<String?>(null) // collapse cards on Layout page entry
@@ -1644,7 +1743,18 @@ class ComposeMainActivity : ComponentActivity() {
         var choosingDelete by remember { mutableStateOf(false) }
         var showingUnlinked by remember { mutableStateOf(false) }
         var layoutMessage by remember { mutableStateOf("") }
+        var directoryOpen by remember { mutableStateOf(false) }
+        var advancedOpen by remember { mutableStateOf(false) }
         Panel(t) {
+            HardwareOutputEditor(t)
+            Pill(if(directoryOpen) "Hide lighting directory" else "Lighting directory",t,directoryOpen) {
+                directoryOpen=!directoryOpen
+            }
+            if(directoryOpen) LightingDirectory(t)
+            Pill(if(advancedOpen) "Hide advanced settings" else "Advanced settings",t,advancedOpen) {
+                advancedOpen=!advancedOpen
+            }
+            if(advancedOpen) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text("Controller / Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 Caption(project.pixelCount().toString()+" LEDs",t)
@@ -1670,7 +1780,6 @@ class ComposeMainActivity : ComponentActivity() {
             }
             // One Output → Panel → Zone editor. Reload replaces authoritative
             // values in these cards, without creating a second editor.
-            HardwareOutputEditor(t)
             // Keep the original local authoring controls only for unmatched
             // design zones; linked zones are edited inside the cards above.
             // A draft with a new zone is already represented above. The saved
@@ -1810,6 +1919,7 @@ class ComposeMainActivity : ComponentActivity() {
             }
             // Empty projects use the single "+ Add zone" control in the
             // Output editor above. No duplicate Add or hardware cards.
+            }
         }
         if (choosingDelete) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { choosingDelete = false },
@@ -2883,6 +2993,31 @@ class ComposeMainActivity : ComponentActivity() {
     private fun HardwareOutputEditor(t: Tone) {
         val outputLimit = BleConfigCodec.MAX_LEDS_PER_OUTPUT
         val index = captureOutput.intValue
+        var outputToolsOpen by remember(index) { mutableStateOf(false) }
+        var autoReadStarted by remember(index) { mutableStateOf(false) }
+        // Read the selected output automatically after BLE authorization.
+        // Never overwrite an unsaved draft or start a second ATT transaction.
+        LaunchedEffect(index, bleMessage.value, outputs[index]) {
+            if(!ble.canConfigure()) {
+                autoReadStarted=false
+                return@LaunchedEffect
+            }
+            if(outputs[index]==null && !autoReadStarted) {
+                repeat(12) {
+                    if(!ble.canConfigure()) return@LaunchedEffect
+                    if(ble.readOutputIfReady(index)) {
+                        autoReadStarted=true
+                        return@LaunchedEffect
+                    }
+                    delay(300)
+                }
+            }
+        }
+        fun outputTab(which:Int):String {
+            val text=outputDrafts[which] ?: outputs[which]?.toString()
+            val candidate=runCatching { JSONObject(text ?: "{}") }.getOrNull()
+            return "O"+(which+1)+" · "+(candidate?.optInt("pixels",0) ?: 0)+" LEDs"
+        }
         // String snapshots make edits observable without mutating the last
         // confirmed hardware readback. A failed save cannot masquerade as NVS.
         var draftText by remember(index, outputReadbackEpoch[index]) {
@@ -2900,6 +3035,7 @@ class ComposeMainActivity : ComponentActivity() {
                 change(updated)
                 draftText = updated.toString()
                 outputDrafts[index] = draftText
+                outputDirty[index] = true
             }.onFailure { outputMessage.value = "Invalid draft: " + (it.message ?: "input") }
         }
         // Generic live zone cursor logic. Updating any zone recomputes the
@@ -2937,7 +3073,10 @@ class ComposeMainActivity : ComponentActivity() {
                         draftText=before
                         outputDrafts[index]=before
                         outputMessage.value="Local design zone could not be saved; draft retained"
-                    } else refresh() // triggers existing coalesced volatile CORE preview
+                    } else {
+                        layoutLiveEditPending.value=true
+                        refresh() // coalesced volatile controller preview
+                    }
                 }
             }
         }
@@ -2967,6 +3106,7 @@ class ComposeMainActivity : ComponentActivity() {
                     it.put("pixels",newTotal)
                 }
                 structureVersion++
+                layoutLiveEditPending.value=true
                 refresh()
                 return
             }
@@ -2977,49 +3117,44 @@ class ComposeMainActivity : ComponentActivity() {
         }
 
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Output " + (index+1) + " · Panels & zones",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
-            Caption("Edit one Output → Panel → Zone layout. Live preview is volatile; Save verifies permanent CORE readback.", t)
-            Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Pill("Output 1", t, index == 0) {
-                    captureOutput.intValue = 0
-                    liveChainMask.intValue = 1
+            Text("Outputs",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+            Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                Pill(outputTab(0),t,index==0) {
+                    captureOutput.intValue=0
+                    liveChainMask.intValue=1
                     invalidateCoreFrame()
                 }
-                Pill("Output 2", t, index == 1) {
-                    captureOutput.intValue = 1
-                    liveChainMask.intValue = 2
+                Pill(outputTab(1),t,index==1) {
+                    captureOutput.intValue=1
+                    liveChainMask.intValue=2
                     invalidateCoreFrame()
                 }
             }
-            Pill("Reload output " + (index + 1) + " from CORE", t) {
-                if (ble.canConfigure()) ble.readOutput(index)
-                else outputMessage.value = "Connect and authorize BLE before loading hardware"
-            }
-            Caption(outputMessage.value, t)
-            if (savingOutput.intValue == index) Caption("Saving… waiting for CORE confirmation and matching readback", t)
-            if (outputs[index] == null)
-                Caption("Unsaved output draft · 0 LEDs. Nothing is stored on CORE until a verified Save.", t)
-            else Caption("CORE active Output v1 readback · " + outputs[index]!!.optInt("pixels",0) +
-                " LEDs. Verify Panel/Zone geometry separately before Play.",t)
-            run {
-                // Never enable Play from an unsaved or speculative draft.
-                val confirmed=outputs[index]
-                val eligible = (0 until (confirmed?.optJSONArray("zones")?.length() ?: 0))
-                    .any { z ->
-                        val zone=confirmed?.optJSONArray("zones")?.optJSONObject(z)
-                        zone != null && zone.optInt("pixels",0)>0 &&
-                            zone.optString("role","off")!="off"
-                    }
-                if (!eligible) Caption("No playable saved CORE zones yet. Assign LEDs and a non-Off role, then Save.", t)
-                Pill("Play selected effect on Output " + (index + 1), t,
-                    enabled=ble.canControl() && eligible) {
-                    liveChainMask.intValue = 1 shl index
-                    liveZoneMask.intValue = 255
-                    offlinePreview.value = false
-                    previewCurrentEffect()
+            val currentName=runCatching { JSONObject(draftText).optString("name") }.getOrDefault("")
+            Caption("O"+(index+1)+" · "+currentName.ifBlank { "Unnamed output" },t)
+            if(outputs[index]==null && ble.canConfigure())
+                Caption("Reading controller settings automatically…",t)
+            else if(outputs[index]==null)
+                Caption("Offline draft · 0 LEDs until configured",t)
+            if(outputDirty[index]==true) Caption("Unsaved changes",t)
+            if (savingOutput.intValue == index) Caption("Saving… verifying controller readback", t)
+            if(outputMessage.value.isNotBlank()) Caption(outputMessage.value.replace("CORE","controller"),t)
+            val confirmed=outputs[index]
+            val eligible=(0 until (confirmed?.optJSONArray("zones")?.length() ?: 0))
+                .any { z ->
+                    val zone=confirmed?.optJSONArray("zones")?.optJSONObject(z)
+                    zone != null && zone.optInt("pixels",0)>0 &&
+                        zone.optString("role","off")!="off"
                 }
+            Pill("Test LEDs · O"+(index+1),t,
+                enabled=ble.canControl() && eligible) {
+                liveChainMask.intValue=1 shl index
+                liveZoneMask.intValue=255
+                offlinePreview.value=false
+                previewCurrentEffect()
             }
+            if(!eligible && confirmed!=null)
+                Caption("To test, assign LEDs and a lighting role other than Off, then Save.",t)
         }
         if (draft == null) return
         val zones = draft.optJSONArray("zones") ?: JSONArray()
@@ -3038,7 +3173,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
         LaunchedEffect(index,pixelCount) { outputCountText=pixelCount.toString() }
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Output " + (index + 1) + " · physical pixel allocation", color = t.fg, fontWeight = FontWeight.Bold)
+            Text("LED count · O" + (index + 1), color=t.fg,fontWeight=FontWeight.SemiBold)
             Field(draft.optString("name"), "Output name", t) { value ->
                 edit { it.put("name", value) }
             }
@@ -3049,9 +3184,11 @@ class ComposeMainActivity : ComponentActivity() {
             }
             if(outputCountText.toIntOrNull()!=null && outputCountText.toIntOrNull()!=pixelCount)
                 Caption("Typed total has not been applied; check the other zone allocations.",t)
-            ValueSlider("Total output pixels", pixelCount.coerceIn(0, outputLimit), outputLimit, t) { newCount ->
-                adjustOutput(newCount.coerceAtLeast(0))
-                outputCountText = JSONObject(draftText).optInt("pixels",pixelCount).toString()
+            if(outputToolsOpen) {
+                ValueSlider("Total output pixels", pixelCount.coerceIn(0, outputLimit), outputLimit, t) { newCount ->
+                    adjustOutput(newCount.coerceAtLeast(0))
+                    outputCountText = JSONObject(draftText).optInt("pixels",pixelCount).toString()
+                }
             }
             // Restore the approved pixel +/- controls beside the draft
             // slider. These change only RAM; Save still requires confirmation.
@@ -3067,14 +3204,39 @@ class ComposeMainActivity : ComponentActivity() {
                     outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
             }
-            Caption("Color order · set this for the actual connected LED strips", t)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                BleConfigCodec.ORDERS.forEach { order ->
-                    Pill(order, t, order == draft.optString("color_order")) {
-                        edit { it.put("color_order", order) }
+            // One Save, positioned with the LED count rather than below
+            // diagnostics and every zone editor. Never claim success pre-readback.
+            var validationError=""
+            val valid=try {
+                BleConfigCodec.encode(draft)
+                true
+            } catch(ex:Exception) {
+                validationError=ex.message ?: "Invalid output configuration"
+                false
+            }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                Pill(if (savingOutput.intValue == index) "Saving…" else "Save",t,true,
+                    enabled=valid && savingOutput.intValue<0 &&
+                        ble.canConfigure() && outputs[index]!=null) {
+                    try {
+                        BleConfigCodec.encode(JSONObject(draftText))
+                        if(!ble.canConfigure()) outputMessage.value="Not authorized"
+                        else if (ble.saveOutput(index, draftText)) {
+                            savingOutput.intValue = index
+                            outputMessage.value="Saving… verifying controller readback"
+                        } else outputMessage.value="Controller busy; no Save started"
+                    } catch(ex:Exception) {
+                        outputMessage.value="Save rejected: "+(ex.message ?: "invalid draft")
                     }
                 }
+                Caption(if(!valid) {
+                    if(pixelCount==0) "0 LEDs · add LEDs before saving" else validationError
+                } else if(outputs[index]==null) "Loading controller…" else
+                    if(outputDirty[index]==true) "Unsaved" else "Controller confirmed",t)
+            }
+            Pill(if(outputToolsOpen) "Hide advanced output tools" else "Advanced output tools",t,outputToolsOpen) {
+                outputToolsOpen=!outputToolsOpen
             }
         }
         if(zones.length()>0) {
@@ -3113,8 +3275,8 @@ class ComposeMainActivity : ComponentActivity() {
                 if(coreZone!=null)
                     Caption("CORE identities · Panel " + coreZone.panelId +
                         " · Zone " + coreZone.id,t)
-                Caption("Start " + from + " · end " + (if (count > 0) cursor - 1 else "empty") +
-                    " · next " + cursor, t)
+                if(outputToolsOpen) Caption("Start " + from + " · end " +
+                    (if(count>0) cursor-1 else "empty") + " · next " + cursor,t)
                 val linkedId=(0 until project.zoneCount()).firstOrNull { localIndex ->
                     val local=project.zone(localIndex)
                     local?.optInt("physicalOutput",-1)==index &&
@@ -3142,11 +3304,13 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 if(zoneCountText.toIntOrNull()!=null && zoneCountText.toIntOrNull()!=count)
                     Caption("Typed zone length is not applied; check the output LED limit.",t)
-                ValueSlider("Next start · zero-based", cursor.coerceIn(0, outputLimit), outputLimit, t) { nextStart ->
-                    val n = (nextStart - from).coerceAtLeast(0)
-                    adjustZone(i, n)
-                    zoneCountText = n.toString()
-                    outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
+                if(outputToolsOpen) {
+                    ValueSlider("Next start · zero-based", cursor.coerceIn(0, outputLimit), outputLimit, t) { nextStart ->
+                        val n=(nextStart-from).coerceAtLeast(0)
+                        adjustZone(i,n)
+                        zoneCountText=n.toString()
+                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    }
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     PixelStepPill("−",t) {
@@ -3162,6 +3326,7 @@ class ComposeMainActivity : ComponentActivity() {
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
                     }
                 }
+                if(outputToolsOpen) {
                 // Bidirectional association: choose a design zone here, or
                 // choose its physical output/section from the expanded design card.
                 var choosingDesign by remember(index,i) { mutableStateOf(false) }
@@ -3240,7 +3405,8 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                 }
-                Caption("Physical section link is local until CORE Save/readback.",t)
+                Caption("Physical section link is local until controller Save/readback.",t)
+                }
                 val selectedRole=zone.optString("role","off")
                 var choosingRole by remember(index,i) { mutableStateOf(false) }
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
@@ -3266,7 +3432,7 @@ class ComposeMainActivity : ComponentActivity() {
                     "Off disables effects in this zone. Choose a role, then Save."
                     else "Draft role: " + selectedRole.replace('_',' ') +
                         " · Only active after confirmed Save.",t)
-                Pill("Remove zone", t) {
+                if(outputToolsOpen) Pill("Remove zone", t) {
                     pendingRemoveSection=i
                 }
                 // Destructive action is confirmed once for the unified zone.
@@ -3295,6 +3461,7 @@ class ComposeMainActivity : ComponentActivity() {
                             it.put("zones",next);it.put("pixels", remaining)
                         }
                         structureVersion++
+                        layoutLiveEditPending.value=true
                         refresh()
                     }
                     selectedZone=removal.coerceAtMost((zones.length()-2).coerceAtLeast(0))
@@ -3303,13 +3470,14 @@ class ComposeMainActivity : ComponentActivity() {
                 dismissButton={ Pill("Cancel",t) { pendingRemoveSection=-1 } })
         }
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Caption("Assigned " + assigned + " of " + pixelCount + " pixels · " +
-                (pixelCount - assigned) + " remaining. Zone offsets are zero-based and automatically contiguous.", t)
+            if(outputToolsOpen) Caption("Assigned " + assigned + " of " + pixelCount +
+                " pixels · " + (pixelCount - assigned) +
+                " remaining. Zero-based offsets are automatically contiguous.",t)
             PixelStrip(t, (0 until zones.length()).map { j ->
                 val part = zones.optJSONObject(j)
                 (part?.optInt("pixels", 0) ?: 0) to rolePixelColor(part?.optString("role", "off") ?: "off")
             })
-            Caption("Draft shown locally; active live Geometry previews stream to CORE without flash writes. Save commits with readback.", t)
+            if(outputToolsOpen) Caption("Draft edits are local; an active live preview streams to the controller without flash writes.",t)
             if (zones.length() < 8) Pill("+ Add zone", t) {
                 val newSection=zones.length()
                 val label="Zone " + (newSection+1)
@@ -3328,10 +3496,11 @@ class ComposeMainActivity : ComponentActivity() {
                     outputMessage.value="Could not add local zone; CORE draft unchanged"
                 }
                 structureVersion++
+                layoutLiveEditPending.value=true
                 selectedZone=newSection
                 choosingZone=false
             }
-            Pill("Fit last zone to remaining pixels", t) {
+            if(outputToolsOpen) Pill("Fit last zone to remaining pixels", t) {
                 edit {
                     val group = it.getJSONArray("zones")
                     if (group.length() > 0) {
@@ -3345,36 +3514,26 @@ class ComposeMainActivity : ComponentActivity() {
             }
             val calibrated = draft.optJSONObject("calibration")
             val gamma = calibrated?.optBoolean("gamma_enabled", false) ?: false
-            Pill(if (gamma) "Gamma enabled ✓" else "Gamma disabled", t, gamma) {
+            if(outputToolsOpen) Pill(if (gamma) "Gamma enabled ✓" else "Gamma disabled", t, gamma) {
                 edit {
                     val cal = it.optJSONObject("calibration") ?: JSONObject()
                     cal.put("gamma_enabled", !gamma)
                     it.put("calibration", cal)
                 }
             }
-            var validationError = ""
-            val valid = try {
-                BleConfigCodec.encode(draft)
-                true
-            } catch (ex: Exception) {
-                validationError = ex.message ?: "Invalid output mapping"
-                false
-            }
-            Caption(if (valid) "Ready to save; verified CORE readback required." else
-                if(pixelCount==0) "Empty draft (0 LEDs) · nothing to save to CORE yet." else
-                    "Cannot save: " + validationError, t)
-            if (valid) Pill(if (savingOutput.intValue == index) "Saving…" else "Save", t, true,
-                enabled=savingOutput.intValue < 0) {
-                try {
-                    BleConfigCodec.encode(JSONObject(draftText))
-                    if (!ble.canConfigure()) {
-                        outputMessage.value = "Not authorized — no settings sent"
-                    } else if (ble.saveOutput(index, draftText)) {
-                        savingOutput.intValue = index
-                        outputMessage.value = "Saving… verifying matching CORE readback"
-                    } else outputMessage.value = "Save request rejected · see BLE status"
-                } catch (ex: Exception) {
-                    outputMessage.value = "Save rejected: " + (ex.message ?: "invalid draft")
+            if(outputToolsOpen) {
+                Caption("Advanced output settings",t)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    BleConfigCodec.ORDERS.forEach { order ->
+                        Pill(order,t,order==draft.optString("color_order")) {
+                            edit { it.put("color_order",order) }
+                        }
+                    }
+                }
+                Pill("Reload from controller",t) {
+                    if(ble.canConfigure()) ble.readOutput(index)
+                    else outputMessage.value="Connect and authorize before reading controller settings"
                 }
             }
         }

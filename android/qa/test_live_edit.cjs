@@ -146,7 +146,7 @@ assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
        hardwareBlock.includes('savingOutput.intValue = index') &&
        hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
        hardwareBlock.includes('"Saving…" else "Save"') &&
-       compose.includes('if (index == savingOutput.intValue)') &&
+       compose.includes('val completedSave = index == savingOutput.intValue') &&
        ble.includes('if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected)))'),
   'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
@@ -212,6 +212,14 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Output " + (index+1) + " · Panels & zones"') &&
+        compose.includes('Text("Outputs",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
+
+assert(hardwareBlock.includes('ble.readOutputIfReady(index)') &&
+       hardwareBlock.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
+       hardwareBlock.includes('if(outputToolsOpen)') &&
+       compose.includes('if(advancedOpen) {') &&
+       compose.includes('layoutLiveEditPending.value=true') &&
+       project.includes('updateZoneOrganization(String id, String field, String text)'),
+       'Owner minimal universal Layout: no mandatory Reload, hidden advanced, live edit and freeform light labels');

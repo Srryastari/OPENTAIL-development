@@ -142,6 +142,13 @@ final class NativeProject {
                     || start + length > 1000000)
                 throw new JSONException("Invalid or overlapping zone layout");
             if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
+            // Vehicle-neutral, app-only organization. A light may remain
+            // unassigned and empty until matching hardware is installed.
+            for (String key : new String[]{"assembly", "location", "lightingType"}) {
+                if (z.has(key) && (!(z.opt(key) instanceof String)
+                        || z.optString(key).length() > 64))
+                    throw new JSONException("Invalid lighting organization label");
+            }
             // Optional local Output Manager link, never a physical NVS write.
             // Old Studio v4 documents omit these fields and remain compatible.
             if (z.has("physicalOutput") || z.has("physicalSection")) {
@@ -412,6 +419,19 @@ final class NativeProject {
             else z.put("physicalOutput",output).put("physicalSection",section);
             return save();
         }catch(JSONException ex){restoreCommitted();return false;}
+    }
+
+    /** Freeform labels are project metadata, not a hidden hardware mapping
+     * or a firmware-specific list of headlight/taillight categories. */
+    synchronized boolean updateZoneOrganization(String id, String field, String text) {
+        int index=indexOfZone(id);
+        if(index<0 || !("assembly".equals(field)||"location".equals(field)||
+                "lightingType".equals(field)) || text==null || text.length()>64)
+            return false;
+        try {
+            zone(index).put(field,text);
+            return save();
+        } catch (JSONException e) {restoreCommitted();return false;}
     }
 
     synchronized boolean removeZone(String id) {

@@ -779,6 +779,19 @@ final class BleDiscovery {
     private volatile int cfgWatchdog=0;
     void setConfigListener(java.util.function.Consumer<String> listener){configListener=listener;}
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
+    /** Non-destructive automatic read after authorization. Busy GATT
+     * operations are not interrupted or duplicated; UI may try later. */
+    boolean readOutputIfReady(int index) {
+        if(index<0||index>1||!canConfigure()||cfgBusy||queuedOutputRead>=0||
+           writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||
+           panelUpdateWritePending||panelControlQueued||panelUpdateQueued||
+           panelReadQueued!=0||panelSnapshotQueuedLane>=0||panelCancelQueued||
+           palette.busy()||nextPacket!=null||authPending||pairPending||challengePending)
+            return false;
+        readOutput(index);
+        return true;
+    }
     void readOutput(int index){
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
         if(index<0||index>1){cfgNotify(false,"Invalid CORE output index",null,index);return;}

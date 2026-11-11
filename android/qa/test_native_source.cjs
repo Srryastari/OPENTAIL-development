@@ -204,7 +204,7 @@ assert(previewSrc &&
        compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
        hardwareOutput.includes('adjustZone(i,n)') &&
        hardwareOutput.includes('adjustOutput(n)') &&
-       hardwareOutput.includes('Draft shown locally; active live Geometry previews stream to CORE without flash writes'),
+       hardwareOutput.includes('if(outputToolsOpen) Caption("Draft edits are local;'),
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
 // Owner's full Test 1-80 regression gates (Android-only source contracts).
 assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
@@ -364,7 +364,7 @@ assert(bleSource.includes('boolean saveOutput(int index,String json)') &&
        bleSource.includes('Load this output over BLE before saving",null,index);return false;') &&
        bleSource.includes('BLE is busy; retry after current transfer",null,index);return false;') &&
        hardware.includes('if (ble.saveOutput(index, draftText))') &&
-       hardware.includes('Save request rejected · see BLE status'),
+       hardware.includes('Controller busy; no Save started'),
   'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
   'synchronized boolean editZone(', 'synchronized boolean moveZone(',
@@ -1148,7 +1148,7 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Output " + (index+1) + " · Panels & zones"') &&
+        compose.includes('Text("Outputs",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
 
@@ -1271,11 +1271,11 @@ const unifiedEditor = compose.split('private fun HardwareOutputEditor(t: Tone) {
 assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captureOutput.intValue]') &&
        layoutEditor.includes('HardwareOutputEditor(t)') &&
        layoutEditor.includes('linked zones are edited inside the cards above') &&
-       unifiedEditor?.includes('liveChainMask.intValue = 1') &&
-       unifiedEditor.includes('liveChainMask.intValue = 2') &&
-       unifiedEditor.includes('Play selected effect on Output ') &&
+       unifiedEditor?.includes('liveChainMask.intValue=1') &&
+       unifiedEditor.includes('liveChainMask.intValue=2') &&
+       unifiedEditor.includes('Pill("Test LEDs · O"') &&
        unifiedEditor.includes('liveZoneMask.intValue = 255') &&
-       unifiedEditor.includes('No playable saved CORE zones yet') &&
+       unifiedEditor.includes('To test, assign LEDs and a lighting role other than Off') &&
        unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
@@ -1319,7 +1319,19 @@ assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
   finalOutput.includes('.put("pixels",0)') &&
   finalOutput.includes('mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()') &&
   finalOutput.includes('SideEffect { layoutDraftZoneCounts[index] = zones.length() }') &&
-  finalOutput.includes('if(pixelCount==0) "Empty draft (0 LEDs)') &&
+  finalOutput.includes('if(pixelCount==0) "0 LEDs · add LEDs before saving"') &&
   finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
   bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
   'Zero LED drafts must stay inert; saved CORE state still requires readback');
+
+assert(finalLayout.includes('LightingDirectory(t)') &&
+  finalLayout.includes('if(advancedOpen) {') &&
+  finalOutput.includes('Pill(outputTab(0),t,index==0)') &&
+  finalOutput.includes('Pill(outputTab(1),t,index==1)') &&
+  finalOutput.includes('ble.readOutputIfReady(index)') &&
+  finalOutput.includes('outputDirty[index] = true') &&
+  compose.includes('if (completedSave || outputDirty[index] != true)') &&
+  model.includes('updateZoneOrganization(String id, String field, String text)') &&
+  model.includes('z.optString(key).length() > 64') &&
+  !finalLayout.includes('EffectsPreview(t, selectedEffect.intValue)'),
+  'Universal lighting directory, simple O1/O2 selector, automatic reads, and single guarded Save must stay intact');
