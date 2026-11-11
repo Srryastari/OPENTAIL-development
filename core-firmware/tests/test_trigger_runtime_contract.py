@@ -362,7 +362,10 @@ assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
 assert "ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,\n        previous,candidate," in core
 assert "ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id," in core
 assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and '"ot_zone_map"' in core
-assert "pz_save_controller_locked(&candidate)" in core
+# Legacy BLE Save now reuses the existing mutex-protected pair-store workspace
+# rather than consuming another full controller object on the NimBLE host stack.
+assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in core
+assert "pz_save_controller_locked(candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
 assert "tm_persistent && !tm_deferred.pending" in core
