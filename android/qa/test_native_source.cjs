@@ -1305,7 +1305,7 @@ assert(bleSource.includes('private String cfgTimingDetail()') &&
        bleSource.includes('cfgTransferMs=android.os.SystemClock.elapsedRealtime();') &&
        bleSource.includes('cfgReadbackMs=android.os.SystemClock.elapsedRealtime();') &&
        bleSource.includes('cfgReadFragments++;') &&
-       bleSource.includes('"+cfgTimingDetail(),output,cfgIndex') &&
+       bleSource.includes(')+cfgTimingDetail(),output,cfgIndex') &&
        bleSource.includes('Arrays.equals(cfgBytes,cfgExpected)'),
        'Measure real readback fragments and latency without bypassing verified controller readback');
 
