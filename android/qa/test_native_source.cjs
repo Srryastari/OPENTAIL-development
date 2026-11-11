@@ -1309,6 +1309,29 @@ assert(bleSource.includes('private String cfgTimingDetail()') &&
        bleSource.includes('Arrays.equals(cfgBytes,cfgExpected)'),
        'Measure real readback fragments and latency without bypassing verified controller readback');
 
+// Role Off cannot authorize a normal FX show, but Firmware #127's
+// authenticated Pixel Probe can still test physical LED 0 without NVS,
+// without constructing a fake zone, and without bypassing STOP priority.
+const probeBlock = bleSource.split('boolean probeFirstPixel(int lane) {')[1]
+  ?.split('boolean canReadPanelPreview()')[0];
+assert(bleSource.includes('PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf33")') &&
+       bleSource.includes('boolean canProbeFirstPixel()') &&
+       bleSource.includes('(panelCapabilities.flags&1)!=0') &&
+       probeBlock?.includes('new byte[]{(byte)0xaa,(byte)(lane+1),0,0,1}') &&
+       probeBlock.includes('BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT') &&
+       probeBlock.includes('pixelProbeWritePending=true;') &&
+       probeBlock.includes('recoverStalledGatt(owner,"Pixel probe ATT write timeout")') &&
+       bleSource.includes('if (pixelProbeWritePending || writePending || readReplyPending') &&
+       bleSource.includes('if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy') &&
+       bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
+       compose.includes('ble.setPixelProbeListener { result ->') &&
+       unifiedEditor.includes('Pill("Check first LED · O"') &&
+       unifiedEditor.includes('enabled=ble.canProbeFirstPixel()') &&
+       unifiedEditor.includes('if(ble.probeFirstPixel(index))') &&
+       !probeBlock.includes('saveOutput(') &&
+       !probeBlock.includes('cfgSend('),
+       'Bench Pixel Probe must use exact authorized five-byte v4 diagnostic, no NVS, serialized behind STOP');
+
 // Regression: a lost GATT confirmation must not erase draft role/count edits,
 // silently retry flash writes, or call an unverified commit "Saved".
 assert(unifiedEditor.includes('var choosingRole by remember(index,i)') &&
