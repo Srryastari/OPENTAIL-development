@@ -19,6 +19,22 @@ public class GeometryTransactionManagerTest {
         b[60]=(byte)flags;return PanelPreviewProtocol.Status.parse(b);
     }
 
+    @Test public void blankUniversalLayoutHasNoSyntheticPanelOrPixels() {
+        FakeProjectStorage store=new FakeProjectStorage();
+        NativeProject project=new NativeProject(store.prefs);
+        assertEquals(0,project.zoneCount());
+        GeometryTransactionManager.LayoutMapping initial=GeometryTransactionManager.mapLayout(project);
+        assertEquals(0,initial.lane(0).activePixels);
+        assertEquals(0,initial.lane(1).activePixels);
+        assertEquals(0,initial.lane(0).zones.size());
+        assertEquals(0,initial.lane(1).panels.size());
+        assertTrue(project.addZoneAt("Empty zone",0,0));
+        GeometryTransactionManager.LayoutMapping localOnly=GeometryTransactionManager.mapLayout(project);
+        assertEquals(0,localOnly.lane(0).activePixels);
+        assertEquals(0,localOnly.lane(1).activePixels);
+        assertEquals(0,project.pixelCount());
+    }
+
     @Test public void lastConfirmedGeometryDoesNotChangeDuringPreviewOrCommit() {
         byte[] original={3,0,1,2};byte[] edited={3,0,1,9};
         GeometryTransactionManager manager=new GeometryTransactionManager(

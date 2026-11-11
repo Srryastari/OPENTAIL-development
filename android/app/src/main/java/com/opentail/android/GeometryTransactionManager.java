@@ -425,8 +425,15 @@ final class GeometryTransactionManager {
         boolean exactGs400Profile=!anyExplicitPanel&&hasOwnerApprovedGs400SectionTopology(assigned);
         if(anyExplicitPanel&&!allExplicitPanel)
             throw new IllegalStateException("Every assigned section must have an explicit CORE Panel identity");
-        if(!anyExplicitPanel&&!exactGs400Profile)
+        if(!anyExplicitPanel&&!exactGs400Profile) {
+            // Fresh universal projects start with no vehicle sections.
+            // Zero-output layouts are inert; no synthetic GS400 map is emitted.
+            if(assigned[0].isEmpty()&&assigned[1].isEmpty())
+                return new LayoutMapping(new MappedLane[]{
+                    new MappedLane(0,0,new ArrayList<>(),new ArrayList<>()),
+                    new MappedLane(1,0,new ArrayList<>(),new ArrayList<>())});
             throw new IllegalStateException("Layout has no explicit CORE Panel identity and does not match the owner-approved GS400 five-section topology");
+        }
         MappedLane[] lanes=new MappedLane[2];
         Map<Integer,Integer> globalPanelLanes=new HashMap<>();
         for(int lane=0;lane<2;lane++) {

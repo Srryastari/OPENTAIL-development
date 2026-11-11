@@ -134,7 +134,7 @@ final class NativeProject {
             String id = z.optString("id", "");
             String name = z.optString("name", "");
             if (!wholeNumber(z.opt("start"), 0, 999999)
-                    || !wholeNumber(z.opt("length"), 1, 10000))
+                    || !wholeNumber(z.opt("length"), 0, 10000))
                 throw new JSONException("Zone index and length must be whole numbers");
             long start = ((Number)z.opt("start")).longValue();
             long length = ((Number)z.opt("length")).longValue();
@@ -318,7 +318,7 @@ final class NativeProject {
     /** Insert and reindex once. An "Add next" edit must not commit an
      * appended zone and then fail during a second reorder transaction. */
     synchronized boolean addZoneAt(String label, int length, int insertAt) {
-        if (zoneCount() >= MAX_ZONES || length < 1 || length > 10000
+        if (zoneCount() >= MAX_ZONES || length < 0 || length > 10000
                 || insertAt < 0 || insertAt > zoneCount() || label == null
                 || label.length() > 48) return false;
         try {
@@ -344,8 +344,8 @@ final class NativeProject {
      * dragging nor typing can send BLE commands or persist a draft. */
     synchronized String previewZoneOffsets(String id, int suggestedLength) {
         int selected=indexOfZone(id);
-        if(selected<0 || suggestedLength<1 || suggestedLength>10000)
-            return "Pixel count must be between 1 and 10,000";
+        if(selected<0 || suggestedLength<0 || suggestedLength>10000)
+            return "Pixel count must be between 0 and 10,000";
         long end=0;
         StringBuilder summary=new StringBuilder();
         for(int i=0;i<zoneCount();i++){
@@ -359,7 +359,8 @@ final class NativeProject {
                 if(summary.length()>0)summary.append("\n");
                 summary.append(zone.optString("name","Zone "+(i+1)))
                        .append(": ").append(start).append("–")
-                       .append(start+len-1).append(" · next ").append(start+len);
+                       .append(len==0?"empty":String.valueOf(start+len-1))
+                       .append(" · next ").append(start+len);
             }
             end=start+len;
         }
@@ -369,7 +370,7 @@ final class NativeProject {
 
     synchronized boolean editZone(String id, String label, int length, boolean reverse) {
         int index = indexOfZone(id);
-        if (index < 0 || length < 1 || length > 10000 || label.trim().isEmpty()
+        if (index < 0 || length < 0 || length > 10000 || label.trim().isEmpty()
                 || label.trim().length() > 48) return false;
         try {
             JSONObject z = zone(index);

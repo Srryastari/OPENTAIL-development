@@ -56,7 +56,7 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame!!.colorAt(sample)', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'frame!!.colorAt(sample)', 'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
   'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.saveOutput(index, draftText)',
@@ -203,7 +203,7 @@ assert(previewSrc &&
        compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
        hardwareOutput.includes('adjustZone(i,n)') &&
        hardwareOutput.includes('adjustOutput(n)') &&
-       hardwareOutput.includes('Physical boundaries change only after confirmed NVS Save'),
+       hardwareOutput.includes('Draft shown locally; active live Geometry previews stream to CORE without flash writes'),
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
 // Owner's full Test 1-80 regression gates (Android-only source contracts).
 assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
@@ -262,7 +262,7 @@ assert(layout.includes('Pill("+ Add",t) {') && layout.includes('val created = ad
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
 for(const required of ['project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.editZone(id,label,n,reverse)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
@@ -833,7 +833,7 @@ assert(model.includes('return addZoneAt(label, length, zoneCount());') &&
        model.includes('synchronized boolean addZoneAt(String label, int length, int insertAt)') &&
        model.includes('if (i == insertAt) layout.put(z);') &&
        model.includes('if (i < zoneCount()) layout.put(zone(i));') &&
-       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position)') && compose.includes('editingId=created') && compose.includes('val id=project.zone(position)?.optString("id")') &&
+       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 0, position)') && compose.includes('editingId=created') && compose.includes('val id=project.zone(position)?.optString("id")') &&
        !compose.includes('project.moveZone(project.zoneCount() - 1, index + 1)'),
        'Add next zone must insert and reindex with one persisted transaction');
 assert(compose.includes('if(project.assignMany(selections,zoneId,!checked)) refresh()') && compose.includes('if (project.name(it)) refresh()') && compose.includes('else name = project.name() // restore last committed value') && compose.includes('if(project.setPresets(next))') && compose.includes('Could not remove preset'),
@@ -1147,7 +1147,7 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Controller output"') &&
+        compose.includes('Text("Output " + (index+1) + " · Panels & zones"') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
 
@@ -1278,3 +1278,32 @@ assert(layoutEditor?.includes('if (outputs[captureOutput.intValue] == null) {') 
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
        'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
+
+// Overseer 4 Layout acceptance: one Output / Panel / Zone editor and
+// zero-LED first-run drafts, without making a fake saved CORE output.
+const finalLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+const finalOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(finalLayout && finalOutput &&
+  finalLayout.includes('HardwareOutputEditor(t)') &&
+  finalLayout.includes('linked zones are edited inside the cards above') &&
+  finalLayout.includes('0 until (selectedReadback.optJSONArray("zones")?.length() ?: 0)) continue') &&
+  finalOutput.includes('val index = captureOutput.intValue') &&
+  finalOutput.includes('val authoritativeMap = runCatching') &&
+  finalOutput.includes('coreZone.panelId') &&
+  finalOutput.includes('if(linkedId!=null && linkedIndex!=null)') &&
+  finalOutput.includes('ZoneDotPreview(t,localCount,reversed)') &&
+  finalOutput.includes('ble.saveOutput(index, draftText)') &&
+  !finalOutput.includes('Saved Output 1') &&
+  !finalOutput.includes('BLE test1'),
+  'One CORE-backed editor must retain all local zone tools without duplicate cards');
+assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
+  model.includes('zoneCount() >= MAX_ZONES || length < 0') &&
+  model.includes('index < 0 || length < 0') &&
+  finalLayout.includes('CapsuleSlider(n, 0, 10000, t,') &&
+  finalOutput.includes('.put("pixels",0)') &&
+  finalOutput.includes('mutableStateOf(outputs[index]?.toString() ?: JSONObject()') &&
+  finalOutput.includes('if(pixelCount==0) "Empty draft (0 LEDs)') &&
+  finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
+  bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
+  'Zero LED drafts must stay inert; saved CORE state still requires readback');

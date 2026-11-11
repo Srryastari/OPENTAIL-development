@@ -166,6 +166,27 @@ public class NativeProjectCommitTest {
         assertEquals(previous, project.exportJson());
     }
 
+    @Test public void blankZonesStartAtZeroAndRemainZeroAcrossReload() throws Exception {
+        Storage storage = new Storage();
+        NativeProject project = new NativeProject(storage.prefs);
+        assertEquals(0,project.zoneCount());
+        assertEquals(0,project.pixelCount());
+        assertTrue(project.addZoneAt("New zone",0,0));
+        assertEquals(0,project.zone(0).getInt("length"));
+        assertEquals(0,project.pixelCount());
+        String id=project.zone(0).getString("id");
+        assertTrue(project.editZone(id,"New zone",0,true));
+        assertEquals(0,project.pixelCount());
+        NativeProject reopened=new NativeProject(storage.prefs);
+        assertEquals(0,reopened.zone(0).getInt("length"));
+        assertTrue(reopened.zone(0).getBoolean("reverse"));
+        assertTrue(reopened.previewZoneOffsets(id,0).contains("empty"));
+        assertFalse(reopened.editZone(id,"New zone",-1,false));
+        assertFalse(reopened.addZoneAt("Invalid",-1,1));
+        assertTrue(reopened.addZoneAt("Next blank",0,1));
+        assertEquals(0,reopened.pixelCount());
+    }
+
     @Test public void importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers() throws Exception {
         Storage storage = new Storage();
         NativeProject project = new NativeProject(storage.prefs);
@@ -179,7 +200,7 @@ public class NativeProjectCommitTest {
             assertFalse("Invalid offset " + invalid, project.importJson(copy.toString()));
             assertEquals(original, project.exportJson());
         }
-        for (Object invalid : new Object[]{8.5, "8", 0, 10001}) {
+        for (Object invalid : new Object[]{8.5, "8", -1, 10001}) {
             JSONObject copy = new JSONObject(original);
             copy.getJSONArray("layout").getJSONObject(0).put("length", invalid);
             assertFalse("Invalid zone length " + invalid, project.importJson(copy.toString()));
