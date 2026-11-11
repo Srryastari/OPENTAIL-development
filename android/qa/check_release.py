@@ -120,7 +120,9 @@ check("Compose has full two-output draft editing without unsaved hardware mutati
           "BleConfigCodec.ROLES", "BleConfigCodec.ORDERS", "Fit last zone",
           "Assigned ", "Color order", "Remove zone", "+ Add zone",
           "val draft = runCatching { JSONObject(draftText) }",
-          "outputMessage.value = \"Save requested · verifying hardware readback\""))
+          "outputMessage.value = \"Saving… verifying matching CORE readback\"",
+          "if (savingOutput.intValue == index) Caption(\"Saving…",
+          'if (valid) Pill(if (savingOutput.intValue == index) "Saving…" else "Save"'))
       and 'ble.saveOutput(index, draftText)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
