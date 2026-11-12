@@ -118,6 +118,78 @@ static void fresh_zero_to_100_unsaved_preview(void){
     assert(committed.outputs[0].active_pixels==0u);
 }
 
+/* Both physical outputs may be configured and effect-targeted before either
+ * config is saved. Saving one must not merge its stale snapshot of the other. */
+static void two_unsaved_lanes_save_and_reconnect(void){
+    ot_pz_controller_t persisted;
+    ot_pz_defaults(&persisted);
+    assert(ot_pz_valid(&persisted));
+    ot_pz_preview_t live[OT_PZ_OUTPUTS]={0};
+    const uint16_t pixels[OT_PZ_OUTPUTS]={100u,37u};
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        assert(ot_pz_preview_begin(&live[lane],&persisted,lane,1u,1u,false,100u));
+        live[lane].candidate.outputs[lane].active_pixels=pixels[lane];
+        const ot_pz_range_update_t range={
+            (uint16_t)(lane+1u),(uint16_t)(lane+1u),0u,0u,
+            pixels[lane],OT_OM_OFF
+        };
+        assert(ot_pz_preview_apply_updates(&live[lane],lane,
+            &range,1u,1u,1u,false,110u));
+        assert(live[lane].candidate.outputs[lane].panel_count==1u);
+        assert(live[lane].candidate.outputs[lane].zone_count==1u);
+        assert(live[lane].candidate.outputs[lane].zones[0].role==OT_OM_OFF);
+    }
+    assert(persisted.outputs[0].active_pixels==0u);
+    assert(persisted.outputs[1].active_pixels==0u);
+    assert(live[0].candidate.outputs[0].active_pixels==100u);
+    assert(live[1].candidate.outputs[1].active_pixels==37u);
+    assert(ot_pz_preview_heartbeat(&live[0],0u,1u,3500u));
+    assert(ot_pz_preview_heartbeat(&live[1],1u,1u,3501u));
+    assert(!ot_pz_preview_expire(&live[0],3502u));
+
+    /* First durable pair snapshot is based on persisted state and changes O2
+     * only. It must NOT copy the unsaved O1 from the other preview snapshot. */
+    ot_pz_controller_t next=persisted;
+    next.outputs[1]=live[1].candidate.outputs[1];
+    assert(ot_pz_valid(&next));
+    assert(next.outputs[0].active_pixels==0u);
+    assert(next.outputs[1].active_pixels==37u);
+    persisted=next;
+    ot_pz_preview_cancel(&live[1]);
+    assert(live[0].active);
+    assert(live[0].candidate.outputs[0].active_pixels==100u);
+    assert(live[0].candidate.outputs[0].zone_count==1u);
+    assert(persisted.outputs[0].active_pixels==0u);
+
+    /* Save O1 from the latest authoritative pair, not O1's stale O2 copy. */
+    next=persisted;
+    next.outputs[0]=live[0].candidate.outputs[0];
+    assert(ot_pz_valid(&next));
+    assert(next.outputs[0].active_pixels==100u);
+    assert(next.outputs[1].active_pixels==37u);
+    persisted=next;
+    ot_pz_preview_cancel(&live[0]);
+    assert(!live[0].active&&!live[1].active);
+    /* Reconnect has no unsaved session, but both saved layouts survive. */
+    assert(persisted.outputs[0].zone_count==1u);
+    assert(persisted.outputs[1].zone_count==1u);
+
+    /* Failed edit never mutates durable layout or the other live lane. */
+    assert(ot_pz_preview_begin(&live[0],&persisted,0u,2u,2u,false,100u));
+    ot_pz_output_t corrupt=persisted.outputs[0];
+    corrupt.active_pixels=1u; /* Its 100-pixel range no longer fits. */
+    assert(!ot_pz_preview_update(&live[0],0u,&corrupt,2u,2u,false,110u));
+    assert(persisted.outputs[0].active_pixels==100u);
+    assert(persisted.outputs[1].active_pixels==37u);
+    assert(!ot_pz_preview_update(&live[0],0u,&persisted.outputs[0],
+                                 1u,2u,false,115u));
+    /* STOP / disconnect invalidates only volatile preview, not persistence. */
+    ot_pz_preview_cancel(&live[0]);
+    assert(!live[0].active);
+    assert(persisted.outputs[0].active_pixels==100u);
+    assert(persisted.outputs[1].active_pixels==37u);
+}
+
 static void activation_quiet_window(void){
     for(unsigned mask=0;mask<256u;mask++){
         const bool quiet=ot_pz_activation_inputs_quiet(
@@ -131,10 +203,10 @@ static void activation_quiet_window(void){
     assert(!ot_pz_activation_inputs_quiet(0u,0u,4u,4u,100u,99u));
 }
 int main(void){
-    preview_lifecycle();range_transaction();fresh_zero_to_100_unsaved_preview();activation_quiet_window();
+    preview_lifecycle();range_transaction();fresh_zero_to_100_unsaved_preview();two_unsaved_lanes_save_and_reconnect();activation_quiet_window();
     printf("Issue126 static object sizes: controller=%zu preview=%zu max_pixels_per_lane=%u wire_bytes=%u\\n",
            sizeof(ot_pz_controller_t),sizeof(ot_pz_preview_t),
            (unsigned)OT_PZ_MAX_PIXELS,(unsigned)OT_PZ_MAX_WIRE_BYTES);
-    puts("PASS Issue126 preview lifecycle, revision checks, coalescing, 5s heartbeat-owned wrap-safe lease and 256-mask activation quiet gate");
+    puts("PASS Issue126 preview lifecycle, revision checks, coalescing, 5s heartbeat-owned lease, independent O1/O2 live/save/reconnect/rollback, and 256-mask quiet gate");
     return 0;
 }
