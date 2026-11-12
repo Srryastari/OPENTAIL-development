@@ -502,6 +502,11 @@
     ],
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
+  "integrated_workflow_pin": {
+    "blob_sha": "83d39789197f4c2298e75a7380d83baa6d9c3cfa",
+    "firmware127_sha": "bf62df16f89f7440734c48d64814210b2e8b19e2",
+    "status": "source-integrity only; physical acceptance remains blocked"
+  },
   "integrated_trees": {
     "android": "1f1afd49a71c0f29cbde8eb43e21fb39fe9df65a",
     "core-firmware": "b64cd8bb7c14638ec37becdb97d43a02b96f282b"
