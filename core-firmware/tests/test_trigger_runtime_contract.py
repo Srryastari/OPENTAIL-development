@@ -241,7 +241,9 @@ assert "sim_mask=0u;" in stop_core
 assert "live_input_mask=" not in stop_core
 assert "tm_gpio_input_mask" not in stop_core
 assert "gpio_set_level" not in stop_core
-assert "geometry_commit_active" in stop_core
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in core
 status = between(core, "static esp_err_t status_get(httpd_req_t *r) {",
                  "static esp_err_t")
 assert "ot_tm_resolve(&tm,physical)" in status
