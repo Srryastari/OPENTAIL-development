@@ -111,6 +111,7 @@ class ComposeMainActivity : ComponentActivity() {
     private var panelGeometryLoadInProgress = false
     private var panelGeometryLoadLane = -1
     private var panelGeometryMapping: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryActiveLane = -1
     private var panelGeometryAppliedMapping: GeometryTransactionManager.LayoutMapping? = null
     private var panelGeometryPlanTarget: GeometryTransactionManager.LayoutMapping? = null
     private var panelGeometryQueuedTarget: GeometryTransactionManager.LayoutMapping? = null
@@ -1809,8 +1810,12 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             } else if(panelGeometryMapping!=null &&
                 !panelGeometryCommitRequested && !panelGeometryCancelRequested) {
-                delay(180)
-                queuePanelGeometryDraftUpdate()
+                if(captureOutput.intValue!=panelGeometryActiveLane) {
+                    cancelPanelGeometryPreview()
+                } else {
+                    delay(180)
+                    queuePanelGeometryDraftUpdate()
+                }
             }
         }
         DisposableEffect(Unit) {
@@ -2102,6 +2107,7 @@ class ComposeMainActivity : ComponentActivity() {
                 mapping.lane(1).descriptorBatches(right,mtu)
             )
             panelGeometryMapping=mapping
+            panelGeometryActiveLane=captureOutput.intValue
             panelGeometryAppliedMapping=null
             panelGeometryPlanTarget=mapping
             panelGeometryQueuedTarget=null
@@ -2182,55 +2188,36 @@ class ComposeMainActivity : ComponentActivity() {
             pumpPanelGeometryActions()
             return
         }
-        for(lane in 0..1) {
-            if(!panelGeometryBeginRequested[lane]) {
-                if(lane==1) {
-                    val first=ble.panelGeometryManager(0)
-                    if(!panelGeometryBeginRequested[0]||
-                       first?.state()!=GeometryTransactionManager.State.ACTIVE)return
-                }
-                if(ble.beginPanelPreview(lane,mapping)) {
-                    panelGeometryBeginRequested[lane]=true
-                    panelGeometryMessage.value="Output "+(lane+1)+" BEGIN accepted; waiting for CORE status acknowledgement..."
+        val lane=panelGeometryActiveLane
+        if(lane !in 0..1)return
+        if(!panelGeometryBeginRequested[lane]) {
+            if(ble.beginPanelPreview(lane,mapping)) {
+                panelGeometryBeginRequested[lane]=true
+                panelGeometryMessage.value="Output "+(lane+1)+" live mapping requested; checking controller status..."
+                panelGeometryRevision.intValue++
+            }
+            return
+        }
+        val manager=ble.panelGeometryManager(lane)?:return
+        if(manager.syncUncertain()) {
+            panelGeometryMessage.value="Output "+(lane+1)+" synchronization uncertain; no further live writes"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+        val plan=panelGeometryPlanTarget
+        if(plan!=null) {
+            if(panelGeometryNextBatch[lane]<panelGeometryBatches[lane].size) {
+                val batch=panelGeometryBatches[lane][panelGeometryNextBatch[lane]]
+                if(ble.updatePanelPreview(lane,plan.lane(lane).candidateWire(),batch)) {
+                    panelGeometryNextBatch[lane]++
+                    panelGeometryChanged[lane]=true
+                    panelGeometryMessage.value="Output "+(lane+1)+" live UPDATE sent; awaiting controller acceptance..."
                     panelGeometryRevision.intValue++
                 }
                 return
             }
-        }
-        for(lane in 0..1) {
-            val manager=ble.panelGeometryManager(lane)
-            if(manager==null) {
-                panelGeometryMessage.value="Waiting for CORE geometry manager on output "+(lane+1)
-                panelGeometryRevision.intValue++
-                return
-            }
-            if(manager.syncUncertain()) {
-                panelGeometryMessage.value="CORE output "+(lane+1)+" synchronization is uncertain; refusing further geometry writes"
-                panelGeometryRevision.intValue++
-                return
-            }
             if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
-        }
-        val plan=panelGeometryPlanTarget
-        if(plan!=null) {
-            for(lane in 0..1) {
-                if(panelGeometryNextBatch[lane]<panelGeometryBatches[lane].size) {
-                    val batch=panelGeometryBatches[lane][panelGeometryNextBatch[lane]]
-                    if(ble.updatePanelPreview(lane,plan.lane(lane).candidateWire(),batch)) {
-                        panelGeometryNextBatch[lane]++
-                        panelGeometryChanged[lane]=true
-                        panelGeometryMessage.value="Output "+(lane+1)+" geometry UPDATE sent; waiting for CORE acknowledgement..."
-                        panelGeometryRevision.intValue++
-                    }
-                    return
-                }
-            }
-            val allAcknowledged=(0..1).all { lane ->
-                val manager=ble.panelGeometryManager(lane)
-                manager?.state()==GeometryTransactionManager.State.ACTIVE&&
-                    panelGeometryNextBatch[lane]>=panelGeometryBatches[lane].size
-            }
-            if(!allAcknowledged)return
             panelGeometryAppliedMapping=plan
             panelGeometryPlanTarget=null
             val queued=panelGeometryQueuedTarget
@@ -2239,7 +2226,7 @@ class ComposeMainActivity : ComponentActivity() {
                 beginNextPanelGeometryPlan(queued)
                 return
             }
-            panelGeometryMessage.value="Live CORE preview active on both outputs. Layout edits stream after acknowledgement; Commit persists the confirmed geometry."
+            panelGeometryMessage.value="Live mapping active on output "+(lane+1)+"; no Save required for playback."
             panelGeometryRevision.intValue++
         } else {
             val queued=panelGeometryQueuedTarget
@@ -2261,8 +2248,9 @@ class ComposeMainActivity : ComponentActivity() {
             panelGeometryRevision.intValue++
             return
         }
-        if((0..1).any { ble.panelGeometryManager(it)?.state()!=GeometryTransactionManager.State.ACTIVE }) {
-            panelGeometryMessage.value="Both CORE preview sessions must be active before Commit"
+        if(panelGeometryActiveLane !in 0..1 ||
+            ble.panelGeometryManager(panelGeometryActiveLane)?.state()!=GeometryTransactionManager.State.ACTIVE) {
+            panelGeometryMessage.value="Selected output live transaction is not yet active"
             panelGeometryRevision.intValue++
             return
         }
@@ -2349,6 +2337,7 @@ class ComposeMainActivity : ComponentActivity() {
 
     private fun clearPanelGeometryPreview(message:String) {
         panelGeometryMapping=null
+        panelGeometryActiveLane=-1
         panelGeometryAppliedMapping=null
         panelGeometryPlanTarget=null
         panelGeometryQueuedTarget=null
