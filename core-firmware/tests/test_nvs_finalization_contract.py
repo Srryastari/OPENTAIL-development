@@ -120,9 +120,9 @@ assert "nvs_set_blob(" not in legacy_output_save
 assert "static void om_promote(" not in core
 assert "static void pz_sync_from_legacy(" not in core
 
-# A damaged legacy Output Manager journal cannot veto a valid v3
-# Panel/Zone journal or tombstone. It is fatal only if migration must fall
-# all the way back to the old Output Manager records.
+# A damaged legacy Output Manager journal cannot veto a valid v4
+# or v3 record. Owner has retired v1 test PROFILE migration altogether.
+# With no v4/v3 authority, start at genuine 0-LED Panel v4 defaults.
 legacy_om_load=between("static void om_journal_load(void){",
                        "static esp_err_t pz_journal_read(")
 assert "config_recovery_fault" not in legacy_om_load
@@ -133,11 +133,11 @@ assert "snapshot->has_marker||snapshot->has_intent" in pz_load
 assert "if(om_legacy_journal_fault)" not in pz_load
 assert pz_load.index("if(v4_authoritative)") < pz_load.index(
     "pz_load_legacy_snapshot")
-assert "if(om_legacy_journal_fault)return false;" in legacy_load
-assert legacy_load.index("if(om_legacy_journal_fault)return false;") > legacy_load.index(
-    "if(has_tombstone)")
-assert legacy_load.index("if(om_legacy_journal_fault)return false;") < legacy_load.index(
-    "ot_pz_migrate_legacy")
+assert legacy_load.index("if(has_tombstone)") < legacy_load.index(
+    "Fresh Panel v4 defaults")
+assert 'ot_pz_defaults(previous);*candidate=*previous;' in legacy_load
+assert "ot_pz_migrate_legacy(om_outputs" not in legacy_load
+assert "if(om_legacy_journal_fault)return false;" not in legacy_load
 # Multi-kilobyte pair/journal records live in one bounded static workspace,
 # never as nested local snapshots on the 5,120-byte activation task stack.
 store_header=(root/"main/panel_zone_pair_store.h").read_text()
