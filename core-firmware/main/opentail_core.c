@@ -1498,14 +1498,25 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     const TickType_t now=xTaskGetTickCount();
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
-    bool busy,stale,exhausted;
+    bool busy,stale,exhausted,live_match=false;
     portENTER_CRITICAL(&state_lock);
     *candidate=pz_outputs;
-    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||pz_preview.active||
+    /* A direct authoritative v4 Save may persist the exact current live
+     * preview, without a separate user-visible COMMIT. Never accept a stale
+     * or divergent upload: that could replace LEDs that are playing now.
+     * Nonmatching previews and other-lane sessions remain protected. */
+    live_match=pz_preview.active&&!pz_preview.committing&&
+        pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
+        (int32_t)(now_ms-pz_preview.expires_ms)<0&&
+        memcmp(&pz_preview.candidate.outputs[lane],next,sizeof(*next))==0;
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+        (pz_preview.active&&!live_match)||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
-    stale=pz_revision[lane]!=base_revision;
+    stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision;
     exhausted=pz_revision[lane]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return 2;}
@@ -1519,6 +1530,14 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     }
     candidate->outputs[lane]=*next;
     if(!ot_pz_valid(candidate)){xSemaphoreGive(om_write_mutex);return 1;}
+    /* Freeze accepted live geometry during the journal transaction. A render
+     * frame continues to use the same shadow pixels until staged+active v4
+     * readback promotes that map; no black frame or FX phase reset. */
+    if(live_match){
+        portENTER_CRITICAL(&state_lock);
+        pz_preview.committing=true;
+        portEXIT_CRITICAL(&state_lock);
+    }
     /* The authoritative Panel v4 Save also originates in the NimBLE GATT
      * callback. Record host-stack headroom and durable journal timing without
      * introducing another controller copy or changing ACK ordering. A later
@@ -1536,10 +1555,18 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
         (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
         (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
         (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    if(saved){
+    if(live_match){
         portENTER_CRITICAL(&state_lock);
-        ot_pz_preview_cancel(&pz_preview);
+        if(!saved){
+            /* Failed/uncertain NVS outcome is never silently retried. Keep
+             * the previously accepted preview available for reconciliation. */
+            pz_preview.committing=false;
+            pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        }
+        /* On success keep the preview rendered until pz_promote() publishes
+         * the confirmed active revision and retires it atomically. */
         portEXIT_CRITICAL(&state_lock);
+    }else if(saved){
         request_render_refresh();
     }
     xSemaphoreGive(om_write_mutex);
