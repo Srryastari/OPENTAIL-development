@@ -3279,10 +3279,14 @@ class ComposeMainActivity : ComponentActivity() {
                     return
                 }
                 edit {
-                    it.put("panel_id",firstPanel.id).put("panel_name",firstPanel.name)
+                    // Panel Preview v2 resolves local aliases into stable
+                    // full 16-bit identities before accepting live ranges.
+                    val panelFull=0x8000 or (firstPanel.id and 0xff)
+                    val zoneFull=0x4000 or (first.id and 0xff)
+                    it.put("panel_id",panelFull).put("panel_name",firstPanel.name)
                     it.getJSONArray("zones").put(JSONObject()
-                        .put("id",first.id).put("panel_id",firstPanel.id)
-                        .put("name",label).put("pixels",newTotal).put("role","off"))
+                        .put("id",zoneFull).put("panel_id",panelFull)
+                        .put("name",label).put("pixels",newTotal).put("role","unassigned"))
                     it.put("pixels",newTotal)
                 }
                 structureVersion++
@@ -3723,12 +3727,14 @@ class ComposeMainActivity : ComponentActivity() {
                             // Same stable aliases as the project geometry
                             // planner; a later resize must not create a
                             // second, unrelated physical Zone ID.
-                            val zoneId=128+index*8+newSection+1
+                            val zoneId=0x4000 or (128+index*8+newSection+1)
                             edit {
-                                it.put("panel_id",panelId).put("panel_name",panelName)
+                                val panelFull=it.optInt("panel_id",0)
+                                    .takeIf { p -> p>0 } ?: (0x8000 or panelId)
+                                it.put("panel_id",panelFull).put("panel_name",panelName)
                                 it.getJSONArray("zones").put(JSONObject()
-                                    .put("id",zoneId).put("panel_id",panelId)
-                                    .put("name",label).put("pixels",0).put("role","off"))
+                                    .put("id",zoneId).put("panel_id",panelFull)
+                                    .put("name",label).put("pixels",0).put("role","unassigned"))
                             }
                             structureVersion++
                             layoutLiveEditPending.value=true
