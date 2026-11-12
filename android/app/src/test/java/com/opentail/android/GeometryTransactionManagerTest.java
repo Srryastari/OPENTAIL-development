@@ -292,13 +292,15 @@ public class GeometryTransactionManagerTest {
     }
 
     private static void physicalZone(NativeProject project,String name,int pixels,
-            int lane,int section) {
-        assertTrue(project.addZone(name,pixels));
-        String id=project.zone(project.zoneCount()-1).optString("id");
-        assertTrue(project.mapZoneToOutputSlot(id,lane,section));
+            int lane,int section) throws Exception {
+        // The GS400 housing/trunk split is now an explicit owner layout,
+        // never a hidden fallback forced onto arbitrary universal sections.
+        int panel=lane*2+(section==4?2:1);
+        String panelName=(lane==0?"Left ":"Right ")+(section==4?"Trunk":"Housing");
+        mappedZone(project,name,pixels,lane,section,panel,panelName);
     }
 
-    @Test public void exactOwnerApprovedGs400LayoutGetsDeterministicHousingAndTrunkPanels() {
+    @Test public void exactOwnerApprovedGs400LayoutGetsDeterministicHousingAndTrunkPanels() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         int[] pixels={118,109,42,253,101};
         String[] sections={"Top","Amber","Reverse","Bottom","Trunk"};
@@ -316,7 +318,7 @@ public class GeometryTransactionManagerTest {
         assertEquals("Left Trunk",mapping.lane(0).panels.get(1).name);
     }
 
-    @Test public void gs400PanelIdentityRemainsStableWhenPixelCountsAreEdited() {
+    @Test public void gs400PanelIdentityRemainsStableWhenPixelCountsAreEdited() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         int[] edited={120,110,40,250,103}; // Same owner-approved sections; total remains 623.
         String[] sections={"Top","Amber","Reverse","Bottom","Trunk"};
@@ -334,11 +336,18 @@ public class GeometryTransactionManagerTest {
         assertEquals(103,left.zones.get(4).count);
     }
 
-    @Test public void geometryMappingNeverGuessesMissingPanelIdentity() {
+    @Test public void geometryMappingNeverGuessesMissingPanelIdentity() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         assertTrue(project.addZone("Unassigned panel",10));
         String id=project.zone(0).optString("id");
         assertTrue(project.mapZoneToOutputSlot(id,0,0));
+        // The interactive universal assignment legitimately chooses a stable
+        // Panel. A malformed imported document with the identity removed
+        // must still fail closed rather than invent one during CORE mapping.
+        JSONObject imported=new JSONObject(project.exportJson());
+        JSONObject zone=imported.getJSONArray("layout").getJSONObject(0);
+        zone.remove("physicalPanelId");zone.remove("physicalPanelName");
+        assertTrue(project.importJson(imported.toString()));
         try { GeometryTransactionManager.mapLayout(project);fail("Panel identity must not be guessed"); }
         catch(IllegalStateException expected) {
             assertTrue(expected.getMessage().contains("explicit CORE Panel identity"));
