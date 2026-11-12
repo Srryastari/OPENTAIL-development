@@ -413,12 +413,16 @@ class ComposeMainActivity : ComponentActivity() {
                 // A preview session cannot survive a lost GATT connection.
                 // Keep local Layout edits, but discard all pending shadow-map
                 // batches; only fresh CORE readback can start the next preview.
-                val hadPreview = panelGeometryMapping != null
+                val hadPreview = anyLanePreviewActive()
                 val wasLoading = panelGeometryLoadInProgress
                 panelGeometryLoadInProgress = false
                 panelGeometryLoadLane = -1
-                if (hadPreview)
-                    clearPanelGeometryPreview("CORE disconnected; unsaved Layout remains local. Reconnect and Refresh CORE to load authoritative geometry.")
+                if(hadPreview) {
+                    for(lane in 0..1) {
+                        activateLaneState(lane)
+                        clearPanelGeometryPreview("CORE disconnected; both unsaved drafts remain local. Reconnect for authoritative readback.")
+                    }
+                }
                 else if (wasLoading) {
                     panelGeometryMessage.value = "CORE disconnected during readback; reconnect and Refresh CORE."
                     panelGeometryRevision.intValue++
@@ -455,7 +459,7 @@ class ComposeMainActivity : ComponentActivity() {
                 panelStatusSummary.value = if(status==null) "Panel telemetry disconnected" else
                     status.diagnosticSummary()
                 panelGeometryRevision.intValue++
-                pumpPanelGeometry()
+                pumpEveryLaneGeometry()
             }
         }, { decision ->
             runOnUiThread {
@@ -585,6 +589,7 @@ class ComposeMainActivity : ComponentActivity() {
                         // atomically after durable readback. Retire only the
                         // Android session bookkeeping; do NOT send CANCEL,
                         // STOP or another COMMIT to the physical output.
+                        if(completedSave)activateLaneState(index)
                         if(completedSave && panelGeometryMapping!=null &&
                             panelGeometryActiveLane==index) {
                             clearPanelGeometryPreview("Panel v4 saved and confirmed. Playback continues from the committed mapping.")
@@ -661,9 +666,14 @@ class ComposeMainActivity : ComponentActivity() {
             if(geometryEpoch>0) {
                 var lastHeartbeat=0L
                 while(isActive) {
-                    if(panelGeometryMapping==null&&panelSaveQueuedLane<0)break
-                    pumpPanelGeometry()
-                    pumpPanelQueuedSave()
+                    if(!anyLanePreviewActive()&&panelSaveQueuedLane<0)break
+                    pumpEveryLaneGeometry()
+                    if(panelSaveQueuedLane in 0..1) {
+                        val editingLane=captureOutput.intValue.coerceIn(0,1)
+                        activateLaneState(panelSaveQueuedLane)
+                        pumpPanelQueuedSave()
+                        activateLaneState(editingLane)
+                    }
                     val now=System.currentTimeMillis()
                     if(now-lastHeartbeat>=1500L) {
                         for(lane in 0..1) {
@@ -1888,11 +1898,12 @@ class ComposeMainActivity : ComponentActivity() {
         val geometryEpoch = panelGeometryEpoch.intValue
         LaunchedEffect(modelRevision,geometryEpoch,panelGeometryRevision.intValue,
             layoutLiveEditPending.value,captureOutput.intValue) {
+            activateLaneState(captureOutput.intValue)
             if(layoutLiveEditPending.value && panelGeometryMapping==null &&
                 !panelGeometryCommitRequested && !panelGeometryCancelRequested &&
                 ble.canReadPanelPreview()) {
                 delay(180)
-                if(ble.panelGeometryReady()) {
+                if(ble.panelGeometryReady(captureOutput.intValue)) {
                     // Only one BEGIN for each prepared edit; status updates
                     // must not continuously restart a default read/preview.
                     layoutLiveEditPending.value=false
@@ -1913,9 +1924,7 @@ class ComposeMainActivity : ComponentActivity() {
                         layoutLiveEditPending.value=false
                     }
                 } else if(layoutLiveEditPending.value) {
-                    panelGeometryMessage.value="O"+(panelGeometryActiveLane+1)+
-                        " remains live. O"+(captureOutput.intValue+1)+
-                        " draft retained; independent BLE sessions require Firmware #127."
+                    panelGeometryMessage.value="Selected output is reconciling its own live Panel v4 mapping."
                 }
             }
         }
@@ -2174,10 +2183,11 @@ class ComposeMainActivity : ComponentActivity() {
                 panelGeometryMessage.value="Both snapshots received; waiting for fresh status-v2 confirmation..."
             }
         }
-        pumpPanelGeometry()
+        pumpEveryLaneGeometry()
     }
 
     private fun startPanelGeometryPreview() {
+        activateLaneState(captureOutput.intValue)
         if(panelGeometryMapping!=null) {
             panelGeometryMessage.value="A CORE shadow preview is already active; continue editing or Commit/Cancel it"
             panelGeometryRevision.intValue++
@@ -2188,8 +2198,8 @@ class ComposeMainActivity : ComponentActivity() {
             panelGeometryRevision.intValue++
             return
         }
-        if(!ble.panelGeometryReady()) {
-            panelGeometryMessage.value="Fresh output 1 and output 2 snapshots/statuses are required; refreshing now..."
+        if(!ble.panelGeometryReady(captureOutput.intValue)) {
+            panelGeometryMessage.value="Selected output needs a fresh idle v4 status; other output playback remains active."
             refreshPanelGeometry()
             return
         }
@@ -2497,8 +2507,8 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     private fun clearPanelGeometryPreview(message:String) {
+        val lane=panelGeometryActiveLane
         panelGeometryMapping=null
-        panelGeometryActiveLane=-1
         panelGeometryAppliedMapping=null
         panelGeometryPlanTarget=null
         panelGeometryQueuedTarget=null
@@ -2513,6 +2523,7 @@ class ComposeMainActivity : ComponentActivity() {
         panelGeometryCommitRequested=false
         panelGeometryCancelRequested=false
         panelGeometryDraftValid=true
+        if(lane in 0..1)lanePreviewStates[lane]=LanePreviewState()
         panelGeometryEpoch.intValue++
         panelGeometryMessage.value=message
         panelGeometryRevision.intValue++
@@ -3377,6 +3388,7 @@ class ComposeMainActivity : ComponentActivity() {
             if(choosingOutput) Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                 Pill(outputTab(0),t,index==0) {
                     captureOutput.intValue=0
+                    activateLaneState(0)
                     choosingOutput=false
                     liveChainMask.intValue=1
                     lastAutoGeometryRefresh.intValue=-1
@@ -3385,6 +3397,7 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 Pill(outputTab(1),t,index==1) {
                     captureOutput.intValue=1
+                    activateLaneState(1)
                     choosingOutput=false
                     liveChainMask.intValue=2
                     lastAutoGeometryRefresh.intValue=-1
@@ -3490,12 +3503,7 @@ class ComposeMainActivity : ComponentActivity() {
                             ?: throw IllegalStateException("Read authoritative Panel v4 before saving")
                         PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)
                         if(!ble.canConfigure()) outputMessage.value="Not authorized"
-                        else if(panelGeometryMapping!=null &&
-                                panelGeometryActiveLane!=index) {
-                            outputMessage.value="O"+(panelGeometryActiveLane+1)+
-                                " keeps playing. O"+(index+1)+
-                                " Save needs independent per-lane BLE preview support; no partial Save performed."
-                        } else {
+                        else {
                             // Freeze this owner's Save request. UPDATE ACKs
                             // may still be in flight; queue once, never re-Save
                             // after GATT 133 or an uncertain controller ACK.
