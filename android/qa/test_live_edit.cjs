@@ -147,7 +147,7 @@ assert(hardwareBlock.includes('ble.savePanelV4(index, draftText)') &&
        hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
        hardwareBlock.includes('"Saving…" else "Save"') &&
        compose.includes('val completedSave = index == savingOutput.intValue') &&
-       ble.includes('if(Arrays.equals(panelSaveWire,snapshot.wire))'),
+       ble.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
   'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
