@@ -17,6 +17,8 @@ const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/andr
 const approved=fs.readFileSync('android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
 const panelProtocol=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java','utf8');
+const panelV4=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java','utf8');
+const panelDraft=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java','utf8');
 const panelWatchdog=fs.readFileSync('android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java','utf8');
 const geometryTransactions=fs.readFileSync('android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
@@ -361,8 +363,10 @@ assert(hardware.includes('PanelV4DraftCodec.MAX_LEDS') &&
 // A rejected GATT save is not an in-flight hardware commit. Readback, not
 // request admission, remains the only success evidence.
 assert(bleSource.includes('boolean savePanelV4(int lane,String json)') &&
-       bleSource.includes('Load this output over BLE before saving",null,index);return false;') &&
-       bleSource.includes('BLE is busy; retry after current transfer",null,index);return false;') &&
+       bleSource.includes('PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane)') &&
+       bleSource.includes('panelSaveBusy=true;panelSaveLane=lane;') &&
+       bleSource.includes('panelSavePhase=4') &&
+       bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)') &&
        hardware.includes('if (ble.savePanelV4(index, draftText))') &&
        hardware.includes('Controller busy; no Save started'),
   'Output Manager must not claim a rejected save is verifying hardware');
@@ -1376,6 +1380,16 @@ assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
   bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
   'Zero LED drafts must stay inert; saved CORE state still requires readback');
 
+assert(!compose.includes('ble.saveOutput(index, draftText)') &&
+       !compose.includes('ble.readOutputIfReady(index)') &&
+       panelDraft.includes('PanelPreviewProtocol.MapIdentity.parse(snapshot)') &&
+       panelDraft.includes('v4_editable') &&
+       panelV4.includes('parseStartFreshChallenge') &&
+       bleSource.includes('startFreshPanelV4(int lane)') &&
+       bleSource.includes('panelSavePhase==7') &&
+       finalOutput.includes('Pill("Start Fresh"') &&
+       finalOutput.includes('ble.startFreshPanelV4(index)'),
+       'User-facing Layout must use only authoritative Panel v4 and protected Start Fresh');
 assert(finalLayout.includes('LightingDirectory(t)') &&
   finalLayout.includes('if(advancedOpen) {') &&
   finalOutput.includes('Pill(outputTab(0),t,index==0)') &&
