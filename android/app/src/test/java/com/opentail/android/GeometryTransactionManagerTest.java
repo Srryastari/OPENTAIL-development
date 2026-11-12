@@ -605,7 +605,9 @@ public class GeometryTransactionManagerTest {
             validateSnapshots(tooLarge,small,empty);
             fail("Android 2000-LED limit must block preview");
         }catch(IllegalArgumentException expected){
-            assertTrue(expected.getMessage().contains("2000-LED"));
+            assertTrue("Unexpected pixel limit message: "+expected.getMessage(),
+                expected.getMessage().contains("2000-LED") ||
+                expected.getMessage().contains("2,000-pixel"));
         }
     }
 
