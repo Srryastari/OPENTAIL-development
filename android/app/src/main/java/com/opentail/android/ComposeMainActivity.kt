@@ -260,7 +260,11 @@ class ComposeMainActivity : ComponentActivity() {
                 ?.zones?.any { it.ranges.any { r -> r.count>0 } } ?: false
         }.getOrDefault(false)
         val liveGeometryActive = ble.panelGeometryManager(index)?.state() ==
-            GeometryTransactionManager.State.ACTIVE && panelGeometryMapping != null
+            GeometryTransactionManager.State.ACTIVE &&
+            panelGeometryActiveLane==index &&
+            panelGeometryAppliedMapping?.lane(index)?.zones?.any { it.count>0 }==true &&
+            panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
+            panelGeometryDraftValid && !panelGeometryCommitRequested
         if(index !in 0..1 || !ble.canControl() ||
             !(hasConfirmedZone || (liveGeometryActive && hasLiveZone))) {
             outputMessage.value =
