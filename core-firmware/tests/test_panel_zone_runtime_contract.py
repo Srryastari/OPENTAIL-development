@@ -67,6 +67,21 @@ assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
 assert "pz_preview.active" in panel_save
 assert "is_show_mode_active" not in panel_save
+# A simple Save persists the exact accepted live candidate, no exposed Commit
+# required; keep the current effect/geometry rendered until journal promotion.
+assert "live_match=pz_preview.active&&!pz_preview.committing" in panel_save
+assert "memcmp(&pz_preview.candidate.outputs[lane],next,sizeof(*next))==0" in panel_save
+assert "pz_preview.committing=true" in panel_save
+assert "if(live_match)" in panel_save and "if(!saved)" in panel_save
+assert "pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS" in panel_save
+assert "ot_pz_preview_cancel(&pz_preview)" not in panel_save.split("const bool saved=pz_save_controller_locked(candidate);",1)[1]
+cfg_writer=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
+assert "const bool live_save=panel_preview_tx.active" in cfg_writer
+assert "panel_preview_tx.lane==lane&&panel_preview_tx.base_revision==revision" in cfg_writer
+assert "ot_ble_panel_preview_heartbeat(lane,revision)" in cfg_writer
+assert "ot_ble_panel_preview_heartbeat(lane,panel_upload_revision)" in cfg_writer
+assert "panel_preview_tx.committing=true" in cfg_writer
+assert "panel_preview_tx.status=OT_PZ_TX_COMMITTING" in cfg_writer
 
 for token in ("panel_preview_control_write","panel_preview_update_write",
               "panel_preview_status_read","ot_panel_preview_control_uuid",
