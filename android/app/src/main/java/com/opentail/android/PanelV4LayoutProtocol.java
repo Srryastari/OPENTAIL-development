@@ -27,6 +27,51 @@ final class PanelV4LayoutProtocol {
             throw new IllegalArgumentException("Invalid authoritative Panel revision");
     }
 
+    /** Firmware Panel CFG opcode 3: begin a revision-bound immutable upload. */
+    static byte[] beginSave(int lane,int baseRevision,byte[] wire) {
+        lane(lane);revision(baseRevision);validateWireLane(lane,wire);
+        int crc=PanelPreviewProtocol.crc16(wire);
+        return new byte[]{3,3,(byte)lane,(byte)MAP_BYTES,(byte)(MAP_BYTES>>>8),
+            (byte)crc,(byte)(crc>>>8),(byte)baseRevision,(byte)(baseRevision>>>8)};
+    }
+
+    /** Firmware Panel CFG opcode 4: exactly one 1..15 byte chunk. */
+    static byte[] saveChunk(int lane,byte[] wire,int offset) {
+        lane(lane);validateWireLane(lane,wire);
+        if(offset<0||offset>=MAP_BYTES)
+            throw new IllegalArgumentException("Invalid Panel upload offset");
+        int count=Math.min(15,MAP_BYTES-offset);
+        byte[] packet=new byte[5+count];
+        packet[0]=3;packet[1]=4;packet[2]=(byte)lane;
+        packet[3]=(byte)offset;packet[4]=(byte)(offset>>>8);
+        System.arraycopy(wire,offset,packet,5,count);
+        return packet;
+    }
+
+    static byte[] completeSave(int lane) {
+        lane(lane);return new byte[]{3,5,(byte)lane};
+    }
+
+    static byte[] cancelUncommittedSave(int lane) {
+        lane(lane);return new byte[]{3,6,(byte)lane};
+    }
+
+    /** A 4-byte write acknowledgement, never proof of durable Save. */
+    static int parseSaveAck(int lane,int opcode,byte[] ack) {
+        lane(lane);
+        if(opcode<3||opcode>6||ack==null||ack.length!=4||
+           (ack[0]&255)!=3||(ack[1]&255)!=(0x80|opcode)||
+           (ack[2]&255)!=lane)
+            throw new IllegalArgumentException("Stale or invalid Panel Save ACK");
+        return ack[3]&255;
+    }
+
+    private static void validateWireLane(int lane,byte[] wire) {
+        if(wire==null||wire.length!=MAP_BYTES||
+           (wire[0]&255)!=WIRE_VERSION||(wire[1]&255)!=lane)
+            throw new IllegalArgumentException("Invalid or cross-lane Panel v4 wire");
+    }
+
     static byte[] startFreshChallenge(int lane,int confirmedRevision) {
         lane(lane);revision(confirmedRevision);
         return new byte[]{3,(byte)0xff,(byte)0xaa,(byte)lane,
