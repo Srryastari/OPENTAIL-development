@@ -1135,9 +1135,22 @@ static bool pz_controller_wire_crc32(const ot_pz_controller_t *candidate,
     *crc32=ot_cfg_crc32(canonical,sizeof(canonical));
     return true;
 }
+bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32){
+    if(lane>=OT_PZ_OUTPUTS||!crc32)return false;
+    ot_pz_controller_t committed;
+    bool valid=false;
+    portENTER_CRITICAL(&state_lock);
+    valid=pz_persistent&&pz_active_revision[lane]==revision&&
+        pz_revision[lane]==revision&&!pz_deferred.pending&&
+        !__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    if(valid)committed=pz_outputs;
+    portEXIT_CRITICAL(&state_lock);
+    return valid&&pz_controller_wire_crc32(&committed,crc32);
+}
 int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
                                uint16_t pixel_capacity){
-    if(lane>=OT_PZ_OUTPUTS||pixel_capacity==0u||base_revision==UINT16_MAX)return 1;
+    if(lane>=OT_PZ_OUTPUTS||pixel_capacity>OT_PZ_MAX_PIXELS||
+       base_revision==UINT16_MAX)return 1;
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
        !native_outputs_ready)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
@@ -1146,11 +1159,22 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
     bool accepted=false;
     portENTER_CRITICAL(&state_lock);
     const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
-    const bool capacity_ok=pz_outputs.outputs[lane].active_pixels==pixel_capacity;
+    /* Requested capacity belongs to volatile preview, not saved NVS.
+     * Permit a fresh zero-LED lane to commission 100 LEDs without Save.
+     * Reject shrinking below any still-mapped endpoint; do not render an
+     * invalid intermediate geometry or mutate the committed records. */
+    const bool capacity_ok=pixel_capacity<=OT_PZ_MAX_PIXELS;
     accepted=!pending&&!pz_preview.active&&capacity_ok&&
         pz_revision[lane]==base_revision&&pz_active_revision[lane]==base_revision&&
         ot_pz_preview_begin(&pz_preview,&pz_outputs,lane,
                             pz_active_revision[lane],base_revision,pending,now_ms);
+    if(accepted){
+        pz_preview.candidate.outputs[lane].active_pixels=pixel_capacity;
+        if(!ot_pz_valid(&pz_preview.candidate)){
+            ot_pz_preview_cancel(&pz_preview);
+            accepted=false;
+        }
+    }
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     if(accepted)request_render_refresh();
