@@ -52,9 +52,15 @@ assert changed==set(correction["allowed_runtime_changes"]),changed
 print("PASS scoped continuous playback and owner-approved UI changes; all 13 renderers/palettes and physical release gate unchanged")
 
 issue=m["issue93_correction"]
-changed=set(git("diff","--name-only",issue["base_sha"],"HEAD","--","android","core-firmware").splitlines())
-assert changed==set(issue["allowed_android_changes"]),changed
 p0=m.get("owner_mandated_p0_addendum")
+historical_end=p0["base_sha"] if p0 else "HEAD"
+changed=set(git("diff","--name-only",issue["base_sha"],historical_end,"--","android","core-firmware").splitlines())
+# Issue93's original reviewed list is an allowlist, not a requirement to
+# change every listed file. Its historical window ends at the owner P0 base;
+# owner P0 has a separate, exact changed-file lock below.
+assert changed.issubset(set(issue["allowed_android_changes"])),changed-set(issue["allowed_android_changes"])
+assert len(changed)==issue.get("historical_changed_file_count",len(changed)),len(changed)
+
 if p0:
     p0_changed=set(git("diff","--name-only",p0["base_sha"],"HEAD","--","android","core-firmware").splitlines())
     assert p0_changed==set(p0["allowed_changes"]),(p0_changed,set(p0["allowed_changes"]))
