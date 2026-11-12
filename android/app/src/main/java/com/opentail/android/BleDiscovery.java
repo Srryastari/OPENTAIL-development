@@ -1535,8 +1535,14 @@ final class BleDiscovery {
             return;
         }
         if (stop&&panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&
-            !panelSnapshotBusy&&!panelSaveWaitingWrite&&!panelSaveWaitingRead)
+            !panelSnapshotBusy&&!panelSaveWaitingWrite&&!panelSaveWaitingRead) {
+            // Queue STOP before releasing the Save owner; pumpQueue must never
+            // dispatch an earlier FX packet ahead of this safety command.
+            nextPacket=Arrays.copyOf(data,data.length);
+            afterStopPacket=null;
             panelSaveFinish(false,"STOP prioritized; durable Save must be reconciled after reconnect",null);
+            return;
+        }
         if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
             panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
