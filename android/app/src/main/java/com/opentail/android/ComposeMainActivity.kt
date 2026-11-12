@@ -3224,12 +3224,16 @@ class ComposeMainActivity : ComponentActivity() {
                     captureOutput.intValue=0
                     choosingOutput=false
                     liveChainMask.intValue=1
+                    lastAutoGeometryRefresh.intValue=-1
+                    if(outputDirty[0]==true)layoutLiveEditPending.value=true
                     invalidateCoreFrame()
                 }
                 Pill(outputTab(1),t,index==1) {
                     captureOutput.intValue=1
                     choosingOutput=false
                     liveChainMask.intValue=2
+                    lastAutoGeometryRefresh.intValue=-1
+                    if(outputDirty[1]==true)layoutLiveEditPending.value=true
                     invalidateCoreFrame()
                 }
             }
