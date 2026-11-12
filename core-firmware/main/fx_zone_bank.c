@@ -81,8 +81,9 @@ bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
     }
     return true;
 }
-/* Resolve broad BLE masks against actual configured zones. Avoid acknowledging
- * phantom/disabled zones, and never reset a different zone's live effect.
+/* Resolve FX masks against nonempty mapped zones, regardless of vehicle input
+ * role. OFF disables road-trigger overrides, not owner-directed Show effects.
+ * Never acknowledge absent zones or reset a different zone's effect.
  * A two-output target may contain differently sized independent layouts. */
 bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
  const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
@@ -97,8 +98,7 @@ bool ot_fx_bank_apply_configured(ot_fx_zone_bank_t *bank,
   const ot_om_output_t *out=&outputs[o];
   if(out->zone_count>OT_OM_ZONES)return false;
   for(unsigned z=0;z<out->zone_count;z++){
-   if((request->zone_mask&(1u<<z))&&out->zones[z].pixels>0&&
-      out->zones[z].role!=OT_OM_OFF){
+   if((request->zone_mask&(1u<<z))&&out->zones[z].pixels>0){
      masks[o]=(uint8_t)(masks[o]|(1u<<z));
      selected=true;
    }
@@ -128,8 +128,7 @@ bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
   if(!(chain_mask&(1u<<o)))continue;
   if(outputs[o].zone_count>OT_OM_ZONES)return false;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u&&
-      outputs[o].zones[z].role!=OT_OM_OFF &&
+   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u &&
       ot_fx_slot_active(&bank->zones[o][z],now_ms))
     active=true;
  }
@@ -137,8 +136,7 @@ bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!(chain_mask&(1u<<o)))continue;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u&&
-      outputs[o].zones[z].role!=OT_OM_OFF &&
+   if((zone_mask&(1u<<z))&&outputs[o].zones[z].pixels>0u &&
       ot_fx_slot_active(&bank->zones[o][z],now_ms))
     bank->zones[o][z].overlay=*overlay;
  }
@@ -156,8 +154,7 @@ static bool resolve_requested_slots(ot_fx_zone_bank_t *bank,
  *bank_mask=0u;
  for(unsigned zone=0;zone<output_cfg->zone_count;zone++){
   if(!(requested_mask&(1u<<zone)))continue;
-  if(output_cfg->zones[zone].pixels==0u||
-     output_cfg->zones[zone].role==OT_OM_OFF)continue;
+  if(output_cfg->zones[zone].pixels==0u)continue;
   unsigned bank_z=resolved[zone];
   if(bank_z>=OT_OM_ZONES){
    if(require_active)continue;
@@ -205,8 +202,7 @@ bool ot_fx_bank_apply_configured_identity(ot_fx_zone_bank_t *bank,
   if(outputs[o].zone_count>OT_OM_ZONES)return false;
   bool has_target=false;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
-      outputs[o].zones[z].role!=OT_OM_OFF)has_target=true;
+   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels)has_target=true;
   if(!has_target)continue;
   if(!resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
       request->zone_mask,now_ms,false,&masks[o],resolved[o]))return false;
@@ -245,8 +241,7 @@ bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
   if(total!=outputs[o].active_pixels)return false;
   bool has_target=false;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
-      outputs[o].zones[z].role!=OT_OM_OFF)has_target=true;
+   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels)has_target=true;
   if(!has_target)continue;
   if(!resolve_requested_slots(bank,&outputs[o],&panel_outputs[o],o,
       request->zone_mask,now_ms,false,&masks[o],resolved[o]))return false;
@@ -365,8 +360,7 @@ bool ot_fx_bank_apply_continuous_tertiary(ot_fx_zone_bank_t *bank,
   }
   if(total!=outputs[o].active_pixels)return false;
   for(unsigned z=0;z<outputs[o].zone_count;z++)
-   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels&&
-      outputs[o].zones[z].role!=OT_OM_OFF){masks[o]|=(uint8_t)(1u<<z);any=true;}
+   if((request->zone_mask&(1u<<z))&&outputs[o].zones[z].pixels){masks[o]|=(uint8_t)(1u<<z);any=true;}
  }
  if(!any)return false;
  /* All rejection paths precede mutation. Drop only previous continuous
