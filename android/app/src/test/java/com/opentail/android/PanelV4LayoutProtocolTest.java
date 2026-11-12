@@ -35,6 +35,40 @@ public class PanelV4LayoutProtocolTest {
             PanelV4LayoutProtocol.startFreshConfirm(0,0x5678,0x89abcdefL));
     }
 
+    @Test public void durableUploadUsesExact667ByteV4WireAndFifteenByteChunks() {
+        byte[] wire=PanelV4LayoutProtocol.expectedFactoryMap(1);
+        byte[] begin=PanelV4LayoutProtocol.beginSave(1,0x1234,wire);
+        assertEquals(9,begin.length);
+        assertEquals(3,begin[0]&255);assertEquals(3,begin[1]&255);
+        assertEquals(1,begin[2]&255);
+        assertEquals(667, (begin[3]&255)|((begin[4]&255)<<8));
+        assertEquals(PanelPreviewProtocol.crc16(wire),
+            (begin[5]&255)|((begin[6]&255)<<8));
+        assertEquals(0x1234,(begin[7]&255)|((begin[8]&255)<<8));
+        int offset=0;
+        while(offset<wire.length) {
+            byte[] chunk=PanelV4LayoutProtocol.saveChunk(1,wire,offset);
+            assertTrue(chunk.length>=6&&chunk.length<=20);
+            assertEquals(3,chunk[0]&255);assertEquals(4,chunk[1]&255);
+            assertEquals(1,chunk[2]&255);
+            assertEquals(offset,(chunk[3]&255)|((chunk[4]&255)<<8));
+            for(int k=5;k<chunk.length;k++)assertEquals(wire[offset+k-5],chunk[k]);
+            offset+=chunk.length-5;
+        }
+        assertEquals(667,offset);
+        assertArrayEquals(new byte[]{3,5,1},PanelV4LayoutProtocol.completeSave(1));
+        assertArrayEquals(new byte[]{3,6,1},PanelV4LayoutProtocol.cancelUncommittedSave(1));
+        assertEquals(0,PanelV4LayoutProtocol.parseSaveAck(1,5,
+            new byte[]{3,(byte)0x85,1,0}));
+        assertEquals(3,PanelV4LayoutProtocol.parseSaveAck(1,5,
+            new byte[]{3,(byte)0x85,1,3}));
+        try { PanelV4LayoutProtocol.parseSaveAck(1,5,
+            new byte[]{3,(byte)0x85,0,0});fail("wrong lane ACK"); }
+        catch(IllegalArgumentException expected) {}
+        try {PanelV4LayoutProtocol.beginSave(0,1,wire);fail("cross-lane Save");}
+        catch(IllegalArgumentException expected) {}
+    }
+
     @Test public void resetRejectsInvalidLaneRevisionAndChallenge() {
         try {PanelV4LayoutProtocol.startFreshChallenge(2,1);fail("lane");}
         catch(IllegalArgumentException expected) {}
