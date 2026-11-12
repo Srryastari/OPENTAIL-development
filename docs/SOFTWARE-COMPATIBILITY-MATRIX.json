@@ -502,6 +502,13 @@
     ],
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
+  "integrated_renderer_pin": {
+    "firmware127_sha": "bf62df16f89f7440734c48d64814210b2e8b19e2",
+    "base_effects_commit": "601155a196a692792e60fd399505fdc676dc57d9",
+    "android_core_logic_blob": "98a93e64b22ba5a858d1ddff673681e04431c59a",
+    "firmware_core_logic_blob": "1675a7bd497c01c3189dc759af9560ede04a6f13",
+    "status": "12 runtime effect/source files byte-identical to build-passing Firmware #127; Android core_logic header pinned to Effects #110"
+  },
   "integrated_workflow_pin": {
     "blob_sha": "83d39789197f4c2298e75a7380d83baa6d9c3cfa",
     "firmware127_sha": "bf62df16f89f7440734c48d64814210b2e8b19e2",
