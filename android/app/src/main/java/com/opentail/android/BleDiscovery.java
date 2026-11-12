@@ -601,6 +601,25 @@ final class BleDiscovery {
         panelControlQueued=true;pumpQueue();return true;
     }
 
+    boolean startFreshPanelV4(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelSaveBusy||
+           panelSnapshotBusy||panelSnapshotQueuedLane>=0||panelReadPending||
+           panelReadQueued!=0||panelControlQueued||panelUpdateQueued||
+           panelControlWritePending||panelUpdateWritePending||panelCancelQueued||
+           cfgBusy||writePending||readReplyPending||pixelProbeWritePending||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           triggerMapBusy||fxCapsBusy||authPending||pairPending||challengePending)
+            return false;
+        PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane);
+        if(base==null||base.pending||!base.persistent)return false;
+        panelSaveBusy=true;panelSaveLane=lane;panelSaveWire=
+            PanelV4LayoutProtocol.expectedFactoryMap(lane);
+        panelSaveRevision=base.activeRevision;
+        panelSavePhase=5;
+        panelSaveWrite(PanelV4LayoutProtocol.startFreshChallenge(lane,panelSaveRevision));
+        return true;
+    }
+
     boolean savePanelV4(int lane,String json) {
         if(lane<0||lane>1||!canReadPanelPreview()||panelSaveBusy||
            panelSnapshotBusy||panelSnapshotQueuedLane>=0||panelReadPending||
@@ -673,6 +692,33 @@ final class BleDiscovery {
         panelSaveWaitingRead=false;panelSaveLease++;
         if(status!=BluetoothGatt.GATT_SUCCESS) {
             panelSaveFinish(false,"Panel Save ACK GATT "+status+"; outcome uncertain",null);
+            return;
+        }
+        if(panelSavePhase==5) {
+            final long challenge;
+            try{challenge=PanelV4LayoutProtocol.parseStartFreshChallenge(
+                    panelSaveLane,panelSaveRevision,bytes);}
+            catch(IllegalArgumentException ex){
+                panelSaveFinish(false,"Start Fresh challenge mismatch; no reset confirmed",null);return;
+            }
+            panelSavePhase=6;
+            panelSaveWrite(PanelV4LayoutProtocol.startFreshConfirm(
+                panelSaveLane,panelSaveRevision,challenge));
+            return;
+        }
+        if(panelSavePhase==6) {
+            final int resetCode;
+            try{resetCode=PanelV4LayoutProtocol.parseStartFreshAck(panelSaveLane,bytes);}
+            catch(IllegalArgumentException ex){
+                panelSaveFinish(false,"Start Fresh outcome unknown; reconcile before retry",null);
+                return;
+            }
+            if(resetCode!=0){
+                panelSaveFinish(false,"Controller rejected Start Fresh (code "+resetCode+")",null);
+                return;
+            }
+            panelSavePhase=7;
+            startPanelSnapshot(panelSaveLane);
             return;
         }
         int opcode=panelSavePhase==0?3:panelSavePhase==1?4:
@@ -2549,9 +2595,9 @@ final class BleDiscovery {
                 new PanelPreviewProtocol.LaneSnapshot(panelSnapshotHeader,panelSnapshotWire);
             panelConfirmedSnapshots[panelSnapshotLane]=snapshot;
             panelSnapshotFresh[panelSnapshotLane]=true;
-            if(panelSaveBusy&&panelSavePhase==4&&panelSaveLane==snapshot.lane) {
+            if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&panelSaveLane==snapshot.lane) {
                 boolean durable=Arrays.equals(panelSaveWire,snapshot.wire)&&
-                    snapshot.activeRevision!=panelSaveRevision&&
+                    (snapshot.activeRevision!=panelSaveRevision||panelSavePhase==7)&&
                     !snapshot.pending&&snapshot.persistent;
                 if(durable) {
                     try {
@@ -2559,8 +2605,9 @@ final class BleDiscovery {
                         panelGeometryManagers[snapshot.lane]=new GeometryTransactionManager(
                             new GeometryTransactionManager.Snapshot(snapshot.lane,
                                 snapshot.activeRevision,snapshot.wire));
-                        panelSaveFinish(true,"Panel v4 Saved · revision "+
-                            snapshot.activeRevision+" confirmed",result);
+                        panelSaveFinish(true,
+                            (panelSavePhase==7?"Start Fresh confirmed · revision ":"Panel v4 Saved · revision ")+
+                            snapshot.activeRevision,result);
                     }catch(Exception ex){
                         panelSaveFinish(false,"Panel v4 readback decode failed; outcome unknown",null);
                     }
