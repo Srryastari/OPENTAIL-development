@@ -458,6 +458,8 @@
       "android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt",
       "android/app/src/main/java/com/opentail/android/OfflinePreviewSettings.java",
       "android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java",
+      "android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java",
+      "android/app/src/test/java/com/opentail/android/PanelV4LayoutProtocolTest.java",
       "android/app/src/main/java/com/opentail/android/PreviewFrameClock.java",
       "android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java",
       "android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java",
@@ -501,7 +503,7 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_trees": {
-    "android": "e54a22b421e423e46c43ce65d0731d6e4dbdb45a",
+    "android": "0b2642b174f6e1f90792a77e018ccaf005679b38",
     "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
   },
   "owner_mandated_p0_addendum": {
