@@ -26,6 +26,19 @@ cb=ble.split("static int cfg_write(",1)[1].split("/* BLE post-render snapshot v1
 assert "ot_ble_config_save(index,&output,cfg_upload_revision)" in cb
 assert "cfg_ack(opcode,index,(uint8_t)rc)" in cb
 assert "cfg_upload_index=255" in cb
+# Panel v4 becomes the sole user-facing Save after Android #111 cutover. Its
+# GATT callback must retain the same stack/durable-phase evidence as v1 Save,
+# while legacy v1 writes remain available until compatibility passes.
+v4save=core.split("int ot_ble_panel_save(",1)[1].split("bool ot_ble_pixel_probe(",1)[0]
+assert "ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;" in v4save
+assert "BLE_PANEL_SAVE_BEGIN" in v4save and "BLE_PANEL_SAVE_END" in v4save
+assert "uxTaskGetStackHighWaterMark(NULL)" in v4save
+assert "MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT" in v4save
+assert v4save.index("BLE_PANEL_SAVE_BEGIN") < v4save.index("pz_save_controller_locked(candidate)")
+assert v4save.index("pz_save_controller_locked(candidate)") < v4save.index("BLE_PANEL_SAVE_END")
+assert "save_elapsed_ms" in v4save and "pz_pair_commit_phase" in v4save
+panel_cfg=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
+assert "ot_ble_panel_save(lane,&output,panel_upload_revision)" in panel_cfg
 render=core.split("static void led_task(void *p) {",1)[1]
 assert "if(local_panel[ch].active_pixels!=0u)" in render
 assert "c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u)" in render
@@ -58,4 +71,4 @@ assert "led_strip_refresh_async(strip[ch])" in render
 assert "led_strip_refresh_async_done(strip[ch])" in render
 assert "OT_OUT_LEFT_GPIO 16" in (root/"main/board_config.h").read_text()
 assert "OT_OUT_RIGHT_GPIO 17" in (root/"main/board_config.h").read_text()
-print("PASS: save uses mutex-protected static controller, bounded BLE stack, logged durable phase, zero-LED inert, RMT+probe unchanged (SOURCE ONLY)")
+print("PASS: save uses mutex-protected static controller, bounded v1/v4 BLE stack and durable-phase logs, zero-LED inert, RMT+probe unchanged (SOURCE ONLY)")
