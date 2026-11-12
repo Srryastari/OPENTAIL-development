@@ -749,7 +749,7 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     bool busy=false;
     portENTER_CRITICAL(&state_lock);
     busy=pz_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
-         (pz_preview.active&&!pz_preview.committing);
+         false; /* Pair-store access serialized by om_write_mutex. */
     *previous=pz_outputs;
     memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
     memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
@@ -798,7 +798,7 @@ static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
     if(!items)return false;
     ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
     portENTER_CRITICAL(&state_lock);
-    if(pz_preview.active){portEXIT_CRITICAL(&state_lock);return false;}
+    if(pz_preview_any_active_locked()){portEXIT_CRITICAL(&state_lock);return false;}
     *candidate=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
@@ -1041,7 +1041,7 @@ static esp_err_t om_post(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE) || pz_preview.active || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE) || pz_preview_any_active_locked() || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
     const ot_pz_controller_t active_panel=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
@@ -1096,7 +1096,7 @@ int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_re
     portENTER_CRITICAL(&state_lock);
     *candidate=pz_outputs;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
-        pz_preview.active||raw_active||live_input_mask||
+        pz_preview_any_active_locked()||raw_active||live_input_mask||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
     stale=pz_revision[index]!=base_revision;
@@ -1402,7 +1402,7 @@ int ot_ble_panel_reset_challenge(uint8_t lane,uint16_t expected_revision,
         !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
         !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
         !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
-        !pz_preview.active&&stop_request_generation==stop_render_generation;
+        !pz_preview_any_active_locked()&&stop_request_generation==stop_render_generation;
     portEXIT_CRITICAL(&state_lock);
     if(!safe||tm_gpio_input_mask()!=0u||
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch||
@@ -1447,7 +1447,7 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
         !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
         !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
-        !pz_preview.active&&stop_request_generation==stop_render_generation;
+        !pz_preview_any_active_locked()&&stop_request_generation==stop_render_generation;
     if(safe){
         *candidate=pz_outputs;
         /* Owner-authorized Start Fresh means ACTUAL Panel v4 factory defaults,
@@ -1505,7 +1505,7 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
         pz_reset_challenge.active=false;
         ot_pz_diag_clear(&pz_diag);
-        ot_pz_preview_cancel(&pz_preview);
+        ot_pz_preview_cancel(&pz_preview[lane]);
         portEXIT_CRITICAL(&state_lock);
     }
     /* Reset readback is the authoritative v4 pair: map-only geometry and
@@ -1555,7 +1555,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
     if(memcmp(&candidate->outputs[lane],next,sizeof(*next))==0){
         portENTER_CRITICAL(&state_lock);
-        ot_pz_preview_cancel(&pz_preview);
+        ot_pz_preview_cancel(&pz_preview[lane]);
         portEXIT_CRITICAL(&state_lock);
         request_render_refresh();
         xSemaphoreGive(om_write_mutex);return 0;
@@ -1644,10 +1644,10 @@ bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
 void ot_ble_diag_disconnect(void){
     bool active;
     portENTER_CRITICAL(&state_lock);
-    active=pz_diag.mode!=OT_PZ_DIAG_NONE||pz_preview.active;
+    active=pz_diag.mode!=OT_PZ_DIAG_NONE||pz_preview_any_active_locked();
     ot_pz_diag_clear(&pz_diag);
     pz_preview_cancel_pending_locked();
-    ot_pz_preview_cancel(&pz_preview);
+    pz_preview_cancel_all_locked();
     pz_reset_challenge.active=false;
     portEXIT_CRITICAL(&state_lock);
     if(active)request_render_refresh();
@@ -1905,7 +1905,7 @@ static esp_err_t show_stop(httpd_req_t *r){
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     ot_pz_diag_clear(&pz_diag);
     pz_preview_cancel_pending_locked();
-    ot_pz_preview_cancel(&pz_preview);
+    pz_preview_cancel_all_locked();
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     request_render_refresh();
@@ -1977,10 +1977,11 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     fx_diag_faults=output_runtime_fault_mask;
     /* Show commands target the same volatile Panel v4 geometry as led_task.
      * Physical road roles never determine effect eligibility. */
-    const ot_pz_output_t *fx_panels=pz_preview.active?
-        pz_preview.candidate.outputs:pz_outputs.outputs;
-    const ot_om_output_t *fx_views=pz_preview.active?
-        pz_live_fx_views:om_outputs;
+    pz_effective_panels_locked(pz_effective_fx_panels);
+    const ot_pz_output_t *fx_panels=pz_effective_fx_panels;
+    ot_om_output_t fx_views[OT_PZ_OUTPUTS];
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        fx_views[i]=pz_preview[i].active?pz_live_fx_views[i]:om_outputs[i];
     for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++){
         fx_diag_pixels[lane]=fx_panels[lane].active_pixels;
         fx_diag_zones[lane]=fx_panels[lane].zone_count;
@@ -2265,11 +2266,11 @@ static void core_stop_all_sources(void){
     ot_fx_bank_stop_all(&fx_bank);
     native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     if(pz_diag.mode!=OT_PZ_DIAG_NONE)ot_pz_diag_clear(&pz_diag);
-    const bool geometry_commit_active=pz_preview.committing||
+    const bool geometry_commit_active=pz_preview_any_committing_locked()||
         pz_preview_commit_requested||pz_preview_commit_worker_active;
-    if(!geometry_commit_active&&pz_preview.active){
+    if(!geometry_commit_active&&pz_preview_any_active_locked()){
         pz_preview_cancel_pending_locked();
-        ot_pz_preview_cancel(&pz_preview);
+        pz_preview_cancel_all_locked();
     }
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
@@ -3366,7 +3367,7 @@ static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     output_runtime_fault_mask|=(1u<<ch);
     ot_pz_diag_clear(&pz_diag);
     pz_preview_cancel_pending_locked();
-    ot_pz_preview_cancel(&pz_preview);
+    pz_preview_cancel_all_locked();
     ot_fx_bank_stop_continuous(&fx_bank); /* do not restart decorative playback after a fault */
     portEXIT_CRITICAL(&state_lock);
 }
@@ -3447,7 +3448,8 @@ static void led_task(void *p) {
            ot_fx_bank_stop_all(&fx_bank);
        }
        const uint32_t render_now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
-       (void)ot_pz_preview_expire(&pz_preview,render_now_ms);
+       for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+            (void)ot_pz_preview_expire(&pz_preview[i],render_now_ms);
        physical=live_input_mask;
        if(pz_preview.active&&physical==0u)
            memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));
