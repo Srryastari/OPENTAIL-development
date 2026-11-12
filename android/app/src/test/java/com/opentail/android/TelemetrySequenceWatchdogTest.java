@@ -18,6 +18,28 @@ public class TelemetrySequenceWatchdogTest {
         return PanelPreviewProtocol.Status.parse(b);
     }
 
+    private static PanelPreviewProtocol.Status statusForLane(int lane,int state,long session,long sequence) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=(byte)lane;b[3]=3;
+        put32(b,4,session);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,sequence);put32(b,18,0x1234);
+        put16(b,22,7);put16(b,24,7);put16(b,26,7);
+        b[29]=1;b[60]=(byte)(sequence==0?0:4);
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
+    @Test public void independentO1O2SequenceWatchdogsNeverFaultOnLaneSwitch() {
+        TelemetrySequenceWatchdog[] watchers={
+            new TelemetrySequenceWatchdog(),new TelemetrySequenceWatchdog()};
+        assertFalse(watchers[0].observe(statusForLane(0,1,100,1)).warning);
+        assertFalse(watchers[1].observe(statusForLane(1,1,200,1)).warning);
+        assertFalse(watchers[0].observe(statusForLane(0,1,100,2)).hardFault);
+        assertFalse(watchers[1].observe(statusForLane(1,1,200,2)).hardFault);
+        assertFalse(watchers[0].snapshot().warning);
+        assertFalse(watchers[1].snapshot().warning);
+        assertTrue(watchers[0].observe(statusForLane(0,1,100,4)).hardFault);
+        assertFalse(watchers[1].snapshot().warning);
+    }
+
     @Test public void contiguousAcceptedSequencesRemainHealthy() {
         TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
         assertFalse(w.observe(status(1,10,1,0,0,0,0,0,0,4)).warning);
