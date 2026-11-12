@@ -166,7 +166,7 @@ jobs:
       - name: Checkout exact Firmware #127 source contract
         uses: actions/checkout@v4
         with:
-          ref: 97f4e2fd29df5aa9249292cee2649404fc98ed48
+          ref: bf62df16f89f7440734c48d64814210b2e8b19e2
           path: pinned-firmware127
       - name: Checkout reviewed Effects #110 renderer
         uses: actions/checkout@v4
