@@ -1469,7 +1469,23 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     }
     candidate->outputs[lane]=*next;
     if(!ot_pz_valid(candidate)){xSemaphoreGive(om_write_mutex);return 1;}
+    /* The authoritative Panel v4 Save also originates in the NimBLE GATT
+     * callback. Record host-stack headroom and durable journal timing without
+     * introducing another controller copy or changing ACK ordering. A later
+     * COM9 log can correlate this interval with a reset reason / GATT 133. */
+    const int64_t save_started_us=esp_timer_get_time();
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_BEGIN lane=%u base_revision=%u pixels=%u panels=%u zones=%u stack_hwm=%u internal_heap=%u",
+        (unsigned)(lane+1u),(unsigned)base_revision,
+        (unsigned)next->active_pixels,(unsigned)next->panel_count,
+        (unsigned)next->zone_count,(unsigned)uxTaskGetStackHighWaterMark(NULL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     const bool saved=pz_save_controller_locked(candidate);
+    const uint32_t save_elapsed_ms=(uint32_t)((esp_timer_get_time()-save_started_us)/1000LL);
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx stack_hwm=%u",
+        (unsigned)(lane+1u),(unsigned)saved,(unsigned long)save_elapsed_ms,
+        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
+        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(saved){
         portENTER_CRITICAL(&state_lock);
         ot_pz_preview_cancel(&pz_preview);
