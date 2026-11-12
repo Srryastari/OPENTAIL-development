@@ -355,6 +355,7 @@ class ComposeMainActivity : ComponentActivity() {
                 if (savingOutput.intValue >= 0)
                     outputMessage.value = "Controller disconnected during Save. Result unknown; reconnect and Reload before retrying."
                 savingOutput.intValue = -1
+                panelSaveAfterPreviewLane = -1 // never resume an uncertain NVS transaction
                 paletteV3Supported.value = false
                 paletteLoadedSlot.intValue = -1
                 paletteLoadedRevision.longValue = -1L
