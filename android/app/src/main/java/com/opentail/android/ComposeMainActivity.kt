@@ -1820,12 +1820,9 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
-        DisposableEffect(Unit) {
-            onDispose {
-                if(panelGeometryMapping!=null&&!panelGeometryCommitRequested)
-                    cancelPanelGeometryPreview()
-            }
-        }
+        // Do not cancel a confirmed volatile Panel mapping on navigation.
+        // The top-level shell owns heartbeat/STOP, so Show Modes can play
+        // on unsaved live geometry until the user saves or explicitly stops.
         Title("Layout", t)
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
