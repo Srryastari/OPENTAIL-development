@@ -1872,7 +1872,7 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         for(unsigned z=0;z<pz_outputs.outputs[lane].zone_count&&z<OT_OM_ZONES;z++){
             const ot_pz_zone_t *zone=&pz_outputs.outputs[lane].zones[z];
             if(zone->role==OT_OM_OFF)fx_diag_roles[lane]|=(uint8_t)(1u<<z);
-            if((req->zone_mask&(1u<<z))&&zone->role!=OT_OM_OFF&&
+            if((req->zone_mask&(1u<<z))&&
                ot_pz_zone_pixel_count(zone)>0u)
                 fx_diag_eligible[lane]|=(uint8_t)(1u<<z);
         }
@@ -3470,7 +3470,7 @@ static void led_task(void *p) {
                        const uint8_t bank_z=resolved_fx_bank_index[ch][z];
                        const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
                            &local_fx_bank.zones[ch][bank_z]:NULL;
-                       const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
+                       const bool active=len>0u&&slot&&
                            ot_fx_slot_active(slot,frame_ms);
                        const int prior_index=active?
                            ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
@@ -3567,13 +3567,13 @@ static void led_task(void *p) {
                                                OT_PZ_ROLE_UNASSIGNED;
                    const uint8_t bank_z=zone>=0?
                        resolved_fx_bank_index[ch][(unsigned)zone]:0xffu;
-                   const bool fx_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
+                   const bool fx_here=zone>=0&&native_rendering&&
                        local_fx_enabled&&bank_z<OT_OM_ZONES&&
                        ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],frame_ms);
-                   const bool legacy_here=zone>=0&&role!=OT_OM_OFF&&native_rendering&&
+                   const bool legacy_here=zone>=0&&native_rendering&&
                        !local_fx_enabled&&(local_show.chain_mask&(1u<<ch))&&
                        (local_show.section_mask&(1u<<zone));
-                   const bool demo_here=zone>=0&&role!=OT_OM_OFF&&!fx_here&&
+                   const bool demo_here=zone>=0&&!fx_here&&
                        !legacy_here&&local_demo.mode!=OT_DEMO_OFF;
                    const bool decorated=fx_here||legacy_here||demo_here;
                    bool trigger_here=false;
@@ -3599,7 +3599,7 @@ static void led_task(void *p) {
                            diagnostic_here=true;
                        }
                    }
-                   if(!trigger_here&&!diagnostic_here&&zone>=0&&role!=OT_OM_OFF){
+                   if(!trigger_here&&!diagnostic_here&&zone>=0){
                        const unsigned logical_px=zone_global_start[zone]+
                                                  pixel_logical_map[ch][px];
                        if(fx_here){
