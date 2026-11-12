@@ -3635,16 +3635,18 @@ class ComposeMainActivity : ComponentActivity() {
                 if(choosingRole) Column(Modifier.fillMaxWidth().heightIn(max=290.dp)
                     .verticalScroll(rememberScrollState()),
                     verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                    BleConfigCodec.ROLES.forEach { role ->
+                    (listOf("unassigned")+BleConfigCodec.ROLES.toList()).forEach { role ->
+                        val roleLabel=if(role=="unassigned") "No vehicle trigger"
+                            else role.replace('_',' ')
                         Pill((if(role==selectedRole) "✓  " else "") +
-                            role.replace('_',' '),t,role==selectedRole) {
+                            roleLabel,t,role==selectedRole) {
                             edit { it.getJSONArray("zones").getJSONObject(i).put("role",role) }
                             choosingRole=false
                             outputMessage.value="Role selected in draft; Save and verify readback to activate"
                         }
                     }
                 }
-                Caption(if(selectedRole=="off")
+                Caption(if(selectedRole=="off"||selectedRole=="unassigned")
                     "No vehicle-trigger override. Show Mode effects can play on this section without assigning a role or saving."
                     else "Vehicle override: " + selectedRole.replace('_',' ') +
                         " · Show Mode playback is independent of trigger roles.",t)
