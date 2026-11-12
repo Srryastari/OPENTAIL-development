@@ -358,7 +358,8 @@ assert(hardware.includes('PanelV4DraftCodec.MAX_LEDS') &&
        hardware.includes('it.put("pixels", remaining)') &&
        hardware.includes('structureVersion++') &&
        hardware.includes('PanelV4DraftCodec.encode(index,draft,authoritative)') &&
-       hardware.includes('ble.savePanelV4(index, draftText)'),
+       hardware.includes('panelSaveQueuedLane=index') &&
+       compose.includes('ble.savePanelV4(lane,requested)'),
   'CORE output editor must validate universal drafts and synchronize zone totals');
 // A rejected GATT save is not an in-flight hardware commit. Readback, not
 // request admission, remains the only success evidence.
@@ -367,8 +368,8 @@ assert(bleSource.includes('boolean savePanelV4(int lane,String json)') &&
        bleSource.includes('panelSaveBusy=true;panelSaveLane=lane;') &&
        bleSource.includes('panelSavePhase=4') &&
        bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)') &&
-       hardware.includes('if (ble.savePanelV4(index, draftText))') &&
-       hardware.includes('Controller busy; no Save started'),
+       hardware.includes('panelSaveQueuedLane=index') &&
+       compose.includes('Save could not start; live configuration remains unsaved'),
   'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
   'synchronized boolean editZone(', 'synchronized boolean moveZone(',
@@ -1349,6 +1350,23 @@ assert(unifiedEditor.includes('var choosingRole by remember(index,i)') &&
        !bleSource.includes('cfgFail("BLE config write failed: "+status);saveOutput('),
        'BLE-133 reconciliation or single selected zone editing regressed');
 
+// Integration regressions: selection must never cancel O1's active shadow
+// just to edit O2; Save sends one durable upload after accepted UPDATEs.
+const layoutPage=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+assert(layoutPage &&
+       layoutPage.includes('if(captureOutput.intValue==panelGeometryActiveLane)') &&
+       layoutPage.includes('O"+(panelGeometryActiveLane+1)+') &&
+       !compose.includes('panelSaveAfterPreviewLane') &&
+       compose.includes('panelSaveQueuedLane=index') &&
+       compose.includes('panelSaveSubmittedDrafts[lane]=requested') &&
+       compose.includes('ble.savePanelV4(lane,requested)') &&
+       !compose.includes('commitPanelGeometryPreview() // automatic') &&
+       bleSource.includes('panelSaveVerificationReads<=8') &&
+       bleSource.includes('STOP prioritized; durable Save must be reconciled') &&
+       compose.includes('ownerEditedAfterSave'),
+       'O1/O2 edit switching, single durable Save, STOP and bounded readback contract regressed');
+
 // Overseer 4 Layout acceptance: one Output / Panel / Zone editor and
 // zero-LED first-run drafts, without making a fake saved CORE output.
 const finalLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
@@ -1364,7 +1382,8 @@ assert(finalLayout && finalOutput &&
   finalOutput.includes('coreZone.panelId') &&
   finalOutput.includes('if(linkedId!=null && linkedIndex!=null)') &&
   finalOutput.includes('ZoneDotPreview(t,localCount,reversed)') &&
-  finalOutput.includes('ble.savePanelV4(index, draftText)') &&
+  finalOutput.includes('panelSaveQueuedLane=index') &&
+  compose.includes('ble.savePanelV4(lane,requested)') &&
   !finalOutput.includes('Saved Output 1') &&
   !finalOutput.includes('BLE test1'),
   'One CORE-backed editor must retain all local zone tools without duplicate cards');
@@ -1396,7 +1415,8 @@ assert(finalLayout.includes('LightingDirectory(t)') &&
   finalOutput.includes('Pill(outputTab(1),t,index==1)') &&
   finalOutput.includes('ble.readPanelLaneSnapshot(index)') &&
   finalOutput.includes('outputDirty[index] = true') &&
-  compose.includes('if (completedSave || outputDirty[index] != true)') &&
+  compose.includes('(!ownerEditedAfterSave && completedSave)') &&
+  compose.includes('outputDirty[index] != true') &&
   model.includes('updateZoneOrganization(String id, String field, String text)') &&
   model.includes('z.optString(key).length() > 64') &&
   finalLayout.includes('EffectsPreview(t, selectedEffect.intValue)'),
