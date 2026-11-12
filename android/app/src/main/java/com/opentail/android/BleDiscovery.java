@@ -302,7 +302,7 @@ final class BleDiscovery {
     private volatile int pixelProbeWatchLease=0,pixelProbeLane=-1;
     private Consumer<String> pixelProbeListener;
     private PanelPreviewProtocol.Capabilities panelCapabilities;
-    private final TelemetrySequenceWatchdog panelWatchdog=new TelemetrySequenceWatchdog();
+    private final TelemetrySequenceWatchdog[] panelWatchdogs={new TelemetrySequenceWatchdog(),new TelemetrySequenceWatchdog()};
     private PanelPreviewProtocol.Status panelLastStatus;
     private final PanelPreviewProtocol.Status[] panelStatuses=new PanelPreviewProtocol.Status[2];
     private final boolean[] panelStatusFresh=new boolean[2];
@@ -818,7 +818,10 @@ final class BleDiscovery {
         });
     }
     private void panelDisconnected() {
-        if(panelWatchdog.hasSession())panelNotify(null,panelWatchdog.markDisconnected());
+        for(int lane=0;lane<2;lane++) {
+            TelemetrySequenceWatchdog watcher=panelWatchdogs[lane];
+            if(watcher.hasSession())panelNotify(null,watcher.markDisconnected());
+        }
         // The old BLE session is no longer authoritative. A reconnect may
         // discover another controller or a newer committed map, even if the
         // previous manager was READY. Never reuse that manager's revision or
@@ -829,6 +832,9 @@ final class BleDiscovery {
             panelGeometryManagers[lane]=null;
             panelConfirmedSnapshots[lane]=null;
         }
+        // Reconnect requires fresh controller identity and fresh per-lane
+        // telemetry; never compare an O2 sequence against an old O1 lease.
+        for(int lane=0;lane<2;lane++)panelWatchdogs[lane]=new TelemetrySequenceWatchdog();
         panelCapabilities=null;panelLastStatus=null;
         panelStatuses[0]=null;panelStatuses[1]=null;
         panelStatusFresh[0]=false;panelStatusFresh[1]=false;
@@ -2202,7 +2208,9 @@ final class BleDiscovery {
             if(panelStatusExpectedLane>=0)panelStatusFresh[panelStatusExpectedLane]=false;
             else if(panelLastStatus!=null)panelStatusFresh[panelLastStatus.lane]=false;
             panelStatusExpectedLane=-1;
-            TelemetrySequenceWatchdog.Decision malformed=panelWatchdog.markMalformedTelemetry(
+            int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
+                (panelLastStatus!=null?panelLastStatus.lane:0);
+            TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
                 "CORE Panel status read failed; transaction synchronization is uncertain");
             for(GeometryTransactionManager manager:panelGeometryManagers)
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
@@ -2215,7 +2223,9 @@ final class BleDiscovery {
         catch(IllegalArgumentException ex){
             if(panelStatusExpectedLane>=0)panelStatusFresh[panelStatusExpectedLane]=false;
             panelStatusExpectedLane=-1;
-            TelemetrySequenceWatchdog.Decision malformed=panelWatchdog.markMalformedTelemetry(
+            int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
+                (panelLastStatus!=null?panelLastStatus.lane:0);
+            TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
                 "Invalid or truncated 61-byte CORE Panel status; authoritative reconciliation required");
             for(GeometryTransactionManager manager:panelGeometryManagers)
                 if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
@@ -2234,6 +2244,10 @@ final class BleDiscovery {
         panelLastStatus=current;
         panelStatuses[current.lane]=current;
         panelStatusFresh[current.lane]=true;
+        // Both lanes may be ACTIVE simultaneously, with independent sequence
+        // numbers and lease IDs. A global watchdog would falsely hard-fault
+        // when switching telemetry between O1 and O2.
+        TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane];
         GeometryTransactionManager manager=panelGeometryManagers[current.lane];
         if(manager!=null) {
             manager.observeStatus(current);
