@@ -468,14 +468,28 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
         }
         case 3u:{ /* begin durable upload: version/op/lane/length/CRC/base revision */
             if(n!=9u){panel_ack(opcode,lane,1u);break;}
-            if(panel_preview_tx.active||panel_preview_tx.committing||
-               panel_upload_index!=255u){
+            panel_preview_expire_if_needed((uint32_t)(esp_timer_get_time()/1000LL));
+            const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            const uint16_t revision=(uint16_t)(packet[7]|((uint16_t)packet[8]<<8));
+            const bool live_save=panel_preview_tx.active&&
+                !panel_preview_tx.committing&&!panel_preview_tx.sequence_sync_fault&&
+                panel_preview_tx.lane==lane&&panel_preview_tx.base_revision==revision;
+            if((panel_preview_tx.active&&!live_save)||
+               panel_preview_tx.committing||panel_upload_index!=255u){
                 panel_ack(opcode,lane,2u);break;
             }
-            const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
             if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            if(live_save){
+                /* Durable Save owns no new UX Commit control. Keep the active
+                 * volatile map alive during the acknowledged chunk upload. */
+                if(ot_ble_panel_preview_heartbeat(lane,revision)!=0){
+                    panel_ack(opcode,lane,3u);break;
+                }
+                panel_preview_tx.expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                                            OT_PZ_PREVIEW_LEASE_MS;
+            }
             panel_upload_crc=(uint16_t)(packet[5]|((uint16_t)packet[6]<<8));
-            panel_upload_revision=(uint16_t)(packet[7]|((uint16_t)packet[8]<<8));
+            panel_upload_revision=revision;
             panel_upload_index=lane;
             memset(panel_upload,0,sizeof(panel_upload));
             memset(panel_received,0,sizeof(panel_received));break;
@@ -498,6 +512,13 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
                 const unsigned pos=(unsigned)off+i;
                 panel_upload[pos]=packet[5u+i];panel_received[pos]=true;
             }
+            if(panel_preview_tx.active&&panel_preview_tx.lane==lane){
+                if(ot_ble_panel_preview_heartbeat(lane,panel_upload_revision)!=0){
+                    panel_ack(opcode,lane,3u);panel_upload_index=255u;break;
+                }
+                panel_preview_tx.expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                                            OT_PZ_PREVIEW_LEASE_MS;
+            }
             break;
         }
         case 5u:{ /* validate complete immutable upload, then stage CORE config */
@@ -512,8 +533,15 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             if(!ot_pz_wire_decode(panel_upload,lane,&output)){
                 panel_ack(opcode,lane,7u);panel_upload_index=255;break;
             }
-            panel_ack(opcode,lane,panel_save_status(
-                ot_ble_panel_save(lane,&output,panel_upload_revision)));
+            const int save_rc=ot_ble_panel_save(lane,&output,panel_upload_revision);
+            panel_ack(opcode,lane,panel_save_status(save_rc));
+            if(save_rc==0&&panel_preview_tx.active&&panel_preview_tx.lane==lane){
+                /* The same verified shadow stays physically rendered until
+                 * the v4 pair promoter publishes active revision and frame. */
+                panel_preview_tx.committing=true;
+                panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+                panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+            }
             panel_upload_index=255;break;
         }
         case 6u: /* cancel */
@@ -747,6 +775,9 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
     }
     if(command.opcode==OT_PZ_TX_OP_COMMIT){
+        if(panel_upload_index!=255u){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_BUSY);return 0;
+        }
         if(panel_preview_tx.sequence_sync_fault){
             panel_preview_reject_control(OT_PZ_TX_ERROR_SYNC_REQUIRED);return 0;
         }
