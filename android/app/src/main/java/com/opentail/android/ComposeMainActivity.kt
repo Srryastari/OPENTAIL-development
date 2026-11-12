@@ -2204,6 +2204,69 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Owner Save is a single durable Panel v4 upload. Firmware #127's live
+     * candidate stays rendered while the journal promotes that SAME lane.
+     * Never issue a preview COMMIT first: a partial persistent geometry
+     * would violate the owner's single-action Save contract.
+     */
+    private fun pumpPanelQueuedSave() {
+        val lane=panelSaveQueuedLane
+        if(lane !in 0..1)return
+        val requested=panelSaveQueuedDraft
+        if(requested==null||savingOutput.intValue!=lane||!ble.canConfigure()) {
+            panelSaveQueuedLane=-1
+            panelSaveQueuedDraft=null
+            savingOutput.intValue=-1
+            outputMessage.value="Save cancelled: controller or requested layout is unavailable"
+            return
+        }
+        if(panelGeometryMapping!=null) {
+            if(panelGeometryActiveLane!=lane || panelGeometryCommitRequested ||
+               panelGeometryCancelRequested || !panelGeometryDraftValid) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save rejected: selected output's live mapping is not stable"
+                return
+            }
+            val manager=ble.panelGeometryManager(lane)
+            if(manager?.syncUncertain()==true) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save withheld: live mapping is uncertain; reconnect for authoritative verification"
+                return
+            }
+            if(panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null||
+               manager?.state()!=GeometryTransactionManager.State.ACTIVE) {
+                if(++panelSaveQueuedChecks>100) {
+                    panelSaveQueuedLane=-1
+                    panelSaveQueuedDraft=null
+                    savingOutput.intValue=-1
+                    outputMessage.value="Save not started: live updates did not receive controller confirmation"
+                }
+                return
+            }
+        }
+        if(!ble.savePanelV4(lane,requested)) {
+            // No command was accepted. Do not retry *after* a GATT write;
+            // BleDiscovery owns all in-flight/uncertain outcome handling.
+            if(++panelSaveQueuedChecks>100) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save could not start; live configuration remains unsaved"
+            }
+            return
+        }
+        panelSaveSubmittedDrafts[lane]=requested
+        panelSaveQueuedLane=-1
+        panelSaveQueuedDraft=null
+        panelSaveQueuedChecks=0
+        outputMessage.value="One Panel v4 Save submitted · verifying durable controller readback"
+    }
+
     private fun pumpPanelGeometry() {
         val mapping=panelGeometryMapping?:return
         if(panelGeometryCommitRequested||panelGeometryCancelRequested) {
@@ -3344,6 +3407,7 @@ class ComposeMainActivity : ComponentActivity() {
                             panelSaveQueuedLane=index
                             panelSaveQueuedDraft=draftText
                             panelSaveQueuedChecks=0
+                            panelGeometryEpoch.intValue++ // keeps bounded Save admission checks alive
                             outputMessage.value="Verifying current live mapping before one Panel v4 Save..."
                             pumpPanelQueuedSave()
                         }
