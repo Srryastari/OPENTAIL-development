@@ -2114,7 +2114,9 @@ class ComposeMainActivity : ComponentActivity() {
             panelGeometryBatches=batches
             panelGeometryNextBatch=intArrayOf(0,0)
             panelGeometryBeginRequested=booleanArrayOf(false,false)
-            panelGeometryChanged=booleanArrayOf(false,false)
+            panelGeometryChanged=booleanArrayOf(
+                mapping.lane(0).activePixels!=PanelPreviewProtocol.MapIdentity.parse(left).activePixels,
+                mapping.lane(1).activePixels!=PanelPreviewProtocol.MapIdentity.parse(right).activePixels)
             panelGeometryActionStarted=booleanArrayOf(false,false)
             panelGeometryActionCommit=booleanArrayOf(false,false)
             panelGeometryActionDone=booleanArrayOf(false,false)
