@@ -589,17 +589,23 @@ public class GeometryTransactionManagerTest {
         }
     }
 
-    @Test public void proposedGeometryCannotExceedAuthoritativeActivePixelCapacity() throws Exception {
+    @Test public void unsavedCapacityExpansionIsAllowedButOver2000Fails() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left Top",118,0,0,1,"Left Housing");
         GeometryTransactionManager.LayoutMapping mapping=GeometryTransactionManager.mapLayout(project);
         PanelPreviewProtocol.LaneSnapshot small=panelSnapshot(0,100,0,"",0,0,"",0,0);
         PanelPreviewProtocol.LaneSnapshot empty=panelSnapshot(1,623,0,"",0,0,"",0,0);
+        // Firmware advertises the live-capacity bit separately; geometry
+        // preflight must validate against the new proposed capacity, not NVS.
+        validateSnapshots(mapping,small,empty);
+        NativeProject oversized=new NativeProject(new FakeProjectStorage().prefs);
+        mappedZone(oversized,"Too long",2001,0,0,1,"Left Housing");
+        GeometryTransactionManager.LayoutMapping tooLarge=GeometryTransactionManager.mapLayout(oversized);
         try {
-            validateSnapshots(mapping,small,empty);
-            fail("capacity mismatch must block preview");
-        } catch(IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("active pixel capacity"));
+            validateSnapshots(tooLarge,small,empty);
+            fail("Android 2000-LED limit must block preview");
+        }catch(IllegalArgumentException expected){
+            assertTrue(expected.getMessage().contains("2000-LED"));
         }
     }
 
