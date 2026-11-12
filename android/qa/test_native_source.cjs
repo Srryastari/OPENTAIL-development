@@ -61,7 +61,7 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
   'frame!!.colorAt(sample)', 'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
-  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.savePanelV4(index, draftText)',
+  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.savePanelV4(lane,requested)',
   'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
@@ -1285,7 +1285,7 @@ assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captur
        compose.includes('effectId = 0, chainMask = 1 shl index, zoneMask = 255') &&
        compose.includes('brightness = 24, speed = 128, intensity = 128, paletteId = 0') &&
        unifiedEditor.includes('Solid Red targets any configured section.') &&
-       unifiedEditor.includes('ble.savePanelV4(index, draftText)') &&
+       unifiedEditor.includes('panelSaveQueuedLane=index') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
        'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
