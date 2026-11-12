@@ -3258,6 +3258,7 @@ class ComposeMainActivity : ComponentActivity() {
             ble.lastConfirmedPanelSnapshot(index)?.let { PanelPreviewProtocol.MapIdentity.parse(it) }
         }.getOrNull()
         var pendingRemoveSection by remember(index) { mutableIntStateOf(-1) }
+        var confirmingStartFresh by remember(index) { mutableStateOf(false) }
         val assigned = (0 until zones.length()).sumOf { zones.optJSONObject(it)?.optInt("pixels", 0) ?: 0 }
         var outputCountText by remember(index, outputReadbackEpoch[index]) {
             mutableStateOf(pixelCount.toString())
@@ -3323,6 +3324,11 @@ class ComposeMainActivity : ComponentActivity() {
                     } catch(ex:Exception) {
                         outputMessage.value="Save rejected: "+(ex.message ?: "invalid draft")
                     }
+                }
+                Pill("Start Fresh",t,enabled=savingOutput.intValue<0 &&
+                    ble.canReadPanelPreview() &&
+                    ble.lastConfirmedPanelSnapshot(index)!=null) {
+                    confirmingStartFresh=true
                 }
                 Caption(if(!valid) {
                     if(ble.lastConfirmedPanelSnapshot(index)==null)
@@ -3528,6 +3534,20 @@ class ComposeMainActivity : ComponentActivity() {
                 // Removal belongs beside Add Zone below, not in a hidden menu.
                 // Destructive action is confirmed once for the unified zone.
             }
+        }
+        if(confirmingStartFresh) {
+            AlertDialog(containerColor=t.surface,
+                onDismissRequest={ confirmingStartFresh=false },
+                title={ Text("Start Fresh · O"+(index+1)+"?") },
+                text={ Text("Reset only this output's saved Panel v4 layout to 0 LEDs and no sections. Other outputs, trigger settings, pairing and system settings are preserved. Unsaved edits are cleared only after controller confirmation.") },
+                confirmButton={ Pill("Start Fresh",t,true) {
+                    confirmingStartFresh=false
+                    if(ble.startFreshPanelV4(index)) {
+                        savingOutput.intValue=index
+                        outputMessage.value="Start Fresh requested · verifying controller revision and empty layout"
+                    } else outputMessage.value="Start Fresh unavailable: finish the current operation and read Panel v4"
+                }},
+                dismissButton={ Pill("Cancel",t) { confirmingStartFresh=false } })
         }
         if(pendingRemoveSection in 0 until zones.length()) {
             AlertDialog(containerColor=t.surface,
