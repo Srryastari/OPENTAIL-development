@@ -58,6 +58,10 @@ assert "ot_pz_journal_recover(" in legacy
 assert "nvs_erase" not in reset
 assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in reset
 assert "PIXEL_PROBE_RMT_DONE" in core and "PIXEL_PROBE_NONBLACK_FRAME" in core
+rmt_init=core.split("static bool strip_configure_channel(",1)[1].split("static bool strip_init(",1)[0]
+assert "RMT_OUTPUT_READY" in rmt_init and "out_pin[ch]" in rmt_init
+assert "led_strip_new_rmt_device(&cfg,&rmt,&next)" in rmt_init
+assert rmt_init.index("led_strip_new_rmt_device(&cfg,&rmt,&next)") < rmt_init.index("RMT_OUTPUT_READY")
 assert "BLE_FX_DECISION" in core and "BLE_FX_LANE" in core
 fxfn=core.split("static bool ot_ble_apply_fx_internal(",1)[1].split("bool ot_ble_apply_fx(",1)[0]
 assert fxfn.index("portEXIT_CRITICAL(&state_lock);") < fxfn.index('ESP_LOGI(TAG,"BLE_FX_DECISION')
