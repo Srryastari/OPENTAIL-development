@@ -144,8 +144,15 @@ final class PanelV4DraftCodec {
                 throw new IllegalArgumentException("Invalid contiguous zone pixel range");
             int id=zone.optInt("id",0);
             if(id==0){
-                for(int alias=1;alias<256;alias++)
-                    if(!usedAlias[alias]&&id==0)id=0x4000|alias;
+                // Match GeometryTransactionManager.mapLayout() and the
+                // firmware's 0x4000|low-byte identity: section slots 0..7
+                // have aliases 129..136 on O1 and 137..144 on O2.
+                // A different ID would make direct Save diverge from the
+                // *already playing* unsaved geometry, correctly rejecting it.
+                int section=zone.optInt("physical_section",i);
+                if(section<0||section>=8)
+                    throw new IllegalArgumentException("Invalid physical zone section");
+                id=0x4000|(129+lane*8+section);
             }
             int alias=id&255;
             if(id<1||id>65535||alias==0||usedAlias[alias])
