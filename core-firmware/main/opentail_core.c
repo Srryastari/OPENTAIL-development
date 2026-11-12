@@ -1263,8 +1263,9 @@ int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision){
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool valid=false;
     portENTER_CRITICAL(&state_lock);
-    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
-    valid=!pending&&pz_revision[lane]==base_revision&&
+    /* O1's durable journal may be pending for an extended quiet-input window.
+     * O2's HEARTBEAT must still renew its independent volatile session. */
+    valid=pz_revision[lane]==base_revision&&
         pz_active_revision[lane]==base_revision&&
         ot_pz_preview_heartbeat(&pz_preview[lane],lane,base_revision,now_ms);
     portEXIT_CRITICAL(&state_lock);
