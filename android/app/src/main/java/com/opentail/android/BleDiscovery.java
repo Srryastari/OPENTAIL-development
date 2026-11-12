@@ -2520,9 +2520,12 @@ final class BleDiscovery {
         if(status!=BluetoothGatt.GATT_SUCCESS)
             notifyStatus("CORE Panel control write failed: "+status);
         if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
-        if(status==BluetoothGatt.GATT_SUCCESS&&action==PANEL_CONTROL_COMMIT) {
-            panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
-            panelStatusFresh[0]=false;panelStatusFresh[1]=false;
+        if(status==BluetoothGatt.GATT_SUCCESS&&action==PANEL_CONTROL_COMMIT&&
+           lane>=0&&lane<2) {
+            // A finalized O1 revision does not invalidate O2's still-active
+            // volatile geometry, status-v2 lease or authenticated snapshot.
+            panelSnapshotFresh[lane]=false;
+            panelStatusFresh[lane]=false;
         }
         panelReadQueued=2;pumpQueue();
     }
