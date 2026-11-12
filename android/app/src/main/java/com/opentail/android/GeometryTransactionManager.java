@@ -541,9 +541,9 @@ final class GeometryTransactionManager {
         for(int lane=0;lane<2;lane++) {
             MappedLane proposed=mapping.lane(lane);
             PanelPreviewProtocol.MapIdentity active=current[lane];
-            if(proposed.activePixels>active.activePixels)
+            if(proposed.activePixels<0||proposed.activePixels>2000)
                 throw new IllegalArgumentException("Output "+(lane+1)+
-                    " layout exceeds CORE's authoritative active pixel capacity");
+                    " layout exceeds the supported 2000-LED limit");
             for(MappedPanel panel:proposed.panels) {
                 if(currentZones.containsKey(panel.id))
                     throw new IllegalArgumentException("Proposed Panel ID collides with an existing Zone ID");
@@ -561,7 +561,7 @@ final class GeometryTransactionManager {
                         throw new IllegalArgumentException("Existing Zone ID has a different Panel or unsupported multi-range geometry");
                 }
                 long end=(long)zone.start+zone.count;
-                if(zone.start<0||zone.count<1||end>active.activePixels)
+                if(zone.start<0||zone.count<1||end>proposed.activePixels)
                     throw new IllegalArgumentException("Proposed Zone range is outside CORE active pixel capacity");
                 Set<Integer> proposedZoneIds=new HashSet<>();
                 for(MappedZone candidate:proposed.zones)proposedZoneIds.add(candidate.id);
