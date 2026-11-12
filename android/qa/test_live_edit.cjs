@@ -141,7 +141,8 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        !hardwareBlock.includes('623') &&
        hardwareBlock.includes('PixelStrip(t,'),
        'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
-assert(hardwareBlock.includes('ble.savePanelV4(index, draftText)') &&
+assert(hardwareBlock.includes('panelSaveQueuedLane=index') &&
+       compose.includes('ble.savePanelV4(lane,requested)') &&
        hardwareBlock.includes('PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)') &&
        hardwareBlock.includes('savingOutput.intValue = index') &&
        hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
