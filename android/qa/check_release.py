@@ -73,7 +73,7 @@ check("Continuous controller playback is capability-gated with explicit Home STO
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Active Compose output save uses authenticated BLE revision/readback path",
-      'ble.savePanelV4(index, draftText)' in compose and
+      'ble.savePanelV4(lane,requested)' in compose and
       'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)' in compose and
       all(k in ble for k in ("panelSaveBusy", "PanelV4LayoutProtocol.beginSave", "panelSaveRead(",
                              "Arrays.equals(panelSaveWire,snapshot.wire)", "panelSaveFinish(true")))
@@ -120,13 +120,13 @@ check("Compose has full two-output draft editing without unsaved hardware mutati
           "BleConfigCodec.ROLES", "BleConfigCodec.ORDERS", "Fit last zone",
           "Assigned ", "if(outputToolsOpen)", "Remove zone", "+ Add zone",
           "val draft = runCatching { JSONObject(draftText) }",
-          "outputMessage.value=\"Saving… verifying controller readback\"",
+          "outputMessage.value=\"Verifying current live mapping before one Panel v4 Save...\"",
           "if (savingOutput.intValue == index) Caption(\"Saving…",
           'Pill(if (savingOutput.intValue == index) "Saving…" else "Save"'))
-      and 'ble.savePanelV4(index, draftText)' in compose
+      and 'ble.savePanelV4(lane,requested)' in compose
       and 'ble.readPanelLaneSnapshot(index)' in compose
       and 'outputDirty[index] = true' in compose
-      and 'if (completedSave || outputDirty[index] != true)' in compose)
+      and '(!ownerEditedAfterSave && completedSave)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
           "Repeat", "Edit time", "project.sequenceOptions()", "project.editTriggerStyle(",
