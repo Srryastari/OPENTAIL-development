@@ -178,14 +178,15 @@ static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for
  * the saved FX view. No NVS mutation or additional controller stack copy. */
 static ot_om_output_t pz_live_fx_views[OT_OM_OUTPUTS];
 static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v4. */
+static ot_pz_pending_t pz_deferred;
+/* Per-output volatile sessions. Preview never writes another output's geometry. */
+static ot_pz_preview_t pz_preview[OT_PZ_OUTPUTS];
 static void pz_effective_panels_locked(ot_pz_output_t *outputs){
     for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
         outputs[i]=pz_preview[i].active?
             pz_preview[i].candidate.outputs[i]:pz_outputs.outputs[i];
 }
-static ot_pz_pending_t pz_deferred;
-/* Per-output volatile sessions. Preview never writes another output's geometry. */
-static ot_pz_preview_t pz_preview[OT_PZ_OUTPUTS];
+
 /* Single mutex-protected scratch avoids full controller copies on NimBLE stack. */
 static ot_pz_preview_t pz_preview_scratch;
 static ot_pz_output_t pz_effective_fx_panels[OT_PZ_OUTPUTS];
