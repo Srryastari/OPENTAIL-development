@@ -3452,7 +3452,7 @@ static void led_task(void *p) {
            ble_fx_enabled=false;ble_owns_show=false;
            ot_pz_diag_clear(&pz_diag);
            pz_preview_cancel_pending_locked();
-           ot_pz_preview_cancel(&pz_preview);
+           pz_preview_cancel_all_locked();
            ot_fx_bank_stop_all(&fx_bank);
        }
        const uint32_t render_now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
