@@ -134,6 +134,75 @@ class ComposeMainActivity : ComponentActivity() {
     private var panelSaveQueuedChecks = 0
     private val panelSaveSubmittedDrafts = mutableMapOf<Int,String>()
     private var panelGeometryDraftValid = true
+    /** Lane-specific volatile previews. BLE owns the authoritative
+     * transaction manager; the editor owns only unsaved UI batching.
+     * Switching O1/O2 must never send CANCEL or alter the other lane's state. */
+    private class LanePreviewState {
+        var mapping: GeometryTransactionManager.LayoutMapping? = null
+        var applied: GeometryTransactionManager.LayoutMapping? = null
+        var plan: GeometryTransactionManager.LayoutMapping? = null
+        var queued: GeometryTransactionManager.LayoutMapping? = null
+        var batches: Array<List<Array<PanelPreviewProtocol.UpdateDescriptor>>> =
+            arrayOf(emptyList(),emptyList())
+        var nextBatch = intArrayOf(0,0)
+        var begun = booleanArrayOf(false,false)
+        var changed = booleanArrayOf(false,false)
+        var actionStarted = booleanArrayOf(false,false)
+        var actionCommit = booleanArrayOf(false,false)
+        var actionDone = booleanArrayOf(false,false)
+        var baseRevisions = intArrayOf(-1,-1)
+        var commitRequested = false
+        var cancelRequested = false
+        var draftValid = true
+    }
+    private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())
+
+    private fun storeActiveLaneState() {
+        val lane=panelGeometryActiveLane
+        if(lane !in 0..1)return
+        lanePreviewStates[lane].apply {
+            mapping=panelGeometryMapping;applied=panelGeometryAppliedMapping
+            plan=panelGeometryPlanTarget;queued=panelGeometryQueuedTarget
+            batches=panelGeometryBatches;nextBatch=panelGeometryNextBatch
+            begun=panelGeometryBeginRequested;changed=panelGeometryChanged
+            actionStarted=panelGeometryActionStarted;actionCommit=panelGeometryActionCommit
+            actionDone=panelGeometryActionDone;baseRevisions=panelGeometryBaseRevisions
+            commitRequested=panelGeometryCommitRequested
+            cancelRequested=panelGeometryCancelRequested;draftValid=panelGeometryDraftValid
+        }
+    }
+
+    private fun activateLaneState(lane:Int) {
+        if(lane !in 0..1)return
+        if(panelGeometryActiveLane==lane)return
+        storeActiveLaneState()
+        lanePreviewStates[lane].apply {
+            panelGeometryMapping=mapping;panelGeometryAppliedMapping=applied
+            panelGeometryPlanTarget=plan;panelGeometryQueuedTarget=queued
+            panelGeometryBatches=batches;panelGeometryNextBatch=nextBatch
+            panelGeometryBeginRequested=begun;panelGeometryChanged=changed
+            panelGeometryActionStarted=actionStarted;panelGeometryActionCommit=actionCommit
+            panelGeometryActionDone=actionDone;panelGeometryBaseRevisions=baseRevisions
+            panelGeometryCommitRequested=commitRequested
+            panelGeometryCancelRequested=cancelRequested;panelGeometryDraftValid=draftValid
+        }
+        panelGeometryActiveLane=lane
+    }
+
+    private fun anyLanePreviewActive():Boolean =
+        panelGeometryMapping!=null ||
+        lanePreviewStates.any { it.mapping!=null }
+
+    private fun pumpEveryLaneGeometry() {
+        val selected=captureOutput.intValue.coerceIn(0,1)
+        storeActiveLaneState()
+        for(lane in 0..1) {
+            activateLaneState(lane)
+            if(panelGeometryMapping!=null)pumpPanelGeometry()
+        }
+        activateLaneState(selected)
+    }
+
     private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
     private val paletteV3Supported = mutableStateOf(false)
     private val paletteLoadedSlot = mutableIntStateOf(-1)
