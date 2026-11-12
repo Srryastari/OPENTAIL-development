@@ -1539,13 +1539,13 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
      * preview, without a separate user-visible COMMIT. Never accept a stale
      * or divergent upload: that could replace LEDs that are playing now.
      * Nonmatching previews and other-lane sessions remain protected. */
-    live_match=pz_preview.active&&!pz_preview.committing&&
-        pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
-        (int32_t)(now_ms-pz_preview.expires_ms)<0&&
-        memcmp(&pz_preview.candidate.outputs[lane],next,sizeof(*next))==0;
+    live_match=pz_preview[lane].active&&!pz_preview[lane].committing&&
+        pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+        (int32_t)(now_ms-pz_preview[lane].expires_ms)<0&&
+        memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))==0;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
         __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
-        (pz_preview.active&&!live_match)||
+        (pz_preview[lane].active&&!live_match)||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
     stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision;
@@ -1567,7 +1567,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
      * readback promotes that map; no black frame or FX phase reset. */
     if(live_match){
         portENTER_CRITICAL(&state_lock);
-        pz_preview.committing=true;
+        pz_preview[lane].committing=true;
         portEXIT_CRITICAL(&state_lock);
     }
     /* The authoritative Panel v4 Save also originates in the NimBLE GATT
@@ -1592,8 +1592,8 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
         if(!saved){
             /* Failed/uncertain NVS outcome is never silently retried. Keep
              * the previously accepted preview available for reconciliation. */
-            pz_preview.committing=false;
-            pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+            pz_preview[lane].committing=false;
+            pz_preview[lane].expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
         }
         /* On success keep the preview rendered until pz_promote() publishes
          * the confirmed active revision and retires it atomically. */
@@ -3198,10 +3198,16 @@ static void pz_promote(uint32_t epoch){
        tm_gpio_input_mask()==0u&&
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
         if(pz_deferred.pending){
+            uint8_t changed=0u;
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(memcmp(&pz_outputs.outputs[i],&workspace->pending.candidate.outputs[i],
+                          sizeof(pz_outputs.outputs[i]))!=0)changed|=(uint8_t)(1u<<i);
             pz_outputs=workspace->pending.candidate;
-            /* Retire slots owned by deleted zones only after committed geometry
-             * is authoritative. A preview candidate must remain cancellable. */
-            ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs);
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(changed&(1u<<i))ot_pz_preview_cancel(&pz_preview[i]);
+            /* An unsaved O2 zone is not an orphan when O1 is promoted. */
+            pz_effective_panels_locked(pz_effective_fx_panels);
+            ot_fx_bank_prune_orphans(&fx_bank,pz_effective_fx_panels);
             pz_deferred.pending=false;
             applied=true;
         }
@@ -3214,10 +3220,10 @@ static void pz_promote(uint32_t epoch){
             pz_reset_pending_mask&=(uint8_t)~effective_reset_mask;
             pz_reset_challenge.active=false;
             ot_pz_diag_clear(&pz_diag);
-            ot_pz_preview_cancel(&pz_preview);
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(effective_reset_mask&(1u<<i))ot_pz_preview_cancel(&pz_preview[i]);
             reset_cleanup=true;
         }
-        ot_pz_preview_cancel(&pz_preview);
         pz_refresh_legacy_projection_locked();
     }
     portEXIT_CRITICAL(&state_lock);
@@ -3239,7 +3245,9 @@ static void config_activation_task(void *unused){
             bool preview_commit=false;
             portENTER_CRITICAL(&state_lock);
             if(pz_preview_commit_requested){
-                pz_pair_workspace.candidate=pz_preview_commit_candidate;
+                pz_pair_workspace.candidate=pz_outputs;
+                pz_pair_workspace.candidate.outputs[pz_preview_commit_lane]=
+                    pz_preview_commit_candidate.outputs[pz_preview_commit_lane];
                 pz_preview_commit_requested=false;
                 pz_preview_commit_worker_active=true;
                 preview_commit=true;
@@ -3249,11 +3257,11 @@ static void config_activation_task(void *unused){
                 const bool saved=pz_save_controller_locked(&pz_pair_workspace.candidate);
                 portENTER_CRITICAL(&state_lock);
                 pz_preview_commit_worker_active=false;
-                if(!saved&&pz_preview.active&&pz_preview.committing&&
-                   pz_preview.lane==pz_preview_commit_lane&&
-                   pz_preview.base_revision==pz_preview_commit_lane_revision){
-                    pz_preview.committing=false;
-                    pz_preview.expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                if(!saved&&pz_preview[pz_preview_commit_lane].active&&pz_preview[pz_preview_commit_lane].committing&&
+                   pz_preview[pz_preview_commit_lane].lane==pz_preview_commit_lane&&
+                   pz_preview[pz_preview_commit_lane].base_revision==pz_preview_commit_lane_revision){
+                    pz_preview[pz_preview_commit_lane].committing=false;
+                    pz_preview[pz_preview_commit_lane].expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
                                            OT_PZ_PREVIEW_LEASE_MS;
                 }
                 memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
