@@ -257,7 +257,10 @@ bool ot_pz_preview_update(ot_pz_preview_t *state,unsigned lane,
         if(state)(void)ot_pz_preview_expire(state,now_ms);
         return false;
     }
-    ot_pz_controller_t candidate=state->candidate;
+    /* Called under the owner mutex in CORE. Keep full-schema scratch out of
+     * the constrained NimBLE task stack, including nested UPDATE calls. */
+    static ot_pz_controller_t candidate;
+    candidate=state->candidate;
     candidate.outputs[lane]=*next;
     if(!ot_pz_valid(&candidate))return false;
     state->candidate=candidate;
@@ -417,7 +420,10 @@ bool ot_pz_preview_apply_updates(ot_pz_preview_t *state,unsigned lane,
             if(updates[i].panel_id==updates[j].panel_id&&
                updates[i].zone_id==updates[j].zone_id&&
                updates[i].range_id==updates[j].range_id)return false;
-    ot_pz_preview_t candidate=*state;
+    /* The caller serializes previews; this bounded scratch is non-reentrant.
+     * This keeps 5+ KiB off the BLE/GATT stack. */
+    static ot_pz_preview_t candidate;
+    candidate=*state;
     ot_pz_output_t *out=&candidate.candidate.outputs[lane];
     for(size_t i=0;i<update_count;i++)
         if(!pz_apply_one_update(out,lane,&updates[i]))return false;
