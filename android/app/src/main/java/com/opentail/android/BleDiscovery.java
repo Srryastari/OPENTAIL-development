@@ -314,6 +314,13 @@ final class BleDiscovery {
     private Consumer<PanelPreviewProtocol.Status> panelStatusListener;
     private Consumer<TelemetrySequenceWatchdog.Decision> panelSyncListener;
     private Consumer<PanelPreviewProtocol.LaneSnapshot> panelSnapshotListener;
+    // Durable v4 writes use the same Panel CFG characteristic as snapshots.
+    // ATT acknowledgement never establishes persistence; verify active readback.
+    private boolean panelSaveBusy, panelSaveWaitingWrite, panelSaveWaitingRead;
+    private int panelSaveLane=-1,panelSavePhase,panelSaveOffset,panelSaveLastCount;
+    private int panelSaveRevision,panelSaveLease;
+    private byte[] panelSaveWire;
+
     private volatile int panelReadQueued=0; // 1=capabilities, 2=status
     private volatile boolean panelReadPending=false;
     private volatile int panelReadKind=0,panelReadWatchLease=0;
@@ -592,6 +599,127 @@ final class BleDiscovery {
            panelUpdateWritePending||panelCancelQueued)return false;
         panelControlPacket=packet;panelControlLane=lane;panelControlAction=action;
         panelControlQueued=true;pumpQueue();return true;
+    }
+
+    boolean savePanelV4(int lane,String json) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelSaveBusy||
+           panelSnapshotBusy||panelSnapshotQueuedLane>=0||panelReadPending||
+           panelReadQueued!=0||panelControlQueued||panelUpdateQueued||
+           panelControlWritePending||panelUpdateWritePending||
+           panelCancelQueued||cfgBusy||writePending||readReplyPending||
+           pixelProbeWritePending||frameCapture.busy()||palette.busy()||
+           nextPacket!=null||triggerMapBusy||fxCapsBusy||authPending||
+           pairPending||challengePending)return false;
+        PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane);
+        if(base==null||base.pending||!base.persistent||base.activeRevision>=65535)
+            return false;
+        try {
+            byte[] candidate=PanelV4DraftCodec.encode(
+                lane,new org.json.JSONObject(json),base);
+            panelSaveBusy=true;panelSaveLane=lane;panelSaveWire=candidate;
+            panelSaveRevision=base.activeRevision;panelSavePhase=0;
+            panelSaveOffset=0;
+            panelSaveWrite(PanelV4LayoutProtocol.beginSave(lane,panelSaveRevision,candidate));
+            return true;
+        }catch(Exception ex){
+            notifyStatus("Panel v4 Save validation failed: "+ex.getMessage());
+            return false;
+        }
+    }
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void panelSaveWrite(byte[] packet) {
+        if(gatt==null||panelConfigCommand==null) {
+            panelSaveFinish(false,"Panel Save connection unavailable; reconcile before retry",null);
+            return;
+        }
+        BluetoothGatt owner=gatt;
+        int lease=++panelSaveLease;
+        panelSaveWaitingWrite=true;
+        boolean ok=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                ok=owner.writeCharacteristic(panelConfigCommand,packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelConfigCommand.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelConfigCommand.setValue(packet);
+                ok=owner.writeCharacteristic(panelConfigCommand);
+            }
+        }catch(SecurityException ex){notifyStatus("Panel Save Bluetooth permission denied");}
+        if(!ok) {
+            panelSaveFinish(false,"Panel Save write unavailable; outcome uncertain",null);
+            return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelSaveBusy&&panelSaveLease==lease)
+                recoverStalledGatt(owner,"Panel v4 Save timed out; reconnect and reconcile");
+        },8000L);
+    }
+    private void panelSaveWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelSaveBusy||!panelSaveWaitingWrite)return;
+        panelSaveWaitingWrite=false;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            panelSaveFinish(false,"Panel v4 Save GATT "+status+"; outcome uncertain",null);
+            return;
+        }
+        panelSaveWaitingRead=true;
+        boolean ok=false;
+        try{ok=owner.readCharacteristic(panelConfigReply);}
+        catch(SecurityException ex){notifyStatus("Panel Save ACK permission denied");}
+        if(!ok)panelSaveFinish(false,"Panel Save ACK unavailable; outcome uncertain",null);
+    }
+    private void panelSaveRead(BluetoothGatt owner,byte[] bytes,int status) {
+        if(owner!=gatt||!panelSaveBusy||!panelSaveWaitingRead)return;
+        panelSaveWaitingRead=false;panelSaveLease++;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            panelSaveFinish(false,"Panel Save ACK GATT "+status+"; outcome uncertain",null);
+            return;
+        }
+        int opcode=panelSavePhase==0?3:panelSavePhase==1?4:
+            panelSavePhase==2?5:6;
+        int result;
+        try{result=PanelV4LayoutProtocol.parseSaveAck(panelSaveLane,opcode,bytes);}
+        catch(IllegalArgumentException ex){
+            panelSaveFinish(false,"Panel Save ACK mismatch; reconcile before retry",null);
+            return;
+        }
+        if(result!=0) {
+            panelSaveFinish(false,"Controller rejected Panel v4 command ("+result+")",null);
+            return;
+        }
+        if(panelSavePhase==3) {
+            panelSaveFinish(false,"Save interrupted by STOP before finalization",null);
+            return;
+        }
+        if(panelSavePhase==2) {
+            panelSavePhase=4;
+            // COMMIT ACK is only admission. Read active v4 journal confirmation.
+            startPanelSnapshot(panelSaveLane);
+            return;
+        }
+        if(panelSavePhase==1)panelSaveOffset+=panelSaveLastCount;
+        else panelSavePhase=1;
+        if(isStopPacket(nextPacket)) {
+            panelSavePhase=3;
+            panelSaveWrite(PanelV4LayoutProtocol.cancelUncommittedSave(panelSaveLane));
+        }else if(panelSaveOffset>=panelSaveWire.length) {
+            panelSavePhase=2;
+            panelSaveWrite(PanelV4LayoutProtocol.completeSave(panelSaveLane));
+        }else {
+            byte[] chunk=PanelV4LayoutProtocol.saveChunk(
+                panelSaveLane,panelSaveWire,panelSaveOffset);
+            panelSaveLastCount=chunk.length-5;
+            panelSaveWrite(chunk);
+        }
+    }
+    private void panelSaveFinish(boolean success,String message,org.json.JSONObject confirmed) {
+        int lane=panelSaveLane;
+        panelSaveBusy=false;panelSaveWaitingWrite=false;panelSaveWaitingRead=false;
+        panelSaveLane=-1;panelSaveWire=null;panelSavePhase=0;panelSaveOffset=0;
+        panelSaveLease++;
+        if(lane>=0&&lane<2)cfgNotify(success,message,confirmed,lane);
+        if(!success)notifyStatus(message);
+        pumpQueue();
     }
 
     PanelPreviewProtocol.LaneSnapshot lastConfirmedPanelSnapshot(int lane) {
