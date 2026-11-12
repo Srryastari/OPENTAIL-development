@@ -32,10 +32,14 @@ for required in (
     assert required in stop_core, f"Global STOP must cancel software effects: {required}"
 assert stop_core.index("portENTER_CRITICAL(&state_lock)") < stop_core.index(
     "ot_fx_bank_stop_all(&fx_bank)") < stop_core.index("portEXIT_CRITICAL(&state_lock)")
-assert "const bool geometry_commit_active=pz_preview.committing||" in stop_core
-assert "if(!geometry_commit_active&&pz_preview.active)" in stop_core
-assert stop_core.index("geometry_commit_active") < stop_core.index(
-    "if(!geometry_commit_active&&pz_preview.active)")
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert stop_core.index("ot_fx_bank_stop_all(&fx_bank)") < stop_core.index(
+    "pz_preview_cancel_all_locked()")
+cancel_helper=section("static void pz_preview_cancel_pending_locked(void){",
+                      "void ot_ble_panel_preview_cancel_lane(")
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in cancel_helper
+assert "if(!pz_preview[i].committing)ot_pz_preview_cancel(&pz_preview[i]);" in core
 assert "live_input_mask=" not in stop_core
 assert "tm_gpio_input_mask" not in stop_core
 assert "gpio_set_level" not in stop_core
