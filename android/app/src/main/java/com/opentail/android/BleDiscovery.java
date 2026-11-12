@@ -407,7 +407,7 @@ final class BleDiscovery {
         }
         // A probe is optional. Never interrupt or overlap another ATT action;
         // STOP remains queued ahead of all subsequent diagnostics.
-        if(pixelProbeWritePending||cfgBusy||queuedOutputRead>=0||
+        if(panelSaveBusy||pixelProbeWritePending||cfgBusy||queuedOutputRead>=0||
            writePending||readReplyPending||fxCapsBusy||infoReadPending||infoReadQueued||
            triggerMapBusy||panelReadPending||panelSnapshotBusy||
            panelControlWritePending||panelUpdateWritePending||
@@ -771,6 +771,7 @@ final class BleDiscovery {
         panelStatusExpectedLane=-1;panelStatusReadRetries=0;panelStatusRetryLease++;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
         panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
+        if(panelSaveBusy)panelSaveFinish(false,"Panel v4 Save interrupted; outcome uncertain",null);
         panelSnapshotWatchLease++;panelCancelQueued=false;
         panelCancelWaitingWrite=false;panelControlWritePending=false;panelCancelPacket=null;
         panelControlQueued=false;panelControlWaitingWrite=false;panelControlPacket=null;
@@ -1469,7 +1470,7 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
+        if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
             panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
             frameCapture.busy() || palette.busy() || nextPacket!=null) {
@@ -1513,7 +1514,7 @@ final class BleDiscovery {
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
-        if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
+        if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
            panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||
            frameCapture.busy()||palette.busy()||authPending||pairPending||challengePending)return;
         // Preserve existing STOP-before-FX order. Never prioritize a read
@@ -1981,7 +1982,7 @@ final class BleDiscovery {
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,value,status);return;}
             if (PANEL_CAP_UUID.equals(characteristic.getUuid())) {panelCapabilitiesRead(connection,value,status);return;}
             if (PANEL_PREVIEW_STATUS_UUID.equals(characteristic.getUuid())) {panelStatusRead(connection,value,status);return;}
-            if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {panelSnapshotRead(connection,value,status);return;}
+            if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingRead)panelSaveRead(connection,value,status);else panelSnapshotRead(connection,value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid())) {
                 finishInfoRead(connection,value,status);
             }
@@ -2005,7 +2006,7 @@ final class BleDiscovery {
                 if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,characteristic.getValue(),status);return;}
                 if (PANEL_CAP_UUID.equals(characteristic.getUuid())) {panelCapabilitiesRead(connection,characteristic.getValue(),status);return;}
                 if (PANEL_PREVIEW_STATUS_UUID.equals(characteristic.getUuid())) {panelStatusRead(connection,characteristic.getValue(),status);return;}
-                if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {panelSnapshotRead(connection,characteristic.getValue(),status);return;}
+                if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingRead)panelSaveRead(connection,characteristic.getValue(),status);else panelSnapshotRead(connection,characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid())) {
                     finishInfoRead(connection,characteristic.getValue(),status);
                 }
@@ -2028,7 +2029,7 @@ final class BleDiscovery {
             if (PALETTE_CMD_UUID.equals(characteristic.getUuid())) {palette.written(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {ui.post(()->frameCapture.written(connection,status));return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
-            if (PANEL_CFG_CMD_UUID.equals(characteristic.getUuid())) {panelSnapshotWritten(connection,status);return;}
+            if (PANEL_CFG_CMD_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingWrite)panelSaveWritten(connection,status);else panelSnapshotWritten(connection,status);return;}
             if (PANEL_PREVIEW_CONTROL_UUID.equals(characteristic.getUuid())) {
                 if(panelCancelWaitingWrite)panelCancelWritten(connection,status);
                 else panelControlWritten(connection,status);
@@ -2548,6 +2549,24 @@ final class BleDiscovery {
                 new PanelPreviewProtocol.LaneSnapshot(panelSnapshotHeader,panelSnapshotWire);
             panelConfirmedSnapshots[panelSnapshotLane]=snapshot;
             panelSnapshotFresh[panelSnapshotLane]=true;
+            if(panelSaveBusy&&panelSavePhase==4&&panelSaveLane==snapshot.lane) {
+                boolean durable=Arrays.equals(panelSaveWire,snapshot.wire)&&
+                    snapshot.activeRevision!=panelSaveRevision&&
+                    !snapshot.pending&&snapshot.persistent;
+                if(durable) {
+                    try {
+                        org.json.JSONObject result=PanelV4DraftCodec.fromSnapshot(snapshot);
+                        panelGeometryManagers[snapshot.lane]=new GeometryTransactionManager(
+                            new GeometryTransactionManager.Snapshot(snapshot.lane,
+                                snapshot.activeRevision,snapshot.wire));
+                        panelSaveFinish(true,"Panel v4 Saved · revision "+
+                            snapshot.activeRevision+" confirmed",result);
+                    }catch(Exception ex){
+                        panelSaveFinish(false,"Panel v4 readback decode failed; outcome unknown",null);
+                    }
+                }else panelSaveFinish(false,
+                    "Panel v4 Save not yet confirmed; reconnect and reconcile before retry",null);
+            }
             if(panelGeometryManagers[panelSnapshotLane]==null) {
                 panelGeometryManagers[panelSnapshotLane]=new GeometryTransactionManager(
                     new GeometryTransactionManager.Snapshot(snapshot.lane,snapshot.activeRevision,snapshot.wire));
