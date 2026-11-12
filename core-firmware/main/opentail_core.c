@@ -2924,6 +2924,11 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
         ot_st_set_fault("external pixel RMT initialization failed");return false;
     }
     strip[ch]=next;strip_capacity[ch]=(uint16_t)pixels;
+    /* One-time/resize-only driver evidence: successful RMT allocation and
+     * clear are not proof of voltage at the shifter or an optical LED. */
+    ESP_LOGI(TAG,"RMT_OUTPUT_READY lane=%u gpio=%u pixels=%u dma=%u symbols=%u (driver only, not optical proof)",
+        (unsigned)(ch+1u),(unsigned)out_pin[ch],pixels,
+        (unsigned)rmt.flags.with_dma,(unsigned)rmt.mem_block_symbols);
     return true;
 }
 static bool strip_init(void){
