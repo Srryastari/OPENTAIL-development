@@ -89,7 +89,7 @@ assert "pz_live_fx_views[lane]=projected" in live_begin
 assert "pz_live_fx_views[lane]=projected" in live_update
 assert "pz_effective_panels_locked(pz_effective_fx_panels)" in fxfn
 assert "fx_views,fx_panels" in fxfn
-assert "ot_pz_to_fx_view(&candidate.candidate.outputs[lane]" in live_update
+assert "ot_pz_to_fx_view(&candidate->candidate.outputs[lane]" in live_update
 assert "probe_rmt_first_frame_generation" in core
 assert "probe_rmt_bright_frame_generation" in core
 assert "probe_nonblack[ch]=true" in render
