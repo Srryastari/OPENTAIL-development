@@ -2205,15 +2205,14 @@ final class BleDiscovery {
         if(owner!=gatt)return;
         if(panelReadPending&&panelReadKind==2){panelReadPending=false;panelReadKind=0;panelReadWatchLease++;}
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null){
-            if(panelStatusExpectedLane>=0)panelStatusFresh[panelStatusExpectedLane]=false;
-            else if(panelLastStatus!=null)panelStatusFresh[panelLastStatus.lane]=false;
-            panelStatusExpectedLane=-1;
             int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
                 (panelLastStatus!=null?panelLastStatus.lane:0);
+            panelStatusFresh[lane]=false;
+            panelStatusExpectedLane=-1;
             TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
                 "CORE Panel status read failed; transaction synchronization is uncertain");
-            for(GeometryTransactionManager manager:panelGeometryManagers)
-                if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
+            GeometryTransactionManager affected=panelGeometryManagers[lane];
+            if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("CORE Panel status read failed: "+status);
             panelRetryStatusRead(owner);pumpQueue();return;
@@ -2221,14 +2220,14 @@ final class BleDiscovery {
         final PanelPreviewProtocol.Status current;
         try{current=PanelPreviewProtocol.Status.parse(value);}
         catch(IllegalArgumentException ex){
-            if(panelStatusExpectedLane>=0)panelStatusFresh[panelStatusExpectedLane]=false;
-            panelStatusExpectedLane=-1;
             int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
                 (panelLastStatus!=null?panelLastStatus.lane:0);
+            panelStatusFresh[lane]=false;
+            panelStatusExpectedLane=-1;
             TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
                 "Invalid or truncated 61-byte CORE Panel status; authoritative reconciliation required");
-            for(GeometryTransactionManager manager:panelGeometryManagers)
-                if(manager!=null)manager.markSynchronizationUncertain(malformed.message);
+            GeometryTransactionManager affected=panelGeometryManagers[lane];
+            if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());
             panelRetryStatusRead(owner);pumpQueue();return;
