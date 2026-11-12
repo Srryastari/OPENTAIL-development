@@ -59,8 +59,8 @@ for(const required of ['MaterialTheme(colorScheme = scheme)',
   'frame!!.colorAt(sample)', 'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
-  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.saveOutput(index, draftText)',
-  'BleConfigCodec.encode(JSONObject(draftText))']) {
+  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.savePanelV4(index, draftText)',
+  'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
 assert(compose.includes('private fun CapsuleSlider(') &&
@@ -351,19 +351,19 @@ assert(model.includes('synchronized boolean setAutoEvent(String event, String ke
        model.includes('if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0)') &&
        model.includes('return save();'),
        'Event authoring must be validated and saved atomically');
-assert(hardware.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+assert(hardware.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardware.includes('623') &&
        hardware.includes('it.put("pixels", remaining)') &&
        hardware.includes('structureVersion++') &&
-       hardware.includes('BleConfigCodec.encode(draft)') &&
-       hardware.includes('ble.saveOutput(index, draftText)'),
+       hardware.includes('PanelV4DraftCodec.encode(index,draft,authoritative)') &&
+       hardware.includes('ble.savePanelV4(index, draftText)'),
   'CORE output editor must validate universal drafts and synchronize zone totals');
 // A rejected GATT save is not an in-flight hardware commit. Readback, not
 // request admission, remains the only success evidence.
-assert(bleSource.includes('boolean saveOutput(int index,String json)') &&
+assert(bleSource.includes('boolean savePanelV4(int lane,String json)') &&
        bleSource.includes('Load this output over BLE before saving",null,index);return false;') &&
        bleSource.includes('BLE is busy; retry after current transfer",null,index);return false;') &&
-       hardware.includes('if (ble.saveOutput(index, draftText))') &&
+       hardware.includes('if (ble.savePanelV4(index, draftText))') &&
        hardware.includes('Controller busy; no Save started'),
   'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
@@ -499,7 +499,7 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
        bleSource.includes('if(!stopped && owner==gatt && configListener!=null)') &&
        bleSource.includes('CORE active output differs; may be pending trigger release.') &&
        bleSource.includes('Reload after release; no active change verified') &&
-       bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
+       bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
        'Output Manager must reject stale controller callbacks and fail closed on pending geometry');
 
 // STOP queued behind a GATT transaction must drain before any new capture,
@@ -517,7 +517,7 @@ assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbac
 // Layout Reload Output1 was repeatedly blocked by the 500ms frame-preview
 // capture loop. Explicit READ must win without changing locked visual UI.
 const outputRead = bleSource.split('void readOutput(int index){')[1]
-  ?.split('boolean saveOutput(int index,String json)')[0];
+  ?.split('boolean savePanelV4(int lane,String json)')[0];
 const queuedReadPump = bleSource.split('private void pumpQueue(){')[1]
   ?.split('private String preferredPending')[0];
 assert(outputRead &&
@@ -1280,7 +1280,7 @@ assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captur
        compose.includes('effectId = 0, chainMask = 1 shl index, zoneMask = 255') &&
        compose.includes('brightness = 24, speed = 128, intensity = 128, paletteId = 0') &&
        unifiedEditor.includes('Solid Red needs a saved non-Off zone. The hardware check below does not.') &&
-       unifiedEditor.includes('ble.saveOutput(index, draftText)') &&
+       unifiedEditor.includes('ble.savePanelV4(index, draftText)') &&
        unifiedEditor.includes('"Saving…" else "Save"') &&
        !unifiedEditor.includes('if (confirm) AlertDialog'),
        'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
@@ -1360,7 +1360,7 @@ assert(finalLayout && finalOutput &&
   finalOutput.includes('coreZone.panelId') &&
   finalOutput.includes('if(linkedId!=null && linkedIndex!=null)') &&
   finalOutput.includes('ZoneDotPreview(t,localCount,reversed)') &&
-  finalOutput.includes('ble.saveOutput(index, draftText)') &&
+  finalOutput.includes('ble.savePanelV4(index, draftText)') &&
   !finalOutput.includes('Saved Output 1') &&
   !finalOutput.includes('BLE test1'),
   'One CORE-backed editor must retain all local zone tools without duplicate cards');
@@ -1371,16 +1371,16 @@ assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
   finalOutput.includes('.put("pixels",0)') &&
   finalOutput.includes('mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()') &&
   finalOutput.includes('SideEffect { layoutDraftZoneCounts[index] = zones.length() }') &&
-  finalOutput.includes('if(pixelCount==0) "Empty draft · current firmware cannot persist 0 LEDs"') &&
+  finalOutput.includes('if(ble.lastConfirmedPanelSnapshot(index)==null)') &&
   finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
-  bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
+  bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
   'Zero LED drafts must stay inert; saved CORE state still requires readback');
 
 assert(finalLayout.includes('LightingDirectory(t)') &&
   finalLayout.includes('if(advancedOpen) {') &&
   finalOutput.includes('Pill(outputTab(0),t,index==0)') &&
   finalOutput.includes('Pill(outputTab(1),t,index==1)') &&
-  finalOutput.includes('ble.readOutputIfReady(index)') &&
+  finalOutput.includes('ble.readPanelLaneSnapshot(index)') &&
   finalOutput.includes('outputDirty[index] = true') &&
   compose.includes('if (completedSave || outputDirty[index] != true)') &&
   model.includes('updateZoneOrganization(String id, String field, String text)') &&
