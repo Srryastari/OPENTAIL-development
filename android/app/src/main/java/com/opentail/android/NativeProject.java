@@ -415,8 +415,52 @@ final class NativeProject {
                 }
             }
             JSONObject z=zone(selected);
-            if(output==-1){z.remove("physicalOutput");z.remove("physicalSection");}
-            else z.put("physicalOutput",output).put("physicalSection",section);
+            if(output==-1) {
+                z.remove("physicalOutput");z.remove("physicalSection");
+                z.remove("physicalPanelId");z.remove("physicalPanelName");
+            } else {
+                // A universal first-run section needs an actual stable Panel
+                // identity. The previous mapping only set Output/Section,
+                // leaving GeometryTransactionManager unable to map 100 LEDs.
+                int oldLane=z.optInt("physicalOutput",-1);
+                boolean preserve=oldLane==output&&
+                    z.optInt("physicalPanelId",0)>0&&
+                    !z.optString("physicalPanelName","").trim().isEmpty();
+                if(!preserve) {
+                    int chosen=0;
+                    String panelName="";
+                    java.util.Set<Integer> reserved=new java.util.HashSet<>();
+                    for(int i=0;i<zoneCount();i++) {
+                        if(i==selected)continue;
+                        JSONObject other=zone(i);
+                        if(other.optInt("physicalOutput",-1)<0)continue;
+                        int otherId=other.optInt("physicalPanelId",0);
+                        if(otherId<1||otherId>127)continue;
+                        reserved.add(otherId);
+                        if(other.optInt("physicalOutput",-1)==output&&chosen==0) {
+                            chosen=otherId;
+                            panelName=other.optString("physicalPanelName","").trim();
+                        }
+                    }
+                    if(chosen==0) {
+                        // Prefer deterministic independent O1/O2 IDs, but
+                        // never steal an existing controller-wide identity.
+                        int desired=output+1;
+                        if(reserved.contains(desired)) {
+                            desired=1;
+                            while(desired<=127&&reserved.contains(desired))desired++;
+                        }
+                        if(desired>127)throw new JSONException("No available Panel identity");
+                        chosen=desired;
+                        panelName="Panel O"+(output+1);
+                    }
+                    if(panelName.isEmpty())
+                        throw new JSONException("Existing Panel identity has no name");
+                    z.put("physicalPanelId",chosen)
+                     .put("physicalPanelName",panelName);
+                }
+                z.put("physicalOutput",output).put("physicalSection",section);
+            }
             return save();
         }catch(JSONException ex){restoreCommitted();return false;}
     }
