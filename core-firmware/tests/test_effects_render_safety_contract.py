@@ -70,11 +70,15 @@ assert "slot->owner_panel_id=panel->zones[zone].panel_id" in fxbank
 assert "if(same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
+# Live effect routing uses the same transient geometry as RMT; no Save needed.
+assert "const ot_pz_output_t *fx_panels=pz_preview.active?" in core
+assert "const ot_om_output_t *fx_views=pz_preview.active?" in core
+assert "pz_live_fx_views:om_outputs" in core
 # All public live mutations resolve current logical zone masks to stable bank slots.
-assert "ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs," in core
+assert "ot_fx_bank_apply_configured_identity(&fx_bank,req,fx_views," in core
 assert "ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req," in core
-assert "ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs," in core
-assert "ot_fx_bank_set_spark_identity(&fx_bank,om_outputs," in core
+assert "ot_fx_bank_set_overlay_identity(&fx_bank,fx_views," in core
+assert "ot_fx_bank_set_spark_identity(&fx_bank,fx_views," in core
 assert "bank->zones[o][resolved[z]].spark=*spark" in fxbank
 assert "bank->zones[o][resolved[z]].overlay=*overlay" in fxbank
 assert "ot_fx_bank_apply_configured_identity(&replacement,&targeted," in core
