@@ -352,7 +352,7 @@ static int panel_caps_read(uint16_t conn,uint16_t handle,
     const uint8_t caps[11]={
         OT_PZ_WIRE_VERSION,OT_PZ_SCHEMA_VERSION,
         OT_PZ_MAX_PANELS_PER_OUTPUT,OT_PZ_MAX_ZONES_PER_OUTPUT,
-        OT_PZ_MAX_RANGES_PER_ZONE,0x0fu,
+        OT_PZ_MAX_RANGES_PER_ZONE,0x1fu, /* bit4: volatile capacity provisioning */
         (uint8_t)OT_PZ_MAX_WIRE_BYTES,(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8),
         15u,(uint8_t)(OT_PZ_PREVIEW_LEASE_MS/1000u),(uint8_t)OT_MAX_BRIGHTNESS
     };
