@@ -71,6 +71,7 @@ jobs:
               'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
               'android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java',
               'android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java',
+              'android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java',
               'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
               'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java',
           }
