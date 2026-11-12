@@ -1376,6 +1376,15 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         !pz_preview.active&&stop_request_generation==stop_render_generation;
     if(safe){
         *candidate=pz_outputs;
+        /* Owner-authorized Start Fresh must reset the real physical pixel
+         * count and old testing label too; clearing zones alone left the
+         * former 100-pixel/BLE TEST 1 fixture as an apparent default.
+         * Retain calibration/color-order in the hardware lane record and
+         * NEVER erase unrelated controller, trigger, auth or effects NVS. */
+        candidate->outputs[lane].active_pixels=0u;
+        (void)snprintf(candidate->outputs[lane].name,
+                       sizeof(candidate->outputs[lane].name),
+                       "Pixel OUT %u",(unsigned)(lane+1u));
         candidate->outputs[lane].panel_count=0u;
         candidate->outputs[lane].zone_count=0u;
         memset(candidate->outputs[lane].panels,0,sizeof(candidate->outputs[lane].panels));

@@ -31,6 +31,12 @@ assert "if(local_panel[ch].active_pixels!=0u)" in render
 assert "c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u)" in render
 assert "ot_pz_diag_render(&local_diag" in render
 assert "PIXEL_PROBE_ACCEPT" in core and "PIXEL_PROBE_REJECT" in core
+reset=core.split("int ot_ble_panel_reset_confirm(",1)[1].split("int ot_ble_panel_save(",1)[0]
+assert "candidate->outputs[lane].active_pixels=0u;" in reset
+assert '"Pixel OUT %u"' in reset
+assert "pz_save_controller_locked(candidate)" in reset
+assert "nvs_erase" not in reset
+assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in reset
 assert "PIXEL_PROBE_RMT_DONE" in core and "PIXEL_PROBE_NONBLACK_FRAME" in core
 assert "BLE_FX_DECISION" in core and "BLE_FX_LANE" in core
 fxfn=core.split("static bool ot_ble_apply_fx_internal(",1)[1].split("bool ot_ble_apply_fx(",1)[0]

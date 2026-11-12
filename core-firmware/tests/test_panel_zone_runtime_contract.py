@@ -226,6 +226,11 @@ reset_confirm = core.split("int ot_ble_panel_reset_confirm(", 1)[1].split(
     "int ot_ble_panel_save(", 1)[0]
 assert "candidate->outputs[lane].panel_count=0u" in reset_confirm
 assert "candidate->outputs[lane].zone_count=0u" in reset_confirm
+assert "candidate->outputs[lane].active_pixels=0u" in reset_confirm
+assert '"Pixel OUT %u"' in reset_confirm
+assert "candidate->outputs[lane].color_order=" not in reset_confirm
+assert "candidate->outputs[lane].rgb_gain" not in reset_confirm
+assert "candidate->outputs[lane].white_gain" not in reset_confirm
 # Reset persistence is performed exactly once by the shared save path:
 # changed geometry carries reset_mask in the pair intent; unchanged geometry
 # uses mark_reset() inside pz_save_controller_locked().
