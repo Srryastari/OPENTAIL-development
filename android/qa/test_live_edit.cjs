@@ -144,7 +144,7 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
 assert(hardwareBlock.includes('panelSaveQueuedLane=index') &&
        compose.includes('ble.savePanelV4(lane,requested)') &&
        hardwareBlock.includes('PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)') &&
-       hardwareBlock.includes('savingOutput.intValue = index') &&
+       hardwareBlock.includes('savingOutput.intValue=index') &&
        hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
        hardwareBlock.includes('"Saving…" else "Save"') &&
        compose.includes('val completedSave = index == savingOutput.intValue') &&
