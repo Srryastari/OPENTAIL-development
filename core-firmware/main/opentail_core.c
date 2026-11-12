@@ -1368,19 +1368,23 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
         !pz_preview.active&&stop_request_generation==stop_render_generation;
     if(safe){
         *candidate=pz_outputs;
-        /* Owner-authorized Start Fresh must reset the real physical pixel
-         * count and old testing label too; clearing zones alone left the
-         * former 100-pixel/BLE TEST 1 fixture as an apparent default.
-         * Retain calibration/color-order in the hardware lane record and
-         * NEVER erase unrelated controller, trigger, auth or effects NVS. */
-        candidate->outputs[lane].active_pixels=0u;
+        /* Owner-authorized Start Fresh means ACTUAL Panel v4 factory defaults,
+         * not the old 100-LED/BLE TEST 1 fixture or experimental calibration.
+         * Reset only this lane's entire authoritative output record. Preserve
+         * all other lanes and unrelated trigger/auth/system NVS namespaces.
+         * Never erase NVS partition 0x9000 or bypass the safe journal path. */
+        memset(&candidate->outputs[lane],0,sizeof(candidate->outputs[lane]));
         (void)snprintf(candidate->outputs[lane].name,
                        sizeof(candidate->outputs[lane].name),
                        "Pixel OUT %u",(unsigned)(lane+1u));
+        candidate->outputs[lane].active_pixels=0u;
+        candidate->outputs[lane].color_order=OT_OM_GRB;
+        for(unsigned c=0;c<3u;c++)
+            candidate->outputs[lane].rgb_gain[c]=
+                candidate->outputs[lane].white_gain[c]=255u;
+        candidate->outputs[lane].gamma_enabled=false;
         candidate->outputs[lane].panel_count=0u;
         candidate->outputs[lane].zone_count=0u;
-        memset(candidate->outputs[lane].panels,0,sizeof(candidate->outputs[lane].panels));
-        memset(candidate->outputs[lane].zones,0,sizeof(candidate->outputs[lane].zones));
         pz_reset_pending_mask|=(uint8_t)(1u<<lane);
     }
     pz_reset_challenge.active=false; /* single-use even if the confirm fails */

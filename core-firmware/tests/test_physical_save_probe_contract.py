@@ -34,6 +34,9 @@ assert "PIXEL_PROBE_ACCEPT" in core and "PIXEL_PROBE_REJECT" in core
 reset=core.split("int ot_ble_panel_reset_confirm(",1)[1].split("int ot_ble_panel_save(",1)[0]
 assert "candidate->outputs[lane].active_pixels=0u;" in reset
 assert '"Pixel OUT %u"' in reset
+assert "memset(&candidate->outputs[lane],0,sizeof(candidate->outputs[lane]));" in reset
+assert "candidate->outputs[lane].color_order=OT_OM_GRB;" in reset
+assert "candidate->outputs[lane].gamma_enabled=false;" in reset
 assert "pz_save_controller_locked(candidate)" in reset
 legacy=core.split("static bool pz_load_legacy_snapshot(",1)[1].split("static void pz_load(void)",1)[0]
 assert "Fresh Panel v4 defaults" in legacy

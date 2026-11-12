@@ -232,9 +232,11 @@ assert "candidate->outputs[lane].panel_count=0u" in reset_confirm
 assert "candidate->outputs[lane].zone_count=0u" in reset_confirm
 assert "candidate->outputs[lane].active_pixels=0u" in reset_confirm
 assert '"Pixel OUT %u"' in reset_confirm
-assert "candidate->outputs[lane].color_order=" not in reset_confirm
-assert "candidate->outputs[lane].rgb_gain" not in reset_confirm
-assert "candidate->outputs[lane].white_gain" not in reset_confirm
+assert "memset(&candidate->outputs[lane],0,sizeof(candidate->outputs[lane]));" in reset_confirm
+assert "candidate->outputs[lane].color_order=OT_OM_GRB;" in reset_confirm
+assert "candidate->outputs[lane].rgb_gain[c]" in reset_confirm
+assert "candidate->outputs[lane].white_gain[c]=255u;" in reset_confirm
+assert "candidate->outputs[lane].gamma_enabled=false;" in reset_confirm
 # Reset persistence is performed exactly once by the shared save path:
 # changed geometry carries reset_mask in the pair intent; unchanged geometry
 # uses mark_reset() inside pz_save_controller_locked().
