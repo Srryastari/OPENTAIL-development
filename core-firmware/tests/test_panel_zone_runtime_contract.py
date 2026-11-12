@@ -292,7 +292,7 @@ for token in ("last_rejected_sequence", "missing_sequence_count",
     assert token in status_handler, token
 assert "OT_PZ_TX_STATUS_V2_VERSION 2u" in protocol_header
 assert "OT_PZ_TX_STATUS_V2_BYTES 61u" in protocol_header
-assert "OT_PZ_MAX_RANGES_PER_ZONE,0x0fu" in ble
+assert "OT_PZ_MAX_RANGES_PER_ZONE,0x1fu" in ble  # bit4: live unsaved output-capacity provisioning
 
 print("PASS Owner P0 protected-COMMITTING and sequence-watchdog source contracts")
 
