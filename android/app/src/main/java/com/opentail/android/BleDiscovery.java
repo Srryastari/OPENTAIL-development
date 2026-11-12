@@ -465,20 +465,26 @@ final class BleDiscovery {
         return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
                panelPreviewStatus!=null && panelConfigCommand!=null && panelConfigReply!=null;
     }
-    /** Both authoritative lane snapshots and status-v2 reads are fresh and idle. */
-    boolean panelGeometryReady() {
-        if(!canReadPanelPreview())return false;
-        for(int lane=0;lane<2;lane++) {
-            PanelPreviewProtocol.Status status=panelStatuses[lane];
-            GeometryTransactionManager manager=panelGeometryManagers[lane];
-            if(!panelSnapshotFresh[lane]||!panelStatusFresh[lane]||
-               panelConfirmedSnapshots[lane]==null||status==null||manager==null||
-               status.state!=PanelPreviewProtocol.STATE_IDLE||status.sessionId!=0||
-               manager.state()!=GeometryTransactionManager.State.READY||manager.syncUncertain())
-                return false;
+    /** Each v4 lane has its own live lease. A different ACTIVE lane must
+     * never block editing this lane or be cancelled as a side effect. */
+    boolean panelGeometryReady(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview())return false;
+        for(int i=0;i<2;i++) {
+            PanelPreviewProtocol.Status status=panelStatuses[i];
+            GeometryTransactionManager manager=panelGeometryManagers[i];
+            if(!panelSnapshotFresh[i]||!panelStatusFresh[i]||
+               panelConfirmedSnapshots[i]==null||status==null||manager==null||
+               manager.syncUncertain())return false;
+            boolean idle=status.state==PanelPreviewProtocol.STATE_IDLE&&
+                status.sessionId==0&&manager.state()==GeometryTransactionManager.State.READY;
+            boolean retainedPreview=status.state==PanelPreviewProtocol.STATE_ACTIVE&&
+                status.sessionId!=0&&status.leaseRemainingMs>0&&
+                manager.state()==GeometryTransactionManager.State.ACTIVE;
+            if(i==lane?!idle:!(idle||retainedPreview))return false;
         }
         return true;
     }
+    boolean panelGeometryReady(){return panelGeometryReady(0)||panelGeometryReady(1);}
     /** Current negotiated ATT MTU used by both the batch planner and the writer. */
     int panelUpdateMtu(){return Math.max(23,negotiatedMtu);}
     boolean readPanelStatus() {
@@ -494,7 +500,7 @@ final class BleDiscovery {
     }
     /** Begin only from two fresh, stable, authoritative lane maps/statuses. */
     boolean beginPanelPreview(int lane,GeometryTransactionManager.LayoutMapping mapping) {
-        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+        if(lane<0||lane>1||!panelGeometryReady(lane)||panelPreviewControl==null||
            mapping==null||panelControlQueued||panelControlWritePending||panelUpdateQueued||
            panelUpdateWritePending||panelCancelQueued)return false;
         for(int i=0;i<2;i++)
