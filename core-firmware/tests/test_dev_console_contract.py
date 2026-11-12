@@ -120,7 +120,7 @@ for save_path in (output_http, output_ble):
     assert "pz_deferred.pending" in save_path
     assert "om_deferred.pending" in save_path
     assert "tm_deferred.pending" in save_path
-    assert "pz_preview.active" in save_path
+    assert "pz_preview_any_active_locked()" in save_path
     assert "raw_active" in save_path and "live_input_mask" in save_path
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
@@ -131,7 +131,7 @@ assert "om_save(next_all)" in output_http
 om_save_impl = core.split("static bool om_save(",1)[1].split(
     "#define OT_SHOW_MAX_MS",1)[0]
 assert "pz_save_controller_locked(candidate)" in om_save_impl
-assert "pz_preview.active" in om_save_impl
+assert "pz_preview_any_active_locked()" in om_save_impl
 assert "busy=pz_deferred.pending" in output_ble
 assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in output_ble
 assert output_ble.index("busy=pz_deferred.pending") < output_ble.index(
