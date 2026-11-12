@@ -159,7 +159,7 @@ static bool render_probe_frame(render_probe_t *probe,
             const uint8_t bank_z=probe->resolved_bank_index[lane][zone];
             const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
                 &bank->zones[lane][bank_z]:NULL;
-            const bool active=len>0u&&zone_cfg->role!=OT_OM_OFF&&slot&&
+            const bool active=len>0u&&slot&&
                 ot_fx_slot_active(slot,now_ms);
             const int prior_index=active?
                 ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
@@ -675,6 +675,30 @@ static void test_stop_and_physical_priority(ot_fx_zone_bank_t *bank){
     assert(same_rgb(physical,reverse));
 }
 
+/* Owner P0: trigger-role OFF means no road overlay, not Show exclusion. */
+static void test_off_role_still_accepts_independent_show_effect(void){
+    ot_pz_controller_t panel;
+    make_controller(&panel);
+    panel.outputs[0].zones[0].role=OT_OM_OFF;
+    assert(ot_pz_valid(&panel));
+    ot_om_output_t output_view[OT_OM_OUTPUTS];
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++)
+        assert(ot_pz_to_fx_view(&panel.outputs[lane],lane,&output_view[lane]));
+    ot_fx_zone_bank_t bank;
+    ot_fx_bank_reset(&bank);
+    ot_ble_fx_packet_t red=make_fx(OT_WLED_RIPPLE,0u,0u);
+    red.r=255u;red.g=0u;red.b=0u;
+    assert(ot_fx_bank_apply_configured_identity(&bank,&red,output_view,
+        panel.outputs,1000u,false));
+    render_probe_t *probe=calloc(1u,sizeof(*probe));
+    assert(probe);
+    assert(render_probe_frame(probe,&panel,&bank,1010u));
+    assert(probe->prior_active[0][0]);
+    assert(!probe->prior_active[1][0]);
+    release_render_probe(probe);
+    free(probe);
+}
+
 int main(void){
     ot_pz_controller_t active;
     make_controller(&active);
@@ -682,6 +706,7 @@ int main(void){
     ot_fx_bank_reset(&bank);
     render_probe_t probe={0};
 
+    test_off_role_still_accepts_independent_show_effect();
     test_production_identity_lookup();
     test_zone_independence_and_discontiguous_ranges(&active,&bank,&probe);
     test_preview_phase_commit_cancel_and_unaffected_zone(&active,&bank,&probe);
