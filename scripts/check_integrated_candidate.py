@@ -25,8 +25,26 @@ if workflow_pin:
 else:
     assert git("rev-parse","HEAD:"+gate)==git("rev-parse",m["sources"]["firmware"]["sha"]+":"+gate)
 names=("core_logic.h","effects_1d.c","effects_1d.h","ot_auto_effects.c","ot_auto_effects.h","palette_1d.c","palette_1d.h","particle_system_1d.c","particle_system_1d.h","wled_1d.c","wled_1d.h","wled_fx_compat.c","wled_fx_compat.h")
-for name in names:
-    assert git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)==git("rev-parse","HEAD:core-firmware/main/"+name),name
+renderer_pin=m.get("integrated_renderer_pin")
+if renderer_pin:
+    # The Android branch retains its separately pinned historical CORE tree.
+    # New JNI renderer bytes must instead equal the *approved* Firmware #127
+    # source exactly. Keep the only platform header difference explicit.
+    approved=renderer_pin["firmware127_sha"]
+    assert workflow_pin and approved==workflow_pin["firmware127_sha"]
+    for name in names:
+        actual=git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)
+        if name=="core_logic.h":
+            assert actual==renderer_pin["android_core_logic_blob"],(name,actual)
+            assert actual==git("rev-parse",renderer_pin["base_effects_commit"]+":core-firmware/main/"+name)
+            firmware_header=git("rev-parse",approved+":core-firmware/main/"+name)
+            assert firmware_header==renderer_pin["firmware_core_logic_blob"],(name,firmware_header)
+        else:
+            expected=git("rev-parse",approved+":core-firmware/main/"+name)
+            assert actual==expected,(name,actual,expected)
+else:
+    for name in names:
+        assert git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)==git("rev-parse","HEAD:core-firmware/main/"+name),name
 assert m["release_approval"] is False and m["hardware_failover_certified"] is False
 correction=m["continuous_correction"]
 changed=set(git("diff","--name-only",correction["base_sha"],m["issue93_correction"]["base_sha"],"--","android","core-firmware").splitlines())
