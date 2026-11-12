@@ -504,7 +504,7 @@
   },
   "integrated_trees": {
     "android": "cccac707b31bd878ce8ffab45ef3ed1f10cc31e1",
-    "core-firmware": "f29aeb4f5bad94b0517b6e45d33c0667c2e7ad5b"
+    "core-firmware": "b64cd8bb7c14638ec37becdb97d43a02b96f282b"
   },
   "owner_mandated_p0_addendum": {
     "base_sha": "1a9cfc4b25ef57bda38a7861ac5548c3747d9605",
