@@ -318,8 +318,9 @@ final class BleDiscovery {
     // ATT acknowledgement never establishes persistence; verify active readback.
     private boolean panelSaveBusy, panelSaveWaitingWrite, panelSaveWaitingRead;
     private int panelSaveLane=-1,panelSavePhase,panelSaveOffset,panelSaveLastCount;
-    private int panelSaveRevision,panelSaveLease;
-    private byte[] panelSaveWire;
+    private int panelSaveRevision,panelSaveLease,panelSaveVerificationReads;
+    private long panelSaveVerifyDeadlineMs;
+    private byte[] panelSaveWire,panelSaveBaseWire;
 
     private volatile int panelReadQueued=0; // 1=capabilities, 2=status
     private volatile boolean panelReadPending=false;
@@ -642,6 +643,7 @@ final class BleDiscovery {
             byte[] candidate=PanelV4DraftCodec.encode(
                 lane,new org.json.JSONObject(json),base);
             panelSaveBusy=true;panelSaveLane=lane;panelSaveWire=candidate;
+            panelSaveBaseWire=Arrays.copyOf(base.wire,base.wire.length);
             panelSaveRevision=base.activeRevision;panelSavePhase=0;
             panelSaveOffset=0;
             panelSaveWrite(PanelV4LayoutProtocol.beginSave(lane,panelSaveRevision,candidate));
@@ -724,6 +726,8 @@ final class BleDiscovery {
                 return;
             }
             panelSavePhase=7;
+            panelSaveVerificationReads=0;
+            panelSaveVerifyDeadlineMs=android.os.SystemClock.elapsedRealtime()+20000L;
             startPanelSnapshot(panelSaveLane);
             return;
         }
@@ -744,8 +748,15 @@ final class BleDiscovery {
             return;
         }
         if(panelSavePhase==2) {
+            // Final ACK is admission, not durable promotion. A queued STOP
+            // must take precedence over long snapshot polling.
+            if(isStopPacket(nextPacket)) {
+                panelSaveFinish(false,"STOP prioritized; Panel Save outcome requires reconnect verification",null);
+                return;
+            }
             panelSavePhase=4;
-            // COMMIT ACK is only admission. Read active v4 journal confirmation.
+            panelSaveVerificationReads=0;
+            panelSaveVerifyDeadlineMs=android.os.SystemClock.elapsedRealtime()+20000L;
             startPanelSnapshot(panelSaveLane);
             return;
         }
@@ -767,8 +778,9 @@ final class BleDiscovery {
     private void panelSaveFinish(boolean success,String message,org.json.JSONObject confirmed) {
         int lane=panelSaveLane;
         panelSaveBusy=false;panelSaveWaitingWrite=false;panelSaveWaitingRead=false;
-        panelSaveLane=-1;panelSaveWire=null;panelSavePhase=0;panelSaveOffset=0;
-        panelSaveLease++;
+        panelSaveLane=-1;panelSaveWire=null;panelSaveBaseWire=null;
+        panelSavePhase=0;panelSaveOffset=0;panelSaveVerificationReads=0;
+        panelSaveVerifyDeadlineMs=0L;panelSaveLease++;
         if(lane>=0&&lane<2)cfgNotify(success,message,confirmed,lane);
         if(!success)notifyStatus(message);
         pumpQueue();
@@ -1522,6 +1534,9 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
+        if (stop&&panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&
+            !panelSnapshotBusy&&!panelSaveWaitingWrite&&!panelSaveWaitingRead)
+            panelSaveFinish(false,"STOP prioritized; durable Save must be reconciled after reconnect",null);
         if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
             panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
@@ -2601,10 +2616,18 @@ final class BleDiscovery {
                 new PanelPreviewProtocol.LaneSnapshot(panelSnapshotHeader,panelSnapshotWire);
             panelConfirmedSnapshots[panelSnapshotLane]=snapshot;
             panelSnapshotFresh[panelSnapshotLane]=true;
+            boolean retrySaveReadback=false;
             if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&panelSaveLane==snapshot.lane) {
+                // No-op saves retain the revision. A changed durable map must
+                // advance it, and every success must match the whole 667-byte
+                // active image, not an ATT write ACK or staged NVS contents.
+                boolean unchanged=panelSavePhase==4&&
+                    Arrays.equals(panelSaveBaseWire,panelSaveWire);
+                boolean revisionMatches=snapshot.activeRevision!=panelSaveRevision||
+                    (unchanged&&snapshot.activeRevision==panelSaveRevision)||
+                    panelSavePhase==7;
                 boolean durable=Arrays.equals(panelSaveWire,snapshot.wire)&&
-                    (snapshot.activeRevision!=panelSaveRevision||panelSavePhase==7)&&
-                    !snapshot.pending&&snapshot.persistent;
+                    revisionMatches&&!snapshot.pending&&snapshot.persistent;
                 if(durable) {
                     try {
                         org.json.JSONObject result=PanelV4DraftCodec.fromSnapshot(snapshot);
@@ -2617,14 +2640,30 @@ final class BleDiscovery {
                     }catch(Exception ex){
                         panelSaveFinish(false,"Panel v4 readback decode failed; outcome unknown",null);
                     }
-                }else panelSaveFinish(false,
-                    "Panel v4 Save not yet confirmed; reconnect and reconcile before retry",null);
+                }else if(++panelSaveVerificationReads<=8&&
+                    android.os.SystemClock.elapsedRealtime()<panelSaveVerifyDeadlineMs&&
+                    !isStopPacket(nextPacket)){
+                    retrySaveReadback=true;
+                }else {
+                    panelSaveFinish(false,
+                        "Panel v4 Save not confirmed after bounded active readback; reconnect and reconcile before retry",null);
+                }
             }
             if(panelGeometryManagers[panelSnapshotLane]==null) {
                 panelGeometryManagers[panelSnapshotLane]=new GeometryTransactionManager(
                     new GeometryTransactionManager.Snapshot(snapshot.lane,snapshot.activeRevision,snapshot.wire));
             }
             panelSnapshotBusy=false;panelSnapshotWire=null;panelSnapshotHeader=null;
+            if(retrySaveReadback) {
+                final BluetoothGatt session=gatt;
+                final int lane=snapshot.lane,lease=panelSaveLease;
+                ui.postDelayed(()->{
+                    if(!stopped&&session==gatt&&panelSaveBusy&&
+                       panelSaveLease==lease&&panelSaveLane==lane&&
+                       !panelSnapshotBusy&&!isStopPacket(nextPacket))
+                        startPanelSnapshot(lane);
+                },250L);
+            }
             if(panelSnapshotListener!=null) {
                 final BluetoothGatt current=gatt;
                 ui.post(()->{
@@ -2661,6 +2700,8 @@ final class BleDiscovery {
         }
         panelStatusExpectedLane=-1;
         panelSnapshotWire=null;panelSnapshotHeader=null;panelSnapshotWatchLease++;
+        if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7))
+            panelSaveFinish(false,"Panel v4 readback interrupted; Save outcome uncertain: "+message,null);
         notifyStatus(message);
         if(panelReconciliationPending) {
             panelReconciliationPending=false;panelReconciliationSnapshotVerified=false;
