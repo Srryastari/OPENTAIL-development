@@ -2377,7 +2377,7 @@ final class BleDiscovery {
             panelReconciliationAttempts=0;
             panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
         }
-        if(panelWatchdog.requiresCancelFor(current)) {
+        if(panelWatchdogs[current.lane].requiresCancelFor(current)) {
             if(panelCancelAttemptedSession!=current.sessionId) {
                 panelCancelPacket=PanelPreviewProtocol.cancel(current.lane,current.sessionId);
                 panelCancelQueued=true;pumpQueue();return;
