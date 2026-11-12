@@ -32,6 +32,11 @@ assert "c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u)" in render
 assert "ot_pz_diag_render(&local_diag" in render
 assert "PIXEL_PROBE_ACCEPT" in core and "PIXEL_PROBE_REJECT" in core
 assert "PIXEL_PROBE_RMT_DONE" in core and "PIXEL_PROBE_NONBLACK_FRAME" in core
+assert "BLE_FX_DECISION" in core and "BLE_FX_LANE" in core
+fxfn=core.split("static bool ot_ble_apply_fx_internal(",1)[1].split("bool ot_ble_apply_fx(",1)[0]
+assert fxfn.index("portEXIT_CRITICAL(&state_lock);") < fxfn.index('ESP_LOGI(TAG,"BLE_FX_DECISION')
+assert "fx_diag_eligible" in fxfn and "ot_pz_zone_pixel_count(zone)>0u" in fxfn
+assert "output_runtime_fault_mask" in fxfn
 assert "probe_rmt_first_frame_generation" in core
 assert "probe_rmt_bright_frame_generation" in core
 assert "probe_nonblack[ch]=true" in render

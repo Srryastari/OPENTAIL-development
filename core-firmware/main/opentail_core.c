@@ -1834,8 +1834,28 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool ready;
+    /* These snapshots help distinguish a rejected Off/unassigned zone from
+     * an accepted nonblack FX request and a subsequent physical RMT failure.
+     * Diagnostic logging is OUTSIDE state_lock, never in the renderer loop. */
+    uint16_t fx_diag_pixels[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_zones[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_eligible[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_roles[OT_OM_OUTPUTS]={0};
+    uint32_t fx_diag_faults=0u;
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
+    fx_diag_faults=output_runtime_fault_mask;
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++){
+        fx_diag_pixels[lane]=pz_outputs.outputs[lane].active_pixels;
+        fx_diag_zones[lane]=pz_outputs.outputs[lane].zone_count;
+        for(unsigned z=0;z<pz_outputs.outputs[lane].zone_count&&z<OT_OM_ZONES;z++){
+            const ot_pz_zone_t *zone=&pz_outputs.outputs[lane].zones[z];
+            if(zone->role==OT_OM_OFF)fx_diag_roles[lane]|=(uint8_t)(1u<<z);
+            if((req->zone_mask&(1u<<z))&&zone->role!=OT_OM_OFF&&
+               ot_pz_zone_pixel_count(zone)>0u)
+                fx_diag_eligible[lane]|=(uint8_t)(1u<<z);
+        }
+    }
     if(ready){
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=continuous?
@@ -1864,6 +1884,14 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
     }
     portEXIT_CRITICAL(&state_lock);
+    ESP_LOGI(TAG,"BLE_FX_DECISION effect=%u accepted=%u continuous=%u output_mask=0x%02x zone_mask=0x%02x output_faults=0x%08lx",
+        (unsigned)req->effect_id,(unsigned)ready,(unsigned)continuous,
+        (unsigned)req->chain_mask,(unsigned)req->zone_mask,(unsigned long)fx_diag_faults);
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++)if(req->chain_mask&(1u<<lane))
+        ESP_LOGI(TAG,"BLE_FX_LANE lane=%u gpio=%u configured=%u zones=%u off_mask=0x%02x eligible_mask=0x%02x",
+            (unsigned)(lane+1u),(unsigned)out_pin[lane],(unsigned)fx_diag_pixels[lane],
+            (unsigned)fx_diag_zones[lane],(unsigned)fx_diag_roles[lane],
+            (unsigned)fx_diag_eligible[lane]);
     if(ready)request_render_refresh();
     return ready;
 }
