@@ -538,7 +538,7 @@ assert(outputRead &&
        bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
        bleSource.includes('CORE snapshot ATT timed out; reconnect required') &&
        bleSource.includes('clearQueuedOutputRead();') &&
-       bleSource.includes('if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
+       bleSource.includes('if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
