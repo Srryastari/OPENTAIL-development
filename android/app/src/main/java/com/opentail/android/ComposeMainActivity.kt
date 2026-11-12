@@ -3697,24 +3697,38 @@ class ComposeMainActivity : ComponentActivity() {
             if (zones.length() < 8) Pill("+ Add zone", t) {
                 val newSection=zones.length()
                 val label="Zone " + (newSection+1)
-                val before=draftText
-                edit {
-                    it.getJSONArray("zones").put(JSONObject()
-                        .put("name",label).put("pixels",0).put("role","off"))
-                }
                 val position=project.zoneCount()
-                if(project.addZoneAt(label,0,position)) {
-                    val id=project.zone(position)?.optString("id").orEmpty()
-                    if(id.isNotEmpty() && project.mapZoneToOutputSlot(id,index,newSection))refresh()
-                    else outputMessage.value="Zone created locally but output assignment needs review"
+                if(!project.addZoneAt(label,0,position)) {
+                    outputMessage.value="Could not add local zone; current live geometry is unchanged"
                 } else {
-                    draftText=before
-                    outputMessage.value="Could not add local zone; CORE draft unchanged"
+                    val id=project.zone(position)?.optString("id").orEmpty()
+                    if(id.isEmpty() || !project.mapZoneToOutputSlot(id,index,newSection)) {
+                        outputMessage.value="New section not mapped: Panel identity assignment rejected; no physical change sent"
+                    } else {
+                        val assigned=project.zone(position)
+                        val panelId=assigned?.optInt("physicalPanelId",0) ?: 0
+                        val panelName=assigned?.optString("physicalPanelName","") ?: ""
+                        if(panelId !in 1..127 || panelName.isBlank()) {
+                            outputMessage.value="New section needs a stable Panel identity before live editing"
+                        } else {
+                            // Same stable aliases as the project geometry
+                            // planner; a later resize must not create a
+                            // second, unrelated physical Zone ID.
+                            val zoneId=128+index*8+newSection+1
+                            edit {
+                                it.put("panel_id",panelId).put("panel_name",panelName)
+                                it.getJSONArray("zones").put(JSONObject()
+                                    .put("id",zoneId).put("panel_id",panelId)
+                                    .put("name",label).put("pixels",0).put("role","off"))
+                            }
+                            structureVersion++
+                            layoutLiveEditPending.value=true
+                            selectedZone=newSection
+                            choosingZone=false
+                            refresh()
+                        }
+                    }
                 }
-                structureVersion++
-                layoutLiveEditPending.value=true
-                selectedZone=newSection
-                choosingZone=false
             }
             if(zones.length()>0) Pill("Remove zone",t) {
                 pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)
