@@ -126,8 +126,12 @@ typedef struct {
     bool active,has_sequence,committing;
     bool sequence_sync_warning,sequence_sync_fault;
 } ot_pz_tx_session_t;
-static ot_pz_tx_session_t panel_preview_tx;
+/* Per-output BLE sessions; callbacks are serialized on NimBLE host task. */
+static ot_pz_tx_session_t panel_preview_tx_lanes[OT_PZ_OUTPUTS];
+static uint8_t panel_preview_status_lane=0u;
+#define panel_preview_tx (panel_preview_tx_lanes[panel_preview_status_lane])
 static void panel_preview_reject_control(uint8_t reason);
+extern void ot_ble_panel_preview_cancel_lane(uint8_t lane);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
@@ -326,8 +330,10 @@ static void panel_session_reset(void){
     panel_caps_seen=false;panel_response_len=0;
     panel_read_index=255;panel_upload_index=255;
     panel_upload_crc=0;panel_upload_revision=0;
-    memset(&panel_preview_tx,0,sizeof(panel_preview_tx));
-    panel_preview_tx.status=OT_PZ_TX_IDLE;
+    memset(panel_preview_tx_lanes,0,sizeof(panel_preview_tx_lanes));
+    panel_preview_status_lane=0u;
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        panel_preview_tx_lanes[i].lane=(uint8_t)i;
     memset(panel_response,0,sizeof(panel_response));
     memset(panel_snapshot,0,sizeof(panel_snapshot));
     memset(panel_upload,0,sizeof(panel_upload));
@@ -430,6 +436,7 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
         return 0;
     }
     if(lane>=OT_PZ_OUTPUTS){panel_ack(opcode,lane,1u);return 0;}
+    panel_preview_status_lane=lane;
     switch(opcode){
         case 1u:{ /* immutable active snapshot */
             if(n!=3u){panel_ack(opcode,lane,1u);break;}
@@ -644,7 +651,7 @@ static bool panel_preview_session_matches(uint8_t lane,uint32_t session_id){
 static void panel_preview_expire_if_needed(uint32_t now_ms){
     if(panel_preview_tx.active&&!panel_preview_tx.committing&&
        (int32_t)(now_ms-panel_preview_tx.expires_ms)>=0){
-        ot_ble_panel_preview_cancel();
+        ot_ble_panel_preview_cancel_lane(panel_preview_tx.lane);
         panel_preview_tx.active=false;
         panel_preview_tx.status=OT_PZ_TX_EXPIRED;
         panel_preview_tx.last_error=0u;
@@ -702,6 +709,7 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(command.lane<OT_PZ_OUTPUTS)panel_preview_status_lane=command.lane;
     panel_preview_expire_if_needed(now_ms);
     if(command.opcode==OT_PZ_TX_OP_BEGIN){
         if(panel_preview_tx.committing){
@@ -804,7 +812,7 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         return 0;
     }
     if(command.opcode==OT_PZ_TX_OP_CANCEL){
-        ot_ble_panel_preview_cancel();
+        ot_ble_panel_preview_cancel_lane(lane);
         panel_preview_tx.active=false;
         panel_preview_tx.status=OT_PZ_TX_CANCELLED;
         panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
@@ -839,6 +847,7 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
         return 0;
     }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(update.lane<OT_PZ_OUTPUTS)panel_preview_status_lane=update.lane;
     panel_preview_expire_if_needed(now_ms);
 
     /* This guard intentionally precedes session/sequence checks. Any delayed
