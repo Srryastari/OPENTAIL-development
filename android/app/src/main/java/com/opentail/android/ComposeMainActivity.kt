@@ -3564,9 +3564,9 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 Caption(if(selectedRole=="off")
-                    "Off disables effects in this zone. Choose a role, then Save."
-                    else "Draft role: " + selectedRole.replace('_',' ') +
-                        " · Only active after confirmed Save.",t)
+                    "No vehicle-trigger override. Show Mode effects can play on this section without assigning a role or saving."
+                    else "Vehicle override: " + selectedRole.replace('_',' ') +
+                        " · Show Mode playback is independent of trigger roles.",t)
                 // Removal belongs beside Add Zone below, not in a hidden menu.
                 // Destructive action is confirmed once for the unified zone.
             }
