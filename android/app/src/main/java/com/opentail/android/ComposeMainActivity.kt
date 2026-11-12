@@ -243,16 +243,24 @@ class ComposeMainActivity : ComponentActivity() {
     // brightness, palette, effect selection or an unsaved Output draft.
     // This is a volatile command request, NOT proof of light output.
     private fun testSavedOutputSolidRed(index: Int) {
-        val confirmed = outputs[index]
-        val eligible = confirmed?.optJSONArray("zones")?.let { zones ->
-            (0 until zones.length()).any { z ->
-                val zone = zones.optJSONObject(z)
-                zone != null && zone.optInt("pixels", 0) > 0 &&
-                    zone.optString("role", "off") != "off"
+        val liveDraft = runCatching {
+            JSONObject(outputDrafts[index] ?: outputs[index]?.toString() ?: "{}")
+        }.getOrNull()
+        val hasLiveZone = liveDraft?.optJSONArray("zones")?.let { sections ->
+            (0 until sections.length()).any { z ->
+                (sections.optJSONObject(z)?.optInt("pixels",0) ?: 0)>0
             }
         } ?: false
-        if (index !in 0..1 || !ble.canControl() || !eligible) {
-            outputMessage.value = "Red test unavailable: authorize BLE and confirm a non-Off saved zone"
+        val hasConfirmedZone = runCatching {
+            ble.lastConfirmedPanelSnapshot(index)?.let { PanelPreviewProtocol.MapIdentity.parse(it) }
+                ?.zones?.any { it.ranges.any { r -> r.count>0 } } ?: false
+        }.getOrDefault(false)
+        val liveGeometryActive = ble.panelGeometryManager(index)?.state() ==
+            GeometryTransactionManager.State.ACTIVE && panelGeometryMapping != null
+        if(index !in 0..1 || !ble.canControl() ||
+            !(hasConfirmedZone || (liveGeometryActive && hasLiveZone))) {
+            outputMessage.value =
+                "Solid Red needs a controller-accepted, nonempty live or saved zone. Trigger roles and Save are not required."
             return
         }
         if (0 !in supportedIds.value || !ble.canContinuousFx()) {
@@ -3224,19 +3232,12 @@ class ComposeMainActivity : ComponentActivity() {
             if(outputDirty[index]==true) Caption("Unsaved changes",t)
             if (savingOutput.intValue == index) Caption("Saving… verifying controller readback", t)
             if(outputMessage.value.isNotBlank()) Caption(outputMessage.value.replace("CORE","controller"),t)
-            val confirmed=outputs[index]
-            val eligible=(0 until (confirmed?.optJSONArray("zones")?.length() ?: 0))
-                .any { z ->
-                    val zone=confirmed?.optJSONArray("zones")?.optJSONObject(z)
-                    zone != null && zone.optInt("pixels",0)>0 &&
-                        zone.optString("role","off")!="off"
-                }
             if(outputToolsOpen) Pill("Test Solid Red · O"+(index+1),t,
-                enabled=ble.canControl() && eligible) {
+                enabled=ble.canControl()) {
                 testSavedOutputSolidRed(index)
             }
-            if(outputToolsOpen && !eligible && confirmed!=null)
-                Caption("Solid Red needs a saved non-Off zone. The hardware check below does not.",t)
+            if(outputToolsOpen) Caption(
+                "Solid Red targets any configured section. A vehicle-trigger role and Save are not prerequisites; controller acceptance is required.",t)
             // Firmware's existing authenticated 0xAA diagnostic drives just
             // physical pixel zero for two seconds, even if the saved role is Off.
             // It never saves, reboots or creates a zone.
