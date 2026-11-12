@@ -3254,11 +3254,25 @@ class ComposeMainActivity : ComponentActivity() {
                     return
                 }
                 val id=project.zone(position)?.optString("id").orEmpty()
-                if(id.isNotEmpty() && !project.mapZoneToOutputSlot(id,index,0)) {
-                    outputMessage.value="First zone created; select its physical output assignment"
+                if(id.isEmpty() || !project.mapZoneToOutputSlot(id,index,0)) {
+                    outputMessage.value="First section could not acquire a valid output and Panel identity; no live mapping sent"
+                    return
+                }
+                val mapped=runCatching { GeometryTransactionManager.mapLayout(project).lane(index) }
+                    .getOrElse {
+                        outputMessage.value="Controller geometry rejected first section: "+it.message
+                        return
+                    }
+                val first=mapped.zones.firstOrNull { it.section==0 }
+                val firstPanel=mapped.panels.firstOrNull { it.id==first?.panelId }
+                if(first==null||firstPanel==null) {
+                    outputMessage.value="First section has no stable Panel/Zone identity; no live update sent"
+                    return
                 }
                 edit {
+                    it.put("panel_id",firstPanel.id).put("panel_name",firstPanel.name)
                     it.getJSONArray("zones").put(JSONObject()
+                        .put("id",first.id).put("panel_id",firstPanel.id)
                         .put("name",label).put("pixels",newTotal).put("role","off"))
                     it.put("pixels",newTotal)
                 }
