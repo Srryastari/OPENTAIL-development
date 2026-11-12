@@ -374,7 +374,27 @@ class ComposeMainActivity : ComponentActivity() {
             }
         })
         ble.setPanelSnapshotListener { snapshot ->
-            runOnUiThread { if(snapshot!=null) onPanelGeometrySnapshot(snapshot) }
+            runOnUiThread {
+                if(snapshot!=null) {
+                    // v4 is the only source of saved Layout values.
+                    runCatching { PanelV4DraftCodec.fromSnapshot(snapshot) }
+                        .onSuccess { confirmed ->
+                            val lane=snapshot.lane
+                            outputs[lane]=JSONObject(confirmed.toString())
+                            outputLoadStatus[lane]="ready"
+                            if(outputDirty[lane]!=true) {
+                                outputDrafts[lane]=confirmed.toString()
+                                outputReadbackEpoch[lane]=(outputReadbackEpoch[lane]?:0)+1
+                            }
+                            layoutDraftZoneCounts[lane]=confirmed.optJSONArray("zones")?.length()?:0
+                        }
+                        .onFailure {
+                            outputLoadStatus[snapshot.lane]="error"
+                            outputMessage.value="Panel v4 readback rejected: "+it.message
+                        }
+                    onPanelGeometrySnapshot(snapshot)
+                }
+            }
         }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
@@ -1826,8 +1846,8 @@ class ComposeMainActivity : ComponentActivity() {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp),
                     verticalAlignment=Alignment.CenterVertically) {
                     Pill("Refresh CORE",t) { refreshPanelGeometry() }
-                    Pill("Preview on CORE",t,panelGeometryMapping!=null) { startPanelGeometryPreview() }
-                    Pill("Commit",t,panelGeometryCommitRequested) { commitPanelGeometryPreview() }
+                    // Live preview starts automatically while editing.
+                    // No exposed Commit button: Layout Save controls durable configuration.
                     Pill("Cancel",t,panelGeometryCancelRequested) { cancelPanelGeometryPreview() }
                 }
                 Caption(panelGeometryMessage.value,t)
@@ -3045,7 +3065,7 @@ class ComposeMainActivity : ComponentActivity() {
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
-        val outputLimit = BleConfigCodec.MAX_LEDS_PER_OUTPUT
+        val outputLimit = PanelV4DraftCodec.MAX_LEDS
         val index = captureOutput.intValue
         val outputToolsOpen=layoutAdvancedOpen.value
         var autoReadStarted by remember(index) { mutableStateOf(false) }
@@ -3060,7 +3080,7 @@ class ComposeMainActivity : ComponentActivity() {
             if(outputs[index]==null && !autoReadStarted) {
                 repeat(12) {
                     if(!ble.canConfigure()) return@LaunchedEffect
-                    if(ble.readOutputIfReady(index)) {
+                    if(ble.readPanelLaneSnapshot(index)) {
                         autoReadStarted=true
                         outputLoadStatus[index]="loading"
                         return@LaunchedEffect
@@ -3081,7 +3101,7 @@ class ComposeMainActivity : ComponentActivity() {
             // Do not discard unsaved edits when BLE resets or the screen changes.
             // A verified output reply advances the epoch and replaces the draft.
             mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()
-                .put("name","Output "+(index+1)).put("pixels",0)
+                .put("name","Pixel OUT "+(index+1)).put("pixels",0)
                 .put("color_order","GRB").put("zones",JSONArray()).toString())
         }
         var structureVersion by remember(index, outputReadbackEpoch[index]) { mutableIntStateOf(0) }
@@ -3279,8 +3299,9 @@ class ComposeMainActivity : ComponentActivity() {
             // diagnostics and every zone editor. Never claim success pre-readback.
             var validationError=""
             val valid=try {
-                BleConfigCodec.encode(draft)
-                true
+                val authoritative=ble.lastConfirmedPanelSnapshot(index)
+                if(authoritative==null)false
+                else { PanelV4DraftCodec.encode(index,draft,authoritative);true }
             } catch(ex:Exception) {
                 validationError=ex.message ?: "Invalid output configuration"
                 false
@@ -3291,9 +3312,11 @@ class ComposeMainActivity : ComponentActivity() {
                     enabled=valid && savingOutput.intValue<0 &&
                         ble.canConfigure() && outputs[index]!=null) {
                     try {
-                        BleConfigCodec.encode(JSONObject(draftText))
+                        val saved=ble.lastConfirmedPanelSnapshot(index)
+                            ?: throw IllegalStateException("Read authoritative Panel v4 before saving")
+                        PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)
                         if(!ble.canConfigure()) outputMessage.value="Not authorized"
-                        else if (ble.saveOutput(index, draftText)) {
+                        else if (ble.savePanelV4(index, draftText)) {
                             savingOutput.intValue = index
                             outputMessage.value="Saving… verifying controller readback"
                         } else outputMessage.value="Controller busy; no Save started"
@@ -3302,7 +3325,9 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 Caption(if(!valid) {
-                    if(pixelCount==0) "Empty draft · current firmware cannot persist 0 LEDs" else validationError
+                    if(ble.lastConfirmedPanelSnapshot(index)==null)
+                        "Reading Panel v4; Save requires authoritative revision"
+                    else validationError
                 } else if(outputs[index]==null) "Loading controller…" else
                     if(outputDirty[index]==true) "Unsaved" else "Controller confirmed",t)
             }
@@ -3603,7 +3628,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 Pill("Reload from controller",t) {
-                    if(ble.canConfigure()) ble.readOutput(index)
+                    if(ble.canReadPanelPreview()) ble.readPanelLaneSnapshot(index)
                     else outputMessage.value="Connect and authorize before reading controller settings"
                 }
             }
