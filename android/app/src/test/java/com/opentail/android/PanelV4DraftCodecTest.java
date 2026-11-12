@@ -44,10 +44,10 @@ public class PanelV4DraftCodecTest {
         assertEquals(100,(wire[2]&255)|((wire[3]&255)<<8));
         assertEquals(1,wire[37]&255);assertEquals(1,wire[38]&255);
         assertEquals(0x8001,(wire[39]&255)|((wire[40]&255)<<8));
-        assertEquals(0x4001,(wire[155]&255)|((wire[156]&255)<<8));
+        assertEquals(0x4081,(wire[155]&255)|((wire[156]&255)<<8));
         assertEquals(3,wire[184]&255); // BRAKE role
         JSONObject confirmed=PanelV4DraftCodec.fromSnapshot(snapshot(wire,5));
-        assertEquals(0x4001,confirmed.getJSONArray("zones").getJSONObject(0).getInt("id"));
+        assertEquals(0x4081,confirmed.getJSONArray("zones").getJSONObject(0).getInt("id"));
         assertArrayEquals(wire,PanelV4DraftCodec.encode(0,confirmed,snapshot(wire,5)));
     }
     @Test public void independentUnsavedOutputCandidatesPreserveOffRoleAndNeverCrossLanes() throws Exception {
