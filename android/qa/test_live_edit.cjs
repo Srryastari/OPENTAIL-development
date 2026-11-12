@@ -137,17 +137,17 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('next.put("pixels",total)') &&
        hardwareBlock.includes('it.put("pixels", remaining)') &&
        hardwareBlock.includes('structureVersion++') &&
-       hardwareBlock.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+       hardwareBlock.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardwareBlock.includes('623') &&
        hardwareBlock.includes('PixelStrip(t,'),
        'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
-assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
-       hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
+assert(hardwareBlock.includes('ble.savePanelV4(index, draftText)') &&
+       hardwareBlock.includes('PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)') &&
        hardwareBlock.includes('savingOutput.intValue = index') &&
        hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
        hardwareBlock.includes('"Saving…" else "Save"') &&
        compose.includes('val completedSave = index == savingOutput.intValue') &&
-       ble.includes('if(cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected)))'),
+       ble.includes('if(Arrays.equals(panelSaveWire,snapshot.wire))'),
   'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
        compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
@@ -216,7 +216,7 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
 
-assert(hardwareBlock.includes('ble.readOutputIfReady(index)') &&
+assert(hardwareBlock.includes('ble.readPanelLaneSnapshot(index)') &&
        hardwareBlock.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
        hardwareBlock.includes('if(outputToolsOpen)') &&
        compose.includes('if(advancedOpen) {') &&
