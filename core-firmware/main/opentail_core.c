@@ -1359,7 +1359,9 @@ int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
     return 0;
 }
 static void pz_preview_cancel_pending_locked(void){
-    pz_preview_commit_requested=false;
+    /* Once COMMITTING has been published, STOP/disconnect cannot discard the
+     * immutable snapshot. The worker alone consumes and finishes that save. */
+    if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;
     memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
 }
 void ot_ble_panel_preview_cancel_lane(uint8_t lane){
@@ -1375,10 +1377,8 @@ void ot_ble_panel_preview_cancel(void){
     bool active=false;
     portENTER_CRITICAL(&state_lock);
     active=pz_preview_any_active_locked();
-    if(!pz_preview_commit_requested&&!pz_preview_commit_worker_active){
-        pz_preview_cancel_pending_locked();
-        pz_preview_cancel_all_locked();
-    }
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked(); /* Preserve COMMITTING, clear idle other lane. */
     portEXIT_CRITICAL(&state_lock);
     if(active)request_render_refresh();
 }
@@ -2267,12 +2267,8 @@ static void core_stop_all_sources(void){
     ot_fx_bank_stop_all(&fx_bank);
     native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
     if(pz_diag.mode!=OT_PZ_DIAG_NONE)ot_pz_diag_clear(&pz_diag);
-    const bool geometry_commit_active=pz_preview_any_committing_locked()||
-        pz_preview_commit_requested||pz_preview_commit_worker_active;
-    if(!geometry_commit_active&&pz_preview_any_active_locked()){
-        pz_preview_cancel_pending_locked();
-        pz_preview_cancel_all_locked();
-    }
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked(); /* STOP clears FX and idle drafts, not NVS commit. */
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     request_render_refresh();
