@@ -177,9 +177,31 @@ static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for
 /* Protected by state_lock; only the selected preview lane differs from
  * the saved FX view. No NVS mutation or additional controller stack copy. */
 static ot_om_output_t pz_live_fx_views[OT_OM_OUTPUTS];
-static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v3. */
+static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v4. */
+static void pz_effective_panels_locked(ot_pz_output_t *outputs){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        outputs[i]=pz_preview[i].active?
+            pz_preview[i].candidate.outputs[i]:pz_outputs.outputs[i];
+}
 static ot_pz_pending_t pz_deferred;
-static ot_pz_preview_t pz_preview;
+/* Per-output volatile sessions. Preview never writes another output's geometry. */
+static ot_pz_preview_t pz_preview[OT_PZ_OUTPUTS];
+/* Single mutex-protected scratch avoids full controller copies on NimBLE stack. */
+static ot_pz_preview_t pz_preview_scratch;
+static ot_pz_output_t pz_effective_fx_panels[OT_PZ_OUTPUTS];
+static bool pz_preview_any_active_locked(void){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)if(pz_preview[i].active)return true;
+    return false;
+}
+static bool pz_preview_any_committing_locked(void){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)if(pz_preview[i].committing)return true;
+    return false;
+}
+static void pz_preview_cancel_all_locked(void){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        if(!pz_preview[i].committing)ot_pz_preview_cancel(&pz_preview[i]);
+}
+
 static ot_pz_controller_t pz_preview_commit_candidate;
 static uint16_t pz_preview_commit_lane_revision=0u;
 static uint8_t pz_preview_commit_lane=0u;
@@ -1179,17 +1201,16 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
      * Reject shrinking below any still-mapped endpoint; do not render an
      * invalid intermediate geometry or mutate the committed records. */
     const bool capacity_ok=pixel_capacity<=OT_PZ_MAX_PIXELS;
-    accepted=!pending&&!pz_preview.active&&capacity_ok&&
+    accepted=!pending&&!pz_preview[lane].active&&capacity_ok&&
         pz_revision[lane]==base_revision&&pz_active_revision[lane]==base_revision&&
-        ot_pz_preview_begin(&pz_preview,&pz_outputs,lane,
+        ot_pz_preview_begin(&pz_preview[lane],&pz_outputs,lane,
                             pz_active_revision[lane],base_revision,pending,now_ms);
     if(accepted){
-        pz_preview.candidate.outputs[lane].active_pixels=pixel_capacity;
-        if(!ot_pz_valid(&pz_preview.candidate)){
-            ot_pz_preview_cancel(&pz_preview);
+        pz_preview[lane].candidate.outputs[lane].active_pixels=pixel_capacity;
+        if(!ot_pz_valid(&pz_preview[lane].candidate)){
+            ot_pz_preview_cancel(&pz_preview[lane]);
             accepted=false;
         }else{
-            memcpy(pz_live_fx_views,om_outputs,sizeof(pz_live_fx_views));
             pz_live_fx_views[lane]=projected;
         }
     }
@@ -1204,33 +1225,33 @@ int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
     /* Slider traffic is deliberately non-blocking and never queues stale edits. */
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
-    ot_pz_preview_t candidate;
+    ot_pz_preview_t *candidate=&pz_preview_scratch;
     uint16_t active_revision=0u;
     bool pending=false,valid=false;
     uint16_t staged_revision=0u;
     portENTER_CRITICAL(&state_lock);
-    candidate=pz_preview;
+    *candidate=pz_preview[lane];
     active_revision=pz_active_revision[lane];
     staged_revision=pz_revision[lane];
     pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     portEXIT_CRITICAL(&state_lock);
     valid=!pending&&staged_revision==base_revision&&
         active_revision==base_revision&&
-        ot_pz_preview_apply_updates(&candidate,lane,updates,count,
+        ot_pz_preview_apply_updates(candidate,lane,updates,count,
                                     base_revision,active_revision,pending,now_ms);
     ot_om_output_t projected={0};
-    if(valid)valid=ot_pz_to_fx_view(&candidate.candidate.outputs[lane],lane,
+    if(valid)valid=ot_pz_to_fx_view(&candidate->candidate.outputs[lane],lane,
                                     &projected);
     if(valid){
         portENTER_CRITICAL(&state_lock);
-        valid=pz_preview.active&&!pz_preview.committing&&
-            pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
-            pz_preview.expires_ms==candidate.expires_ms&&
+        valid=pz_preview[lane].active&&!pz_preview[lane].committing&&
+            pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+            pz_preview[lane].expires_ms==candidate->expires_ms&&
             pz_active_revision[lane]==base_revision&&
             pz_revision[lane]==base_revision&&
             !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
         if(valid){
-            pz_preview=candidate;
+            pz_preview[lane]=*candidate;
             pz_live_fx_views[lane]=projected;
         }
         portEXIT_CRITICAL(&state_lock);
@@ -1248,7 +1269,7 @@ int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision){
     const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     valid=!pending&&pz_revision[lane]==base_revision&&
         pz_active_revision[lane]==base_revision&&
-        ot_pz_preview_heartbeat(&pz_preview,lane,base_revision,now_ms);
+        ot_pz_preview_heartbeat(&pz_preview[lane],lane,base_revision,now_ms);
     portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return valid?0:3;
@@ -1259,11 +1280,11 @@ bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *cr
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool valid=false;
     portENTER_CRITICAL(&state_lock);
-    valid=pz_preview.active&&pz_preview.lane==lane&&
-        pz_preview.base_revision==base_revision&&
+    valid=pz_preview[lane].active&&pz_preview[lane].lane==lane&&
+        pz_preview[lane].base_revision==base_revision&&
         pz_active_revision[lane]==base_revision&&
-        (pz_preview.committing||(int32_t)(now_ms-pz_preview.expires_ms)<0);
-    if(valid)pz_crc_snapshot=pz_preview.candidate;
+        (pz_preview[lane].committing||(int32_t)(now_ms-pz_preview[lane].expires_ms)<0);
+    if(valid)pz_crc_snapshot=pz_preview[lane].candidate;
     portEXIT_CRITICAL(&state_lock);
     const bool ok=valid&&pz_controller_wire_crc32(&pz_crc_snapshot,crc32);
     xSemaphoreGive(om_write_mutex);
@@ -1274,7 +1295,7 @@ bool ot_ble_panel_preview_commit_pending(uint8_t lane,uint16_t base_revision){
     bool pending=false;
     portENTER_CRITICAL(&state_lock);
     pending=(pz_preview_commit_requested||pz_preview_commit_worker_active||
-             (pz_deferred.pending&&pz_preview.committing))&&
+             (pz_deferred.pending&&pz_preview[lane].committing))&&
             pz_preview_commit_lane==lane&&
             pz_preview_commit_lane_revision==base_revision;
     portEXIT_CRITICAL(&state_lock);
@@ -1293,38 +1314,38 @@ int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
     if(lane>=OT_PZ_OUTPUTS)return 1;
     /* Queue a validated immutable snapshot; the configuration worker owns NVS. */
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
-    ot_pz_preview_t snapshot;
+    ot_pz_preview_t *snapshot=&pz_preview_scratch;
     bool accepted=false,no_change=false;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     portENTER_CRITICAL(&state_lock);
     const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
         pz_preview_commit_requested||pz_preview_commit_worker_active;
-    accepted=!pending&&pz_preview.active&&!pz_preview.committing&&
-       pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
+    accepted=!pending&&pz_preview[lane].active&&!pz_preview[lane].committing&&
+       pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
        pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
-       (int32_t)(now_ms-pz_preview.expires_ms)<0;
+       (int32_t)(now_ms-pz_preview[lane].expires_ms)<0;
     if(accepted){
-        snapshot=pz_preview;
-        no_change=memcmp(&snapshot.candidate,&pz_outputs,sizeof(pz_outputs))==0;
+        *snapshot=pz_preview[lane];
+        no_change=memcmp(&snapshot->candidate.outputs[lane],&pz_outputs.outputs[lane],sizeof(pz_outputs.outputs[lane]))==0;
     }
     portEXIT_CRITICAL(&state_lock);
     uint32_t actual_crc32=0u;
-    if(!accepted||!pz_controller_wire_crc32(&snapshot.candidate,&actual_crc32)||
+    if(!accepted||!pz_controller_wire_crc32(&snapshot->candidate,&actual_crc32)||
        actual_crc32!=expected_crc32){
         xSemaphoreGive(om_write_mutex);return accepted?1:3;
     }
     portENTER_CRITICAL(&state_lock);
-    accepted=pz_preview.active&&!pz_preview.committing&&
-       pz_preview.lane==lane&&pz_preview.base_revision==base_revision&&
+    accepted=pz_preview[lane].active&&!pz_preview[lane].committing&&
+       pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
        pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
-       pz_preview.expires_ms==snapshot.expires_ms&&
+       pz_preview[lane].expires_ms==snapshot->expires_ms&&
        !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)&&
        !pz_preview_commit_requested&&!pz_preview_commit_worker_active;
     if(accepted){
-        if(no_change)ot_pz_preview_cancel(&pz_preview);
+        if(no_change)ot_pz_preview_cancel(&pz_preview[lane]);
         else{
-            pz_preview.committing=true;
-            pz_preview_commit_candidate=snapshot.candidate;
+            pz_preview[lane].committing=true;
+            pz_preview_commit_candidate=snapshot->candidate;
             pz_preview_commit_lane=lane;
             pz_preview_commit_lane_revision=base_revision;
             pz_preview_commit_requested=true;
@@ -1340,12 +1361,23 @@ static void pz_preview_cancel_pending_locked(void){
     pz_preview_commit_requested=false;
     memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
 }
+void ot_ble_panel_preview_cancel_lane(uint8_t lane){
+    if(lane>=OT_PZ_OUTPUTS)return;
+    bool active=false;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_preview[lane].active;
+    if(!pz_preview[lane].committing)ot_pz_preview_cancel(&pz_preview[lane]);
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
+}
 void ot_ble_panel_preview_cancel(void){
     bool active=false;
     portENTER_CRITICAL(&state_lock);
-    active=pz_preview.active;
-    pz_preview_cancel_pending_locked();
-    ot_pz_preview_cancel(&pz_preview);
+    active=pz_preview_any_active_locked();
+    if(!pz_preview_commit_requested&&!pz_preview_commit_worker_active){
+        pz_preview_cancel_pending_locked();
+        pz_preview_cancel_all_locked();
+    }
     portEXIT_CRITICAL(&state_lock);
     if(active)request_render_refresh();
 }
