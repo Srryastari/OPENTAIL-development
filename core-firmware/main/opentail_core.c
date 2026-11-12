@@ -194,10 +194,6 @@ static bool pz_preview_any_active_locked(void){
     for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)if(pz_preview[i].active)return true;
     return false;
 }
-static bool pz_preview_any_committing_locked(void){
-    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)if(pz_preview[i].committing)return true;
-    return false;
-}
 static void pz_preview_cancel_all_locked(void){
     for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
         if(!pz_preview[i].committing)ot_pz_preview_cancel(&pz_preview[i]);
