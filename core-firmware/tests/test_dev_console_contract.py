@@ -76,7 +76,9 @@ stop_core = core.split("static void core_stop_all_sources(void){",1)[1].split(
 assert "core_stop_all_sources();" in stop
 assert 'sim_mask=0u' in stop_core and 'live_input_mask=0' not in stop_core
 assert 'gpio_set_level' not in stop_core
-assert "geometry_commit_active" in stop_core
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in core
 disconnect = core.split("void ot_ble_disconnect_show(void){",1)[1].split(
     "static esp_err_t status_get(",1)[0]
 assert 'live_input_mask=0' not in disconnect
