@@ -347,7 +347,7 @@ final class BleDiscovery {
     private final int[] panelTransactionPollAttempts={0,0};
     private final boolean[] panelTransactionTimeoutLatched={false,false};
     private boolean panelReconciliationPending=false,panelReconciliationSnapshotVerified=false;
-    private int panelReconciliationAttempts=0;
+    private int panelReconciliationAttempts=0,panelReconciliationLane=-1;
     private PanelPreviewProtocol.LaneSnapshot panelReconciliationSnapshot;
     private volatile boolean triggerMapBusy=false;
     private boolean triggerMapSavePending=false;
@@ -854,7 +854,7 @@ final class BleDiscovery {
         panelControlAction=0;panelControlLane=-1;panelControlWriteLease++;
         panelUpdateQueued=false;panelUpdateWritePending=false;panelUpdatePacket=null;
         panelUpdateLane=-1;panelUpdateWriteLease++;negotiatedMtu=23;
-        panelPollLease++;panelReconciliationPending=false;
+        panelPollLease++;panelReconciliationPending=false;panelReconciliationLane=-1;
         Arrays.fill(panelTransactionPollAttempts,0);
         Arrays.fill(panelTransactionTimeoutLatched,false);
         panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
@@ -2261,7 +2261,8 @@ final class BleDiscovery {
         if(manager!=null&&decision.warning)manager.markSynchronizationUncertain(decision.message);
         panelNotify(current,decision);
 
-        if(manager!=null&&!panelReconciliationPending&&
+        if(manager!=null&&(!panelReconciliationPending||
+           panelReconciliationLane==current.lane)&&
            manager.state()==GeometryTransactionManager.State.RECONCILING) {
             if(!decision.requiresReconciliation)
                 decision=panelWatchdog.markReconciliationFailed(manager.lastError());
@@ -2270,7 +2271,8 @@ final class BleDiscovery {
             pumpQueue();return;
         }
 
-        if(panelReconciliationPending&&panelReconciliationSnapshotVerified) {
+        if(panelReconciliationPending&&panelReconciliationLane==current.lane&&
+           panelReconciliationSnapshotVerified) {
             if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
                 panelReconciliationSnapshotVerified=false;
                 if(panelTransactionPollAttempts[current.lane]>=40&&
@@ -2310,6 +2312,7 @@ final class BleDiscovery {
                 if(manager!=null)manager.markSynchronizationUncertain(why);
             }
             panelReconciliationPending=false;
+            panelReconciliationLane=-1;
             panelReconciliationSnapshotVerified=false;
             if(reconciled) {
                 panelReconciliationAttempts=0;
@@ -2358,12 +2361,20 @@ final class BleDiscovery {
     private void panelBeginReconciliation(BluetoothGatt owner,
             PanelPreviewProtocol.Status current,TelemetrySequenceWatchdog.Decision decision) {
         if(owner!=gatt||!canControl())return;
+        if(panelReconciliationPending&&panelReconciliationLane!=current.lane) {
+            // The other lane's verified transaction is in progress.
+            // Never assign its snapshot or session ID to this lane.
+            return;
+        }
         if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
             panelReconciliationPending=true;
+            panelReconciliationLane=current.lane;
             panelScheduleCommitPoll(owner);return;
         }
         if(!panelReconciliationPending) {
-            panelReconciliationPending=true;panelReconciliationAttempts=0;
+            panelReconciliationPending=true;
+            panelReconciliationLane=current.lane;
+            panelReconciliationAttempts=0;
             panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
         }
         if(panelWatchdog.requiresCancelFor(current)) {
@@ -2372,7 +2383,8 @@ final class BleDiscovery {
                 panelCancelQueued=true;pumpQueue();return;
             }
             notifyStatus("CORE still reports the hard-fault geometry session as ACTIVE after CANCEL; reconnect before editing");
-            panelReconciliationPending=false;panelReconciliationSnapshotVerified=false;
+            panelReconciliationPending=false;panelReconciliationLane=-1;
+            panelReconciliationSnapshotVerified=false;
             panelReconciliationSnapshot=null;return;
         }
         panelSnapshotQueuedLane=current.lane;pumpQueue();
@@ -2699,7 +2711,7 @@ final class BleDiscovery {
                         panelSnapshotListener.accept(snapshot);
                 });
             }
-            if(panelReconciliationPending) {
+            if(panelReconciliationPending&&panelReconciliationLane==snapshot.lane) {
                 panelReconciliationSnapshot=snapshot;
                 panelReconciliationSnapshotVerified=true;
             }
@@ -2731,8 +2743,9 @@ final class BleDiscovery {
         if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7))
             panelSaveFinish(false,"Panel v4 readback interrupted; Save outcome uncertain: "+message,null);
         notifyStatus(message);
-        if(panelReconciliationPending) {
-            panelReconciliationPending=false;panelReconciliationSnapshotVerified=false;
+        if(panelReconciliationPending&&panelReconciliationLane==panelSnapshotLane) {
+            panelReconciliationPending=false;panelReconciliationLane=-1;
+            panelReconciliationSnapshotVerified=false;
         }
         pumpQueue();
     }
