@@ -436,6 +436,7 @@
   },
   "issue93_correction": {
     "base_sha": "8cfd6d020e4d0acc466947f7f3adc00e68a05b5f",
+    "historical_changed_file_count": 52,
     "allowed_android_changes": [
       "android/app/build.gradle",
       "android/app/src/main/cpp/core/SOURCE.json",
@@ -521,17 +522,39 @@
   "owner_mandated_p0_addendum": {
     "base_sha": "1a9cfc4b25ef57bda38a7861ac5548c3747d9605",
     "allowed_changes": [
+      "android/app/src/main/cpp/core/SOURCE.json",
+      "android/app/src/main/cpp/core/effects_1d.c",
+      "android/app/src/main/cpp/core/effects_1d.h",
+      "android/app/src/main/cpp/core/wled_fx_compat.c",
       "android/app/src/main/java/com/opentail/android/BleConfigCodec.java",
       "android/app/src/main/java/com/opentail/android/BleDiscovery.java",
       "android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt",
       "android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java",
+      "android/app/src/main/java/com/opentail/android/NativeProject.java",
       "android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java",
+      "android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java",
+      "android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java",
       "android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java",
+      "android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java",
       "android/app/src/test/java/com/opentail/android/BleConfigCodecTest.java",
       "android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java",
+      "android/app/src/test/java/com/opentail/android/NativeProjectCommitTest.java",
       "android/app/src/test/java/com/opentail/android/PanelPreviewProtocolTest.java",
+      "android/app/src/test/java/com/opentail/android/PanelV4DraftCodecTest.java",
+      "android/app/src/test/java/com/opentail/android/PanelV4LayoutProtocolTest.java",
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
-      "android/qa/test_native_source.cjs"
+      "android/app/src/test/java/com/opentail/android/TertiaryFxCommandTest.java",
+      "android/qa/check_pinned_firmware127_contract.py",
+      "android/qa/check_release.py",
+      "android/qa/test_full_offline_preview.py",
+      "android/qa/test_live_edit.cjs",
+      "android/qa/test_native_source.cjs",
+      "core-firmware/main/ble_fx_command.c",
+      "core-firmware/main/ble_fx_command.h",
+      "core-firmware/main/ble_status.c",
+      "core-firmware/main/wled_fx_compat.c",
+      "core-firmware/tests/test_ble_fx_command.c",
+      "core-firmware/tests/test_issue102_third_roles.c"
     ],
     "firmware_contract_sha": "1628e993a76bae0b34d7cae0c2dd203ae977d898",
     "protocol": {
