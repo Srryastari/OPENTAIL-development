@@ -84,10 +84,10 @@ assert "output_runtime_fault_mask" in fxfn
 assert "pz_live_fx_views" in core
 live_begin=core.split("int ot_ble_panel_preview_begin(",1)[1].split("int ot_ble_panel_preview_update_ranges(",1)[0]
 live_update=core.split("int ot_ble_panel_preview_update_ranges(",1)[1].split("int ot_ble_panel_preview_heartbeat(",1)[0]
-assert "pz_preview.candidate.outputs[lane].active_pixels=pixel_capacity" in live_begin
+assert "pz_preview[lane].candidate.outputs[lane].active_pixels=pixel_capacity" in live_begin
 assert "pz_live_fx_views[lane]=projected" in live_begin
 assert "pz_live_fx_views[lane]=projected" in live_update
-assert "pz_preview.active?" in fxfn
+assert "pz_effective_panels_locked(pz_effective_fx_panels)" in fxfn
 assert "fx_views,fx_panels" in fxfn
 assert "ot_pz_to_fx_view(&candidate.candidate.outputs[lane]" in live_update
 assert "probe_rmt_first_frame_generation" in core
