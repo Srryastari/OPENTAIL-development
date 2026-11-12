@@ -131,6 +131,8 @@ static ot_pz_tx_session_t panel_preview_tx_lanes[OT_PZ_OUTPUTS];
 static uint8_t panel_preview_status_lane=0u;
 #define panel_preview_tx (panel_preview_tx_lanes[panel_preview_status_lane])
 static void panel_preview_reject_control(uint8_t reason);
+/* Save's GATT upload path calls lease checking before its definition. */
+static void panel_preview_expire_if_needed(uint32_t now_ms);
 extern void ot_ble_panel_preview_cancel_lane(uint8_t lane);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
