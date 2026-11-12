@@ -111,6 +111,10 @@ legacy_load = core.split("static bool pz_load_legacy_snapshot(", 1)[1].split(
     "static void pz_load(void)", 1)[0]
 assert 'nvs_open("ot_zone_map",NVS_READONLY' in legacy_load
 assert "ot_pz_journal_recover(" in legacy_load
+assert "Fresh Panel v4 defaults" in legacy_load
+assert "ot_pz_migrate_legacy(om_outputs" not in legacy_load
+assert "if(om_legacy_journal_fault)return false;" not in legacy_load
+assert "ot_pz_defaults(previous);*candidate=*previous;" in legacy_load
 assert "pz_reset_tombstone_valid" in legacy_load
 assert "OT_PZ_RESET_TOMBSTONE_KEY" in legacy_load
 assert "nvs_set_blob(" not in legacy_load and "nvs_commit(" not in legacy_load

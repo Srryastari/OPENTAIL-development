@@ -35,6 +35,10 @@ reset=core.split("int ot_ble_panel_reset_confirm(",1)[1].split("int ot_ble_panel
 assert "candidate->outputs[lane].active_pixels=0u;" in reset
 assert '"Pixel OUT %u"' in reset
 assert "pz_save_controller_locked(candidate)" in reset
+legacy=core.split("static bool pz_load_legacy_snapshot(",1)[1].split("static void pz_load(void)",1)[0]
+assert "Fresh Panel v4 defaults" in legacy
+assert "ot_pz_migrate_legacy(om_outputs" not in legacy
+assert "ot_pz_journal_recover(" in legacy
 assert "nvs_erase" not in reset
 assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in reset
 assert "PIXEL_PROBE_RMT_DONE" in core and "PIXEL_PROBE_NONBLACK_FRAME" in core

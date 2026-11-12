@@ -612,21 +612,13 @@ static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
     }else if(e!=ESP_ERR_NVS_NOT_FOUND){
         return false;
     }
-    /* A valid v3 controller journal or reset tombstone is self-contained.
-     * Only consult the older Output Manager journal when it is the actual
-     * migration source; unrelated legacy corruption must not mask valid v3. */
-    if(om_legacy_journal_fault)return false;
-    if(!ot_pz_migrate_legacy(om_outputs,om_persistent,previous))return false;
-    *candidate=*previous;
-    if(om_deferred.pending&&
-       !ot_pz_migrate_legacy(om_deferred.outputs,om_persistent,candidate))return false;
-    memcpy(previous_revision,om_active_revision,sizeof(om_active_revision));
-    memcpy(candidate_revision,om_revision,sizeof(om_revision));
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
-        if(!previous_revision[lane])previous_revision[lane]=1u;
-        if(candidate_revision[lane]<previous_revision[lane])
-            candidate_revision[lane]=previous_revision[lane];
-    }
+    /* Owner-locked fresh commissioning: do NOT import old Output v1/v2
+     * test records (including 'BLE TEST 1') into authoritative Panel v4.
+     * A valid older v3 panel journal/tombstone above remains recoverable.
+     * With NO v4 and NO valid v3 record, the zero-LED defaults initialized
+     * at entry are persisted as the initial v4 pair by pz_load().
+     * Never erase unrelated NVS or silently modify existing v4 layouts. */
+    ESP_LOGI(TAG,"Fresh Panel v4 defaults: O1/O2 0 LEDs, 0 panels/zones; legacy Output v1 test profiles ignored");
     return true;
 }
 static void pz_load(void){
