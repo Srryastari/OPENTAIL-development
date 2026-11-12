@@ -33,7 +33,7 @@ assert 'studio_embedded\\":false' in core
 assert 'developer_console\\":true' in core
 assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL,false,NULL)' in core, "Auto preview must use transient spark accents"
 assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false,NULL)' in core, "Regular effects must retain default accents"
-assert 'ot_fx_bank_set_spark_identity(&fx_bank,om_outputs,' in core
+assert 'ot_fx_bank_set_spark_identity(&fx_bank,fx_views,' in core
 # Old developer previews explicitly omit the optional third RGB slot.
 assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL,false,NULL)' in core
 assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false,NULL)' in core, "Spark style must remain volatile, not saved NVS"
