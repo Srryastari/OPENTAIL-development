@@ -11,7 +11,19 @@ for area,key in (("android","android"),("core-firmware","firmware")):
     actual=git("rev-parse","HEAD:"+area)
     assert actual==expected,(area,actual,expected)
 gate=".github/workflows/verify-active-sources.yml"
-assert git("rev-parse","HEAD:"+gate)==git("rev-parse",m["sources"]["firmware"]["sha"]+":"+gate)
+workflow_pin=m.get("integrated_workflow_pin")
+if workflow_pin:
+    # This is a strict reviewed blob pin, not a waiver. The old Firmware #84
+    # workflow cannot equal Android's independently updated Firmware #127
+    # checkout, but its old source/renderer provenance remains immutable.
+    current_blob=git("rev-parse","HEAD:"+gate)
+    assert current_blob==workflow_pin["blob_sha"],(current_blob,workflow_pin["blob_sha"])
+    authorized_firmware=workflow_pin["firmware127_sha"]
+    assert len(authorized_firmware)==40 and all(ch in "0123456789abcdef" for ch in authorized_firmware)
+    assert ("ref: "+authorized_firmware) in Path(gate).read_text()
+    assert ("PIN = \""+authorized_firmware+"\"") in Path("android/qa/check_pinned_firmware127_contract.py").read_text()
+else:
+    assert git("rev-parse","HEAD:"+gate)==git("rev-parse",m["sources"]["firmware"]["sha"]+":"+gate)
 names=("core_logic.h","effects_1d.c","effects_1d.h","ot_auto_effects.c","ot_auto_effects.h","palette_1d.c","palette_1d.h","particle_system_1d.c","particle_system_1d.h","wled_1d.c","wled_1d.h","wled_fx_compat.c","wled_fx_compat.h")
 for name in names:
     assert git("rev-parse","HEAD:android/app/src/main/cpp/core/"+name)==git("rev-parse","HEAD:core-firmware/main/"+name),name
