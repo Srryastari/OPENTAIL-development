@@ -3459,10 +3459,7 @@ static void led_task(void *p) {
        for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
             (void)ot_pz_preview_expire(&pz_preview[i],render_now_ms);
        physical=live_input_mask;
-       if(pz_preview.active&&physical==0u)
-           memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));
-       else
-           memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));
+       pz_effective_panels_locked(local_panel);
        uint16_t local_active_revision[OT_PZ_OUTPUTS];
        memcpy(local_active_revision,pz_active_revision,sizeof(local_active_revision));
        local_tm=tm_profile;
