@@ -19,6 +19,32 @@ public class GeometryTransactionManagerTest {
         b[60]=(byte)flags;return PanelPreviewProtocol.Status.parse(b);
     }
 
+    @Test public void freshUniversalOutputAssignmentsKeepIndependentPanelAndZoneIdentity() {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        assertTrue(project.addZoneAt("O1",100,0));
+        String leftId=project.zone(0).optString("id");
+        assertTrue(project.mapZoneToOutputSlot(leftId,0,0));
+        assertTrue(project.addZoneAt("O2",80,1));
+        String rightId=project.zone(1).optString("id");
+        assertTrue(project.mapZoneToOutputSlot(rightId,1,0));
+        GeometryTransactionManager.LayoutMapping mapped=
+            GeometryTransactionManager.mapLayout(project);
+        assertEquals(100,mapped.lane(0).activePixels);
+        assertEquals(80,mapped.lane(1).activePixels);
+        assertEquals(1,mapped.lane(0).panels.size());
+        assertEquals(1,mapped.lane(1).panels.size());
+        assertEquals(1,mapped.lane(0).zones.size());
+        assertEquals(1,mapped.lane(1).zones.size());
+        assertNotEquals(mapped.lane(0).panels.get(0).id,mapped.lane(1).panels.get(0).id);
+        assertNotEquals(mapped.lane(0).zones.get(0).id,mapped.lane(1).zones.get(0).id);
+        assertTrue(mapped.lane(0).panels.get(0).name.length()>0);
+        assertTrue(mapped.lane(1).panels.get(0).name.length()>0);
+        assertEquals(0,mapped.lane(0).zones.get(0).start);
+        assertEquals(0,mapped.lane(1).zones.get(0).start);
+        assertEquals(100,mapped.lane(0).zones.get(0).count);
+        assertEquals(80,mapped.lane(1).zones.get(0).count);
+    }
+
     @Test public void blankUniversalLayoutHasNoSyntheticPanelOrPixels() {
         FakeProjectStorage store=new FakeProjectStorage();
         NativeProject project=new NativeProject(store.prefs);
