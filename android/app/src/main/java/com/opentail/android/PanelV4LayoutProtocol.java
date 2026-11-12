@@ -78,6 +78,31 @@ final class PanelV4LayoutProtocol {
             (byte)confirmedRevision,(byte)(confirmedRevision >>> 8)};
     }
 
+    /** Firmware returns a 12-byte owner-authenticated lane/revision challenge. */
+    static long parseStartFreshChallenge(int lane,int revision,byte[] response) {
+        lane(lane);revision(revision);
+        if(response==null||response.length!=12||
+           (response[0]&255)!=3||(response[1]&255)!=255||
+           (response[2]&255)!=170||(response[3]&255)!=lane||
+           ((response[8]&255)|((response[9]&255)<<8))!=revision)
+            throw new IllegalArgumentException("Stale or wrong-lane Panel reset challenge");
+        int ttl=(response[10]&255)|((response[11]&255)<<8);
+        if(ttl!=5000)throw new IllegalArgumentException("Invalid reset challenge lease");
+        long challenge=(response[4]&255L)|((response[5]&255L)<<8)|
+            ((response[6]&255L)<<16)|((response[7]&255L)<<24);
+        if(challenge==0)throw new IllegalArgumentException("Invalid zero reset challenge");
+        return challenge;
+    }
+
+    static int parseStartFreshAck(int lane,byte[] response) {
+        lane(lane);
+        if(response==null||response.length!=4||
+           (response[0]&255)!=3||(response[1]&255)!=255||
+           (response[2]&255)!=lane)
+            throw new IllegalArgumentException("Invalid reset confirmation ACK");
+        return response[3]&255;
+    }
+
     static byte[] startFreshConfirm(int lane,int confirmedRevision,long challenge) {
         lane(lane);revision(confirmedRevision);
         if(challenge <= 0 || challenge > 0xffffffffL)
