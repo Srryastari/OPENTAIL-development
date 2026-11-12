@@ -1371,7 +1371,11 @@ const layoutPage=compose.split('private fun LayoutPage(t: Tone) {')[1]
   ?.split('private fun refreshPanelGeometry()')[0];
 assert(layoutPage &&
        layoutPage.includes('if(captureOutput.intValue==panelGeometryActiveLane)') &&
-       layoutPage.includes('O"+(panelGeometryActiveLane+1)+') &&
+       compose.includes('private fun pumpEveryLaneGeometry()') &&
+       compose.includes('private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())') &&
+       compose.includes('activateLaneState(0)') &&
+       compose.includes('activateLaneState(1)') &&
+       bleSource.includes('TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane]') &&
        !compose.includes('panelSaveAfterPreviewLane') &&
        compose.includes('panelSaveQueuedLane=index') &&
        compose.includes('panelSaveSubmittedDrafts[lane]=requested') &&
