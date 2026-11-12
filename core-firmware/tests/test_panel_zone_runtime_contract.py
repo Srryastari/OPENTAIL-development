@@ -20,7 +20,10 @@ for token in (
 assert "prior_fx_offset" not in core
 assert "config_activation_idle(epoch)" not in core
 assert re.search(r"ot_frame_snapshot_begin\(\(uint8_t\)ch,\s*render_pixels\[ch\]", core)
-assert "ot_pz_preview_cancel(&pz_preview)" in core
+assert "ot_pz_preview_cancel(&pz_preview[lane])" in core
+assert "static ot_pz_preview_t pz_preview[OT_PZ_OUTPUTS]" in core
+assert "pz_effective_panels_locked(local_panel);" in core
+assert "pz_preview_cancel_all_locked();" in core
 for token in ("ot_ble_panel_preview_begin", "ot_ble_panel_preview_update_ranges",
               "ot_ble_panel_preview_heartbeat", "ot_ble_panel_preview_crc32",
               "ot_ble_panel_preview_commit", "ot_ble_panel_preview_cancel",
@@ -29,8 +32,8 @@ for token in ("ot_ble_panel_preview_begin", "ot_ble_panel_preview_update_ranges"
 assert "OT_PZ_PREVIEW_LEASE_MS" in core
 assert "config_activation_idle(epoch,true)" in core
 assert "config_activation_idle(epoch,false)" in core
-assert "if(pz_preview.active&&physical==0u)" in core
-assert "pz_preview.candidate.outputs" in core
+assert "if(pz_preview.active&&physical==0u)" not in core
+assert "pz_preview[i].candidate.outputs[i]" in core
 
 preview_begin = core.split("int ot_ble_panel_preview_begin(", 1)[1].split("int ot_ble_panel_preview_update_ranges(", 1)[0]
 preview_update = core.split("int ot_ble_panel_preview_update_ranges(", 1)[1].split("int ot_ble_panel_preview_heartbeat(", 1)[0]
@@ -60,28 +63,35 @@ assert "pz_preview_commit_worker_active=false" in config_worker
 
 pz_save = core.split("static bool pz_save_controller_locked(", 1)[1].split(
     "static bool om_save(", 1)[0]
-assert "pz_preview.active&&!pz_preview.committing" in pz_save
-assert "pz_preview.committing=true;" in preview_commit
+assert "pz_deferred.pending" in pz_save
+assert "pz_preview.active&&!pz_preview.committing" not in pz_save
+assert "pz_preview[lane].committing=true;" in preview_commit
 panel_save = core.split("int ot_ble_panel_save(", 1)[1].split("bool ot_ble_pixel_probe(", 1)[0]
 assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
-assert "pz_preview.active" in panel_save
+assert "pz_preview[lane].active" in panel_save
 assert "is_show_mode_active" not in panel_save
 # A simple Save persists the exact accepted live candidate, no exposed Commit
 # required; keep the current effect/geometry rendered until journal promotion.
-assert "live_match=pz_preview.active&&!pz_preview.committing" in panel_save
-assert "memcmp(&pz_preview.candidate.outputs[lane],next,sizeof(*next))==0" in panel_save
-assert "pz_preview.committing=true" in panel_save
+assert "live_match=pz_preview[lane].active&&!pz_preview[lane].committing" in panel_save
+assert "memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))==0" in panel_save
+assert "pz_preview[lane].committing=true" in panel_save
 assert "if(live_match)" in panel_save and "if(!saved)" in panel_save
-assert "pz_preview.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS" in panel_save
-assert "ot_pz_preview_cancel(&pz_preview)" not in panel_save.split("const bool saved=pz_save_controller_locked(candidate);",1)[1]
+assert "pz_preview[lane].expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS" in panel_save
+assert "ot_pz_preview_cancel(&pz_preview[lane])" not in panel_save.split("const bool saved=pz_save_controller_locked(candidate);",1)[1]
 cfg_writer=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
 assert "const bool live_save=panel_preview_tx.active" in cfg_writer
 assert "panel_preview_tx.lane==lane&&panel_preview_tx.base_revision==revision" in cfg_writer
 assert "ot_ble_panel_preview_heartbeat(lane,revision)" in cfg_writer
 assert "ot_ble_panel_preview_heartbeat(lane,panel_upload_revision)" in cfg_writer
 assert "panel_preview_tx.committing=true" in cfg_writer
+assert "panel_preview_tx_lanes[OT_PZ_OUTPUTS]" in ble
+assert "panel_preview_status_lane=command.lane" in ble
+assert "panel_preview_status_lane=update.lane" in ble
+assert "ot_ble_panel_preview_cancel_lane(lane)" in ble
 assert "panel_preview_tx.status=OT_PZ_TX_COMMITTING" in cfg_writer
+assert "pz_pair_workspace.candidate.outputs[pz_preview_commit_lane]=" in core
+assert "pz_effective_panels_locked(pz_effective_fx_panels)" in core
 
 for token in ("panel_preview_control_write","panel_preview_update_write",
               "panel_preview_status_read","ot_panel_preview_control_uuid",
