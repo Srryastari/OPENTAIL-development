@@ -91,6 +91,33 @@ static void range_transaction(void){
     assert(preview.candidate.outputs[0].zone_count==0u);
     assert(preview.candidate.outputs[0].panel_count==0u);
 }
+/* Fresh zero-LED lane can stage a real 100-LED physical layout in RAM
+ * without mutating committed configuration or requiring a trigger role. */
+static void fresh_zero_to_100_unsaved_preview(void){
+    ot_pz_controller_t committed;
+    ot_pz_defaults(&committed);
+    assert(ot_pz_valid(&committed));
+    assert(committed.outputs[0].active_pixels==0u);
+    assert(committed.outputs[0].panel_count==0u);
+    assert(committed.outputs[0].zone_count==0u);
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,&committed,0u,1u,1u,false,100u));
+    preview.candidate.outputs[0].active_pixels=100u;
+    assert(ot_pz_valid(&preview.candidate));
+    const ot_pz_range_update_t zone={1u,1u,0u,0u,100u,OT_OM_OFF};
+    assert(ot_pz_preview_apply_updates(&preview,0u,&zone,1u,1u,1u,false,120u));
+    assert(preview.candidate.outputs[0].active_pixels==100u);
+    assert(preview.candidate.outputs[0].panel_count==1u);
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].role==OT_OM_OFF);
+    assert(committed.outputs[0].active_pixels==0u);
+    assert(committed.outputs[0].zone_count==0u);
+    assert(committed.outputs[1].active_pixels==0u);
+    ot_pz_preview_cancel(&preview);
+    assert(!preview.active);
+    assert(committed.outputs[0].active_pixels==0u);
+}
+
 static void activation_quiet_window(void){
     for(unsigned mask=0;mask<256u;mask++){
         const bool quiet=ot_pz_activation_inputs_quiet(
@@ -104,7 +131,7 @@ static void activation_quiet_window(void){
     assert(!ot_pz_activation_inputs_quiet(0u,0u,4u,4u,100u,99u));
 }
 int main(void){
-    preview_lifecycle();range_transaction();activation_quiet_window();
+    preview_lifecycle();range_transaction();fresh_zero_to_100_unsaved_preview();activation_quiet_window();
     printf("Issue126 static object sizes: controller=%zu preview=%zu max_pixels_per_lane=%u wire_bytes=%u\\n",
            sizeof(ot_pz_controller_t),sizeof(ot_pz_preview_t),
            (unsigned)OT_PZ_MAX_PIXELS,(unsigned)OT_PZ_MAX_WIRE_BYTES);
