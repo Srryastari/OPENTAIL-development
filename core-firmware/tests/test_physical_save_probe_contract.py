@@ -67,6 +67,17 @@ fxfn=core.split("static bool ot_ble_apply_fx_internal(",1)[1].split("bool ot_ble
 assert fxfn.index("portEXIT_CRITICAL(&state_lock);") < fxfn.index('ESP_LOGI(TAG,"BLE_FX_DECISION')
 assert "fx_diag_eligible" in fxfn and "ot_pz_zone_pixel_count(zone)>0u" in fxfn
 assert "output_runtime_fault_mask" in fxfn
+# New zone effects must target the same volatile v4 mapping that the RMT task
+# renders, even when the committed NVS map still has zero LEDs.
+assert "pz_live_fx_views" in core
+live_begin=core.split("int ot_ble_panel_preview_begin(",1)[1].split("int ot_ble_panel_preview_update_ranges(",1)[0]
+live_update=core.split("int ot_ble_panel_preview_update_ranges(",1)[1].split("int ot_ble_panel_preview_heartbeat(",1)[0]
+assert "pz_preview.candidate.outputs[lane].active_pixels=pixel_capacity" in live_begin
+assert "pz_live_fx_views[lane]=projected" in live_begin
+assert "pz_live_fx_views[lane]=projected" in live_update
+assert "pz_preview.active?" in fxfn
+assert "fx_views,fx_panels" in fxfn
+assert "ot_pz_to_fx_view(&candidate.candidate.outputs[lane]" in live_update
 assert "probe_rmt_first_frame_generation" in core
 assert "probe_rmt_bright_frame_generation" in core
 assert "probe_nonblack[ch]=true" in render
