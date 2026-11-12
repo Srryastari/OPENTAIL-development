@@ -73,10 +73,10 @@ check("Continuous controller playback is capability-gated with explicit Home STO
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Active Compose output save uses authenticated BLE revision/readback path",
-      'ble.saveOutput(index, draftText)' in compose and
-      'BleConfigCodec.encode(JSONObject(draftText))' in compose and
-      all(k in ble for k in ("cfgKnownRevision", "cfgExpected", "Arrays.equals(cfgBytes,cfgExpected)",
-                             "cfgCrc", "cfgReadNext()", "cfgWriteNext()")))
+      'ble.savePanelV4(index, draftText)' in compose and
+      'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)' in compose and
+      all(k in ble for k in ("panelSaveBusy", "PanelV4LayoutProtocol.beginSave", "panelSaveRead(",
+                             "Arrays.equals(panelSaveWire,snapshot.wire)", "panelSaveFinish(true")))
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
@@ -110,8 +110,8 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
           ("previewZoneOffsets(id, n)", "project.editZone(",
            "project.assignMany(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
-           "previewCurrentEffect()", "BleConfigCodec.encode(JSONObject(draftText))",
-           "ble.saveOutput(", "draftText = updated.toString()",
+           "previewCurrentEffect()", "PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)",
+           "ble.savePanelV4(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
            "project.previewZoneOffsets(", "AlertDialog(containerColor=t.surface,"))
       and 'android:name=".MainActivity"' not in manifest_xml)
@@ -123,8 +123,8 @@ check("Compose has full two-output draft editing without unsaved hardware mutati
           "outputMessage.value=\"Saving… verifying controller readback\"",
           "if (savingOutput.intValue == index) Caption(\"Saving…",
           'Pill(if (savingOutput.intValue == index) "Saving…" else "Save"'))
-      and 'ble.saveOutput(index, draftText)' in compose
-      and 'ble.readOutputIfReady(index)' in compose
+      and 'ble.savePanelV4(index, draftText)' in compose
+      and 'ble.readPanelLaneSnapshot(index)' in compose
       and 'outputDirty[index] = true' in compose
       and 'if (completedSave || outputDirty[index] != true)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
