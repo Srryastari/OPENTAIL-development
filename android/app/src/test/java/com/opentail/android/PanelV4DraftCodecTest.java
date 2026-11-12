@@ -55,22 +55,24 @@ public class PanelV4DraftCodecTest {
         byte[] baselineO2=PanelV4LayoutProtocol.expectedFactoryMap(1);
         JSONObject left=PanelV4DraftCodec.fromSnapshot(snapshot(baselineO1,7));
         JSONObject right=PanelV4DraftCodec.fromSnapshot(snapshot(baselineO2,9));
-        left.put("pixels",100).put("panel_id",1).put("panel_name","Panel O1");
-        right.put("pixels",80).put("panel_id",2).put("panel_name","Panel O2");
+        left.put("pixels",100).put("panel_id",0x8001).put("panel_name","Panel O1");
+        right.put("pixels",80).put("panel_id",0x8002).put("panel_name","Panel O2");
         left.getJSONArray("zones").put(new JSONObject()
-            .put("id",129).put("panel_id",1).put("name","Left")
-            .put("pixels",100).put("role","off"));
+            .put("id",0x4081).put("panel_id",0x8001).put("name","Left")
+            .put("pixels",100).put("role","unassigned"));
         right.getJSONArray("zones").put(new JSONObject()
-            .put("id",137).put("panel_id",2).put("name","Right")
-            .put("pixels",80).put("role","off"));
+            .put("id",0x4089).put("panel_id",0x8002).put("name","Right")
+            .put("pixels",80).put("role","unassigned"));
         byte[] one=PanelV4DraftCodec.encode(0,left,snapshot(baselineO1,7));
         byte[] two=PanelV4DraftCodec.encode(1,right,snapshot(baselineO2,9));
         assertEquals(0,one[1]&255);assertEquals(1,two[1]&255);
         assertEquals(100,(one[2]&255)|((one[3]&255)<<8));
         assertEquals(80,(two[2]&255)|((two[3]&255)<<8));
-        assertEquals(1,one[39]&255);assertEquals(2,two[39]&255);
-        assertEquals(129,one[155]&255);assertEquals(137,two[155]&255);
-        assertEquals(0,one[184]&255);assertEquals(0,two[184]&255);
+        assertEquals(0x8001,(one[39]&255)|((one[40]&255)<<8));
+        assertEquals(0x8002,(two[39]&255)|((two[40]&255)<<8));
+        assertEquals(0x4081,(one[155]&255)|((one[156]&255)<<8));
+        assertEquals(0x4089,(two[155]&255)|((two[156]&255)<<8));
+        assertEquals(255,one[184]&255);assertEquals(255,two[184]&255);
         assertArrayEquals(baselineO1,PanelV4LayoutProtocol.expectedFactoryMap(0));
         assertArrayEquals(baselineO2,PanelV4LayoutProtocol.expectedFactoryMap(1));
         assertFalse(java.util.Arrays.equals(one,two));
