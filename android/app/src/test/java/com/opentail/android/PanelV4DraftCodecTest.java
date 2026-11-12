@@ -50,6 +50,37 @@ public class PanelV4DraftCodecTest {
         assertEquals(0x4001,confirmed.getJSONArray("zones").getJSONObject(0).getInt("id"));
         assertArrayEquals(wire,PanelV4DraftCodec.encode(0,confirmed,snapshot(wire,5)));
     }
+    @Test public void independentUnsavedOutputCandidatesPreserveOffRoleAndNeverCrossLanes() throws Exception {
+        byte[] baselineO1=PanelV4LayoutProtocol.expectedFactoryMap(0);
+        byte[] baselineO2=PanelV4LayoutProtocol.expectedFactoryMap(1);
+        JSONObject left=PanelV4DraftCodec.fromSnapshot(snapshot(baselineO1,7));
+        JSONObject right=PanelV4DraftCodec.fromSnapshot(snapshot(baselineO2,9));
+        left.put("pixels",100).put("panel_id",1).put("panel_name","Panel O1");
+        right.put("pixels",80).put("panel_id",2).put("panel_name","Panel O2");
+        left.getJSONArray("zones").put(new JSONObject()
+            .put("id",129).put("panel_id",1).put("name","Left")
+            .put("pixels",100).put("role","off"));
+        right.getJSONArray("zones").put(new JSONObject()
+            .put("id",137).put("panel_id",2).put("name","Right")
+            .put("pixels",80).put("role","off"));
+        byte[] one=PanelV4DraftCodec.encode(0,left,snapshot(baselineO1,7));
+        byte[] two=PanelV4DraftCodec.encode(1,right,snapshot(baselineO2,9));
+        assertEquals(0,one[1]&255);assertEquals(1,two[1]&255);
+        assertEquals(100,(one[2]&255)|((one[3]&255)<<8));
+        assertEquals(80,(two[2]&255)|((two[3]&255)<<8));
+        assertEquals(1,one[39]&255);assertEquals(2,two[39]&255);
+        assertEquals(129,one[155]&255);assertEquals(137,two[155]&255);
+        assertEquals(0,one[184]&255);assertEquals(0,two[184]&255);
+        assertArrayEquals(baselineO1,PanelV4LayoutProtocol.expectedFactoryMap(0));
+        assertArrayEquals(baselineO2,PanelV4LayoutProtocol.expectedFactoryMap(1));
+        assertFalse(java.util.Arrays.equals(one,two));
+        assertNotEquals(PanelPreviewProtocol.crc16(one),PanelPreviewProtocol.crc16(two));
+        try {
+            PanelV4DraftCodec.encode(0,left,snapshot(baselineO2,9));
+            fail("cross-lane confirmation");
+        }catch(IllegalArgumentException expected){}
+    }
+
     @Test public void rejectsComplexGeometryRatherThanFlatteningItsRanges() throws Exception {
         byte[] wire=PanelV4LayoutProtocol.expectedFactoryMap(0);
         put16(wire,2,100);wire[37]=1;wire[38]=1;
