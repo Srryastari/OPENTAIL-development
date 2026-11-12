@@ -1325,8 +1325,8 @@ assert(bleSource.includes('PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a9
        probeBlock.includes('BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT') &&
        probeBlock.includes('pixelProbeWritePending=true;') &&
        probeBlock.includes('recoverStalledGatt(owner,"Pixel probe ATT write timeout")') &&
-       bleSource.includes('if (pixelProbeWritePending || writePending || readReplyPending') &&
-       bleSource.includes('if(pixelProbeWritePending||writePending||readReplyPending||cfgBusy') &&
+       bleSource.includes('if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending') &&
+       bleSource.includes('if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy') &&
        bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
        bleSource.includes('panelDisconnected(); // also clear stale Panel/Probe capability and in-flight diagnostic lease') &&
        compose.includes('ble.setPixelProbeListener { result ->') &&
