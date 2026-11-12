@@ -174,6 +174,9 @@ static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect ass
 static ot_ble_fx_packet_t ble_fx_request={0};
 
 static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for unchanged FX/v1 code. */
+/* Protected by state_lock; only the selected preview lane differs from
+ * the saved FX view. No NVS mutation or additional controller stack copy. */
+static ot_om_output_t pz_live_fx_views[OT_OM_OUTPUTS];
 static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v3. */
 static ot_pz_pending_t pz_deferred;
 static ot_pz_preview_t pz_preview;
@@ -1155,6 +1158,12 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
        !native_outputs_ready)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
         return 2;
+    /* Projection is computed outside the critical section, while the
+     * writer mutex protects the authoritative source from concurrent edits. */
+    ot_om_output_t projected={0};
+    if(!ot_pz_to_fx_view(&pz_outputs.outputs[lane],lane,&projected)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool accepted=false;
     portENTER_CRITICAL(&state_lock);
@@ -1173,6 +1182,9 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
         if(!ot_pz_valid(&pz_preview.candidate)){
             ot_pz_preview_cancel(&pz_preview);
             accepted=false;
+        }else{
+            memcpy(pz_live_fx_views,om_outputs,sizeof(pz_live_fx_views));
+            pz_live_fx_views[lane]=projected;
         }
     }
     portEXIT_CRITICAL(&state_lock);
@@ -1200,6 +1212,9 @@ int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
         active_revision==base_revision&&
         ot_pz_preview_apply_updates(&candidate,lane,updates,count,
                                     base_revision,active_revision,pending,now_ms);
+    ot_om_output_t projected={0};
+    if(valid)valid=ot_pz_to_fx_view(&candidate.candidate.outputs[lane],lane,
+                                    &projected);
     if(valid){
         portENTER_CRITICAL(&state_lock);
         valid=pz_preview.active&&!pz_preview.committing&&
@@ -1208,7 +1223,10 @@ int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
             pz_active_revision[lane]==base_revision&&
             pz_revision[lane]==base_revision&&
             !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
-        if(valid)pz_preview=candidate;
+        if(valid){
+            pz_preview=candidate;
+            pz_live_fx_views[lane]=projected;
+        }
         portEXIT_CRITICAL(&state_lock);
     }
     xSemaphoreGive(om_write_mutex);
@@ -1890,11 +1908,17 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
     fx_diag_faults=output_runtime_fault_mask;
+    /* Show commands target the same volatile Panel v4 geometry as led_task.
+     * Physical road roles never determine effect eligibility. */
+    const ot_pz_output_t *fx_panels=pz_preview.active?
+        pz_preview.candidate.outputs:pz_outputs.outputs;
+    const ot_om_output_t *fx_views=pz_preview.active?
+        pz_live_fx_views:om_outputs;
     for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++){
-        fx_diag_pixels[lane]=pz_outputs.outputs[lane].active_pixels;
-        fx_diag_zones[lane]=pz_outputs.outputs[lane].zone_count;
-        for(unsigned z=0;z<pz_outputs.outputs[lane].zone_count&&z<OT_OM_ZONES;z++){
-            const ot_pz_zone_t *zone=&pz_outputs.outputs[lane].zones[z];
+        fx_diag_pixels[lane]=fx_panels[lane].active_pixels;
+        fx_diag_zones[lane]=fx_panels[lane].zone_count;
+        for(unsigned z=0;z<fx_panels[lane].zone_count&&z<OT_OM_ZONES;z++){
+            const ot_pz_zone_t *zone=&fx_panels[lane].zones[z];
             if(zone->role==OT_OM_OFF)fx_diag_roles[lane]|=(uint8_t)(1u<<z);
             if((req->zone_mask&(1u<<z))&&
                ot_pz_zone_pixel_count(zone)>0u)
@@ -1905,15 +1929,15 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         /* Apply only the requested output/zone slots. Other zones retain FX phase. */
         ready=continuous?
             ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req,
-                om_outputs,pz_outputs.outputs,tertiary,now_ms):
-            ot_fx_bank_apply_configured_identity(&fx_bank,req,om_outputs,
-                pz_outputs.outputs,now_ms,standalone);
+                fx_views,fx_panels,tertiary,now_ms):
+            ot_fx_bank_apply_configured_identity(&fx_bank,req,fx_views,
+                fx_panels,now_ms,standalone);
         if(ready&&spark)
-            ready=ot_fx_bank_set_spark_identity(&fx_bank,om_outputs,
-                pz_outputs.outputs,req->chain_mask,req->zone_mask,now_ms,spark);
+            ready=ot_fx_bank_set_spark_identity(&fx_bank,fx_views,
+                fx_panels,req->chain_mask,req->zone_mask,now_ms,spark);
         if(ready&&overlay)
-            ready=ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs,
-                pz_outputs.outputs,req->chain_mask,req->zone_mask,now_ms,overlay);
+            ready=ot_fx_bank_set_overlay_identity(&fx_bank,fx_views,
+                fx_panels,req->chain_mask,req->zone_mask,now_ms,overlay);
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
