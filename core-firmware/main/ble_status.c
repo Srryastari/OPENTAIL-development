@@ -692,7 +692,7 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         bool pending=false,persistent=false;
         if(!ot_ble_panel_get(lane,&output,&active,&staged,&pending,&persistent)||
            pending||revision!=active||revision!=staged||
-           capacity!=output.active_pixels||revision==UINT16_MAX){
+           capacity>OT_PZ_MAX_PIXELS||revision==UINT16_MAX){
             panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
         }
         uint32_t session=esp_random();
@@ -709,12 +709,15 @@ static int panel_preview_control_write(uint16_t conn,uint16_t handle,
         panel_preview_tx.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
         panel_preview_tx.active=true;
         panel_preview_tx.status=OT_PZ_TX_ACTIVE;
-        if(!ot_ble_panel_preview_crc32(lane,revision,&panel_preview_tx.base_crc32)){
+        /* Baseline CRC belongs to the durable map, candidate CRC to the
+         * unsaved preview capacity/geometry. Never mark a capacity-only
+         * change as a no-op COMMIT. */
+        if(!ot_ble_panel_active_crc32(lane,revision,&panel_preview_tx.base_crc32)||
+           !ot_ble_panel_preview_crc32(lane,revision,&panel_preview_tx.candidate_crc32)){
             ot_ble_panel_preview_cancel();
             panel_preview_tx.active=false;
             panel_preview_set_error(OT_PZ_TX_ERROR_INTERNAL);return 0;
         }
-        panel_preview_tx.candidate_crc32=panel_preview_tx.base_crc32;
         return 0;
     }
 
