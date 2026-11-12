@@ -21,6 +21,7 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
 int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
                                const ot_pz_range_update_t *updates,size_t count);
 int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision);
+bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32);
 bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *crc32);
 int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
                                 uint32_t expected_crc32);
