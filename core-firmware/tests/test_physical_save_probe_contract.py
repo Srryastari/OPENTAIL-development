@@ -22,6 +22,18 @@ assert "BLE_OUTPUT_SAVE_BEGIN" in fn and "BLE_OUTPUT_SAVE_END" in fn
 assert "uxTaskGetStackHighWaterMark(NULL)" in fn
 assert "elapsed_ms" in fn and "MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT" in fn
 assert "nvs_commit(" in core and "PZ_PAIR_PHASE" in core
+# Authoritative v4 BEGIN/UPDATE CRC must not put a full controller plus
+# 2x667-byte wire buffers on the NimBLE GATT task stack.
+assert "static ot_pz_controller_t pz_crc_snapshot;" in core
+assert "static uint8_t pz_crc_wire[OT_PZ_OUTPUTS][OT_PZ_MAX_WIRE_BYTES];" in core
+active_crc=core.split("bool ot_ble_panel_active_crc32(",1)[1].split("int ot_ble_panel_preview_begin(",1)[0]
+preview_crc=core.split("bool ot_ble_panel_preview_crc32(",1)[1].split("uint16_t ot_ble_panel_render_revision(",1)[0]
+assert "ot_pz_controller_t committed;" not in active_crc
+assert "ot_pz_controller_t candidate;" not in preview_crc
+assert "xSemaphoreTake(om_write_mutex,0)" in active_crc
+assert "xSemaphoreTake(om_write_mutex,0)" in preview_crc
+assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in active_crc
+assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in preview_crc
 cb=ble.split("static int cfg_write(",1)[1].split("/* BLE post-render snapshot v1:",1)[0]
 assert "ot_ble_config_save(index,&output,cfg_upload_revision)" in cb
 assert "cfg_ack(opcode,index,(uint8_t)rc)" in cb
