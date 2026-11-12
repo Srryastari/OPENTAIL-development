@@ -24,9 +24,7 @@ def ordered(blob,items):
 # Saved/staged NVS swaps never access live palette data inside FX/LED loops.
 ordered(render,[
     "portENTER_CRITICAL(&state_lock);",
-    "if(pz_preview.active&&physical==0u)",
-    "memcpy(local_panel,pz_preview.candidate.outputs,sizeof(local_panel));",
-    "memcpy(local_panel,pz_outputs.outputs,sizeof(local_panel));",
+    "pz_effective_panels_locked(local_panel);",
     "if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));",
     "portEXIT_CRITICAL(&state_lock);",
     "ot_om_defaults(default_outputs);",
@@ -71,9 +69,10 @@ assert "if(same_identity)" in render
 assert "ot_effects_1d_reset(&fx_state[ch][z]," in render
 
 # Live effect routing uses the same transient geometry as RMT; no Save needed.
-assert "const ot_pz_output_t *fx_panels=pz_preview.active?" in core
-assert "const ot_om_output_t *fx_views=pz_preview.active?" in core
-assert "pz_live_fx_views:om_outputs" in core
+assert "pz_effective_panels_locked(pz_effective_fx_panels);" in core
+assert "const ot_pz_output_t *fx_panels=pz_effective_fx_panels;" in core
+assert "fx_views[i]=pz_preview[i].active?pz_live_fx_views[i]:om_outputs[i];" in core
+assert "pz_preview[lane].candidate.outputs[lane]" in core
 # All public live mutations resolve current logical zone masks to stable bank slots.
 assert "ot_fx_bank_apply_configured_identity(&fx_bank,req,fx_views," in core
 assert "ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req," in core
@@ -82,7 +81,7 @@ assert "ot_fx_bank_set_spark_identity(&fx_bank,fx_views," in core
 assert "bank->zones[o][resolved[z]].spark=*spark" in fxbank
 assert "bank->zones[o][resolved[z]].overlay=*overlay" in fxbank
 assert "ot_fx_bank_apply_configured_identity(&replacement,&targeted," in core
-assert "ot_fx_bank_prune_orphans(&fx_bank,pz_outputs.outputs)" in core
+assert "ot_fx_bank_prune_orphans(&fx_bank,pz_effective_fx_panels)" in core
 assert "bool ot_fx_bank_apply_configured_identity(" in fxbank
 assert "bool ot_fx_bank_apply_continuous_tertiary_identity(" in fxbank
 assert "bool ot_fx_bank_set_overlay_identity(" in fxbank
