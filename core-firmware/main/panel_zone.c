@@ -540,10 +540,14 @@ bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
         offset+=legacy->zones[z].pixels;
     }
     if(offset!=legacy->active_pixels||!ot_pz_output_valid(&next,lane))return false;
-    if(existing){
-        ot_pz_controller_t check=*existing;check.outputs[lane]=next;
-        if(!ot_pz_valid(&check))return false;
-    }
+    /* BLE Output v1 Save runs on the NimBLE host stack. A prior final
+     * validation copied the complete controller a second time onto that
+     * stack, even after the Save path moved its candidate into mutex-owned
+     * BSS. Validate the already-authoritative existing controller directly:
+     * newly allocated panel/zone IDs are checked against every OTHER lane
+     * and all previously assigned IDs in next, and next was individually
+     * validated above. No full-controller stack copy is required. */
+    if(existing && !ot_pz_valid(existing))return false;
     *out=next;return true;
 }
 bool ot_pz_to_legacy(const ot_pz_output_t *src,unsigned lane,

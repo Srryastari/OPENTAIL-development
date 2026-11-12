@@ -11,6 +11,12 @@ assert "ot_pz_controller_t candidate;" not in fn
 assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in fn
 assert fn.index("xSemaphoreTake(om_write_mutex") < fn.index("pz_pair_workspace.candidate")
 assert "ot_pz_from_legacy_output(next,index,candidate,&replacement)" in fn
+panel=(root/"main/panel_zone.c").read_text()
+conversion=panel.split("bool ot_pz_from_legacy_output(",1)[1].split("bool ot_pz_to_legacy(",1)[0]
+assert "ot_pz_controller_t check=*existing;" not in conversion
+assert "if(existing && !ot_pz_valid(existing))return false;" in conversion
+assert "pz_allocate_id(existing,lane,&next" in conversion
+assert "ot_pz_output_valid(&next,lane)" in conversion
 assert "pz_save_controller_locked(candidate)" in fn
 assert "BLE_OUTPUT_SAVE_BEGIN" in fn and "BLE_OUTPUT_SAVE_END" in fn
 assert "uxTaskGetStackHighWaterMark(NULL)" in fn

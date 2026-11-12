@@ -289,6 +289,33 @@ static void storage_split_roundtrip(void){
     bad_order.lanes[0].color_order=0xffu;
     assert(!ot_pz_lane_config_set_valid(&bad_order));
 }
+/* Exercise the real 100-pixel legacy Output Save conversion without
+ * discarding active Panel v4 data on the other physical lane. */
+static void legacy_output_replace_stack_safe(void){
+    ot_pz_controller_t current;ot_pz_defaults(&current);
+    ot_pz_output_t *other=&current.outputs[1];
+    make_output(other,1u,100u);
+    make_panel(other,1u,501u,"Right Panel");
+    make_zone(other,0u,601u,501u,OT_OM_DECORATIVE,"Right Zone",0u,100u);
+    assert(ot_pz_valid(&current));
+    ot_om_output_t profile[OT_OM_OUTPUTS];
+    ot_om_defaults(profile);
+    ot_om_output_t *left=&profile[0];
+    left->active_pixels=100u;
+    left->zones[0].pixels=100u;
+    left->zones[0].role=OT_OM_DECORATIVE;
+    assert(ot_om_valid(left));
+    ot_pz_output_t replacement={0};
+    const ot_pz_output_t original_other=*other;
+    assert(ot_pz_from_legacy_output(left,0u,&current,&replacement));
+    assert(replacement.active_pixels==100u&&replacement.zone_count==1u);
+    assert(replacement.zones[0].role==OT_OM_DECORATIVE);
+    current.outputs[0]=replacement;
+    assert(ot_pz_valid(&current));
+    assert(memcmp(&current.outputs[1],&original_other,sizeof(original_other))==0);
+    assert(current.outputs[0].panels[0].id!=current.outputs[1].panels[0].id);
+    assert(current.outputs[0].zones[0].id!=current.outputs[1].zones[0].id);
+}
 static void wire_roundtrip(void){
     ot_pz_controller_t cfg;ot_pz_defaults(&cfg);
     ot_pz_output_t *o=&cfg.outputs[1];make_output(o,1,100);
@@ -308,7 +335,8 @@ static void wire_roundtrip(void){
 }
 int main(void){
     defaults_and_fallback();hierarchy_and_ranges();invalid_maps();
-    legacy_migration();capacity_cases();storage_split_roundtrip();wire_roundtrip();
+    legacy_migration();capacity_cases();storage_split_roundtrip();
+    legacy_output_replace_stack_safe();wire_roundtrip();
     puts("PASS Issue126 Panel/Zone model: migration, ranges, fallback, 256 masks, 1,246 pixels, 2,048/lane and v3 codec");
     return 0;
 }
