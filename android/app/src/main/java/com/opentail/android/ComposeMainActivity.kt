@@ -512,8 +512,17 @@ class ComposeMainActivity : ComponentActivity() {
                             outputReadbackEpoch[index] = (outputReadbackEpoch[index] ?: 0) + 1
                         }
                         layoutDraftZoneCounts[index] = confirmed.optJSONArray("zones")?.length() ?: 0
-                        // Durable v4 Save finishes only after byte-identical
-                        // active readback. Never start another preview commit here.
+                        // The firmware retired this lane's volatile lease
+                        // atomically after durable readback. Retire only the
+                        // Android session bookkeeping; do NOT send CANCEL,
+                        // STOP or another COMMIT to the physical output.
+                        if(completedSave && panelGeometryMapping!=null &&
+                            panelGeometryActiveLane==index) {
+                            clearPanelGeometryPreview("Panel v4 saved and confirmed. Playback continues from the committed mapping.")
+                            if(captureOutput.intValue!=index &&
+                                outputDirty[captureOutput.intValue]==true)
+                                layoutLiveEditPending.value=true
+                        }
                         invalidateCoreFrame() // the saved/readback output may have changed
                     }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
