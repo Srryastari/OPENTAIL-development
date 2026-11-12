@@ -34,8 +34,8 @@
   "tertiary_legacy_capability": "fx-tertiary-v1",
   "tertiary_legacy_transport_modes": 11,
   "tertiary_aurora_palette_id": 4,
-  "firmware127_ble_contract_head": "97f4e2fd29df5aa9249292cee2649404fc98ed48",
-  "core_identity_source_commit": "97f4e2fd29df5aa9249292cee2649404fc98ed48",
+  "firmware127_ble_contract_head": "bf62df16f89f7440734c48d64814210b2e8b19e2",
+  "core_identity_source_commit": "bf62df16f89f7440734c48d64814210b2e8b19e2",
   "core_identity_files": [
     "effects_1d.c",
     "effects_1d.h"
