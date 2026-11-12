@@ -600,8 +600,8 @@ public class GeometryTransactionManagerTest {
         validateSnapshots(mapping,small,empty);
         NativeProject oversized=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(oversized,"Too long",2001,0,0,1,"Left Housing");
-        GeometryTransactionManager.LayoutMapping tooLarge=GeometryTransactionManager.mapLayout(oversized);
         try {
+            GeometryTransactionManager.LayoutMapping tooLarge=GeometryTransactionManager.mapLayout(oversized);
             validateSnapshots(tooLarge,small,empty);
             fail("Android 2000-LED limit must block preview");
         }catch(IllegalArgumentException expected){
