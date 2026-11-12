@@ -1128,27 +1128,33 @@ bool ot_ble_panel_get(uint8_t lane,ot_pz_output_t *out,uint16_t *active_revision
     return true;
 }
 
+/* CRC scratch is mutex-owned static BSS, not several KB of nested NimBLE
+ * stack. Every caller must own om_write_mutex, including read-only BEGIN/UPDATE
+ * CRC reads. Never keep state_lock during wire encode or flash I/O. */
+static ot_pz_controller_t pz_crc_snapshot;
+static uint8_t pz_crc_wire[OT_PZ_OUTPUTS][OT_PZ_MAX_WIRE_BYTES];
 static bool pz_controller_wire_crc32(const ot_pz_controller_t *candidate,
                                       uint32_t *crc32){
     if(!candidate||!crc32||!ot_pz_valid(candidate))return false;
-    uint8_t canonical[OT_PZ_OUTPUTS][OT_PZ_MAX_WIRE_BYTES];
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
-        if(!ot_pz_wire_encode(&candidate->outputs[lane],lane,canonical[lane]))
+        if(!ot_pz_wire_encode(&candidate->outputs[lane],lane,pz_crc_wire[lane]))
             return false;
-    *crc32=ot_cfg_crc32(canonical,sizeof(canonical));
+    *crc32=ot_cfg_crc32(pz_crc_wire,sizeof(pz_crc_wire));
     return true;
 }
 bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32){
-    if(lane>=OT_PZ_OUTPUTS||!crc32)return false;
-    ot_pz_controller_t committed;
+    if(lane>=OT_PZ_OUTPUTS||!crc32||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
     bool valid=false;
     portENTER_CRITICAL(&state_lock);
     valid=pz_persistent&&pz_active_revision[lane]==revision&&
         pz_revision[lane]==revision&&!pz_deferred.pending&&
         !__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
-    if(valid)committed=pz_outputs;
+    if(valid)pz_crc_snapshot=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
-    return valid&&pz_controller_wire_crc32(&committed,crc32);
+    const bool ok=valid&&pz_controller_wire_crc32(&pz_crc_snapshot,crc32);
+    xSemaphoreGive(om_write_mutex);
+    return ok;
 }
 int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
                                uint16_t pixel_capacity){
@@ -1248,8 +1254,8 @@ int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision){
     return valid?0:3;
 }
 bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *crc32){
-    if(lane>=OT_PZ_OUTPUTS||!crc32)return false;
-    ot_pz_controller_t candidate;
+    if(lane>=OT_PZ_OUTPUTS||!crc32||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool valid=false;
     portENTER_CRITICAL(&state_lock);
@@ -1257,9 +1263,11 @@ bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *cr
         pz_preview.base_revision==base_revision&&
         pz_active_revision[lane]==base_revision&&
         (pz_preview.committing||(int32_t)(now_ms-pz_preview.expires_ms)<0);
-    if(valid)candidate=pz_preview.candidate;
+    if(valid)pz_crc_snapshot=pz_preview.candidate;
     portEXIT_CRITICAL(&state_lock);
-    return valid&&pz_controller_wire_crc32(&candidate,crc32);
+    const bool ok=valid&&pz_controller_wire_crc32(&pz_crc_snapshot,crc32);
+    xSemaphoreGive(om_write_mutex);
+    return ok;
 }
 bool ot_ble_panel_preview_commit_pending(uint8_t lane,uint16_t base_revision){
     if(lane>=OT_PZ_OUTPUTS)return false;
