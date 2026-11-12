@@ -29,7 +29,7 @@ final class PanelPreviewProtocol {
                      STATE_EXPIRED = 5, STATE_ERROR = 6;
     static final int FLAG_WARNING = 1, FLAG_HARD_FAULT = 2, FLAG_HAS_SEQUENCE = 4;
     static final int CAP_LIVE_PREVIEW = 1 << 1, CAP_SEQUENCED_PREVIEW = 1 << 2,
-                     CAP_STATUS_V2 = 1 << 3;
+                     CAP_STATUS_V2 = 1 << 3, CAP_LIVE_CAPACITY = 1 << 4;
 
     private PanelPreviewProtocol() {}
 
@@ -51,6 +51,7 @@ final class PanelPreviewProtocol {
                 throw new IllegalArgumentException("Unsupported or invalid Panel capability descriptor");
             return c;
         }
+        boolean supportsLiveCapacity() { return (flags&CAP_LIVE_CAPACITY)!=0; }
         boolean supportsPreviewV2() {
             int required=CAP_LIVE_PREVIEW|CAP_SEQUENCED_PREVIEW|CAP_STATUS_V2;
             return (flags&required)==required;
