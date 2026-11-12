@@ -126,6 +126,9 @@ class ComposeMainActivity : ComponentActivity() {
     private var panelGeometryBaseRevisions = intArrayOf(-1,-1)
     private var panelGeometryCommitRequested = false
     private var panelGeometryCancelRequested = false
+    // Owner Save during live preview: preview COMMIT first, then one journaled
+    // Panel v4 upload for calibration/names, each with authoritative readback.
+    private var panelSaveAfterPreviewLane = -1
     private var panelGeometryDraftValid = true
     private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
     private val paletteV3Supported = mutableStateOf(false)
@@ -492,13 +495,8 @@ class ComposeMainActivity : ComponentActivity() {
                             outputReadbackEpoch[index] = (outputReadbackEpoch[index] ?: 0) + 1
                         }
                         layoutDraftZoneCounts[index] = confirmed.optJSONArray("zones")?.length() ?: 0
-                        if(completedSave && panelGeometryMapping!=null) {
-                            // Persist a live geometry preview through the same
-                            // owner's Save action, only after output readback.
-                            if(panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
-                                panelGeometryDraftValid) commitPanelGeometryPreview()
-                            else panelGeometryMessage.value="Output saved; waiting for live layout preview updates before geometry commit"
-                        }
+                        // Durable v4 Save finishes only after byte-identical
+                        // active readback. Never start another preview commit here.
                         invalidateCoreFrame() // the saved/readback output may have changed
                     }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
@@ -1811,6 +1809,10 @@ class ComposeMainActivity : ComponentActivity() {
             } else if(panelGeometryMapping!=null &&
                 !panelGeometryCommitRequested && !panelGeometryCancelRequested) {
                 if(captureOutput.intValue!=panelGeometryActiveLane) {
+                    // Keep O1/O2 unsaved drafts independent when switching.
+                    // One firmware preview session exists; park the old lane,
+                    // then auto-apply the newly selected lane's draft.
+                    layoutLiveEditPending.value=true
                     cancelPanelGeometryPreview()
                 } else {
                     delay(180)
@@ -2125,7 +2127,7 @@ class ComposeMainActivity : ComponentActivity() {
             panelGeometryCancelRequested=false
             panelGeometryDraftValid=true
             panelGeometryEpoch.intValue++
-            panelGeometryMessage.value="Opening protected shadow-preview transactions on both outputs..."
+            panelGeometryMessage.value="Opening live preview on selected output "+(panelGeometryActiveLane+1)+"..."
             panelGeometryRevision.intValue++
             pumpPanelGeometry()
         } catch(error:Exception) {
@@ -2328,12 +2330,34 @@ class ComposeMainActivity : ComponentActivity() {
             return
         }
         if(panelGeometryActionDone.all { it }) {
+            val pendingLane=panelSaveAfterPreviewLane
+            val didCommit=pendingLane in 0..1 && panelGeometryActionCommit[pendingLane]
             val result=if(!panelGeometryCommitRequested)
-                "CORE shadow previews cancelled; confirmed geometry remains unchanged"
+                "Live mapping paused; saved layout unchanged"
             else if(panelGeometryActionCommit.none { it })
-                "No pixel-range changes were needed; preview sessions closed without an NVS commit"
-            else "CORE geometry committed and read back on changed outputs; unchanged previews were cancelled"
+                "Live geometry unchanged; closing preview before durable Save"
+            else "Live geometry journaled and authoritatively read back"
             clearPanelGeometryPreview(result)
+            if(pendingLane in 0..1) {
+                panelSaveAfterPreviewLane=-1
+                val draft=outputDrafts[pendingLane]
+                val snapshot=ble.lastConfirmedPanelSnapshot(pendingLane)
+                val manager=ble.panelGeometryManager(pendingLane)
+                // A preview COMMIT is real NVS persistence. The second v4
+                // write is only for the draft's names/color order/calibration.
+                // Never report Saved if its admission or readback fails.
+                if(snapshot==null || snapshot.pending || !snapshot.persistent ||
+                   (didCommit && manager?.lastConfirmed()?.revision != snapshot.activeRevision) ||
+                   draft==null) {
+                    savingOutput.intValue=-1
+                    outputMessage.value="Live geometry Save uncertain; reconnect and verify Panel v4 before retry"
+                } else if(ble.savePanelV4(pendingLane,draft)) {
+                    outputMessage.value="Live geometry confirmed; verifying complete Panel v4 Save..."
+                } else {
+                    savingOutput.intValue=-1
+                    outputMessage.value="Live geometry committed, but full Panel v4 Save could not start. Reload to reconcile before retry."
+                }
+            }
         }
     }
 
@@ -3309,7 +3333,21 @@ class ComposeMainActivity : ComponentActivity() {
                             ?: throw IllegalStateException("Read authoritative Panel v4 before saving")
                         PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)
                         if(!ble.canConfigure()) outputMessage.value="Not authorized"
-                        else if (ble.savePanelV4(index, draftText)) {
+                        else if(panelGeometryMapping!=null) {
+                            if(panelGeometryActiveLane!=index) {
+                                outputMessage.value="Another output is previewing. Its unsaved draft is preserved; switch back or finish its transition."
+                            } else if(panelGeometryPlanTarget!=null ||
+                                      panelGeometryQueuedTarget!=null ||
+                                      !panelGeometryDraftValid ||
+                                      ble.panelGeometryManager(index)?.state() != GeometryTransactionManager.State.ACTIVE) {
+                                outputMessage.value="Finishing live LED updates; Save will be available after controller acknowledgement."
+                            } else {
+                                panelSaveAfterPreviewLane=index
+                                savingOutput.intValue=index
+                                commitPanelGeometryPreview() // automatic, never a visible Commit button
+                                outputMessage.value="Saving active live geometry; verifying revision and full Panel v4 readback..."
+                            }
+                        } else if (ble.savePanelV4(index, draftText)) {
                             savingOutput.intValue = index
                             outputMessage.value="Saving… verifying controller readback"
                         } else outputMessage.value="Controller busy; no Save started"
