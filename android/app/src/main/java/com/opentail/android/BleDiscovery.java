@@ -504,6 +504,12 @@ final class BleDiscovery {
         try {GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,snapshots,statuses);}
         catch(IllegalArgumentException ex){notifyStatus("Panel geometry preflight rejected: "+ex.getMessage());return false;}
         PanelPreviewProtocol.Status status=statuses[lane];
+        int desiredCapacity=mapping.lane(lane).activePixels;
+        if(desiredCapacity!=status.pixelCapacity&&
+           (panelCapabilities==null||!panelCapabilities.supportsLiveCapacity())){
+            notifyStatus("Controller firmware does not support live capacity changes; update firmware, do not Save as a workaround");
+            return false;
+        }
         GeometryTransactionManager manager=panelGeometryManagers[lane];
         if(manager==null||manager.state()!=GeometryTransactionManager.State.READY||
            status.state!=PanelPreviewProtocol.STATE_IDLE||status.sessionId!=0)return false;
@@ -515,7 +521,7 @@ final class BleDiscovery {
         // activeRevision is decoded as uint32 for shared status telemetry;
         // BEGIN carries the authoritative uint16 active revision.
         try {packet=PanelPreviewProtocol.begin(lane,(int)status.activeRevision,
-            status.pixelCapacity,panelCapabilities.schemaVersion);}
+            desiredCapacity,panelCapabilities.schemaVersion);}
         catch(IllegalArgumentException ex) {
             manager.markSynchronizationUncertain("Panel BEGIN values changed after preflight");
             panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
