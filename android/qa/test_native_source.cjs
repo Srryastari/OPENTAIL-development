@@ -1209,7 +1209,7 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
        bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&
        bleSource.includes('GATT stack performs the characteristic long-read') &&
-       bleSource.includes('panelWatchdog.markMalformedTelemetry') &&
+       bleSource.includes('panelWatchdogs[lane].markMalformedTelemetry') &&
        bleSource.includes('panelScheduleTransactionPoll(owner,current.lane)') &&
        bleSource.includes('panelTransactionTimeoutLatched[current.lane]') &&
        bleSource.includes('manager.state()==GeometryTransactionManager.State.RECONCILING') &&
@@ -1267,6 +1267,21 @@ assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
        compose.includes('Wait for all draft updates to be acknowledged before Commit'),
        'Live Layout must invalidate disconnected managers and shadow drafts, reload verified CORE map, and serialize rapid edits');
 
+
+// Owner P0: simultaneous O1/O2 live leases have separate Android transaction
+// state, independent sequence watchdogs, and output switching never sends
+// CANCEL or persists the other lane's unsaved geometry.
+assert(compose.includes('private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())') &&
+       compose.includes('private fun activateLaneState(lane:Int)') &&
+       compose.includes('private fun pumpEveryLaneGeometry()') &&
+       compose.includes('activateLaneState(0)') &&
+       compose.includes('activateLaneState(1)') &&
+       compose.includes('ble.panelGeometryReady(captureOutput.intValue)') &&
+       bleSource.includes('private final TelemetrySequenceWatchdog[] panelWatchdogs=') &&
+       bleSource.includes('TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane]') &&
+       bleSource.includes('boolean panelGeometryReady(int lane)') &&
+       !compose.includes('cancelPanelGeometryPreview()\n                } else if(layoutLiveEditPending.value)'),
+       'O1/O2 must preserve concurrent live geometries and independent telemetry without Save');
 
 // Physical bench regression: Reload must not stack a local/project editor
 // beneath a second CORE-output editor, and output selection must route PLAY.
