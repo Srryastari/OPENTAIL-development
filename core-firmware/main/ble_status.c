@@ -64,6 +64,9 @@ void ot_ble_session_hex(char out[33]){
 #include "nimble/nimble_port.h"
 #include "host/ble_sm.h"
 #include "store/config/ble_store_config.h"
+/* ESP-IDF 5.5.5 bleprph declares this initializer explicitly; its header
+ * exposes store callbacks but omits the initializer prototype. */
+void ble_store_config_init(void);
 #include "ble_owner_policy.h"
 #include "config_journal.h"
 #include <stddef.h>
