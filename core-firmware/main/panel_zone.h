@@ -139,6 +139,12 @@ typedef struct {
 
 void ot_pz_defaults(ot_pz_controller_t *config);
 bool ot_pz_output_valid(const ot_pz_output_t *output,unsigned lane);
+/* A full v4 Save may update names and output color/calibration metadata while
+ * the authenticated live preview owns geometry. Compare authoritative
+ * physical topology only: full 16-bit identities, ordering, roles, ranges
+ * and pixel length must match. Do NOT compare the low-byte BLE aliases. */
+bool ot_pz_live_geometry_matches(const ot_pz_output_t *live,
+                                 const ot_pz_output_t *uploaded,unsigned lane);
 bool ot_pz_valid(const ot_pz_controller_t *config);
 bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
                                    uint8_t quiet_samples,uint8_t required_samples,
