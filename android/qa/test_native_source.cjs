@@ -363,7 +363,9 @@ assert(model.includes('synchronized boolean setAutoEvent(String event, String ke
        'Event authoring must be validated and saved atomically');
 assert(hardware.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardware.includes('623') &&
-       hardware.includes('it.put("pixels", remaining)') &&
+       hardware.includes('it.put("pixels",remaining)') &&
+        hardware.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
+        hardware.includes('applyPhysicalRanges(next)') &&
        hardware.includes('structureVersion++') &&
        hardware.includes('PanelV4DraftCodec.encode(index,draft,authoritative)') &&
        hardware.includes('panelSaveQueuedLane=index') &&
