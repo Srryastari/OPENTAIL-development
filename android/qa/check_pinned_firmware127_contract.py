@@ -24,6 +24,7 @@ def main():
     ble_h = read("ble_fx_command.h")
     ble_c = read("ble_fx_command.c")
     ble_status = read("ble_status.c")
+    core_main = read("opentail_core.c")
     effects_c = read("effects_1d.c")
     effects_h = read("effects_1d.h")
 
@@ -52,6 +53,24 @@ def main():
         "(candidate.effect_id==38u && candidate.palette_id!=4u)",
     ], "BLE third-color admission and Aurora palette gate")
     require(ble_status, ["OT_BLE_FX_TERTIARY13_CAPABILITY"], "BLE capability advertisement")
+    require(panel_h, ["bool ot_pz_live_geometry_matches("],
+            "Metadata-compatible full Panel v4 Save geometry matcher")
+    require(core_main, [
+        "ot_pz_live_geometry_matches(accepted_geometry,next,lane)",
+        "if(structural_conflict)",
+        "return 5;",
+        "const bool live_active=pz_preview[lane].active;",
+        "pz_preview[lane].committing=true;",
+    ], "Atomic metadata-only Save and unsaved-geometry refusal")
+    require(ble_status, [
+        "case 5:return 10u;",
+        "case 1:return 7u;",
+        "case 2:return 2u;",
+        "case 3:return 3u;",
+        "case 4u:{",
+        "case 5u:{",
+        "panel_save_status(save_rc)",
+    ], "Distinct v4 Save NACK status and journal acknowledgement")
     require(effects_c, [
         "ot_effects_1d_find_prior_zone_state",
         "ot_effects_1d_move_state",
@@ -60,7 +79,7 @@ def main():
         "ot_effects_1d_find_prior_zone_state",
         "ot_effects_1d_move_state",
     ], "CORE stable Panel/Zone renderer-state declarations")
-    print("PASS: Firmware #127 16-bit identities, low-byte alias rejection, COMMITTING guard, 13-mode BLE contract and stable renderer-state migration")
+    print("PASS: Firmware #127 metadata-compatible atomic v4 Save/NACK, 16-bit identities, role-independent 13-mode BLE, and stable renderer migration")
 
 if __name__ == "__main__":
     main()
