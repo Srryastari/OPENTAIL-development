@@ -67,6 +67,7 @@ jobs:
               'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
               'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
               'android/app/src/main/java/com/opentail/android/NativeProject.java',
+              'android/app/src/main/java/com/opentail/android/NativeOutputManager.java',
               'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
               'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
               'android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java',
