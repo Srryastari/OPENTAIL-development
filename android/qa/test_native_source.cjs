@@ -1462,23 +1462,16 @@ assert(finalOutput.includes('PanelV4DraftCodec.savedSelectorPixels(outputs[which
   'O2 0/522 saved-versus-local display and safe lane-only discard regressed');
 
 
-// Owner scope lock: Layout authors physical geometry only. Vehicle trigger
-// overrides are assigned in Triggers and share the same Panel v4 draft.
-// Role edits never secretly persist NVS or reset another lane.
-const layoutOnlyOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
-const triggerOnlyPage=compose.split('private fun TriggersPage(t: Tone) {')[1]
+// Owner scope lock: the existing Triggers editor is the ONLY place to
+// assign zones to trigger profiles. No second override card or Layout role UI.
+const unclutteredLayout=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+const unclutteredTriggers=compose.split('private fun TriggersPage(t: Tone) {')[1]
   ?.split('private fun CoreTriggerMappingPage(t: Tone) {')[0];
-const physicalTriggerEditor=compose.split('private fun assignPhysicalTriggerRole(')[1]
-  ?.split('private fun refreshLoadedProject()')[0];
-assert(layoutOnlyOutput && triggerOnlyPage && physicalTriggerEditor &&
-  !layoutOnlyOutput.includes('Text("Lighting role"') &&
-  !layoutOnlyOutput.includes('var choosingRole by remember') &&
-  triggerOnlyPage.includes('Controller zone overrides') &&
-  triggerOnlyPage.includes('assignPhysicalTriggerRole(lane,i,role)') &&
-  physicalTriggerEditor.includes('outputDrafts[lane]=next.toString()') &&
-  physicalTriggerEditor.includes('outputDirty[lane]=true') &&
-  physicalTriggerEditor.includes('queuePanelGeometryDraftUpdate()') &&
-  physicalTriggerEditor.includes('startPanelGeometryPreview(lane)') &&
-  !physicalTriggerEditor.includes('ble.savePanelV4(') &&
-  !physicalTriggerEditor.includes('startFreshPanelV4('),
-  'Trigger zone ownership must stay in Triggers and remain lane-local/live without Save');
+assert(unclutteredLayout && unclutteredTriggers &&
+  !unclutteredLayout.includes('Text("Lighting role"') &&
+  !unclutteredLayout.includes('var choosingRole by remember') &&
+  !unclutteredTriggers.includes('Controller zone overrides') &&
+  !compose.includes('private fun assignPhysicalTriggerRole(') &&
+  unclutteredTriggers.includes('project.assignMany(selections,zoneId,!checked)') &&
+  unclutteredTriggers.includes('Assign zones to '),
+  'Keep existing Triggers zone assignments; no duplicate role card in Layout or Triggers');
