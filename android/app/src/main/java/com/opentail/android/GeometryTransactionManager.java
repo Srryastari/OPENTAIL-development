@@ -46,18 +46,37 @@ final class GeometryTransactionManager {
         }
     }
     static final class MappedZone {
-        final int id,panelId,section,start,count,roleFlags;
+        final int id,panelId,section,start,count,roleFlags,flags;
         final String name;
+        final List<PanelPreviewProtocol.MapRange> ranges;
         MappedZone(int id,int panelId,int section,int start,int count,String name) {
             this(id,panelId,section,start,count,name,PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE);
         }
         MappedZone(int id,int panelId,int section,int start,int count,String name,int roleFlags) {
-            this.id=id;this.panelId=panelId;this.section=section;this.start=start;
-            this.count=count;this.name=name;this.roleFlags=roleFlags;
+            this(id,panelId,section,name,roleFlags,0,
+                count>0?Collections.singletonList(new PanelPreviewProtocol.MapRange(start,count)):
+                    Collections.emptyList());
+        }
+        MappedZone(int id,int panelId,int section,String name,int roleFlags,int flags,
+                   List<PanelPreviewProtocol.MapRange> ranges) {
+            this.id=id;this.panelId=panelId;this.section=section;this.name=name;
+            this.roleFlags=roleFlags;this.flags=flags;
+            this.ranges=Collections.unmodifiableList(new ArrayList<>(ranges));
+            this.start=ranges.isEmpty()?0:ranges.get(0).start;
+            int total=0;
+            for(PanelPreviewProtocol.MapRange range:ranges)total+=range.count;
+            this.count=total;
         }
         PanelPreviewProtocol.UpdateDescriptor descriptor() { return descriptor(roleFlags); }
         PanelPreviewProtocol.UpdateDescriptor descriptor(int roles) {
+            if(ranges.size()!=1)
+                throw new IllegalArgumentException("Multi-range Zone needs one descriptor per range");
             return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,0,start,count,roles);
+        }
+        PanelPreviewProtocol.UpdateDescriptor descriptorAt(int slot) {
+            PanelPreviewProtocol.MapRange range=ranges.get(slot);
+            return new PanelPreviewProtocol.UpdateDescriptor(panelId,id,slot,
+                range.start,range.count,roleFlags);
         }
     }
     static final class MappedLane {
@@ -83,10 +102,10 @@ final class GeometryTransactionManager {
             this.zones=Collections.unmodifiableList(new ArrayList<>(zones));
         }
         PanelPreviewProtocol.UpdateDescriptor[] descriptors() {
-            PanelPreviewProtocol.UpdateDescriptor[] out=
-                new PanelPreviewProtocol.UpdateDescriptor[zones.size()];
-            for(int i=0;i<zones.size();i++)out[i]=zones.get(i).descriptor();
-            return out;
+            List<PanelPreviewProtocol.UpdateDescriptor> result=new ArrayList<>();
+            for(MappedZone zone:zones)for(int slot=0;slot<zone.ranges.size();slot++)
+                result.add(zone.descriptorAt(slot));
+            return result.toArray(new PanelPreviewProtocol.UpdateDescriptor[0]);
         }
 
         /** Deterministic local candidate receipt; CORE's candidate CRC remains authoritative. */
@@ -105,7 +124,12 @@ final class GeometryTransactionManager {
                 out.write(zone.panelId&0xff);out.write((zone.panelId>>>8)&0xff);
                 out.write(zone.section);out.write(zone.start&0xff);out.write((zone.start>>>8)&0xff);
                 out.write(zone.count&0xff);out.write((zone.count>>>8)&0xff);
-                out.write(zone.roleFlags);out.write(Math.min(255,name.length));
+                out.write(zone.roleFlags);out.write(zone.flags);out.write(zone.ranges.size());
+                for(PanelPreviewProtocol.MapRange range:zone.ranges){
+                    out.write(range.start&0xff);out.write((range.start>>>8)&0xff);
+                    out.write(range.count&0xff);out.write((range.count>>>8)&0xff);
+                }
+                out.write(Math.min(255,name.length));
                 out.write(name,0,Math.min(255,name.length));
             }
             return out.toByteArray();
@@ -206,8 +230,8 @@ final class GeometryTransactionManager {
                 if(panelId==null)
                     throw new IllegalArgumentException("Layout Zone references a missing local Panel identity");
                 int role=prior==null?zone.roleFlags:wireRole(prior.role);
-                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.start,
-                    zone.count,zone.name,role));
+                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.name,role,
+                    zone.flags,zone.ranges));
             }
             return new MappedLane(lane,activePixels,resolvedPanels,resolvedZones);
         }
@@ -245,8 +269,8 @@ final class GeometryTransactionManager {
                 if(panelId==null)
                     throw new IllegalArgumentException("Layout Zone references a missing local Panel identity");
                 int role=prior==null?zone.roleFlags:prior.roleFlags;
-                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.start,
-                    zone.count,zone.name,role));
+                resolvedZones.add(new MappedZone(fullId,panelId,zone.section,zone.name,role,
+                    zone.flags,zone.ranges));
             }
             return new MappedLane(lane,activePixels,resolvedPanels,resolvedZones);
         }
@@ -421,13 +445,9 @@ final class GeometryTransactionManager {
         for(PanelPreviewProtocol.MapPanel panel:current.panels)
             panels.add(new MappedPanel(panel.id,panel.lane,panel.name,panel.zoneCount));
         int section=0;
-        for(PanelPreviewProtocol.MapZone zone:current.zones) {
-            if(zone.flags!=0||zone.ranges.size()!=1)
-                throw new IllegalArgumentException("Full Panel v4 candidate needs advanced multi-range preview");
-            PanelPreviewProtocol.MapRange range=zone.ranges.get(0);
+        for(PanelPreviewProtocol.MapZone zone:current.zones)
             zones.add(new MappedZone(zone.id,zone.panelId,section++,
-                range.start,range.count,zone.name,MappedLane.wireRole(zone.role)));
-        }
+                zone.name,MappedLane.wireRole(zone.role),zone.flags,zone.ranges));
         return new MappedLane(lane,current.activePixels,panels,zones);
     }
 
@@ -444,8 +464,12 @@ final class GeometryTransactionManager {
         }
         for(int i=0;i<accepted.zones.size();i++) {
             MappedZone a=accepted.zones.get(i),b=upload.zones.get(i);
-            if(a.id!=b.id||a.panelId!=b.panelId||a.start!=b.start||
-               a.count!=b.count||a.roleFlags!=b.roleFlags)return false;
+            if(a.id!=b.id||a.panelId!=b.panelId||a.roleFlags!=b.roleFlags||
+               a.flags!=b.flags||a.ranges.size()!=b.ranges.size())return false;
+            for(int n=0;n<a.ranges.size();n++){
+                PanelPreviewProtocol.MapRange ar=a.ranges.get(n),br=b.ranges.get(n);
+                if(ar.start!=br.start||ar.count!=br.count)return false;
+            }
         }
         return true;
     }
