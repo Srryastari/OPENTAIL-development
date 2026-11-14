@@ -2186,6 +2186,23 @@ class ComposeMainActivity : ComponentActivity() {
         pumpEveryLaneGeometry()
     }
 
+    /**
+     * A saved Panel v4 draft is the one physical editor for this lane.
+     * Translate its exact Save bytes to the preview map so role changes,
+     * stable full IDs and ranges cannot diverge from accepted live playback.
+     * Never use the other output's unsaved draft as this lane's source.
+     */
+    private fun withCurrentEditorDraft(
+        base: GeometryTransactionManager.LayoutMapping,lane:Int
+    ): GeometryTransactionManager.LayoutMapping {
+        if(outputDirty[lane]!=true)return base
+        val raw=outputDrafts[lane] ?: return base
+        val confirmed=ble.lastConfirmedPanelSnapshot(lane)
+            ?: throw IllegalStateException("A fresh Panel v4 lane snapshot is required")
+        val bytes=PanelV4DraftCodec.encode(lane,JSONObject(raw),confirmed)
+        return base.withLane(lane,GeometryTransactionManager.fromV4SaveCandidate(lane,bytes))
+    }
+
     private fun startPanelGeometryPreview() {
         activateLaneState(captureOutput.intValue)
         if(panelGeometryMapping!=null) {
@@ -2208,7 +2225,9 @@ class ComposeMainActivity : ComponentActivity() {
             val right=ble.lastConfirmedPanelSnapshot(1)
             if(left==null||right==null)throw IllegalStateException("Both confirmed CORE snapshots are required")
             val snapshots=arrayOf(left,right)
-            val mapping=GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
+            val mapping=withCurrentEditorDraft(
+                GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots),
+                captureOutput.intValue)
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
                 mapping.lane(0).descriptorBatches(left,mtu),
@@ -2247,7 +2266,9 @@ class ComposeMainActivity : ComponentActivity() {
         try {
             val roleBase=panelGeometryQueuedTarget?:panelGeometryPlanTarget?:
                 panelGeometryAppliedMapping?:panelGeometryMapping!!
-            val target=GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
+            val target=withCurrentEditorDraft(
+                GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase),
+                panelGeometryActiveLane)
             panelGeometryDraftValid=true
             if(panelGeometryPlanTarget!=null||panelGeometryAppliedMapping==null) {
                 panelGeometryQueuedTarget=target
@@ -2266,7 +2287,7 @@ class ComposeMainActivity : ComponentActivity() {
 
     private fun beginNextPanelGeometryPlan(targetDraft: GeometryTransactionManager.LayoutMapping) {
         val base=panelGeometryAppliedMapping?:return
-        val target=targetDraft.withRolesFrom(base)
+        val target=withCurrentEditorDraft(targetDraft.withRolesFrom(base),panelGeometryActiveLane)
         try {
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
@@ -3750,7 +3771,9 @@ class ComposeMainActivity : ComponentActivity() {
                             roleLabel,t,role==selectedRole) {
                             edit { it.getJSONArray("zones").getJSONObject(i).put("role",role) }
                             choosingRole=false
-                            outputMessage.value="Role selected in draft; Save and verify readback to activate"
+                            layoutLiveEditPending.value=true
+                            refresh()
+                            outputMessage.value="Role changed · sending live controller update; Save is optional"
                         }
                     }
                 }
