@@ -319,7 +319,7 @@ final class GeometryTransactionManager {
             for(MappedZone zone:zones) {
                 ExistingZone prior=old.get(zone.id);
                 int role=prior==null?zone.roleFlags:prior.roleFlags;
-                if(prior==null||prior.start!=zone.start||prior.count!=zone.count)
+                if(prior==null||prior.start!=zone.start||prior.count!=zone.count||prior.roleFlags!=role)
                     pending.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
             }
             while(!pending.isEmpty()) {
@@ -371,6 +371,13 @@ final class GeometryTransactionManager {
                 lanes[0].withRolesFromSnapshot(snapshots[0]),
                 lanes[1].withRolesFromSnapshot(snapshots[1])});
         }
+        LayoutMapping withLane(int lane,MappedLane replacement) {
+            if(replacement==null||replacement.lane!=lane)
+                throw new IllegalArgumentException("Preview lane replacement mismatch");
+            MappedLane[] updated=lanes.clone();
+            updated[lane]=replacement;
+            return new LayoutMapping(updated);
+        }
         LayoutMapping withRolesFrom(LayoutMapping previous) {
             if(previous==null)throw new IllegalArgumentException("Previous geometry mapping is required");
             return new LayoutMapping(new MappedLane[]{
@@ -399,6 +406,61 @@ final class GeometryTransactionManager {
                 seen[index]=true;
             }
             for(boolean present:seen)if(!present)return false;
+        }
+        return true;
+    }
+
+    /**
+     * Convert the EXACT validated 667-byte Save candidate to volatile preview
+     * geometry, rather than re-deriving roles/IDs/ranges from NativeProject.
+     * The synthesized snapshot is an in-memory parser input only; it never
+     * claims controller confirmation or changes its authoritative revision.
+     */
+    static MappedLane fromV4SaveCandidate(int lane,byte[] wire) {
+        if(lane<0||lane>1||wire==null||wire.length!=PanelV4LayoutProtocol.MAP_BYTES)
+            throw new IllegalArgumentException("Invalid full Panel v4 Save candidate");
+        byte[] header=new byte[14];
+        header[0]=PanelPreviewProtocol.WIRE_VERSION;
+        header[1]=(byte)0x81;header[2]=(byte)lane;
+        header[4]=(byte)wire.length;header[5]=(byte)(wire.length>>>8);
+        int crc=PanelPreviewProtocol.crc16(wire);
+        header[6]=(byte)crc;header[7]=(byte)(crc>>>8);
+        header[13]=1;
+        PanelPreviewProtocol.SnapshotHeader parsed=
+            PanelPreviewProtocol.SnapshotHeader.parse(header,lane);
+        parsed.verify(wire,lane);
+        PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(
+            new PanelPreviewProtocol.LaneSnapshot(parsed,wire));
+        List<MappedPanel> panels=new ArrayList<>();
+        List<MappedZone> zones=new ArrayList<>();
+        for(PanelPreviewProtocol.MapPanel panel:current.panels)
+            panels.add(new MappedPanel(panel.id,panel.lane,panel.name,panel.zoneCount));
+        int section=0;
+        for(PanelPreviewProtocol.MapZone zone:current.zones) {
+            if(zone.flags!=0||zone.ranges.size()!=1)
+                throw new IllegalArgumentException("Full Panel v4 candidate needs advanced multi-range preview");
+            PanelPreviewProtocol.MapRange range=zone.ranges.get(0);
+            zones.add(new MappedZone(zone.id,zone.panelId,section++,
+                range.start,range.count,zone.name,wireRole(zone.role)));
+        }
+        return new MappedLane(lane,current.activePixels,panels,zones);
+    }
+
+    /** Mirror Firmware ot_pz_live_geometry_matches: names, color order and
+     * calibration are metadata; full IDs, ordering, role and ranges are not. */
+    static boolean sameLiveGeometry(MappedLane accepted,MappedLane upload) {
+        if(accepted==null||upload==null||accepted.lane!=upload.lane||
+           accepted.activePixels!=upload.activePixels||
+           accepted.panels.size()!=upload.panels.size()||
+           accepted.zones.size()!=upload.zones.size())return false;
+        for(int i=0;i<accepted.panels.size();i++) {
+            MappedPanel a=accepted.panels.get(i),b=upload.panels.get(i);
+            if(a.id!=b.id||a.lane!=b.lane||a.zoneCount!=b.zoneCount)return false;
+        }
+        for(int i=0;i<accepted.zones.size();i++) {
+            MappedZone a=accepted.zones.get(i),b=upload.zones.get(i);
+            if(a.id!=b.id||a.panelId!=b.panelId||a.start!=b.start||
+               a.count!=b.count||a.roleFlags!=b.roleFlags)return false;
         }
         return true;
     }
