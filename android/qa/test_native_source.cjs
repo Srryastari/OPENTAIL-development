@@ -133,7 +133,7 @@ assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().
        !settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') &&
        bleSource.includes('String connectionPhase()'),
        'Home alone owns the connection-status pill; Settings must not duplicate it');
-assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
+assert(homeSection.includes('ble.promptOwnerPin()') && !homeSection.includes('Pill("Authorize"') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
 
@@ -633,7 +633,7 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        bleSource.includes('if(status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
        bleSource.includes('finishInfoRead(connection,value,status);') &&
        bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
-       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();'),
+       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) {ownerAutoAuthQueued=true;pumpQueue();}'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
 // MTU negotiation failures fall through to guarded service discovery.
@@ -1077,7 +1077,7 @@ const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/S
 assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
        nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
-       nativeManifest.core_identity_source_commit==='7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3' &&
+       nativeManifest.core_identity_source_commit==='6fb147a8784f1653234ae19771229b2ae7de0bf6' &&
        JSON.stringify(nativeManifest.core_identity_files)===JSON.stringify(['effects_1d.c','effects_1d.h']) &&
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
        nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
@@ -1085,7 +1085,7 @@ assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9'
        nativeManifest.tertiary_transport_admitted_modes===13 &&
        nativeManifest.tertiary_legacy_transport_modes===11 &&
        nativeManifest.tertiary_transport_capability==='fx-tertiary13-v1' &&
-       nativeManifest.firmware127_ble_contract_head==='7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3',
+       nativeManifest.firmware127_ble_contract_head==='6fb147a8784f1653234ae19771229b2ae7de0bf6',
        'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
 for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
     const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));

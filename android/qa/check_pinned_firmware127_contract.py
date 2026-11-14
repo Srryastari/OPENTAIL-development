@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-PIN = "7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3"
+PIN = "6fb147a8784f1653234ae19771229b2ae7de0bf6"
 SOURCE = ROOT / "pinned-firmware127"
 
 def read(name):
@@ -52,7 +52,7 @@ def main():
         "return ot_wled_fx_tertiary_supported(id);",
         "(candidate.effect_id==38u && candidate.palette_id!=4u)",
     ], "BLE third-color admission and Aurora palette gate")
-    require(ble_status, ["OT_BLE_FX_TERTIARY13_CAPABILITY"], "BLE capability advertisement")
+    require(ble_status, ["OT_BLE_FX_TERTIARY13_CAPABILITY", "owner-bond-v3", "owner_link(&desc)", "owner_commit(&next)"], "BLE capabilities and encrypted owner enrollment")
     require(panel_h, ["bool ot_pz_live_geometry_matches("],
             "Metadata-compatible full Panel v4 Save geometry matcher")
     require(core_main, [

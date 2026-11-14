@@ -1149,10 +1149,10 @@ class ComposeMainActivity : ComponentActivity() {
                 UiIcon("shield",t.muted)
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Authorization", color = t.fg, fontSize = 14.sp)
-                    Caption(if (ble.canControl()) "Authorized" else "Not authorized", t)
+                    Text("Controller access", color = t.fg, fontSize = 14.sp)
+                    Caption(if (ble.canControl()) "Owner connected" else "Securing connection automatically", t)
                 }
-                Pill("Authorize", t, enabled=ble.isConnected() && !ble.canControl()) { ble.authorizeOrPair() }
+                Pill("Set PIN", t, enabled=ble.canControl()) { ble.promptOwnerPin() }
             }
         }
         EffectsPreview(t, selectedEffect.intValue, animateOffline=true)
@@ -3133,7 +3133,7 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
-            Caption("Authorize only on a physically present CORE bench controller.", t)
+            Caption("Owner access reconnects automatically. Set an optional PIN from Home.", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {

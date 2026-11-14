@@ -50,7 +50,7 @@ jobs:
       - name: Checkout exact Firmware #127 Panel/Zone and BLE contract
         uses: actions/checkout@v4
         with:
-          ref: 7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3
+          ref: 6fb147a8784f1653234ae19771229b2ae7de0bf6
           path: pinned-firmware127
       - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
         run: |

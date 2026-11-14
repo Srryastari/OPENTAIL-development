@@ -263,6 +263,7 @@ final class BleDiscovery {
     void cancelFrameCapture() { frameCapture.abortForStop(); }
     boolean captureFrame(int output) {
         if(!canCaptureFrame())return false;
+        if(ownerPinQueued!=null)return false;
         if(pixelProbeRequests.blocksBackgroundTransfer(pixelProbeWritePending,panelSaveBusy))return false;
         // UI preview probes at display cadence. A refused opportunistic capture
         // is normal backpressure, not a connection failure or user-facing BLE
@@ -299,6 +300,72 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic panelCapabilitiesCharacteristic;
     private BluetoothGattCharacteristic panelConfigCommand,panelConfigReply;
     private BluetoothGattCharacteristic panelPreviewControl,panelPreviewUpdate,panelPreviewStatus;
+    private boolean ownerBondingSupported=false,offerOwnerPin=false,ownerPinWritePending=false;
+    private boolean ownerAutoAuthQueued=false;
+    private byte[] ownerPinQueued;
+    private BluetoothGatt ownerPinQueuedOwner;
+    private int ownerBondLease;
+    @SuppressWarnings("MissingPermission")
+    private boolean ensureOwnerBond() {
+        final BluetoothGatt owner=gatt;
+        if(owner==null||!connected)return false;
+        BluetoothDevice device=owner.getDevice();
+        if(device.getBondState()==BluetoothDevice.BOND_BONDED)return true;
+        if(pairPending)return false;
+        pairPending=true;
+        final int lease=++ownerBondLease;
+        if(device.getBondState()==BluetoothDevice.BOND_NONE&&!device.createBond()){
+            pairPending=false;notifyStatus("Bluetooth pairing could not start");return false;
+        }
+        notifyStatus("Securing controller connection…");
+        waitForOwnerBond(owner,lease,0);
+        return false;
+    }
+    @SuppressWarnings("MissingPermission")
+    private void waitForOwnerBond(BluetoothGatt owner,int lease,int attempts) {
+        ui.postDelayed(()->{
+            if(stopped||owner!=gatt||lease!=ownerBondLease)return;
+            int state=owner.getDevice().getBondState();
+            if(state==BluetoothDevice.BOND_BONDED){pairPending=false;authorizeOrPair();return;}
+            if(attempts>=240||(attempts>4&&state==BluetoothDevice.BOND_NONE)){
+                pairPending=false;notifyStatus("Bluetooth pairing not completed; select controller to retry");pumpQueue();return;
+            }
+            waitForOwnerBond(owner,lease,attempts+1);
+        },250L);
+    }
+    void promptOwnerPin() {
+        if(!canControl()||!ownerBondingSupported){notifyStatus("Connect an owner-bond-v3 controller first");return;}
+        android.widget.EditText input=new android.widget.EditText(activity);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});
+        input.setHint("6-digit PIN");
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("Controller PIN (optional)")
+            .setMessage("Protect enrollment of another phone. Skip keeps your current setting; you can set a PIN later here.")
+            .setView(input).setPositiveButton("Set PIN",null).setNegativeButton("Skip",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String pin=input.getText().toString();
+            if(!pin.matches("[0-9]{6}")){input.setError("Enter six digits");return;}
+            if(setOwnerPin(pin))dialog.dismiss();
+        }));
+        dialog.show();
+    }
+    boolean setOwnerPin(String pin) {
+        if(!canControl()||!ownerBondingSupported||enroll==null||ownerPinQueued!=null||ownerPinWritePending||
+           pin==null||!pin.matches("[0-9]{6}"))return false;
+        ownerPinQueued=OwnerPinCommand.encode(pin);
+        ownerPinQueuedOwner=gatt;pumpQueue();return true;
+    }
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startOwnerPinWrite(byte[] packet) {
+        final BluetoothGatt owner=gatt;ownerPinWritePending=true;pairPending=true;
+        boolean ok=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)ok=owner.writeCharacteristic(enroll,packet,BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {enroll.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);enroll.setValue(packet);ok=owner.writeCharacteristic(enroll);}
+        }catch(SecurityException ignored){}
+        if(!ok){ownerPinWritePending=false;pairPending=false;notifyStatus("PIN update could not start");ui.post(this::pumpQueue);}
+        else watchOwnerTransaction(owner);
+    }
     private BluetoothGattCharacteristic pixelProbeCharacteristic;
     private volatile boolean pixelProbeWritePending=false;
     private volatile int pixelProbeWatchLease=0,pixelProbeLane=-1;
@@ -880,6 +947,7 @@ final class BleDiscovery {
         });
     }
     private void panelDisconnected() {
+        ownerPinQueued=null;ownerPinQueuedOwner=null;ownerPinWritePending=false;offerOwnerPin=false;ownerAutoAuthQueued=false;ownerBondLease++;ownerBondingSupported=false;
         for(int lane=0;lane<2;lane++) {
             TelemetrySequenceWatchdog watcher=panelWatchdogs[lane];
             if(watcher.hasSession())panelNotify(null,watcher.markDisconnected());
@@ -1428,7 +1496,7 @@ final class BleDiscovery {
     }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
-    /** One UI action: use the stored owner key or enroll with physical BOOT once. */
+    /** One UI action: use the stored owner key or enroll the first encrypted bonded phone. */
     void authorizeOrPair() {
         // The combined Home/Settings action must not open a second GATT
         // challenge while this session is already authorized.
@@ -1437,11 +1505,12 @@ final class BleDiscovery {
         if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
         else authorizeStored();
     }
-    /** Physical BOOT/GPIO0 button must be held after CORE starts, until read completes. */
+    /** Compatibility method name; enrollment now requires an encrypted owner bond, never BOOT. */
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
-        if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
+        if(!connected||enroll==null||!ownerBondingSupported){notifyStatus("Connect updated CORE for automatic owner enrollment");return;}
+        if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::pairWithBoot))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
@@ -1455,7 +1524,8 @@ final class BleDiscovery {
     void authorizeStored(){
         if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
-        if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
+        if(BleOwnerVault.load(activity,activeAddress)==null){pairWithBoot();return;}
+        if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::authorizeStored))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
@@ -1466,9 +1536,9 @@ final class BleDiscovery {
     private void ownerRead(BluetoothGatt connection,byte[] value,int status){
         pairPending=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null||value.length!=16){
-            notifyStatus("Enrollment refused: hold BOOT on powered-on CORE during Pair (GATT "+status+")");return;
+            notifyStatus("Owner enrollment refused: this controller belongs to another phone or needs its configured PIN (GATT "+status+")");return;
         }
-        try{BleOwnerVault.save(activity,activeAddress,value);notifyStatus("Bench owner key saved to Android Keystore; authorizing…");ui.post(()->authorizeStored());}
+        try{BleOwnerVault.save(activity,activeAddress,value);offerOwnerPin=true;notifyStatus("Controller owner remembered; connecting…");ui.post(()->authorizeStored());}
         catch(Exception e){notifyStatus("Could not securely store owner key; pairing not complete");}
     }
     private void ownerChallenge(byte[] value,int status){
@@ -1640,7 +1710,7 @@ final class BleDiscovery {
             panelSaveFinish(false,"STOP prioritized; durable Save must be reconciled after reconnect",null);
             return;
         }
-        if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy ||
+        if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy || ownerPinWritePending ||
             panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
             panelSnapshotQueuedLane>=0 || panelCancelQueued ||
             frameCapture.busy() || palette.busy() || nextPacket!=null) {
@@ -1694,6 +1764,15 @@ final class BleDiscovery {
             nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;
             afterStopPacket=null;
             writeNow();
+            return;
+        }
+        if(ownerAutoAuthQueued){
+            ownerAutoAuthQueued=false;authorizeOrPair();return;
+        }
+        if(ownerPinQueued!=null){
+            byte[] packet=ownerPinQueued;BluetoothGatt owner=ownerPinQueuedOwner;
+            ownerPinQueued=null;ownerPinQueuedOwner=null;
+            if(owner==gatt&&canControl())startOwnerPinWrite(packet);
             return;
         }
         if(previewCommand!=null) {
@@ -2206,6 +2285,12 @@ final class BleDiscovery {
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if(stopped || connection!=gatt)return;
+            if (ENROLL_UUID.equals(characteristic.getUuid())&&ownerPinWritePending) {
+                ownerPinWritePending=false;pairPending=false;
+                notifyStatus(status==BluetoothGatt.GATT_SUCCESS?"Controller PIN saved":"PIN update uncertain; reconnect before retry");
+                if(status!=BluetoothGatt.GATT_SUCCESS)recoverStalledGatt(connection,"PIN write failed");
+                else pumpQueue();return;
+            }
             if (PIXEL_PROBE_UUID.equals(characteristic.getUuid())) {
                 if(!pixelProbeWritePending)return;
                 final int lane=pixelProbeLane;
@@ -2871,7 +2956,7 @@ final class BleDiscovery {
         continuousFx=false;tertiaryFx=false;coreInfoText=null;
         if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
             String info=new String(value,StandardCharsets.UTF_8);
-            coreInfoText=info;
+            coreInfoText=info;ownerBondingSupported=info.contains("owner-bond-v3");
             continuousFx=ContinuousFxCommand.advertised(info);
             tertiaryFx=TertiaryFxCommand.advertised(info);
             String version=info.startsWith("OpenTail CORE ")
@@ -2886,12 +2971,14 @@ final class BleDiscovery {
         if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null &&
            !canControl() && !challengePending && !authPending)
             ui.post(thisAutoAuth(connection));
+        if(ownerBondingSupported&&!canControl()&&!pairPending&&!challengePending&&!authPending)
+            ui.post(thisAutoAuth(connection));
         pumpQueue();
     }
 
     private Runnable thisAutoAuth(BluetoothGatt owner) {
         return ()->{
-            if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();
+            if (!stopped && owner==gatt && connected && !canControl()) {ownerAutoAuthQueued=true;pumpQueue();}
         };
     }
 
@@ -2916,6 +3003,7 @@ final class BleDiscovery {
         if(authPending){
             authorized="OK AUTH".equals(response);authPending=false;
             if(authorized)queuePanelCapabilitiesRead();
+            if(authorized&&offerOwnerPin){offerOwnerPin=false;ui.post(this::promptOwnerPin);}
             if(authorized && coreInfo!=null) {
                 final BluetoothGatt owner=gatt;
                 // Allow the existing authorized FX catalog read to start
