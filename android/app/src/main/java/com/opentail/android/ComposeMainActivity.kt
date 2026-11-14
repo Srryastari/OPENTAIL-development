@@ -1156,19 +1156,6 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         EffectsPreview(t, selectedEffect.intValue, animateOffline=true)
-        Panel(t) {
-            Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            listOf("Connection" to connectionPhase,
-                "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
-                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
-                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(label, color = t.muted, fontSize = 13.sp)
-                    Text(value, color = t.fg, fontSize = 13.sp)
-                }
-            }
-        }
     }
     private fun capturePreviewFrame() {
         if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return
@@ -1961,15 +1948,10 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
-            Caption("CORE geometry",t)
-            key(panelGeometryRevision.intValue) {
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp),
-                    verticalAlignment=Alignment.CenterVertically) {
-                    Pill("Refresh CORE",t) { refreshPanelGeometry() }
-                    // Live preview starts automatically while editing.
-                    // No exposed Commit button: Layout Save controls durable configuration.
-                    Pill("Cancel",t,panelGeometryCancelRequested) { cancelPanelGeometryPreview() }
-                }
+            // Live mapping/readback starts automatically. An owner can cancel
+            // only an active selected output lease, not an unrelated lane.
+            if(panelGeometryMapping!=null && panelGeometryActiveLane==captureOutput.intValue) {
+                Pill("Cancel live preview",t) { cancelPanelGeometryPreview() }
                 Caption(panelGeometryMessage.value,t)
             }
             // One Output → Panel → Zone editor. Reload replaces authoritative
@@ -2657,20 +2639,9 @@ class ComposeMainActivity : ComponentActivity() {
                     Caption(profile.optString("pattern", "Solid") +
                         if(assigned > 0) " · $assigned zones" else "", t)
                 }
-                IconAction("Edit " + name, "edit", t) {
-                    selections = setOf(name); editing = true
-                }
                 // Only user-created triggers may be deleted.
                 if (profile.optString("kind") == "trigger-custom")
                     IconAction("Delete " + name, "delete", t) { triggerToDelete = name }
-                // The current protocol has no universal profile-test command.
-                // Preserve a disabled play target rather than target wrong zones.
-                Box(Modifier.size(width=44.dp,height=28.dp)
-                    .clip(RoundedCornerShape(99.dp)).background(t.raised)
-                    .semantics { contentDescription = "Test " + name + " unavailable"; disabled() },
-                    contentAlignment=Alignment.Center) {
-                    UiIcon("play",t.muted)
-                }
             }
         }
         Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty()) {
@@ -2781,8 +2752,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
             },
-            confirmButton = { Pill("Done",t,true) { editing=false } },
-            dismissButton = { Pill("Close",t) { editing=false } })
+            confirmButton = { Pill("Done",t,true) { editing=false } })
     }
     @Composable
     private fun CoreTriggerMappingPage(t: Tone) {
@@ -2885,14 +2855,6 @@ class ComposeMainActivity : ComponentActivity() {
                         Text(key, color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
-                    IconAction("Edit " + key, "edit", t) {
-                        if(selectedEvent!=key) {
-                            autoEventPreviewEffect.intValue=-1
-                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
-                        }
-                        selectedEvent=key
-                        eventEditing = if (eventEditing == key) null else key
-                    }
                     Pill(if (enabled) "On" else "Off", t, enabled) {
                         applyAutoEvent(key, "eventUiEnabled", !enabled)
                     }
@@ -2936,14 +2898,6 @@ class ComposeMainActivity : ComponentActivity() {
                     },
                     onPalette={ _,id -> applyAutoEvent(key,"paletteId",id) }
                 )
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
-                        applyAutoEvent(key,"eventUiFadeMs",1200)
-                    }
-                    Pill("Instant Snap",t,event.optInt("eventUiFadeMs",0)==0) {
-                        applyAutoEvent(key,"eventUiFadeMs",0)
-                    }
-                }
                 val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
                 ValueSlider("Transition fade (ms)", fade, 5000, t) {
                     applyAutoEvent(key, "eventUiFadeMs", it)
@@ -3150,24 +3104,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit,
                              light: Boolean, toggleAppearance: () -> Unit) {
-        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Settings", t)
-        var controllers by remember { mutableStateOf(false) }
         var appearance by remember { mutableStateOf(false) }
         var diagnostics by remember { mutableStateOf(false) }
-        Panel(t) {
-            Text("Connection", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
-            SettingsRow("Controller", connectionPhase, t, "Connect") {
-                foundDevices.clear(); ble.scanHeadless(); controllers = true
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-            SettingsRow("Active Controller", if(ble.canControl()) "Connected controller" else "No controller selected", t) {
-                controllers = !controllers
-            }
-            if(controllers) foundDevices.forEach { (address,label) ->
-                Pill(label, t) { ble.connectFoundDevice(address); controllers=false }
-            }
-        }
         Panel(t) {
             Text("App Preferences", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
             SettingsRow("Appearance", if(light) "Light mode" else "Dark mode", t, rowHeight=52) { appearance = !appearance }
@@ -3180,44 +3119,12 @@ class ComposeMainActivity : ComponentActivity() {
                 Caption("Synchronization warning · " + warning, t)
                 Caption(panelStatusSummary.value, t)
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-            // No reset command exists in the pinned CORE interface. Do not
-            // present a local document clear as a successful controller reset.
-            SettingsRow("Reset Configuration", "Restore controller defaults", t, rowHeight=46) {
-                outputMessage.value = "Controller reset is unavailable in the current CORE protocol"
-                diagnostics = true
-            }
         }
         if(diagnostics) SettingsDiagnostics(t, changePage)
     }
     @Composable
     private fun SettingsDiagnostics(t: Tone, changePage: (Int) -> Unit) {
         Title("Firmware", t)
-        // Developer testing is deliberately isolated from universal trigger
-        // authoring. This is a local UI test; it does not assert GPIO or write NVS.
-        var simulatedTriggers by remember { mutableStateOf(setOf<String>()) }
-        Panel(t) {
-            Title("Developer · Trigger Testing", t)
-            Caption("Local simulation only · physical trigger inputs remain CORE-authoritative.", t)
-            val defaults = listOf("Park","Brake","Left Turn","Right Turn","Hazards","Reverse")
-            defaults.chunked(2).forEach { pair ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    pair.forEach { name ->
-                        Box(Modifier.weight(1f)) {
-                            Pill((if(name in simulatedTriggers) "■ Stop " else "▷ Test ") + name,
-                                t,name in simulatedTriggers) {
-                                simulatedTriggers=if(name in simulatedTriggers)
-                                    simulatedTriggers-name else simulatedTriggers+name
-                            }
-                        }
-                    }
-                }
-            }
-            Caption(simulatedTriggers.size.toString() + " simulated triggers active", t)
-            if(simulatedTriggers.isNotEmpty())
-                Pill("Clear test states",t) { simulatedTriggers=emptySet() }
-        }
-
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
@@ -3274,22 +3181,6 @@ class ComposeMainActivity : ComponentActivity() {
         Pill("Input mapping",t) { mappingExpanded=!mappingExpanded }
         if(mappingExpanded) CoreTriggerMappingPage(t)
         CorePaletteTransferPanel(t)
-        var runConfirmed by remember { mutableStateOf(false) }
-        Panel(t) {
-            Text("Developer · Controller playback",color=t.fg,fontWeight=FontWeight.Bold)
-            Caption("Uses current effect settings. Runs on CORE until changed or stopped from Home.",t)
-            Pill("Run on CORE",t) { runConfirmed=true }
-        }
-        if(runConfirmed) AlertDialog(containerColor=t.surface,onDismissRequest={runConfirmed=false},
-            title={Text("Run current effect on CORE?")},
-            text={Text("Continuous playback on saved zones. STOP is on Home. Physical inputs retain priority.")},
-            confirmButton={Pill("Run",t,true) {
-                offlinePreview.value=false
-                previewCurrentEffect()
-                runConfirmed=false
-            }},
-            dismissButton={Pill("Cancel",t) {runConfirmed=false}})
-
         Panel(t) {
             Title("Projects", t)
             Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
@@ -3615,11 +3506,6 @@ class ComposeMainActivity : ComponentActivity() {
                         outputMessage.value="Save rejected: "+(ex.message ?: "invalid draft")
                     }
                 }
-                Pill("Start Fresh",t,enabled=savingOutput.intValue<0 &&
-                    ble.canReadPanelPreview() &&
-                    ble.lastConfirmedPanelSnapshot(index)!=null) {
-                    confirmingStartFresh=true
-                }
                 Caption(if(!valid) {
                     if(ble.lastConfirmedPanelSnapshot(index)==null)
                         "Reading Panel v4; Save requires authoritative revision"
@@ -3849,10 +3735,6 @@ class ComposeMainActivity : ComponentActivity() {
             if(outputToolsOpen) Caption("Assigned " + assigned + " of " + pixelCount +
                 " pixels · " + (pixelCount - assigned) +
                 " remaining. Zero-based offsets are automatically contiguous.",t)
-            PixelStrip(t, (0 until zones.length()).map { j ->
-                val part = zones.optJSONObject(j)
-                (part?.optInt("pixels", 0) ?: 0) to rolePixelColor(part?.optString("role", "off") ?: "off")
-            })
             if(outputToolsOpen) Caption("Draft edits are local; an active live preview streams to the controller without flash writes.",t)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             if (zones.length() < 8) Pill("+ Add zone", t) {
@@ -3931,6 +3813,13 @@ class ComposeMainActivity : ComponentActivity() {
                 Pill("Reload from controller",t) {
                     if(ble.canReadPanelPreview()) ble.readPanelLaneSnapshot(index)
                     else outputMessage.value="Connect and authorize before reading controller settings"
+                }
+                // Destructive management is intentionally behind More, never
+                // adjacent to the single everyday Save operation.
+                Pill("Start Fresh",t,enabled=savingOutput.intValue<0 &&
+                    ble.canReadPanelPreview() &&
+                    ble.lastConfirmedPanelSnapshot(index)!=null) {
+                    confirmingStartFresh=true
                 }
             }
         }
