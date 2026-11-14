@@ -1445,3 +1445,16 @@ assert(finalLayout.includes('LightingDirectory(t)') &&
   finalOutput.includes('outputLoadStatus[index]=="loading"') &&
   compose.includes('lastAutoGeometryRefresh.intValue!=modelRevision'),
   'One-card Output/Zone editing must expose zone removal, restore locked preview and terminate loading attempts safely');
+
+// Owner 0/522 discrepancy regression: saved Panel v4 and unsaved O2 draft
+// must be distinguished, and local discard must be lane-specific and inert.
+assert(finalOutput.includes('PanelV4DraftCodec.savedSelectorPixels(outputs[which])') &&
+  finalOutput.includes('Unsaved draft · ') &&
+  finalOutput.includes('Discard O') &&
+  finalOutput.includes('outputDrafts[index]=confirmed.toString()') &&
+  finalOutput.includes('outputDirty[index]=false') &&
+  finalOutput.includes('outputReadbackEpoch[index]=(outputReadbackEpoch[index]?:0)+1') &&
+  finalOutput.includes('manager.state()!=GeometryTransactionManager.State.READY') &&
+  finalOutput.includes('Finish or cancel O') &&
+  !finalOutput.includes('outputDrafts[which] ?: outputs[which]?.toString()'),
+  'O2 0/522 saved-versus-local display and safe lane-only discard regressed');
