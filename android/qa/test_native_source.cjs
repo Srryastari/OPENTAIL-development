@@ -1356,8 +1356,8 @@ assert(bleSource.includes('PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a9
 // Regression: a lost GATT confirmation must not erase draft role/count edits,
 // silently retry flash writes, or call an unverified commit "Saved".
 assert(!unifiedEditor.includes('var choosingRole by remember(index,i)') &&
-       compose.includes('private fun assignPhysicalTriggerRole(lane:Int, zoneIndex:Int, role:String)') &&
-       compose.includes('assignPhysicalTriggerRole(lane,i,role)') &&
+       !compose.includes('private fun assignPhysicalTriggerRole(') &&
+       compose.includes('project.assignMany(selections,zoneId,!checked)') &&
        unifiedEditor.includes('if(i != selectedZone.coerceIn(0,zones.length()-1)) continue') &&
        unifiedEditor.includes('LaunchedEffect(index,pixelCount)') &&
        unifiedEditor.includes('LaunchedEffect(index,i,count)') &&
