@@ -457,6 +457,35 @@ public class GeometryTransactionManagerTest {
         }
     }
 
+    @Test public void fiveSectionsOnBothOutputsNeverInferVehicleSpecificPanels() throws Exception {
+        NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
+        for(int lane=0;lane<2;lane++)for(int section=0;section<5;section++)
+            mappedZone(project,"Fixture "+lane+"-"+section,section+1,
+                lane,section,lane+1,"User Panel "+lane);
+
+        // Explicit user metadata works for any fixture shape and LED counts.
+        GeometryTransactionManager.LayoutMapping valid=GeometryTransactionManager.mapLayout(project);
+        assertEquals(15,valid.lane(0).activePixels);
+        assertEquals(15,valid.lane(1).activePixels);
+
+        // A legacy import that merely happens to have five sections per output
+        // must never silently acquire GS400 Housing/Trunk identities.
+        JSONObject imported=new JSONObject(project.exportJson());
+        org.json.JSONArray zones=imported.getJSONArray("layout");
+        for(int i=0;i<zones.length();i++) {
+            JSONObject zone=zones.getJSONObject(i);
+            zone.remove("physicalPanelId");
+            zone.remove("physicalPanelName");
+        }
+        assertTrue(project.importJson(imported.toString()));
+        try {
+            GeometryTransactionManager.mapLayout(project);
+            fail("Missing Panel identities must not be inferred from section count");
+        } catch(IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("explicit CORE Panel identity"));
+        }
+    }
+
     @Test public void geometryMappingRejectsPanelIdReuseAcrossOutputs() throws Exception {
         NativeProject project=new NativeProject(new FakeProjectStorage().prefs);
         mappedZone(project,"Left",10,0,0,7,"Left Housing");
