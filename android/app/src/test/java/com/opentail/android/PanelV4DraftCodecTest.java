@@ -7,6 +7,7 @@ import static org.junit.Assert.*;
 
 public class PanelV4DraftCodecTest {
     private static void put16(byte[] b,int at,int n){b[at]=(byte)n;b[at+1]=(byte)(n>>>8);}
+    private static int u16(byte[] b,int at){return (b[at]&255)|((b[at+1]&255)<<8);}
     private static void name(byte[] b,int at,String s) {
         byte[] chars=s.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         System.arraycopy(chars,0,b,at,chars.length);
@@ -181,8 +182,16 @@ public class PanelV4DraftCodecTest {
         put16(wire,191,60);put16(wire,193,40);
         PanelPreviewProtocol.LaneSnapshot confirmed=snapshot(wire,12);
         JSONObject draft=PanelV4DraftCodec.fromSnapshot(confirmed);
-        assertFalse(draft.getBoolean("v4_editable"));
-        try {PanelV4DraftCodec.encode(0,draft,confirmed);fail("multi-range flatten");}
-        catch(IllegalArgumentException expected) {}
+        assertTrue(draft.getBoolean("v4_editable"));
+        assertTrue(draft.getBoolean("v4_advanced"));
+        assertEquals(2,draft.getJSONArray("zones").getJSONObject(0)
+            .getJSONArray("ranges").length());
+        assertArrayEquals("Accepted two-range geometry must roundtrip unchanged",
+            wire,PanelV4DraftCodec.encode(0,draft,confirmed));
+        JSONObject renamed=new JSONObject(draft.toString());
+        renamed.getJSONArray("zones").getJSONObject(0).put("name","Left Tail");
+        byte[] metadata=PanelV4DraftCodec.encode(0,renamed,confirmed);
+        assertEquals(0,u16(metadata,187));assertEquals(50,u16(metadata,189));
+        assertEquals(60,u16(metadata,191));assertEquals(40,u16(metadata,193));
     }
 }
