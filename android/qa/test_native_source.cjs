@@ -129,8 +129,10 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
-assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
-       'Bluetooth status pill must reflect actual connection state, not transient messages');
+assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') &&
+       !settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') &&
+       bleSource.includes('String connectionPhase()'),
+       'Home alone owns the connection-status pill; Settings must not duplicate it');
 assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
