@@ -441,7 +441,7 @@ final class GeometryTransactionManager {
                 throw new IllegalArgumentException("Full Panel v4 candidate needs advanced multi-range preview");
             PanelPreviewProtocol.MapRange range=zone.ranges.get(0);
             zones.add(new MappedZone(zone.id,zone.panelId,section++,
-                range.start,range.count,zone.name,wireRole(zone.role)));
+                range.start,range.count,zone.name,MappedLane.wireRole(zone.role)));
         }
         return new MappedLane(lane,current.activePixels,panels,zones);
     }
