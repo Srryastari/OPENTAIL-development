@@ -992,9 +992,9 @@ static esp_err_t om_post(httpd_req_t *r){
     cJSON *zones=cJSON_GetObjectItemCaseSensitive(obj,"zones");
     ot_om_output_t next={0};
     bool valid=om_number(obj,"index",&index,0,OT_OM_OUTPUTS-1)&&
-      om_number(obj,"pixels",&pixels,1,OT_CHAIN_PIXELS)&&
+      om_number(obj,"pixels",&pixels,0,OT_CHAIN_PIXELS)&&
       om_string(obj,"name",next.name)&&order_id>=0&&cJSON_IsArray(zones)&&
-      cJSON_GetArraySize(zones)>=1&&cJSON_GetArraySize(zones)<=OT_OM_ZONES;
+      cJSON_GetArraySize(zones)<=OT_OM_ZONES;
     if(valid){
         next.active_pixels=(uint16_t)pixels;next.color_order=(uint8_t)order_id;
         next.zone_count=(uint8_t)cJSON_GetArraySize(zones);

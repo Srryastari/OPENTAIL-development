@@ -257,3 +257,8 @@ for production in (output, board, core):
         assert obsolete not in production, obsolete
 
 print("PASS: universal user-configured pixel counts; board budget only; dynamic per-output RMT lengths")
+
+# Empty REST writes must use the same validated zero/zero geometry as BLE.
+assert 'om_number(obj,"pixels",&pixels,0,OT_CHAIN_PIXELS)' in core
+assert "cJSON_GetArraySize(zones)>=1" not in core
+assert "ot_om_valid(&next)" in core
