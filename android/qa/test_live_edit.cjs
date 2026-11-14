@@ -135,7 +135,8 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('fun adjustOutput(') &&
        hardwareBlock.includes('ValueSlider("Start pixel · zero-based"') &&
        hardwareBlock.includes('next.put("pixels",total)') &&
-       hardwareBlock.includes('it.put("pixels", remaining)') &&
+       hardwareBlock.includes('it.put("pixels",remaining)') &&
+       hardwareBlock.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
        hardwareBlock.includes('structureVersion++') &&
        hardwareBlock.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardwareBlock.includes('623') &&
