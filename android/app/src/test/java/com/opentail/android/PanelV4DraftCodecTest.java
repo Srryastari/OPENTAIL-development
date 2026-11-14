@@ -50,6 +50,58 @@ public class PanelV4DraftCodecTest {
         assertEquals(0x4081,confirmed.getJSONArray("zones").getJSONObject(0).getInt("id"));
         assertArrayEquals(wire,PanelV4DraftCodec.encode(0,confirmed,snapshot(wire,5)));
     }
+    @Test public void freshO2PreviewAndDurableSaveShareTheSameFullIds() throws Exception {
+        byte[] zero=PanelV4LayoutProtocol.expectedFactoryMap(1);
+        PanelPreviewProtocol.LaneSnapshot first=snapshot(zero,2);
+        JSONObject draft=PanelV4DraftCodec.fromSnapshot(first);
+        draft.put("pixels",80);
+        draft.getJSONArray("zones").put(new JSONObject()
+            .put("name","Right").put("pixels",80).put("role","unassigned"));
+        byte[] wire=PanelV4DraftCodec.encode(1,draft,first);
+        assertEquals(0x8002,(wire[39]&255)|((wire[40]&255)<<8));
+        assertEquals(0x4089,(wire[155]&255)|((wire[156]&255)<<8));
+        assertEquals(255,wire[184]&255);
+    }
+
+    @Test public void metadataOnlySavePreservesAcceptedPhysicalGeometry() throws Exception {
+        byte[] zero=PanelV4LayoutProtocol.expectedFactoryMap(0);
+        PanelPreviewProtocol.LaneSnapshot first=snapshot(zero,3);
+        JSONObject base=PanelV4DraftCodec.fromSnapshot(first);
+        base.put("pixels",100).put("panel_id",0x8001)
+            .put("panel_name","Panel O1");
+        base.getJSONArray("zones").put(new JSONObject()
+            .put("id",0x4081).put("panel_id",0x8001)
+            .put("name","Tail").put("pixels",100).put("role","unassigned"));
+        byte[] accepted=PanelV4DraftCodec.encode(0,base,first);
+        JSONObject metadata=new JSONObject(base.toString())
+            .put("name","Custom Left").put("panel_name","Main Tail")
+            .put("color_order","RGB");
+        metadata.getJSONArray("zones").getJSONObject(0).put("name","Light A");
+        JSONObject calibration=metadata.getJSONObject("calibration");
+        calibration.getJSONArray("rgb_gain").put(0,123);
+        calibration.getJSONArray("white_gain").put(1,177);
+        calibration.put("gamma_enabled",true);
+        byte[] candidate=PanelV4DraftCodec.encode(0,metadata,first);
+        assertFalse(java.util.Arrays.equals(accepted,candidate));
+        assertEquals(100,(candidate[2]&255)|((candidate[3]&255)<<8));
+        assertEquals(0x8001,(candidate[39]&255)|((candidate[40]&255)<<8));
+        assertEquals(0x4081,(candidate[155]&255)|((candidate[156]&255)<<8));
+        assertEquals(0,((candidate[187]&255)|((candidate[188]&255)<<8)));
+        assertEquals(100,((candidate[189]&255)|((candidate[190]&255)<<8)));
+        assertEquals(255,candidate[184]&255);
+        assertEquals(123,candidate[30]&255);
+        assertEquals(177,candidate[34]&255);
+        assertEquals(1,candidate[36]&255);
+        assertEquals(0,candidate[4]&255);
+        JSONObject readback=PanelV4DraftCodec.fromSnapshot(snapshot(candidate,4));
+        assertEquals("Custom Left",readback.getString("name"));
+        assertEquals("Main Tail",readback.getString("panel_name"));
+        assertEquals("Light A",
+            readback.getJSONArray("zones").getJSONObject(0).getString("name"));
+        assertArrayEquals(candidate,
+            PanelV4DraftCodec.encode(0,readback,snapshot(candidate,4)));
+    }
+
     @Test public void independentUnsavedOutputCandidatesPreserveOffRoleAndNeverCrossLanes() throws Exception {
         byte[] baselineO1=PanelV4LayoutProtocol.expectedFactoryMap(0);
         byte[] baselineO2=PanelV4LayoutProtocol.expectedFactoryMap(1);
