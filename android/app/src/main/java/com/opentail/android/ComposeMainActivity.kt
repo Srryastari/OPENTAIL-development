@@ -3241,12 +3241,62 @@ class ComposeMainActivity : ComponentActivity() {
                 outputDirty[index] = true
             }.onFailure { outputMessage.value = "Invalid draft: " + (it.message ?: "input") }
         }
+        // An imported v4 range map is authoritative geometry. Validate the
+        // full candidate before publishing a local edit, so overlap errors
+        // cannot silently replace an accepted multi-panel configuration.
+        fun applyPhysicalRanges(next: JSONObject): Boolean {
+            val confirmed=ble.lastConfirmedPanelSnapshot(index)
+            if(confirmed==null) {
+                outputMessage.value="Read this output's Panel v4 configuration before changing physical ranges"
+                return false
+            }
+            val error=runCatching { PanelV4DraftCodec.encode(index,next,confirmed) }.exceptionOrNull()
+            if(error!=null) {
+                outputMessage.value="Physical range unchanged: "+(error.message ?: "invalid geometry")
+                return false
+            }
+            if(next.toString()==draftText)return true
+            draftText=next.toString()
+            outputDrafts[index]=draftText
+            outputDirty[index]=true
+            layoutLiveEditPending.value=true
+            structureVersion++
+            refresh() // volatile preview; persistence still uses the one Save
+            return true
+        }
         // Generic live zone cursor logic. Updating any zone recomputes the
         // output's active allocation and every downstream start automatically.
         // This changes draft RAM only; NVS still requires confirmed Save.
         fun adjustZone(zoneIndex: Int, newLength: Int) {
             if (newLength !in 0..outputLimit) {
                 outputMessage.value = "Zone pixel count must be 0–$outputLimit"
+                return
+            }
+            val current=runCatching { JSONObject(draftText) }.getOrNull() ?: return
+            if(current.optBoolean("v4_advanced",false)) {
+                val next=JSONObject(current.toString())
+                val part=next.optJSONArray("zones")?.optJSONObject(zoneIndex)
+                val ranges=part?.optJSONArray("ranges")
+                if(part==null||ranges==null||ranges.length()==0) {
+                    outputMessage.value="This imported zone has no editable physical ranges"
+                    return
+                }
+                val old=part.optInt("pixels",0)
+                val last=ranges.getJSONObject(ranges.length()-1)
+                val count=last.getInt("count")+(newLength-old)
+                if(count<=0) {
+                    outputMessage.value="Use Remove zone or edit a nonempty range; no zero-length v4 range can be sent"
+                    return
+                }
+                val end=last.getInt("start")+count
+                if(end>outputLimit) {
+                    outputMessage.value="Physical range would exceed the 2000-pixel output limit"
+                    return
+                }
+                last.put("count",count)
+                part.put("pixels",newLength)
+                next.put("pixels",maxOf(current.getInt("pixels"),end))
+                applyPhysicalRanges(next) // preserve all other starts, gaps, Panels and IDs
                 return
             }
             val before=draftText
@@ -3286,6 +3336,12 @@ class ComposeMainActivity : ComponentActivity() {
         fun adjustOutput(newTotal: Int) {
             if(newTotal !in 0..outputLimit) {
                 outputMessage.value = "Output pixel count must be 0–$outputLimit"
+                return
+            }
+            val existing=runCatching { JSONObject(draftText) }.getOrNull() ?: return
+            if(existing.optBoolean("v4_advanced",false)) {
+                val next=JSONObject(existing.toString()).put("pixels",newTotal)
+                applyPhysicalRanges(next) // capacity is NOT the sum of discontiguous ranges
                 return
             }
             val arr=runCatching { JSONObject(draftText).getJSONArray("zones") }.getOrNull()?:return
@@ -3579,11 +3635,50 @@ class ComposeMainActivity : ComponentActivity() {
                 if(zoneCountText.toIntOrNull()!=null && zoneCountText.toIntOrNull()!=count)
                     Caption("Typed zone length is not applied; check the output LED limit.",t)
                 if(outputToolsOpen) {
-                    ValueSlider("Next start · zero-based", cursor.coerceIn(0, outputLimit), outputLimit, t) { nextStart ->
-                        val n=(nextStart-from).coerceAtLeast(0)
-                        adjustZone(i,n)
-                        zoneCountText=n.toString()
-                        outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
+                    // One precise offset control, not another zone editor.
+                    // For imported multi-range Zones, choose the existing slot
+                    // without creating, flattening or reordering the others.
+                    val storedRanges=zone.optJSONArray("ranges")
+                    val slots=storedRanges?.length()?.takeIf { it>0 } ?: 1
+                    var selectedRange by remember(index,i) { mutableIntStateOf(0) }
+                    if(slots>1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        for(slot in 0 until slots)
+                            Pill("Range "+(slot+1),t,slot==selectedRange) {
+                                selectedRange=slot
+                            }
+                    }
+                    val slot=selectedRange.coerceIn(0,slots-1)
+                    val rangeStart=storedRanges?.optJSONObject(slot)?.optInt("start",from) ?: from
+                    ValueSlider("Start pixel · zero-based",rangeStart.coerceIn(0,outputLimit),
+                        outputLimit,t) { nextStart ->
+                        val next=JSONObject(draftText)
+                        val all=next.getJSONArray("zones")
+                        if(!next.optBoolean("v4_advanced",false)) {
+                            var offset=0
+                            for(z in 0 until all.length()) {
+                                val section=all.getJSONObject(z)
+                                val length=section.optInt("pixels",0)
+                                if(length<=0) {
+                                    outputMessage.value="Configure each section's LED count before setting a manual offset"
+                                    return@ValueSlider
+                                }
+                                section.put("ranges",JSONArray().put(JSONObject()
+                                    .put("start",offset).put("count",length)))
+                                offset+=length
+                            }
+                            next.put("v4_advanced",true)
+                        }
+                        val item=all.getJSONObject(i).getJSONArray("ranges").getJSONObject(slot)
+                        val end=nextStart+item.getInt("count")
+                        if(end>outputLimit) {
+                            outputMessage.value="Physical range would exceed the 2000-pixel output limit"
+                            return@ValueSlider
+                        }
+                        item.put("start",nextStart)
+                        next.put("pixels",maxOf(next.optInt("pixels",0),end))
+                        if(applyPhysicalRanges(next))
+                            outputCountText=next.getInt("pixels").toString()
                     }
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -3703,7 +3798,7 @@ class ComposeMainActivity : ComponentActivity() {
             AlertDialog(containerColor=t.surface,
                 onDismissRequest={ pendingRemoveSection=-1 },
                 title={ Text("Remove this zone?") },
-                text={ Text("Remove the physical draft section and its linked local design zone. Nothing is written to CORE until Save.") },
+                text={ Text("Remove this section? Valid changes preview live; Save is required only to persist them.") },
                 confirmButton={ Pill("Remove",t,true) {
                     val removal=pendingRemoveSection
                     val linked=(0 until project.zoneCount()).mapNotNull { project.zone(it) }
@@ -3719,7 +3814,11 @@ class ComposeMainActivity : ComponentActivity() {
                             val remaining=(0 until next.length()).sumOf { j ->
                                 next.getJSONObject(j).getInt("pixels")
                             }
-                            it.put("zones",next);it.put("pixels", remaining)
+                            it.put("zones",next)
+                            if(!it.optBoolean("v4_advanced",false))
+                                it.put("pixels",remaining)
+                            // Advanced active capacity must not collapse to
+                            // the assigned range sum after deleting one Zone.
                         }
                         structureVersion++
                         layoutLiveEditPending.value=true
