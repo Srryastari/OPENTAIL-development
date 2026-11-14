@@ -1598,6 +1598,13 @@ final class BleDiscovery {
     }
     private void enqueueWrite(byte[] data) {
         final boolean stop = isStopPacket(data);
+        if(stop && pixelProbeRequests.pending()) {
+            // A pending diagnostic must NOT follow STOP and relight pixel 0.
+            // An already in-flight probe still drains before queued STOP.
+            pixelProbeRequests.clear();pixelProbeQueuedOwner=null;
+            pixelProbeRequestLease++;
+            probeNotify("Pixel probe cancelled by safety STOP");
+        }
         if(palette.busy() && stop) palette.abortForStop();
         if(frameCapture.busy() && stop) {
             // STOP supersedes diagnostic reads. Drain the one in-flight GATT
