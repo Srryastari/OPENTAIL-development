@@ -516,7 +516,7 @@
     "status": "source-integrity only; physical acceptance remains blocked"
   },
   "integrated_trees": {
-    "android": "f7bf18074c3128dd94feecefaa1516fb3f172062",
+    "android": "92540229b64266d94a466ec5839179c70ea1f382",
     "core-firmware": "b64cd8bb7c14638ec37becdb97d43a02b96f282b"
   },
   "owner_mandated_p0_addendum": {
@@ -542,6 +542,7 @@
       "android/app/src/test/java/com/opentail/android/PanelPreviewProtocolTest.java",
       "android/app/src/test/java/com/opentail/android/PanelV4DraftCodecTest.java",
       "android/app/src/test/java/com/opentail/android/PanelV4LayoutProtocolTest.java",
+      "android/app/src/test/java/com/opentail/android/PixelProbeRequestQueueTest.java",
       "android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java",
       "android/app/src/test/java/com/opentail/android/TertiaryFxCommandTest.java",
       "android/qa/check_pinned_firmware127_contract.py",
