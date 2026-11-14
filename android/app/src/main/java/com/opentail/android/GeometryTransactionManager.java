@@ -550,62 +550,6 @@ final class GeometryTransactionManager {
 
 
     /**
-     * Single Panel v4 authoring source. Convert the exact validated Save wire
-     * candidate into the geometry consumed by the volatile preview protocol.
-     * Metadata remains on the wire for durable Save; no default LEDs created.
-     */
-    static LayoutMapping mapV4Drafts(JSONObject[] drafts,
-                                     PanelPreviewProtocol.LaneSnapshot[] snapshots) throws Exception {
-        if(drafts==null||snapshots==null||drafts.length!=2||snapshots.length!=2)
-            throw new IllegalArgumentException("Both Panel v4 output snapshots are required");
-        return new LayoutMapping(new MappedLane[]{
-            mapV4Draft(0,drafts[0],snapshots[0]),
-            mapV4Draft(1,drafts[1],snapshots[1])});
-    }
-    private static int wire16(byte[] b,int at) {
-        return (b[at]&255)|((b[at+1]&255)<<8);
-    }
-    static MappedLane mapV4Draft(int lane,JSONObject draft,
-                                PanelPreviewProtocol.LaneSnapshot snapshot) throws Exception {
-        byte[] wire=PanelV4DraftCodec.encode(lane,draft,snapshot);
-        int count=wire16(wire,2), panelCount=wire[37]&255,zoneCount=wire[38]&255;
-        List<MappedPanel> panels=new ArrayList<>();
-        List<MappedZone> zones=new ArrayList<>();
-        for(int p=0;p<panelCount;p++){
-            int at=39+p*29,id=wire16(wire,at);
-            panels.add(new MappedPanel(id,lane,"Panel "+id,wire[at+28]&255));
-        }
-        for(int z=0;z<zoneCount;z++){
-            int at=155+z*64,id=wire16(wire,at),panelId=wire16(wire,at+2);
-            int role=wire[at+29]&255;
-            if((wire[at+31]&255)!=1)
-                throw new IllegalArgumentException("Simple Layout needs one range per zone");
-            zones.add(new MappedZone(id,panelId,z,wire16(wire,at+32),
-                wire16(wire,at+34),"Zone "+id,
-                role==255?PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE:role));
-        }
-        return new MappedLane(lane,count,panels,zones);
-    }
-    /** Compare only firmware-enforced geometry, never mutable metadata. */
-    static boolean sameV4Geometry(MappedLane accepted,MappedLane candidate) {
-        if(accepted==null||candidate==null||accepted.lane!=candidate.lane||
-           accepted.activePixels!=candidate.activePixels||
-           accepted.panels.size()!=candidate.panels.size()||
-           accepted.zones.size()!=candidate.zones.size())return false;
-        for(int p=0;p<accepted.panels.size();p++){
-            MappedPanel a=accepted.panels.get(p),b=candidate.panels.get(p);
-            if(a.id!=b.id||a.lane!=b.lane||a.zoneCount!=b.zoneCount)return false;
-        }
-        for(int z=0;z<accepted.zones.size();z++){
-            MappedZone a=accepted.zones.get(z),b=candidate.zones.get(z);
-            if(a.id!=b.id||a.panelId!=b.panelId||
-               a.start!=b.start||a.count!=b.count||
-               a.roleFlags!=b.roleFlags)return false;
-        }
-        return true;
-    }
-
-    /**
      * Validate the proposed identity/ranges against both authoritative CORE maps
      * before BEGIN. Existing geometry is never implicitly deleted or overwritten
      * by a guessed ID; only an exact existing Zone identity may be updated in place.
