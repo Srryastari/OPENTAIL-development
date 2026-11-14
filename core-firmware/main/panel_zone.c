@@ -103,6 +103,34 @@ bool ot_pz_output_valid(const ot_pz_output_t *out,unsigned lane){
     }
     return true;
 }
+/* Compare what is actually rendered and safety-arbitrated, not user-facing
+ * labels or strip calibration. Full IDs and ordered ranges are intentional:
+ * aliases, reordered zones and role changes are not metadata-only edits. */
+bool ot_pz_live_geometry_matches(const ot_pz_output_t *live,
+                                 const ot_pz_output_t *uploaded,unsigned lane){
+    if(!live||!uploaded||lane>=OT_PZ_OUTPUTS||
+       !ot_pz_output_valid(live,lane)||
+       !ot_pz_output_valid(uploaded,lane)||
+       live->active_pixels!=uploaded->active_pixels||
+       live->panel_count!=uploaded->panel_count||
+       live->zone_count!=uploaded->zone_count)return false;
+    for(unsigned p=0;p<live->panel_count;p++){
+        const ot_pz_panel_t *a=&live->panels[p],*b=&uploaded->panels[p];
+        if(a->id!=b->id||a->lane!=b->lane||
+           a->zone_count!=b->zone_count)return false;
+    }
+    for(unsigned z=0;z<live->zone_count;z++){
+        const ot_pz_zone_t *a=&live->zones[z],*b=&uploaded->zones[z];
+        if(a->id!=b->id||a->panel_id!=b->panel_id||
+           a->role!=b->role||a->flags!=b->flags||
+           a->range_count!=b->range_count)return false;
+        for(unsigned k=0;k<a->range_count;k++){
+            if(a->ranges[k].start!=b->ranges[k].start||
+               a->ranges[k].count!=b->ranges[k].count)return false;
+        }
+    }
+    return true;
+}
 bool ot_pz_valid(const ot_pz_controller_t *config){
     if(!config)return false;
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
