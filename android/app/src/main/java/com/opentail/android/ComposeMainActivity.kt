@@ -424,7 +424,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
                 else if (wasLoading) {
-                    panelGeometryMessage.value = "CORE disconnected during readback; reconnect and Refresh CORE."
+                    panelGeometryMessage.value = "CORE disconnected during readback; reconnect to refresh output status."
                     panelGeometryRevision.intValue++
                 }
             }
@@ -2143,7 +2143,7 @@ class ComposeMainActivity : ComponentActivity() {
         if(!ble.readPanelLaneSnapshot(0)) {
             panelGeometryLoadInProgress=false
             panelGeometryLoadLane=-1
-            panelGeometryMessage.value="CORE output 1 snapshot read is busy; retry Refresh CORE"
+            panelGeometryMessage.value="CORE output 1 read is busy; retry when connected"
         }
         panelGeometryRevision.intValue++
     }
@@ -2157,7 +2157,7 @@ class ComposeMainActivity : ComponentActivity() {
                 if(!ble.readPanelLaneSnapshot(1)) {
                     panelGeometryLoadInProgress=false
                     panelGeometryLoadLane=-1
-                    panelGeometryMessage.value="CORE output 2 snapshot read is busy; retry Refresh CORE"
+                    panelGeometryMessage.value="CORE output 2 read is busy; retry when connected"
                 }
             } else if(snapshot.lane==1&&panelGeometryLoadLane==1) {
                 panelGeometryLoadInProgress=false
@@ -3120,6 +3120,12 @@ class ComposeMainActivity : ComponentActivity() {
                 Caption(panelStatusSummary.value, t)
             }
         }
+        Panel(t) {
+            Title("Projects", t)
+            Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
+            Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
+            Caption(outputMessage.value, t)
+        }
         if(diagnostics) SettingsDiagnostics(t, changePage)
     }
     @Composable
@@ -3181,12 +3187,6 @@ class ComposeMainActivity : ComponentActivity() {
         Pill("Input mapping",t) { mappingExpanded=!mappingExpanded }
         if(mappingExpanded) CoreTriggerMappingPage(t)
         CorePaletteTransferPanel(t)
-        Panel(t) {
-            Title("Projects", t)
-            Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
-            Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
-            Caption(outputMessage.value, t)
-        }
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
@@ -3778,18 +3778,6 @@ class ComposeMainActivity : ComponentActivity() {
             if(zones.length()>0) Pill("Remove zone",t) {
                 pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)
             }
-            }
-            if(outputToolsOpen) Pill("Fit last zone to remaining pixels", t) {
-                edit {
-                    val group = it.getJSONArray("zones")
-                    if (group.length() > 0) {
-                        val other = (0 until group.length() - 1)
-                            .sumOf { j -> group.getJSONObject(j).getInt("pixels") }
-                        val remainder = it.getInt("pixels") - other
-                        if (remainder in 0..outputLimit)
-                            group.getJSONObject(group.length() - 1).put("pixels", remainder)
-                    }
-                }
             }
             val calibrated = draft.optJSONObject("calibration")
             val gamma = calibrated?.optBoolean("gamma_enabled", false) ?: false
