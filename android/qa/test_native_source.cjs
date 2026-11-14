@@ -1536,6 +1536,9 @@ assert(probeQueue.includes('synchronized boolean offer(int lane)') &&
   probeQueue.includes('synchronized void clear()') &&
   probeQueueTests.includes('reconnectThenIdleOffersOneRealProbeOnO1') &&
   probeQueueTests.includes('onlyOneLaneAndNoFabricatedOrRepeatedProbe') &&
+  probeQueueTests.includes('safetyStopCancelsQueuedProbeInsteadOfReplayingAfterAck') &&
+  bleSource.includes('if(stop && pixelProbeRequests.pending())') &&
+  bleSource.includes('probeNotify("Pixel probe cancelled by safety STOP")') &&
   ownerProbe.includes('pixelProbeRequests.offer(lane)') &&
   ownerProbe.includes('pixelProbeBlockingOperation()') &&
   ownerProbe.includes('Pixel probe queued behind') &&
