@@ -300,6 +300,11 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic pixelProbeCharacteristic;
     private volatile boolean pixelProbeWritePending=false;
     private volatile int pixelProbeWatchLease=0,pixelProbeLane=-1;
+    // One owner request waits behind normal ATT initialization instead of
+    // failing just because automatic Panel status/snapshot reads are queued.
+    private final PixelProbeRequestQueue pixelProbeRequests=new PixelProbeRequestQueue();
+    private BluetoothGatt pixelProbeQueuedOwner;
+    private int pixelProbeRequestLease=0;
     private Consumer<String> pixelProbeListener;
     private PanelPreviewProtocol.Capabilities panelCapabilities;
     private final TelemetrySequenceWatchdog[] panelWatchdogs={new TelemetrySequenceWatchdog(),new TelemetrySequenceWatchdog()};
@@ -402,25 +407,82 @@ final class BleDiscovery {
      */
     @SuppressWarnings({"MissingPermission","deprecation"})
     boolean probeFirstPixel(int lane) {
-        if(lane<0||lane>1||!canProbeFirstPixel()) {
+        if(lane<0||lane>1||!canProbeFirstPixel()||gatt==null) {
             probeNotify("Pixel probe unavailable: authorize BLE and read Panel capabilities");
             return false;
         }
-        // A probe is optional. Never interrupt or overlap another ATT action;
-        // STOP remains queued ahead of all subsequent diagnostics.
-        if(panelSaveBusy||pixelProbeWritePending||cfgBusy||queuedOutputRead>=0||
-           writePending||readReplyPending||fxCapsBusy||infoReadPending||infoReadQueued||
-           triggerMapBusy||panelReadPending||panelSnapshotBusy||
-           panelControlWritePending||panelUpdateWritePending||
-           panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
-           panelSnapshotQueuedLane>=0||panelCancelQueued||
-           frameCapture.busy()||palette.busy()||nextPacket!=null||
-           authPending||pairPending||challengePending||gatt==null) {
-            probeNotify("Pixel probe busy: finish the current BLE transfer and retry");
+        // Never send a second probe while the first request is queued or its
+        // GATT write is pending. No auto-retry/duplicate physical white pulse.
+        if(pixelProbeRequests.pending()||pixelProbeWritePending) {
+            probeNotify("Pixel probe already queued or in flight on this connection");
             return false;
         }
+        if(!pixelProbeRequests.offer(lane))return false;
+        final BluetoothGatt owner=gatt;
+        pixelProbeQueuedOwner=owner;
+        final int lease=++pixelProbeRequestLease;
+        final String blocker=pixelProbeBlockingOperation();
+        if(blocker!=null) {
+            probeNotify("Pixel probe queued behind "+blocker+"; will run automatically when BLE is idle");
+        }
+        // pumpQueue owns ALL GATT writes. It gives STOP/FX, cancellation and
+        // in-flight transactions precedence, but not new status polling over
+        // this single explicit owner-requested diagnostic.
+        pumpQueue();
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&pixelProbeRequests.pending()&&
+               pixelProbeRequestLease==lease) {
+                final String outstanding=pixelProbeBlockingOperation();
+                probeNotify("Pixel probe queued too long behind "+
+                    (outstanding==null?"an unresponsive GATT queue":outstanding)+
+                    "; recovering the stalled Bluetooth session");
+                pixelProbeRequests.clear();
+                pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+                // A verified read never occurred. Recover rather than overlap
+                // the unknown in-flight ATT owner with a second write.
+                recoverStalledGatt(owner,"Pixel probe waited on stuck BLE transfer");
+            }
+        },20000L);
+        return true;
+    }
+
+    /** Most specific blocker at the instant the owner requests diagnostics. */
+    private String pixelProbeBlockingOperation() {
+        if(panelSaveBusy)return "Panel v4 Save/readback";
+        if(pixelProbeWritePending)return "previous Pixel Probe write";
+        if(cfgBusy)return "Output configuration read/write";
+        if(queuedOutputRead>=0)return "queued Output read";
+        if(writePending||readReplyPending)return "effect/STOP acknowledgement";
+        if(fxCapsBusy)return "effects capabilities read";
+        if(infoReadPending)return "firmware information read";
+        if(infoReadQueued)return "queued firmware information read";
+        if(triggerMapBusy)return "trigger input mapping transfer";
+        if(panelReadPending)return "Panel capabilities/status read";
+        if(panelSnapshotBusy)return "Panel v4 snapshot transfer";
+        if(panelControlWritePending||panelControlQueued)return "Panel preview control";
+        if(panelUpdateWritePending||panelUpdateQueued)return "Panel live UPDATE";
+        if(panelReadQueued!=0)return "queued Panel status read";
+        if(panelSnapshotQueuedLane>=0)return "queued Panel v4 snapshot";
+        if(panelCancelQueued)return "Panel preview cancellation";
+        if(frameCapture.busy())return "LED frame capture";
+        if(palette.busy())return "palette transfer";
+        if(nextPacket!=null)return isStopPacket(nextPacket)?"queued safety STOP":"queued effect command";
+        if(authPending||pairPending||challengePending)return "authorization";
+        if(previewCommand!=null)return "queued LED preview command";
+        return null;
+    }
+
+    /**
+     * Dispatch ONLY after the main GATT queue selects this owner request.
+     * No Save, zone creation, NVS changes or manual reconnection are required.
+     */
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPixelProbe(int lane) {
+        if(lane<0||lane>1||!canProbeFirstPixel()||gatt==null) {
+            probeNotify("Pixel probe dropped: BLE authorization or capabilities changed");
+            return;
+        }
         // [0xAA, output (one-based), index high, index low, white].
-        // Only pixel zero is probed; all other LEDs retain their normal state.
         final byte[] packet=new byte[]{(byte)0xaa,(byte)(lane+1),0,0,1};
         final BluetoothGatt owner=gatt;
         pixelProbeWritePending=true;
@@ -437,18 +499,16 @@ final class BleDiscovery {
                 started=owner.writeCharacteristic(pixelProbeCharacteristic);
             }
         }catch(SecurityException ex) {
-            pixelProbeWritePending=false;
-            pixelProbeLane=-1;
-            pixelProbeWatchLease++;
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
             probeNotify("Pixel probe failed: Bluetooth write permission missing");
-            return false;
+            ui.post(this::pumpQueue);
+            return;
         }
         if(!started) {
-            pixelProbeWritePending=false;
-            pixelProbeLane=-1;
-            pixelProbeWatchLease++;
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
             probeNotify("Pixel probe failed: GATT write did not start");
-            return false;
+            ui.post(this::pumpQueue);
+            return;
         }
         ui.postDelayed(()->{
             if(!stopped && owner==gatt && pixelProbeWritePending &&
@@ -459,7 +519,6 @@ final class BleDiscovery {
                 recoverStalledGatt(owner,"Pixel probe ATT write timeout");
             }
         },8000L);
-        return true;
     }
     boolean canReadPanelPreview() {
         return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
@@ -844,6 +903,7 @@ final class BleDiscovery {
         panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
         pixelProbeCharacteristic=null;pixelProbeWritePending=false;
         pixelProbeLane=-1;pixelProbeWatchLease++;
+        pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
         panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
         panelStatusExpectedLane=-1;panelStatusReadRetries=0;panelStatusRetryLease++;
         panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
@@ -1643,6 +1703,16 @@ final class BleDiscovery {
             startPanelUpdate();
             return;
         }
+        if(pixelProbeRequests.pending()) {
+            // One explicit owner action preempts background status polling,
+            // never a queued STOP, in-flight ATT, panel UPDATE or cancellation.
+            int lane=pixelProbeRequests.take();
+            BluetoothGatt owner=pixelProbeQueuedOwner;
+            pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+            if(owner==gatt&&canProbeFirstPixel())startPixelProbe(lane);
+            else probeNotify("Pixel probe cancelled: connection changed before admission");
+            return;
+        }
         if(panelSnapshotQueuedLane>=0) {
             int lane=panelSnapshotQueuedLane;panelSnapshotQueuedLane=-1;
             startPanelSnapshot(lane);
@@ -2017,6 +2087,7 @@ final class BleDiscovery {
             panelConfigReply=service.getCharacteristic(PANEL_CFG_RSP_UUID);
             pixelProbeCharacteristic=service.getCharacteristic(PIXEL_PROBE_UUID);
             pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+            pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
             panelPreviewControl=service.getCharacteristic(PANEL_PREVIEW_CONTROL_UUID);
             panelPreviewUpdate=service.getCharacteristic(PANEL_PREVIEW_UPDATE_UUID);
             panelPreviewStatus=service.getCharacteristic(PANEL_PREVIEW_STATUS_UUID);
