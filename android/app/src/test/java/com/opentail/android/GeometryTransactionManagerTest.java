@@ -170,6 +170,18 @@ public class GeometryTransactionManagerTest {
             assertEquals(2,baseline.panels.size());
             assertEquals(2,baseline.zones.get(0).ranges.size());
             assertTrue(baseline.descriptorBatches(stored,247).isEmpty());
+            // Fresh matching telemetry must admit the *real* range slots.
+            // Previous preflight collapsed [0,10]+[30,10] into [0,20]
+            // and refused every existing multi-range Zone.
+            GeometryTransactionManager.MappedLane untouchedOther=
+                GeometryTransactionManager.fromV4SaveCandidate(1-lane,
+                    PanelV4LayoutProtocol.expectedFactoryMap(1-lane));
+            GeometryTransactionManager.LayoutMapping both=new GeometryTransactionManager.LayoutMapping(
+                lane==0 ? new GeometryTransactionManager.MappedLane[]{baseline,untouchedOther}
+                    : new GeometryTransactionManager.MappedLane[]{untouchedOther,baseline});
+            byte[] leftWire=lane==0?wire:PanelV4LayoutProtocol.expectedFactoryMap(0);
+            byte[] rightWire=lane==1?wire:PanelV4LayoutProtocol.expectedFactoryMap(1);
+            validateSnapshots(both,fullSnapshot(leftWire,7),fullSnapshot(rightWire,7));
 
             JSONObject moved=new JSONObject(readback.toString());
             moved.getJSONArray("zones").getJSONObject(0).getJSONArray("ranges")
