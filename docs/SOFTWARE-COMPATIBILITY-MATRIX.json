@@ -516,7 +516,7 @@
     "status": "source-integrity only; physical acceptance remains blocked"
   },
   "integrated_trees": {
-    "android": "263f8a863ce9f0702e1ee2109477e0bbb6a09e33",
+    "android": "7601905c238a13901859fd8cae27d123799c17c1",
     "core-firmware": "b64cd8bb7c14638ec37becdb97d43a02b96f282b"
   },
   "owner_mandated_p0_addendum": {
