@@ -9,6 +9,6 @@ core = (root / "opentail_core.c").read_text()
 ble = (root / "ble_status.c").read_text()
 assert re.search(r'#define\s+OT_FW_VERSION\s+"0\.1\.32-alpha"', version)
 assert '#define OT_FW OT_FW_VERSION' in core
-assert '"OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2"' in ble
+assert '"OpenTail CORE " OT_FW_VERSION " | owner-bond-v3"' in ble
 assert 'OpenTail CORE 0.1.25' not in ble
 print("CORE REST/BLE firmware version identity regression passed")

@@ -87,7 +87,7 @@ assert adv.index("ble_gap_adv_start(addr_type") < adv.index(
 assert "ble_hs_cfg.sync_cb=on_sync;" in ble_start
 assert "nimble_port_freertos_init(host_task)" in ble_start
 assert "owner_valid=owner_load();" in ble_start
-assert "boot_enrollment_ready=boot_err==ESP_OK;" in ble_start
+assert "owner_security_config();ble_store_config_init();" in ble_start
 
 config = dict(re.findall(r"^(CONFIG_[A-Z0-9_]+)=(\S+)$", defaults, re.M))
 for key, expected in {

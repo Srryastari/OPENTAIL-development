@@ -1,8 +1,8 @@
 /* OpenTail CORE BLE v2 bench enrollment and existing show/output commands.
- * A physical BOOT/GPIO0 press permits reading a device-specific enrollment key.
+ * First encrypted bonded phone claims a fresh controller; no BOOT enrollment.
  * Routine reconnects authenticate by HMAC of a fresh challenge; the key remains
  * in its own NVS namespace and does not ride along with routine BLE commands.
- * First enrollment is NOT authenticated against an active MITM. Bench ONLY.
+ * Skip uses Just Works and accepts a first-claim race. Optional PIN authenticates new-phone bonding.
  * Existing WPA2 Wi-Fi authorization stays available unchanged.
  */
 #include "sdkconfig.h"
@@ -62,6 +62,11 @@ void ot_ble_session_hex(char out[33]){
 }
 #if CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ENABLED
 #include "nimble/nimble_port.h"
+#include "host/ble_sm.h"
+#include "store/config/ble_store_config.h"
+#include "ble_owner_policy.h"
+#include "config_journal.h"
+#include <stddef.h>
 #include "esp_bt.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -138,34 +143,92 @@ extern void ot_ble_panel_preview_cancel_lane(uint8_t lane);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
-static bool boot_enrollment_ready=false;
+typedef struct {
+    uint32_t version;
+    uint8_t key[16],peer_type,peer[6],pin_enabled;
+    uint32_t pin,crc;
+} owner_record_t;
+static owner_record_t owner_record;
+static bool owner_peer_valid=false,owner_storage_fault=false;
+static void owner_security_config(void){
+    ble_hs_cfg.sm_bonding=1;ble_hs_cfg.sm_sc=1;
+    ble_hs_cfg.sm_mitm=owner_record.pin_enabled?1:0;
+    ble_hs_cfg.sm_io_cap=owner_record.pin_enabled?BLE_HS_IO_DISPLAY_ONLY:BLE_HS_IO_NO_INPUT_OUTPUT;
+    ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+}
+static bool owner_link(struct ble_gap_conn_desc *desc){
+    return active_conn!=BLE_HS_CONN_HANDLE_NONE&&
+        ble_gap_conn_find(active_conn,desc)==0&&desc->sec_state.encrypted&&desc->sec_state.bonded;
+}
+static uint32_t owner_crc(const owner_record_t *r){
+    return ot_cfg_crc32_zeroed(r,sizeof(*r),offsetof(owner_record_t,crc),sizeof(r->crc));
+}
+static bool owner_commit(owner_record_t *next){
+    next->version=3;next->crc=owner_crc(next);
+    nvs_handle_t h;if(nvs_open("ot_blepair",NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,"owner_v3",next,sizeof(*next));
+    if(e==ESP_OK)e=nvs_commit(h);
+    owner_record_t readback={0};size_t n=sizeof(readback);
+    if(e==ESP_OK)e=nvs_get_blob(h,"owner_v3",&readback,&n);
+    nvs_close(h);
+    if(e!=ESP_OK||n!=sizeof(readback)||memcmp(next,&readback,n)!=0){
+        owner_storage_fault=true;return false;
+    }
+    owner_record=*next;memcpy(owner_key,next->key,sizeof(owner_key));
+    owner_valid=true;owner_peer_valid=true;return true;
+}
 static uint8_t pair_failures=0;
 static bool owner_load(void){
-    nvs_handle_t h;
-    if(nvs_open("ot_blepair",NVS_READONLY,&h)!=ESP_OK)return false;
-    size_t n=sizeof(owner_key);
-    esp_err_t e=nvs_get_blob(h,"owner",owner_key,&n);
-    nvs_close(h);
-    return e==ESP_OK && n==sizeof(owner_key);
-}
-static bool owner_create(void){
-    if(owner_valid)return true;
-    uint8_t candidate[16];esp_fill_random(candidate,sizeof(candidate));
-    nvs_handle_t h;
-    if(nvs_open("ot_blepair",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"owner",candidate,sizeof(candidate));
-    if(e==ESP_OK)e=nvs_commit(h);
-    nvs_close(h);
-    if(e!=ESP_OK)return false;
-    memcpy(owner_key,candidate,sizeof(owner_key));owner_valid=true;
+    nvs_handle_t h;esp_err_t e=nvs_open("ot_blepair",NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return false;
+    if(e!=ESP_OK){owner_storage_fault=true;return false;}
+    size_t n=sizeof(owner_record);
+    e=nvs_get_blob(h,"owner_v3",&owner_record,&n);
+    if(e==ESP_OK){
+        nvs_close(h);
+        if(n!=sizeof(owner_record)||owner_record.version!=3||owner_record.pin_enabled>1||
+           !ot_owner_pin_valid(owner_record.pin_enabled,owner_record.pin)||
+           owner_record.crc!=owner_crc(&owner_record)){
+            owner_storage_fault=true;return false;
+        }
+        memcpy(owner_key,owner_record.key,sizeof(owner_key));owner_peer_valid=true;return true;
+    }
+    if(e!=ESP_ERR_NVS_NOT_FOUND){nvs_close(h);owner_storage_fault=true;return false;}
+    n=sizeof(owner_key);e=nvs_get_blob(h,"owner",owner_key,&n);nvs_close(h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return false;
+    if(e!=ESP_OK||n!=sizeof(owner_key)){owner_storage_fault=true;return false;}
+    /* Legacy owner must prove the existing key before its bonded peer is bound. */
     return true;
 }
-/* GPIO0 BOOT must be pressed AFTER power-up, never while resetting. */
 static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
+    struct ble_gap_conn_desc desc;
+    if(conn!=active_conn||!owner_link(&desc))return BLE_ATT_ERR_INSUFFICIENT_ENC;
+    if(ctx->op==BLE_GATT_ACCESS_OP_WRITE_CHR){
+        uint8_t p[6];uint16_t n=0;
+        if(!authorized||owner_storage_fault)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+        if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0||n!=6||p[0]!=3||p[1]>1)
+            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        const uint32_t pin=(uint32_t)p[2]|((uint32_t)p[3]<<8)|((uint32_t)p[4]<<16)|((uint32_t)p[5]<<24);
+        if(!ot_owner_pin_valid(p[1]!=0,pin))return BLE_ATT_ERR_UNLIKELY;
+        owner_record_t next=owner_record;memcpy(next.key,owner_key,16);
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        next.pin_enabled=p[1];next.pin=p[1]?pin:0;
+        if(!owner_commit(&next))return BLE_ATT_ERR_UNLIKELY;
+        owner_security_config();return 0;
+    }
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    if(conn!=active_conn||!boot_enrollment_ready||gpio_get_level(GPIO_NUM_0)!=0)return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    if(!owner_create())return BLE_ATT_ERR_UNLIKELY;
+    const bool same=owner_peer_valid&&owner_record.peer_type==desc.peer_id_addr.type&&
+        memcmp(owner_record.peer,desc.peer_id_addr.val,6)==0;
+    if(!ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same,
+        desc.sec_state.encrypted,desc.sec_state.bonded,
+        owner_record.pin_enabled,desc.sec_state.authenticated))return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if(!owner_valid){
+        owner_record_t next={0};esp_fill_random(next.key,sizeof(next.key));
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        if(!owner_commit(&next))return BLE_ATT_ERR_UNLIKELY;
+    }
     return os_mbuf_append(ctx->om,owner_key,sizeof(owner_key))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int owner_challenge_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -176,7 +239,8 @@ static int owner_challenge_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     return os_mbuf_append(ctx->om,owner_challenge,sizeof(owner_challenge))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static bool owner_verify(const uint8_t mac[16]){
-    if(!owner_valid||!challenge_ready||pair_failures>=5)return false;
+    struct ble_gap_conn_desc desc;
+    if(owner_storage_fault||!owner_link(&desc)||!owner_valid||!challenge_ready||pair_failures>=5)return false;
     challenge_ready=false; /* never permit challenge replay */
     static const uint8_t context[]="OpenTail-BLE-v2";
     uint8_t message[sizeof(context)-1+16],expected[32];
@@ -187,7 +251,13 @@ static bool owner_verify(const uint8_t mac[16]){
     uint8_t mismatch=0;
     for(int i=0;i<16;i++)mismatch|=(uint8_t)(expected[i]^mac[i]);
     if(mismatch)pair_failures++;
-    return mismatch==0;
+    if(mismatch)return false;
+    if(!owner_peer_valid){
+        owner_record_t next={0};memcpy(next.key,owner_key,16);
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        if(!owner_commit(&next))return false;
+    }
+    return true;
 }
 
 static const ble_uuid128_t ot_service_uuid=BLE_UUID128_INIT(0x21,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
@@ -216,7 +286,7 @@ static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0x
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
+    const char *message="OpenTail CORE " OT_FW_VERSION " | owner-bond-v3" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
     return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -1286,8 +1356,8 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_reply_uuid.u,.access_cb=reply_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_fx_caps_uuid.u,.access_cb=fx_capabilities_read,.flags=BLE_GATT_CHR_F_READ},
-  {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ},
-  {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC},
+  {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_cfg_rsp_uuid.u,.access_cb=cfg_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_trigger_uuid.u,.access_cb=trigger_access,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_WRITE},
@@ -1335,6 +1405,13 @@ static void advertise(void){
 }
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
+    if(ev->type==BLE_GAP_EVENT_PASSKEY_ACTION){
+        if(ev->passkey.conn_handle!=active_conn||!owner_record.pin_enabled)return 0;
+        struct ble_sm_io io={0};io.action=ev->passkey.params.action;
+        if(io.action==BLE_SM_IOACT_DISP){io.passkey=owner_record.pin;
+            (void)ble_sm_inject_io(active_conn,&io);}
+        return 0;
+    }
     if(ev->type==BLE_GAP_EVENT_CONNECT){
         if(ev->connect.status==0){
             if(active_conn!=BLE_HS_CONN_HANDLE_NONE){
@@ -1388,13 +1465,6 @@ static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freerto
 bool ot_ble_start(void){
     __atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);
     owner_valid=owner_load();
-    gpio_config_t boot={0};boot.pin_bit_mask=(1ULL<<0);boot.mode=GPIO_MODE_INPUT;boot.pull_up_en=GPIO_PULLUP_ENABLE;
-    const esp_err_t boot_err=gpio_config(&boot);
-    boot_enrollment_ready=boot_err==ESP_OK;
-    if(!boot_enrollment_ready){
-        ESP_LOGE(TAG,"BOOT button GPIO setup failed: %s",esp_err_to_name(boot_err));
-        ot_st_set_fault("BLE BOOT enrollment button unavailable");
-    }
     esp_fill_random(token,sizeof(token));
     token_ready=true;
     ble_alloc_fail_count=0u;
@@ -1421,6 +1491,7 @@ bool ot_ble_start(void){
             ble_alloc_fail_caller?ble_alloc_fail_caller:"none-observed");
         return false;
     }
+    owner_security_config();ble_store_config_init();
     ble_svc_gap_init();ble_svc_gatt_init();
     int rc=ble_svc_gap_device_name_set("OpenTail CORE");
     if(!rc)rc=ble_gatts_count_cfg(services);
@@ -1429,8 +1500,7 @@ bool ot_ble_start(void){
     ble_hs_cfg.reset_cb=on_reset;
     ble_hs_cfg.sync_cb=on_sync;
     nimble_port_freertos_init(host_task);
-    ESP_LOGI(TAG,"BLE output manager started; BOOT enrollment %s; no production pairing security.",
-             boot_enrollment_ready?"available":"disabled");
+    ESP_LOGI(TAG,"BLE owner-bond-v3 started; encrypted owner enrollment, optional PIN");
     return true;
 }
 #else

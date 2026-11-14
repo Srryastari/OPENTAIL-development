@@ -70,7 +70,7 @@ set /p CONFIRM=Type FLASH to write the verified images to COM9:
 if /I not "%CONFIRM%"=="FLASH" (echo Cancelled. & exit /b 1)
 py -3 -m esptool --chip esp32s3 --port COM9 --baud 115200 write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB 0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin 0xf000 ota_data_initial.bin 0x20000 opentail_core_alpha.bin
 if errorlevel 1 (echo Flash failed. & exit /b 1)
-echo Flash finished. Run 02_CAPTURE_BOOT_LOG_COM9.bat now.
+echo Flash finished. Reconnect the app. Serial logging is optional.
 pause
 """,
     "02_CAPTURE_BOOT_LOG_COM9.bat": r"""@echo off
@@ -127,13 +127,30 @@ except KeyboardInterrupt:
     "1. If needed, run INSTALL_ESPTOOL.bat to install esptool + pyserial.\n"
     "2. Close ESP-IDF, Arduino, and other COM9 serial monitors.\n"
     "3. Run 01_FLASH_COM9.bat and type FLASH after SHA-256 checks pass.\n"
-    "4. Run 02_CAPTURE_BOOT_LOG_COM9.bat, press EN/RESET, capture two boots.\n"
-    "5. Press Ctrl+C to save logs. Return the COM9 log for physical review.\n\n"
+    "4. Reconnect the app and perform the lighting acceptance checks.\n"
+    "Serial logging is optional; no COM9 recording is required.\n\n"
     "Four verified offsets: 0x0 bootloader, 0x8000 partition, 0xf000 OTA data,\n"
     "0x20000 app. NVS at 0x9000 remains untouched.\n"
     "Stable renderer/BLE/Wi-Fi without panic is required; neither CI nor flashing\n"
     "alone constitutes physical acceptance. Do not use on the road.\n").replace("\n","\r\n"))
-hashed = [*expected.values(), "flasher_args.json", "release_manifest.json"]
+# Separate opt-in bench reset: normal FLASH always preserves NVS.
+shutil.copy2(root/"scripts/factory_reset.py",out/"factory_reset.py")
+(out/"03_FACTORY_RESET_COM9.bat").write_text(
+    '@echo off\nsetlocal\ncd /d "%~dp0"\n'
+    'echo WARNING: Erases ALL controller data, settings and Bluetooth bonds.\n'
+    'echo Forget this controller in Android Bluetooth settings after reset.\n'
+    'py -3 factory_reset.py --package . --sha '+args.sha+' --port COM9\n'
+    'if errorlevel 1 exit /b 1\n'
+    'set /p CONFIRM=Type ERASE-ALL to erase and reflash this controller: \n'
+    'if not "%CONFIRM%"=="ERASE-ALL" exit /b 1\n'
+    'py -3 factory_reset.py --package . --sha '+args.sha+' --port COM9 --confirm ERASE-ALL\n'
+    'if errorlevel 1 exit /b 1\npause\n')
+with (out/"START_HERE.txt").open("a") as guide:
+    guide.write("\nOptional owner-authorized clean-slate installation ONLY: run 03_FACTORY_RESET_COM9.bat. "
+                "It verifies this exact package before asking ERASE-ALL. This deletes ALL saved settings and bonds. "
+                "Forget the old Android Bluetooth bond and use a fresh app installation for a clean bench. "
+                "Normal 01_FLASH_COM9.bat never erases NVS.\n")
+hashed = [*expected.values(), "flasher_args.json", "release_manifest.json", "factory_reset.py", "03_FACTORY_RESET_COM9.bat"]
 (out/"SHA256SUMS.txt").write_text("".join(
     hashlib.sha256((out/path).read_bytes()).hexdigest()+"  "+path+"\n" for path in hashed))
 for record in (out/"SHA256SUMS.txt").read_text().splitlines():
