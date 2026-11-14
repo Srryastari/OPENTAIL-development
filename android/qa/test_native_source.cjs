@@ -1522,8 +1522,7 @@ assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
 // readback/status telemetry was queued. Reconnect must clear an old request;
 // the one new owner tap must enter the shared ATT queue, behind STOP and live
 // UPDATE/CANCEL but ahead of optional background snapshot/status polling.
-const probeQueue=fs.readFileSync(
-  'android/app/src/main/java/com/opentail/android/PixelProbeRequestQueue.java','utf8');
+const probeQueue=bleSource.split('final class PixelProbeRequestQueue {')[1];
 const probeQueueTests=fs.readFileSync(
   'android/app/src/test/java/com/opentail/android/PixelProbeRequestQueueTest.java','utf8');
 const pump=bleSource.split('private void pumpQueue(){')[1]
