@@ -128,7 +128,7 @@ final class PanelV4DraftCodec {
         result[36]=(byte)(cal.optBoolean("gamma_enabled",false)?1:0);
         if(zones.length()==0)return result;
         int panelId=draft.optInt("panel_id",0);
-        if(panelId==0)panelId=baseline.optInt("panel_id",0x8001);
+        if(panelId==0)panelId=baseline.optInt("panel_id",0x8001+lane);
         if(panelId<1||panelId>65535)
             throw new IllegalArgumentException("Invalid full Panel ID");
         String panelName=draft.optString("panel_name",baseline.optString("panel_name","Panel 1"));
