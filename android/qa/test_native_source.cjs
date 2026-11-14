@@ -1552,3 +1552,23 @@ assert(probeQueue.includes('synchronized boolean offer(int lane)') &&
   !ownerProbe.includes('savePanelV4(') &&
   !ownerProbe.includes('cfgSend('),
   'Pixel Probe reconnect/idle admission must be single-shot, serialized, diagnostic and STOP-safe');
+
+// Direct GATT entrypoints must respect the diagnostic/Save owners even when
+// bypassing pumpQueue. Otherwise display-cadence polling can overlap the probe.
+for (const signature of ['private boolean paletteGate(){',
+    'private boolean triggerMapAvailable(){','private void readFxCapabilitiesInternal() {',
+    'boolean readOutputIfReady(int index) {','void readOutput(int index){',
+    'boolean saveOutput(int index,String json){','void pairWithBoot(){',
+    'void authorizeStored(){','void authorize(String tokenHex) {','void fxPreset(int action,int slot) {']) {
+  const entry=bleSource.split(signature)[1];
+  assert(entry && entry.slice(0,500).includes('pixelProbeWritePending||panelSaveBusy'),
+    signature+' must not overlap Pixel Probe/Panel Save ATT ownership');
+}
+assert(bleSource.split('boolean captureFrame(int output) {')[1].split('frameCapture.request(output)')[0]
+  .includes('pixelProbeRequests.blocksBackgroundTransfer(pixelProbeWritePending,panelSaveBusy)'),
+  'display cadence cannot steal ATT from a queued/in-flight Pixel Probe or Save');
+assert(bleSource.includes('else watchInfoRead(gatt);') &&
+  bleSource.includes('if(infoStarted)watchInfoRead(connection);') &&
+  bleSource.includes('owner==gatt && infoReadPending && lease==infoReadWatchLease') &&
+  bleSource.includes('recoverStalledGatt(owner,"CORE information ATT read timed out")'),
+  'each INFO read must retire a stalled session without overlapping ATT or replaying probes');

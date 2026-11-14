@@ -35,4 +35,18 @@ public class PixelProbeRequestQueueTest {
         queue.clear();               // GATT disconnect never replays the old probe
         assertEquals(-1,queue.take());
     }
+    @Test public void reconnectIdleProbeOwnsGattUntilCallbackAndSaveAlsoBlocksPolling() {
+        PixelProbeRequestQueue queue=new PixelProbeRequestQueue();
+        assertFalse(queue.blocksBackgroundTransfer(false,false));
+        assertTrue(queue.offer(0));
+        assertTrue(queue.blocksBackgroundTransfer(false,false));
+        assertEquals(0,queue.take());
+        // Dispatch consumes the queue, but ATT remains owned until the callback.
+        assertTrue(queue.blocksBackgroundTransfer(true,false));
+        assertFalse(queue.blocksBackgroundTransfer(false,false));
+        assertTrue(queue.blocksBackgroundTransfer(false,true));
+        assertTrue(queue.blocksBackgroundTransfer(true,true));
+        queue.clear(); // reconnect creates no synthetic diagnostic
+        assertFalse(queue.blocksBackgroundTransfer(false,false));
+    }
 }
