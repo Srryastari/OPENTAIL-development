@@ -1592,6 +1592,6 @@ assert(compose.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
   compose.includes('val storedRanges=zone.optJSONArray("ranges")') &&
   compose.includes('item.put("start",nextStart)') &&
   compose.includes('next.put("v4_advanced",true)') &&
-  compose.includes('if(!it.optBoolean("v4_advanced",false))') &&
+  compose.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
   compose.includes('fun adjustZone(zoneIndex: Int, newLength: Int)'),
   'Manual zero-based physical offsets must retain explicit v4 range slots and active capacity');
