@@ -1,0 +1,88 @@
+All 25 CORE host assertions passed.
+PASS Issue121 SignalDebouncer: ISR transition history, multiple inter-sample pulses, absolute 400ms deadline, strict equality expiry, four-sample requalification, independent Left/Right, hazards, 256 boot masks, unchanged non-turn inputs, overflow resync, Brake-priority history isolation and arbitration; HOST_SIMULATED
+Passed 33 status LED pattern assertions.
+PASS: cleared status LED sends the initial white startup frame
+PASS: ESP32-S3 main task startup stack explicit, guarded, and observable
+PASS P0 N16R8 boot: octal 8MB PSRAM malloc + internal-only stacks, exact heap telemetry, renderer-before-BLE-before-Wi-Fi allocation order, fail-closed PSRAM guard, watchdog and stack sizes retained; HOST SOURCE CONTRACT (physical log required)
+PASS P0 BLE startup: renderer→HCI→config→Wi-Fi→HTTP, allocation failure/DMA diagnostics, BLE advertising, bounded secondary SoftAP with protected internal stacks; HOST SOURCE CONTRACT ONLY
+PASS #113 RTC crash streak, panic/brownout/OTA reset classification, 3-crash bootloop, real sampled-input + completed-RMT progress, partial O1/O2 fault handling, fail-closed NVS and stable boot; host only
+PASS issue113: one ESP, config guards, RTC-only resets, TRUE sampled GPIO/RMT progress, bootloop mode, no NVS/UI change, OTA stability gate; PHYSICAL NOT TESTED
+PASS #113 256 boot-held GPIO masks: no first-frame false release, four-sample release still correct (HOST ONLY)
+failover software policy: PASS (256 masks x 2 channels, integrity, revisions, interlock and no-contention policy; NO hardware takeover)
+PASS: failover software is inert by default; no unauthorized GPIO/output, NVS, BLE or UI takeover
+PASS: exactly 22 mandatory hardware acceptance cases, all NOT_RUN; no fabricated evidence
+PASS: GAP reset/reconnect policy, bounded low-latency negotiation, preserved BLE ABI/auth guards (source contract)
+PASS Issue126 Panel/Zone model: migration, ranges, fallback, 256 masks, 1,246 pixels, 2,048/lane and v3 codec
+PASS Issue126 v3 NVS journal: CRC, monotonic revisions, stage-first recovery, rollback image and 256 input-mask power-cut model
+PASS Issue126 v4 pair journal: split lane/map ownership, intent-gated recovery, every cross-namespace crash boundary and fail-closed mismatch checks
+PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption
+PASS Issue126 Pixel Probe: auth/capability, exact five bytes, 256-bit index, WWR burst renewal, disconnect clear primitive, 2s lease and inclusive fill
+Issue126 static object sizes: controller=1340 preview=1352 max_pixels_per_lane=2048 wire_bytes=667\nPASS Issue126 preview lifecycle, revision checks, coalescing, 5s heartbeat-owned lease, independent O1/O2 metadata-compatible live/save/reconnect/rollback, and 256-mask quiet gate
+PASS Issue126 static runtime, namespace, ISR telemetry, brightness and reset contracts
+PASS Owner P0 protected-COMMITTING and sequence-watchdog source contracts
+PASS owner addendum commit race, delayed sequence telemetry and boot identity contracts
+PASS brightness contract: ceiling=32; request 0..255; trigger/fallback/gamma 8-bit; final ratio-preserving cap
+PASS brightness contract: ceiling=255; request 0..255; trigger/fallback/gamma 8-bit; final ratio-preserving cap
+PASS: durable journal CRC, monotonic revisions, crash boundaries and 256 input masks
+Native show logic host assertions passed.
+CORE source-derived effects: 120 modes, timing, zone limits and validation passed.
+PASS Issue93 shared color roles + source rendering: 4 named effects, 140 IDs, 2100 speed/intensity profiles; no unconfigured slot 3/true-black lifting (host only)
+PASS Issue99: 30/60/120fps speed255 toggles, black Chase gaps, triangular RGB, TV state & proprietary motion (host)
+PASS Issue102: 2 real third-color consumers, 6 metadata-only/unimplemented source roles, legacy RGB and all 140 IDs (host)
+Pinned harmonic random palette source: 240 seeded traces, all 5 harmony families, shared byte draw order and 3840 exact RGB samples PASS.
+Pinned source RGB gamma: 5 exponents x 512 LUT values + 15,360 gradient samples x 2 directions, invalid-gamma atomicity PASS (host output stage only).
+Source non-harmonic global palette: raw hardware-byte draw order, independent CHSV RGB, one generator per global frame, 16-bit source lifecycle PASS.
+Transient random/custom palette render injection passed: five IDs, two independent RGB scenes, unsupported-mode and missing-data guards.
+WLED palette-1 source blend and shared lifecycle parity passed: 268800 RGB bytes + 864000 schedule/state bytes checked.\nWLED custom palette 2-18 stop interpolation reference passed: 39168 RGB channel comparisons and invalid-input fail-closed checks.\nWLED palette ID mapping 0-255 verified: 12288 RGB bytes and missing-ID checks.\nWLED fixed palette reference comparison passed: 2359296 RGB samples across 12 built-in/default palette IDs.
+WLED random HSV construction parity passed: 6291456 RGB samples across 32 source-derived four-color palettes.
+WLED gradient catalog reference comparison passed: 11796480 RGB samples across 60 palettes (13-72).
+FX engine-wide fail-closed and absolute-off contract passed: 240 cases across 120 IDs.
+WLED source parity unchanged except Issue99 documented speed255 blink/strobe, black chase and TV scene policy cases; those RGB vectors have separate deterministic tests.
+WLED source-golden gate passed: 391750848 compared RGB samples across 120 catalog modes, excluding only explicitly listed Issue99 visual-policy deviations; see Issue99 frame goldens
+120 WLED 1D catalog entries: metadata and deterministic pixel rendering passed
+CORE startup/shutdown effects: five native one-shot frames, all limits, endpoints, BLE capability IDs passed.
+CORE original effects: 19 names/IDs unique, frame bounds, Event Horizon completion and Singularity true-off passed (host only).\ngolden continuous original 32774: 0xeab38306
+golden continuous original 32775: 0x602d0c51
+golden continuous original 32776: 0xc274a35e
+golden continuous original 32777: 0x0b2af920
+golden continuous original 32778: 0x9a8dbbeb
+golden continuous original 32779: 0x7b6782a5
+golden continuous original 32780: 0x2fedb1c7
+golden continuous original 32781: 0x829b4755
+golden continuous original 32782: 0xb8d9c6c8
+golden continuous original 32783: 0x7ec54024
+golden continuous original 32784: 0xd32803f9
+golden continuous original 32785: 0xdc9fee09
+PASS: proprietary loop continuity, smooth speed edits, 7 one-shot endpoints and pinned RGB goldens
+CORE quality: monotonic fades, untouched guards, crisp strobe edges, and source effect 90 registered (host only)
+CORE unified dispatch: 120 source-derived effects match direct renderer.\nCORE unified resolved palette dispatch: 4 source modes, 5 external IDs, 2 independent zones, global frame-snapshot invariants PASS.\nEffects/OEM compositing matrix: 193536 physical trigger overrides, 165888 decorative frames, 256 input masks, six wire orders, 2 gamma states, 3 gain profiles, 4 overlays PASS (host only)
+PASS: corrected #49 Effects frame ownership, palette -> FX -> overlays -> OEM override -> logical RGB -> wire; physical colors bypass gamma, show/STOP and zone guards (source contract)
+Effects/NVS cross-contract: 768 journal phases/input masks, 768 physical Brake/Reverse safety overrides; independent zones, pending geometry, STOP and no boot FX auto-start PASS (host only)
+Effects manifest: 120 source ports, 16 frame-owned palette modes with runtime-checked custom IDs PASS
+PASS: FX 140-ID NimBLE Read Blob offsets across MTUs, no double-slicing in 4 callbacks
+PASS: CORE palette v3 transport/persistence/frame integration contracts
+Pinned WLED catalog metadata ID uniqueness, provenance and unsupported labels passed.
+Effects parity AUDIT: 120 borrowed IDs; 120 source-derived; 0 still approximated; 19 registered original one-shot/concept IDs, plus Embers.
+Audit only: passing CI is not a full-effects release certificate.
+CORE REST/BLE firmware version identity regression passed
+PASS P0 Wi-Fi heap preflight source guard; hardware retest pending
+PASS: save uses mutex-protected static controller, bounded v1/v4 BLE stack and durable-phase logs, zero-LED inert, RMT+probe unchanged (SOURCE ONLY)
+CORE Stop, bench console routing, capabilities and independent Studio contract passed
+CORE /dev dashboard, all bench API routes, source isolation, JS syntax, and separate Studio release gates passed.
+PASS: trigger, legacy migration, authoritative v4 lane/map pair finalization, recovery, revision and readback contracts
+Zone-local arbitration host tests passed.
+output manager: inert universal defaults, user-configurable zones, validation, trigger priority and six color permutations passed
+output manager: inert universal defaults, user-configurable zones, validation, trigger priority and six color permutations passed
+output manager: inert universal defaults, user-configurable zones, validation, trigger priority and six color permutations passed
+PASS: universal user-configured pixel counts; board budget only; dynamic per-output RMT lengths
+PASS: CORE OTA image confirmation requires first completed multi-output frame
+PASS actual CORE OTA boot guard: 120s deadline, pending confirm, retry failure, timer/flash race, expiry rollback, non-OTA/valid/not-found states (fake IDF; physical rollback NOT_RUN)
+CORE frame completion: no partial success and no fixed vehicle output count
+PASS: authenticated-session snapshot state, immutable RGB888/sequence, stale rejection
+PASS: CORE snapshot owner auth, pixel provenance, immutable CRC and RMT completion gate
+Adaptive FPS pacer tests passed: preferred 53..120, truthful overload fallback, no bench defaults
+BLE config codec validation passed (261-byte payload, CRC, invalid fields, generic 417-pixel profile).\nTrigger Manager: default mapping, 8 inputs, remap, shared, disabled, hazard/brake priority and AUX zone roles passed
+Trigger historical profiles: independent outputs, selected-zone priority, 8x9 remaps, duplicate/disabled inputs and simulated coexistence passed
+PASS: neutral factory zones + saved 522/30 bench profiles + board-derived memory budget + GRB + masks + brake/hazards/reverse + BLE roundtrip
+BLE config codec validation passed (261-byte payload, CRC, invalid fields, generic 417-pixel profile).\nPASS continuous lifetime/disconnect/edits/target replacement/STOP/fault/reboot; legacy TTL bounded
+PASS FX-PZ: independent zone/output state, discontiguous ranges, live preview, stable identity bank/state migration through reorder/delete/cancel, COMMITTING/sync-fault rejection, STOP and physical priority (host simulated; no NVS/RMT/optics)

@@ -1,0 +1,35 @@
+{
+  "scope": "host software only; no BLE radio, RTOS, NVS hardware, RMT or optical certification",
+  "checks": [
+    {
+      "name": "compile-integration",
+      "result": "PASS",
+      "exit_code": 0
+    },
+    {
+      "name": "integration",
+      "result": "PASS",
+      "exit_code": 0
+    },
+    {
+      "name": "firmware-host",
+      "result": "PASS",
+      "exit_code": 0
+    },
+    {
+      "name": "android-wire",
+      "result": "PASS",
+      "exit_code": 0
+    }
+  ],
+  "firmware": {
+    "sha": "e19b81f60d99c3b43ff93bf6295f8becb14aebe9",
+    "status": "?? tests/\n"
+  },
+  "android": {
+    "sha": "29fcb1288677ab28bf7081edc0bf0991d8734cc0",
+    "status": ""
+  },
+  "certified": false,
+  "latest_observed_firmware_sha": "1dfe28ca50ad54fd92c6a0b5fb1c919cd7687d08"
+}

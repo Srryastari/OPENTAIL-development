@@ -1,0 +1,2 @@
+PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption
+PASS independent composition: zero -> 37/144, metadata, isolated Save, 18 crash boundaries, wire readback
