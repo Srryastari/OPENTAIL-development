@@ -73,8 +73,17 @@ assert "pz_preview[lane].active" in panel_save
 assert "is_show_mode_active" not in panel_save
 # A simple Save persists the exact accepted live candidate, no exposed Commit
 # required; keep the current effect/geometry rendered until journal promotion.
-assert "live_match=pz_preview[lane].active&&!pz_preview[lane].committing" in panel_save
-assert "memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))==0" in panel_save
+# Live UPDATE cannot carry names, RGB gains, white gain, gamma or strip
+# order: the one durable v4 Save must permit those, but never changed geometry.
+assert "live_match=live_active&&!pz_preview[lane].committing" in panel_save
+assert "ot_pz_live_geometry_matches(&pz_preview[lane].candidate.outputs[lane]," in panel_save
+assert "memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))" not in panel_save
+assert "(live_active&&!live_match)" in panel_save
+assert "stale=pz_revision[lane]!=base_revision" in panel_save
+assert "candidate->outputs[lane]=*next;" in panel_save
+assert "pz_save_controller_locked(candidate)" in panel_save
+assert "pz_preview[lane].committing=true" in panel_save
+assert "ot_pz_live_geometry_matches(" in (ROOT / "main/panel_zone.c").read_text()
 assert "pz_preview[lane].committing=true" in panel_save
 assert "if(live_match)" in panel_save and "if(!saved)" in panel_save
 assert "pz_preview[lane].expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS" in panel_save
