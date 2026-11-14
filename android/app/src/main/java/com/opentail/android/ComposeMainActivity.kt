@@ -3262,7 +3262,18 @@ class ComposeMainActivity : ComponentActivity() {
                 outputMessage.value="Read this output's Panel v4 configuration before changing physical ranges"
                 return false
             }
-            val error=runCatching { PanelV4DraftCodec.encode(index,next,confirmed) }.exceptionOrNull()
+            val error=runCatching {
+                val wire=PanelV4DraftCodec.encode(index,next,confirmed)
+                val desired=GeometryTransactionManager.fromV4SaveCandidate(index,wire)
+                val accepted=if(panelGeometryActiveLane==index)
+                    panelGeometryAppliedMapping?.lane(index) else null
+                val base=accepted ?: GeometryTransactionManager.fromV4SaveCandidate(
+                    index,confirmed.wire)
+                // Validate the actual firmware v2 transition, not just the
+                // durable map. Invalid reorder/alias moves stay out of RAM
+                // and never partially change a controller.
+                desired.descriptorBatches(base,ble.panelUpdateMtu())
+            }.exceptionOrNull()
             if(error!=null) {
                 outputMessage.value="Physical range unchanged: "+(error.message ?: "invalid geometry")
                 return false
