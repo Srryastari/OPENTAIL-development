@@ -1533,20 +1533,24 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     bool busy,stale,exhausted,live_match=false;
     portENTER_CRITICAL(&state_lock);
     *candidate=pz_outputs;
-    /* A direct authoritative v4 Save may persist the exact current live
-     * preview, without a separate user-visible COMMIT. Never accept a stale
-     * or divergent upload: that could replace LEDs that are playing now.
-     * Nonmatching previews and other-lane sessions remain protected. */
-    live_match=pz_preview[lane].active&&!pz_preview[lane].committing&&
+    /* The eight-byte live UPDATE owns topology, roles and stable full IDs.
+     * The one authoritative v4 Save also carries user-edited names and
+     * output calibration/color order not expressible through UPDATE. Reject
+     * any different geometry, expired session or stale revision, but permit
+     * valid metadata to travel with the same durable lane/map pair. */
+    const bool live_active=pz_preview[lane].active;
+    live_match=live_active&&!pz_preview[lane].committing&&
         pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
         (int32_t)(now_ms-pz_preview[lane].expires_ms)<0&&
-        memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))==0;
+        ot_pz_live_geometry_matches(&pz_preview[lane].candidate.outputs[lane],
+                                    next,lane);
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
         __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
-        (pz_preview[lane].active&&!live_match)||
+        pz_preview[lane].committing||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
-    stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision;
+    stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision||
+        (live_active&&!live_match);
     exhausted=pz_revision[lane]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return 2;}
