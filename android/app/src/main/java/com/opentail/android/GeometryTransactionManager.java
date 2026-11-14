@@ -412,8 +412,15 @@ final class GeometryTransactionManager {
                 }
                 if(retained)eventualPanels.add(panel.id);
             }
-            for(MappedZone zone:zones)if(!eventualPanels.contains(zone.panelId))
+            for(MappedZone zone:zones)if(!eventualPanels.contains(zone.panelId)) {
+                // A fully emptied migrated Panel would be re-created by
+                // Firmware using only its low-byte prefix, changing its
+                // authoritative 16-bit identity. Reject before any delete.
+                if(oldPanels.containsKey(zone.panelId)&&
+                   zone.panelId!=(0x8000|(zone.panelId&0xff)))
+                    throw new IllegalArgumentException("Cannot rebuild a migrated full Panel ID over v2 aliases");
                 eventualPanels.add(zone.panelId);
+            }
             List<Integer> wantedPanels=new ArrayList<>();
             for(MappedPanel panel:panels)wantedPanels.add(panel.id);
             if(!eventualPanels.equals(wantedPanels))
