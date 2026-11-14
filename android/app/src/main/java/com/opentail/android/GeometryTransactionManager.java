@@ -318,7 +318,9 @@ final class GeometryTransactionManager {
             List<MappedZone> pending=new ArrayList<>();
             for(MappedZone zone:zones) {
                 ExistingZone prior=old.get(zone.id);
-                int role=prior==null?zone.roleFlags:prior.roleFlags;
+                // Caller resolved inherited roles before planning; the intended
+                // candidate role is authoritative, not the prior live role.
+                int role=zone.roleFlags;
                 if(prior==null||prior.start!=zone.start||prior.count!=zone.count||prior.roleFlags!=role)
                     pending.add(new MappedZone(zone.id,zone.panelId,zone.section,zone.start,zone.count,zone.name,role));
             }
