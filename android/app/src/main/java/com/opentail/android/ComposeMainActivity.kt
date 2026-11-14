@@ -2358,6 +2358,49 @@ class ComposeMainActivity : ComponentActivity() {
                 return
             }
         }
+        // Firmware rejection 10 means the Save's *physical* geometry was
+        // never accepted by live UPDATE (or the saved snapshot). Compare the
+        // exact full v4 candidate with the last acknowledged lane image BEFORE
+        // sending any durable write. Names, color order and calibration remain
+        // metadata-only changes and do not require a new UPDATE.
+        val verified=runCatching {
+            val snapshot=ble.lastConfirmedPanelSnapshot(lane)
+                ?: throw IllegalStateException("No verified Panel v4 lane snapshot")
+            val upload=GeometryTransactionManager.fromV4SaveCandidate(
+                lane,PanelV4DraftCodec.encode(lane,JSONObject(requested),snapshot))
+            val accepted=if(panelGeometryMapping!=null) {
+                if(ble.panelGeometryManager(lane)?.state()!=GeometryTransactionManager.State.ACTIVE)
+                    throw IllegalStateException("Awaiting live preview acknowledgement")
+                panelGeometryAppliedMapping?.lane(lane)
+                    ?: throw IllegalStateException("Awaiting first live geometry acknowledgement")
+            } else GeometryTransactionManager.fromV4SaveCandidate(lane,snapshot.wire)
+            GeometryTransactionManager.sameLiveGeometry(accepted,upload)
+        }.getOrElse {
+            outputMessage.value="Save waiting for verified live geometry: "+(it.message?:it.javaClass.simpleName)
+            false
+        }
+        if(!verified) {
+            // Only the selected output is eligible for a new UPDATE. The frozen
+            // owner Save request is never uploaded until the exact mapping ACKs.
+            if(panelGeometryMapping!=null &&
+                panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
+                panelGeometryDraftValid &&
+                ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE &&
+                outputDrafts[lane]==requested) {
+                queuePanelGeometryDraftUpdate()
+            } else if(panelGeometryMapping==null && ble.panelGeometryReady(lane) &&
+                       outputDrafts[lane]==requested) {
+                layoutLiveEditPending.value=true
+                startPanelGeometryPreview()
+            }
+            if(++panelSaveQueuedChecks>100) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save not sent: controller has not accepted the requested live geometry"
+            }
+            return
+        }
         if(!ble.savePanelV4(lane,requested)) {
             // No command was accepted. Do not retry *after* a GATT write;
             // BleDiscovery owns all in-flight/uncertain outcome handling.
