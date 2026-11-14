@@ -49,4 +49,12 @@ public class PixelProbeRequestQueueTest {
         queue.clear(); // reconnect creates no synthetic diagnostic
         assertFalse(queue.blocksBackgroundTransfer(false,false));
     }
+    @Test public void safetyStopCancelsQueuedProbeInsteadOfReplayingAfterAck() {
+        PixelProbeRequestQueue queue=new PixelProbeRequestQueue();
+        assertTrue(queue.offer(0));
+        // BleDiscovery.enqueueWrite(STOP) clears this before any ATT START.
+        queue.clear();
+        assertEquals(-1,queue.take());
+        assertFalse(queue.pending());
+    }
 }
