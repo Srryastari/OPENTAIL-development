@@ -645,6 +645,46 @@ class ComposeMainActivity : ComponentActivity() {
         invalidateCoreFrame() // local design changes invalidate an older CORE snapshot
         revision.intValue++
     }
+    /**
+     * Vehicle-trigger ownership is edited only from Triggers, not Layout.
+     * The selected lane retains the same Panel v4 draft used by Live/Save.
+     * An edit never saves NVS or modifies the other lane's draft.
+     */
+    private fun assignPhysicalTriggerRole(lane:Int, zoneIndex:Int, role:String) {
+        if(lane !in 0..1 || role !in (listOf("unassigned")+BleConfigCodec.ROLES.toList()))return
+        val source=outputDrafts[lane] ?: outputs[lane]?.toString()
+        if(source==null) {
+            outputMessage.value="Read the selected output before assigning a trigger"
+            return
+        }
+        val next=runCatching {
+            JSONObject(source).also { draft ->
+                val zones=draft.getJSONArray("zones")
+                require(zoneIndex in 0 until zones.length()) { "Unknown physical zone" }
+                zones.getJSONObject(zoneIndex).put("role",role)
+            }
+        }.getOrElse {
+            outputMessage.value="Invalid physical trigger assignment: "+it.message
+            return
+        }
+        outputDrafts[lane]=next.toString()
+        outputDirty[lane]=true
+        outputReadbackEpoch[lane]=(outputReadbackEpoch[lane]?:0)+1
+        layoutLiveEditPending.value=true
+        refresh()
+        if(ble.canReadPanelPreview()) {
+            activateLaneState(lane)
+            if(panelGeometryMapping!=null) {
+                queuePanelGeometryDraftUpdate()
+                layoutLiveEditPending.value=false
+            } else if(ble.panelGeometryReady(lane)) {
+                startPanelGeometryPreview(lane)
+                layoutLiveEditPending.value=false
+            }
+        }
+        outputMessage.value="O"+(lane+1)+" trigger role updated locally; live preview requested when available"
+    }
+
     private fun refreshLoadedProject() {
         projectLoadRevision.intValue++
         refresh()
@@ -2203,8 +2243,8 @@ class ComposeMainActivity : ComponentActivity() {
         return base.withLane(lane,GeometryTransactionManager.fromV4SaveCandidate(lane,bytes))
     }
 
-    private fun startPanelGeometryPreview() {
-        activateLaneState(captureOutput.intValue)
+    private fun startPanelGeometryPreview(lane:Int = captureOutput.intValue) {
+        activateLaneState(lane)
         if(panelGeometryMapping!=null) {
             panelGeometryMessage.value="A CORE shadow preview is already active; continue editing or Commit/Cancel it"
             panelGeometryRevision.intValue++
@@ -2215,7 +2255,7 @@ class ComposeMainActivity : ComponentActivity() {
             panelGeometryRevision.intValue++
             return
         }
-        if(!ble.panelGeometryReady(captureOutput.intValue)) {
+        if(!ble.panelGeometryReady(lane)) {
             panelGeometryMessage.value="Selected output needs a fresh idle v4 status; other output playback remains active."
             refreshPanelGeometry()
             return
@@ -2227,14 +2267,14 @@ class ComposeMainActivity : ComponentActivity() {
             val snapshots=arrayOf(left,right)
             val mapping=withCurrentEditorDraft(
                 GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots),
-                captureOutput.intValue)
+                lane)
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
                 mapping.lane(0).descriptorBatches(left,mtu),
                 mapping.lane(1).descriptorBatches(right,mtu)
             )
             panelGeometryMapping=mapping
-            panelGeometryActiveLane=captureOutput.intValue
+            panelGeometryActiveLane=lane
             panelGeometryAppliedMapping=null
             panelGeometryPlanTarget=mapping
             panelGeometryQueuedTarget=null
@@ -2624,6 +2664,49 @@ class ComposeMainActivity : ComponentActivity() {
             }, { it }))
         Title("Triggers",t)
         EffectsPreview(t,selectedEffect.intValue)
+        // Firmware Panel/Zone ownership belongs in Triggers. Layout edits only
+        // physical dimensions and pixel ranges. Show Modes never require a role.
+        var physicalRolesOpen by remember { mutableStateOf(false) }
+        var physicalRolePicker by remember { mutableStateOf<Pair<Int,Int>?>(null) }
+        Panel(t) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Controller zone overrides",Modifier.weight(1f),
+                    color=t.fg,fontWeight=FontWeight.SemiBold)
+                Pill(if(physicalRolesOpen) "Close" else "Assign",t) {
+                    physicalRolesOpen=!physicalRolesOpen
+                    physicalRolePicker=null
+                }
+            }
+            if(physicalRolesOpen) {
+                Caption("Assign vehicle-trigger overrides here. Unassigned zones still play Show Modes.",t)
+                for(lane in 0..1) {
+                    val source=outputDrafts[lane] ?: outputs[lane]?.toString()
+                    val draft=runCatching { JSONObject(source ?: "{}") }.getOrNull()
+                    val zones=draft?.optJSONArray("zones") ?: JSONArray()
+                    Text("Output "+(lane+1),color=t.fg,fontWeight=FontWeight.SemiBold)
+                    if(zones.length()==0) Caption("No configured zones",t)
+                    for(i in 0 until zones.length()) {
+                        val zone=zones.optJSONObject(i) ?: continue
+                        val currentRole=zone.optString("role","unassigned")
+                        val isChoosing=physicalRolePicker==(lane to i)
+                        Pill(zone.optString("name","Zone "+(i+1))+" · "+
+                            currentRole.replace('_',' ')+"  ▼",t,isChoosing) {
+                            physicalRolePicker=if(isChoosing)null else lane to i
+                        }
+                        if(isChoosing) {
+                            (listOf("unassigned")+BleConfigCodec.ROLES.toList()).forEach { role ->
+                                Pill((if(role==currentRole) "✓ " else "")+
+                                    (if(role=="unassigned") "No vehicle trigger" else role.replace('_',' ')),
+                                    t,role==currentRole) {
+                                    assignPhysicalTriggerRole(lane,i,role)
+                                    physicalRolePicker=null
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if(triggerMessage.isNotEmpty()) Caption(triggerMessage,t)
         Panel(t) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
@@ -3795,35 +3878,6 @@ class ComposeMainActivity : ComponentActivity() {
                 }
                 Caption("Physical section link is local until controller Save/readback.",t)
                 }
-                val selectedRole=zone.optString("role","off")
-                var choosingRole by remember(index,i) { mutableStateOf(false) }
-                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
-                    horizontalArrangement=Arrangement.SpaceBetween) {
-                    Text("Lighting role",color=t.fg,fontSize=14.sp,fontWeight=FontWeight.SemiBold)
-                    Pill("✓ " + selectedRole.replace('_',' ') + "  ▼",t,true) {
-                        choosingRole=!choosingRole
-                    }
-                }
-                if(choosingRole) Column(Modifier.fillMaxWidth().heightIn(max=290.dp)
-                    .verticalScroll(rememberScrollState()),
-                    verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                    (listOf("unassigned")+BleConfigCodec.ROLES.toList()).forEach { role ->
-                        val roleLabel=if(role=="unassigned") "No vehicle trigger"
-                            else role.replace('_',' ')
-                        Pill((if(role==selectedRole) "✓  " else "") +
-                            roleLabel,t,role==selectedRole) {
-                            edit { it.getJSONArray("zones").getJSONObject(i).put("role",role) }
-                            choosingRole=false
-                            layoutLiveEditPending.value=true
-                            refresh()
-                            outputMessage.value="Role changed · sending live controller update; Save is optional"
-                        }
-                    }
-                }
-                Caption(if(selectedRole=="off"||selectedRole=="unassigned")
-                    "No vehicle-trigger override. Show Mode effects can play on this section without assigning a role or saving."
-                    else "Vehicle override: " + selectedRole.replace('_',' ') +
-                        " · Show Mode playback is independent of trigger roles.",t)
                 // Removal belongs beside Add Zone below, not in a hidden menu.
                 // Destructive action is confirmed once for the unified zone.
             }
