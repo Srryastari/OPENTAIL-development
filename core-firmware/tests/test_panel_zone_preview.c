@@ -91,6 +91,57 @@ static void range_transaction(void){
     assert(preview.candidate.outputs[0].zone_count==0u);
     assert(preview.candidate.outputs[0].panel_count==0u);
 }
+/* The eight-byte preview transaction carries topology, not owner labels or
+ * LED calibration. One Panel v4 durable Save accepts approved metadata but
+ * must reject mismatching pixel topology, roles, and FULL 16-bit identities. */
+static void metadata_compatible_save_contract(void){
+    ot_pz_controller_t cfg;make_config(&cfg);
+    const ot_pz_output_t *live=&cfg.outputs[0];
+    ot_pz_output_t draft=*live;
+    (void)snprintf(draft.name,sizeof(draft.name),"Driver output");
+    (void)snprintf(draft.panels[0].name,sizeof(draft.panels[0].name),"Outer housing");
+    (void)snprintf(draft.zones[0].name,sizeof(draft.zones[0].name),"Parking accent");
+    draft.color_order=OT_OM_RGB;
+    draft.rgb_gain[0]=123u;
+    draft.white_gain[1]=201u;
+    draft.gamma_enabled=true;
+    assert(ot_pz_output_valid(&draft,0u));
+    assert(memcmp(live,&draft,sizeof(draft))!=0);
+    assert(ot_pz_live_geometry_matches(live,&draft,0u));
+    assert(ot_pz_live_geometry_matches(live,live,0u));
+    assert(!ot_pz_live_geometry_matches(NULL,&draft,0u));
+    assert(!ot_pz_live_geometry_matches(live,&draft,OT_PZ_OUTPUTS));
+
+    ot_pz_output_t changed=draft;
+    changed.active_pixels++;
+    assert(ot_pz_output_valid(&changed,0u));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+    changed=draft;changed.zones[0].role=OT_OM_OFF;
+    assert(ot_pz_output_valid(&changed,0u));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+    changed=draft;changed.zones[0].ranges[0].count--;
+    assert(ot_pz_output_valid(&changed,0u));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+    /* Same BLE low-byte aliases are NOT equal full stable identities. */
+    changed=draft;changed.panels[0].id+=256u;
+    changed.zones[0].panel_id=changed.panels[0].id;
+    assert(ot_pz_output_valid(&changed,0u));
+    assert((changed.panels[0].id&0xffu)==(live->panels[0].id&0xffu));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+    changed=draft;changed.zones[0].id+=256u;
+    assert(ot_pz_output_valid(&changed,0u));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+    changed=draft;changed.zones[0].range_count=0u;
+    assert(!ot_pz_output_valid(&changed,0u));
+    assert(!ot_pz_live_geometry_matches(live,&changed,0u));
+
+    ot_pz_controller_t empty;ot_pz_defaults(&empty);
+    ot_pz_output_t renamed_empty=empty.outputs[0];
+    (void)snprintf(renamed_empty.name,sizeof(renamed_empty.name),"Empty lane");
+    renamed_empty.gamma_enabled=true;
+    assert(ot_pz_live_geometry_matches(&empty.outputs[0],&renamed_empty,0u));
+    assert(empty.outputs[0].active_pixels==0u);
+}
 /* Fresh zero-LED lane can stage a real 100-LED physical layout in RAM
  * without mutating committed configuration or requiring a trigger role. */
 static void fresh_zero_to_100_unsaved_preview(void){
@@ -151,9 +202,20 @@ static void two_unsaved_lanes_save_and_reconnect(void){
      * only. It must NOT copy the unsaved O1 from the other preview snapshot. */
     ot_pz_controller_t next=persisted;
     next.outputs[1]=live[1].candidate.outputs[1];
+    (void)snprintf(next.outputs[1].name,sizeof(next.outputs[1].name),"Passenger output");
+    (void)snprintf(next.outputs[1].panels[0].name,
+                   sizeof(next.outputs[1].panels[0].name),"Passenger panel");
+    (void)snprintf(next.outputs[1].zones[0].name,
+                   sizeof(next.outputs[1].zones[0].name),"Passenger accent");
+    next.outputs[1].color_order=OT_OM_RGB;
+    next.outputs[1].rgb_gain[0]=100u;
+    next.outputs[1].gamma_enabled=true;
+    assert(ot_pz_live_geometry_matches(&live[1].candidate.outputs[1],
+                                        &next.outputs[1],1u));
     assert(ot_pz_valid(&next));
     assert(next.outputs[0].active_pixels==0u);
     assert(next.outputs[1].active_pixels==37u);
+    assert(next.outputs[1].rgb_gain[0]==100u);
     persisted=next;
     ot_pz_preview_cancel(&live[1]);
     assert(live[0].active);
@@ -203,10 +265,10 @@ static void activation_quiet_window(void){
     assert(!ot_pz_activation_inputs_quiet(0u,0u,4u,4u,100u,99u));
 }
 int main(void){
-    preview_lifecycle();range_transaction();fresh_zero_to_100_unsaved_preview();two_unsaved_lanes_save_and_reconnect();activation_quiet_window();
+    preview_lifecycle();range_transaction();metadata_compatible_save_contract();fresh_zero_to_100_unsaved_preview();two_unsaved_lanes_save_and_reconnect();activation_quiet_window();
     printf("Issue126 static object sizes: controller=%zu preview=%zu max_pixels_per_lane=%u wire_bytes=%u\\n",
            sizeof(ot_pz_controller_t),sizeof(ot_pz_preview_t),
            (unsigned)OT_PZ_MAX_PIXELS,(unsigned)OT_PZ_MAX_WIRE_BYTES);
-    puts("PASS Issue126 preview lifecycle, revision checks, coalescing, 5s heartbeat-owned lease, independent O1/O2 live/save/reconnect/rollback, and 256-mask quiet gate");
+    puts("PASS Issue126 preview lifecycle, revision checks, coalescing, 5s heartbeat-owned lease, independent O1/O2 metadata-compatible live/save/reconnect/rollback, and 256-mask quiet gate");
     return 0;
 }
