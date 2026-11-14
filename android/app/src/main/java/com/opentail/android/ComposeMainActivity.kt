@@ -3885,14 +3885,32 @@ class ComposeMainActivity : ComponentActivity() {
                         if(panelId !in 1..127 || panelName.isBlank()) {
                             outputMessage.value="New section needs a stable Panel identity before live editing"
                         } else {
-                            // Same stable aliases as the project geometry
-                            // planner; a later resize must not create a
-                            // second, unrelated physical Zone ID.
-                            val zoneId=0x4000 or (128+index*8+newSection+1)
+                            // Reuse a free stable alias after deletes; the
+                            // array position is not an identity. On an imported
+                            // multi-Panel map, add to the selected existing
+                            // Panel instead of manufacturing a new owner.
+                            val used=(0 until zones.length()).mapNotNull { j ->
+                                zones.optJSONObject(j)?.optInt("id",0)?.and(255)
+                            }.toSet()
+                            val alias=(129+index*8 until 137+index*8)
+                                .firstOrNull { it !in used }
+                            if(alias==null) {
+                                outputMessage.value="No free physical Zone identity on this output"
+                                return@Pill
+                            }
+                            val zoneId=0x4000 or alias
+                            val advanced=draft.optBoolean("v4_advanced",false)
+                            val parent=if(advanced) {
+                                zones.optJSONObject(selectedZone.coerceIn(0,(zones.length()-1).coerceAtLeast(0)))
+                                    ?.optInt("panel_id",0)?.takeIf { it>0 }
+                                    ?: draft.optJSONArray("panels")?.optJSONObject(0)?.optInt("id",0)
+                                        ?.takeIf { it>0 }
+                            } else null
+                            val panelFull=parent ?: (draft.optInt("panel_id",0)
+                                .takeIf { it>0 } ?: (0x8000 or panelId))
                             edit {
-                                val panelFull=it.optInt("panel_id",0)
-                                    .takeIf { p -> p>0 } ?: (0x8000 or panelId)
-                                it.put("panel_id",panelFull).put("panel_name",panelName)
+                                if(!advanced)
+                                    it.put("panel_id",panelFull).put("panel_name",panelName)
                                 it.getJSONArray("zones").put(JSONObject()
                                     .put("id",zoneId).put("panel_id",panelFull)
                                     .put("name",label).put("pixels",0).put("role","unassigned"))
