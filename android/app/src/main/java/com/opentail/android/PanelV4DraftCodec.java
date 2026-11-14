@@ -19,6 +19,13 @@ final class PanelV4DraftCodec {
         "right_turn","reverse","aux1","aux2","aux3","decorative"};
 
     private PanelV4DraftCodec() {}
+
+    /* Output picker indicates SAVED Panel v4 state, not the independently
+     * editable, potentially stale/unsaved local output draft. Until an
+     * authoritative lane snapshot arrives, the universal count is 0. */
+    static int savedSelectorPixels(JSONObject confirmedOutput) {
+        return confirmedOutput==null?0:Math.max(0,confirmedOutput.optInt("pixels",0));
+    }
     private static int u8(byte b){ return b&255; }
     private static int u16(byte[] b,int offset){ return u8(b[offset])|(u8(b[offset+1])<<8); }
     private static void put16(byte[] b,int offset,int number) {
