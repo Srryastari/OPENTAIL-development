@@ -2214,7 +2214,9 @@ class ComposeMainActivity : ComponentActivity() {
             val savedMapping=GeometryTransactionManager.LayoutMapping(arrayOf(
                 GeometryTransactionManager.fromV4SaveCandidate(0,left.wire),
                 GeometryTransactionManager.fromV4SaveCandidate(1,right.wire)))
-            val projected=if(outputDirty[lane]==true) savedMapping
+            val advancedSaved=PanelV4DraftCodec.fromSnapshot(snapshots[lane])
+                .optBoolean("v4_advanced",false)
+            val projected=if(outputDirty[lane]==true||advancedSaved) savedMapping
                 else GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
             val mapping=withCurrentEditorDraft(projected,lane)
             val mtu=ble.panelUpdateMtu()
@@ -2255,7 +2257,11 @@ class ComposeMainActivity : ComponentActivity() {
         try {
             val roleBase=panelGeometryQueuedTarget?:panelGeometryPlanTarget?:
                 panelGeometryAppliedMapping?:panelGeometryMapping!!
-            val projected=if(outputDirty[panelGeometryActiveLane]==true) roleBase
+            val confirmed=ble.lastConfirmedPanelSnapshot(panelGeometryActiveLane)
+            val advancedSaved=confirmed?.let {
+                PanelV4DraftCodec.fromSnapshot(it).optBoolean("v4_advanced",false)
+            } ?: false
+            val projected=if(outputDirty[panelGeometryActiveLane]==true||advancedSaved) roleBase
                 else GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
             val target=withCurrentEditorDraft(projected,panelGeometryActiveLane)
             panelGeometryDraftValid=true
