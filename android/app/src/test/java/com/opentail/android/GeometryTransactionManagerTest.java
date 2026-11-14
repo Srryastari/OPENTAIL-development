@@ -61,6 +61,109 @@ public class GeometryTransactionManagerTest {
         assertEquals(0,project.pixelCount());
     }
 
+    private static PanelPreviewProtocol.LaneSnapshot fullSnapshot(byte[] wire,int revision) {
+        byte[] header=new byte[14];
+        header[0]=3;header[1]=(byte)0x81;header[2]=wire[1];
+        put16(header,4,wire.length);put16(header,6,PanelPreviewProtocol.crc16(wire));
+        put16(header,8,revision);put16(header,10,revision);header[13]=1;
+        PanelPreviewProtocol.SnapshotHeader parsed=
+            PanelPreviewProtocol.SnapshotHeader.parse(header,wire[1]&255);
+        parsed.verify(wire,wire[1]&255);
+        return new PanelPreviewProtocol.LaneSnapshot(parsed,wire);
+    }
+
+    @Test public void acknowledgedLiveAndAtomicSaveUseIdenticalFullPhysicalGeometry() throws Exception {
+        for(int lane=0;lane<2;lane++) {
+            byte[] factory=PanelV4LayoutProtocol.expectedFactoryMap(lane);
+            PanelPreviewProtocol.LaneSnapshot confirmed=fullSnapshot(factory,2);
+            JSONObject draft=PanelV4DraftCodec.fromSnapshot(confirmed);
+            GeometryTransactionManager.MappedLane zero=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,factory);
+            assertEquals(0,zero.activePixels);
+            assertTrue(zero.panels.isEmpty());assertTrue(zero.zones.isEmpty());
+
+            // First live BEGIN 0->100 + one nonempty accepted UPDATE.
+            draft.put("pixels",100);
+            draft.getJSONArray("zones").put(new JSONObject()
+                .put("name","Test").put("pixels",100).put("role","unassigned"));
+            byte[] save=PanelV4DraftCodec.encode(lane,draft,confirmed);
+            GeometryTransactionManager.MappedLane accepted=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,save);
+            assertEquals(100,accepted.activePixels);
+            assertEquals(0x8001+lane,accepted.panels.get(0).id);
+            assertEquals(0x4081+lane*8,accepted.zones.get(0).id);
+            assertEquals(PanelPreviewProtocol.ROLE_UNASSIGNED_WIRE,
+                accepted.zones.get(0).roleFlags);
+            assertFalse(GeometryTransactionManager.sameLiveGeometry(zero,accepted));
+            assertTrue(GeometryTransactionManager.sameLiveGeometry(accepted,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,save)));
+
+            // Names, strip order and calibration may change in one atomic
+            // metadata Save without altering already accepted live topology.
+            JSONObject metadata=new JSONObject(draft.toString());
+            metadata.put("name","New output").put("panel_name","New panel")
+                .put("color_order","RGB");
+            metadata.getJSONArray("zones").getJSONObject(0).put("name","New zone");
+            byte[] metadataWire=PanelV4DraftCodec.encode(lane,metadata,confirmed);
+            assertTrue(GeometryTransactionManager.sameLiveGeometry(accepted,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,metadataWire)));
+
+            // Previously the UPDATE planner ignored role-only edits, then
+            // Firmware correctly rejected uploaded Save geometry (code 10).
+            JSONObject changedRole=new JSONObject(draft.toString());
+            changedRole.getJSONArray("zones").getJSONObject(0).put("role","brake");
+            byte[] changedWire=PanelV4DraftCodec.encode(lane,changedRole,confirmed);
+            GeometryTransactionManager.MappedLane desired=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,changedWire);
+            assertFalse(GeometryTransactionManager.sameLiveGeometry(accepted,desired));
+            List<PanelPreviewProtocol.UpdateDescriptor[]> batches=
+                desired.descriptorBatches(accepted,247);
+            assertEquals(1,batches.size());assertEquals(1,batches.get(0).length);
+            assertEquals(3,batches.get(0)[0].roleFlags);
+            assertEquals(100,batches.get(0)[0].count);
+            assertTrue(GeometryTransactionManager.sameLiveGeometry(desired,desired));
+
+            // An unaccepted range or a different stable 16-bit ID may not Save.
+            JSONObject resized=new JSONObject(draft.toString()).put("pixels",80);
+            resized.getJSONArray("zones").getJSONObject(0).put("pixels",80);
+            assertFalse(GeometryTransactionManager.sameLiveGeometry(accepted,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,
+                    PanelV4DraftCodec.encode(lane,resized,confirmed))));
+            JSONObject shiftedId=new JSONObject(draft.toString());
+            shiftedId.getJSONArray("zones").getJSONObject(0)
+                .put("id",0x5000|(accepted.zones.get(0).id&0xff));
+            assertFalse(GeometryTransactionManager.sameLiveGeometry(accepted,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,
+                    PanelV4DraftCodec.encode(lane,shiftedId,confirmed))));
+        }
+    }
+
+    @Test public void savedO2RemainsIndependentFromUnsavedO1LiveCandidate() throws Exception {
+        PanelPreviewProtocol.LaneSnapshot o1=fullSnapshot(
+            PanelV4LayoutProtocol.expectedFactoryMap(0),5);
+        PanelPreviewProtocol.LaneSnapshot o2=fullSnapshot(
+            PanelV4LayoutProtocol.expectedFactoryMap(1),6);
+        JSONObject left=PanelV4DraftCodec.fromSnapshot(o1);
+        JSONObject right=PanelV4DraftCodec.fromSnapshot(o2);
+        left.put("pixels",100);
+        left.getJSONArray("zones").put(new JSONObject().put("name","Left")
+            .put("pixels",100).put("role","unassigned"));
+        right.put("pixels",80);
+        right.getJSONArray("zones").put(new JSONObject().put("name","Right")
+            .put("pixels",80).put("role","unassigned"));
+        GeometryTransactionManager.MappedLane liveLeft=
+            GeometryTransactionManager.fromV4SaveCandidate(0,PanelV4DraftCodec.encode(0,left,o1));
+        GeometryTransactionManager.MappedLane liveRight=
+            GeometryTransactionManager.fromV4SaveCandidate(1,PanelV4DraftCodec.encode(1,right,o2));
+        GeometryTransactionManager.LayoutMapping both=new GeometryTransactionManager.LayoutMapping(
+            new GeometryTransactionManager.MappedLane[]{liveLeft,liveRight});
+        GeometryTransactionManager.LayoutMapping one=both.withLane(0,
+            GeometryTransactionManager.fromV4SaveCandidate(0,o1.wire));
+        assertEquals(0,one.lane(0).activePixels);
+        assertEquals(80,one.lane(1).activePixels);
+        assertTrue(GeometryTransactionManager.sameLiveGeometry(both.lane(1),one.lane(1)));
+    }
+
     @Test public void lastConfirmedGeometryDoesNotChangeDuringPreviewOrCommit() {
         byte[] original={3,0,1,2};byte[] edited={3,0,1,9};
         GeometryTransactionManager manager=new GeometryTransactionManager(
