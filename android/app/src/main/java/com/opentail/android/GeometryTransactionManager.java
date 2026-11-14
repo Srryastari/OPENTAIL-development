@@ -788,35 +788,47 @@ final class GeometryTransactionManager {
                 if(prior!=null&&panelLanes.get(panel.id)!=lane)
                     throw new IllegalArgumentException("Proposed Panel ID conflicts with authoritative Panel identity");
             }
+            Set<Integer> proposedZoneIds=new HashSet<>();
+            for(MappedZone zone:proposed.zones)proposedZoneIds.add(zone.id);
             for(MappedZone zone:proposed.zones) {
                 if(currentPanels.containsKey(zone.id))
                     throw new IllegalArgumentException("Proposed Zone ID collides with an existing Panel ID");
                 PanelPreviewProtocol.MapZone prior=currentZones.get(zone.id);
-                if(prior!=null) {
-                    if(zoneLanes.get(zone.id)!=lane||prior.ranges.size()>1||
-                       (prior.ranges.isEmpty()&&prior.flags!=1))
-                        throw new IllegalArgumentException("Existing Zone ID has a different Panel or unsupported multi-range geometry");
+                if(prior!=null&&zoneLanes.get(zone.id)!=lane)
+                    throw new IllegalArgumentException("Existing Zone ID belongs to another output");
+                if(zone.ranges.isEmpty()) {
+                    if(prior==null||zone.flags!=1||!prior.ranges.isEmpty())
+                        throw new IllegalArgumentException("Cannot create a new empty physical Zone over UPDATE");
+                    continue; // preserved legacy placeholder, never fabricated
                 }
-                long end=(long)zone.start+zone.count;
-                if(zone.start<0||zone.count<1||end>proposed.activePixels)
-                    throw new IllegalArgumentException("Proposed Zone range is outside CORE active pixel capacity");
-                Set<Integer> proposedZoneIds=new HashSet<>();
-                for(MappedZone candidate:proposed.zones)proposedZoneIds.add(candidate.id);
-                for(PanelPreviewProtocol.MapZone existing:active.zones) {
-                    // Mapped stable IDs move together as one final geometry image.
-                    // Unmentioned CORE Zones remain authoritative obstacles.
-                    if(existing.id==zone.id||proposedZoneIds.contains(existing.id))continue;
-                    for(PanelPreviewProtocol.MapRange range:existing.ranges)
-                        if(zone.start<range.start+range.count&&range.start<end)
-                            throw new IllegalArgumentException("Proposed geometry overlaps an existing CORE Zone that is unrelated to the mapped identities");
-                }
-                for(MappedZone other:proposed.zones) {
-                    if(other.id==zone.id)continue;
-                    long otherEnd=(long)other.start+other.count;
-                    if(zone.start<otherEnd&&other.start<end)
-                        throw new IllegalArgumentException("Proposed geometry contains overlapping Zones");
+                if(zone.flags!=0)
+                    throw new IllegalArgumentException("Physical range flags are not supported by v2 UPDATE");
+                for(PanelPreviewProtocol.MapRange proposedRange:zone.ranges) {
+                    long end=(long)proposedRange.start+proposedRange.count;
+                    if(proposedRange.start<0||proposedRange.count<1||end>proposed.activePixels)
+                        throw new IllegalArgumentException("Proposed physical range is outside active pixel capacity");
+                    for(PanelPreviewProtocol.MapZone existing:active.zones) {
+                        // Unrepresented saved Zones are still physical obstacles;
+                        // metadata-only edits must not delete or move them.
+                        if(existing.id==zone.id||proposedZoneIds.contains(existing.id))continue;
+                        for(PanelPreviewProtocol.MapRange original:existing.ranges)
+                            if(proposedRange.start<original.start+original.count &&
+                               original.start<end)
+                                throw new IllegalArgumentException("Proposed range overlaps an unrelated saved Zone");
+                    }
                 }
             }
+            // Validate ALL physical slots, not a synthetic contiguous length.
+            // Gaps and ordered discontiguous ranges are legal; overlaps are not.
+            List<PanelPreviewProtocol.MapRange> occupied=new ArrayList<>();
+            for(MappedZone zone:proposed.zones)
+                for(PanelPreviewProtocol.MapRange range:zone.ranges) {
+                    for(PanelPreviewProtocol.MapRange prior:occupied)
+                        if(range.start<prior.start+prior.count &&
+                           prior.start<range.start+range.count)
+                            throw new IllegalArgumentException("Proposed physical pixel ranges overlap");
+                    occupied.add(range);
+                }
         }
     }
 
