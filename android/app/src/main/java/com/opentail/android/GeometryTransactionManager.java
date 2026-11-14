@@ -311,7 +311,8 @@ final class GeometryTransactionManager {
         List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(MappedLane previous,int mtu) {
             if(previous==null||previous.lane!=lane)
                 throw new IllegalArgumentException("Previous geometry lane mismatch");
-            if(requiresRangePlanner()||previous.requiresRangePlanner())
+            if(requiresRangePlanner()||previous.requiresRangePlanner()||
+               requiresReorderedSlots(previous))
                 return rangeAwareBatches(previous,mtu);
             Map<Integer,MappedZone> targetById=new HashMap<>();
             for(MappedZone zone:zones)targetById.put(zone.id,zone);
@@ -326,6 +327,22 @@ final class GeometryTransactionManager {
             return buildBatches(old,deletes,mtu);
         }
 
+        private boolean requiresReorderedSlots(MappedLane previous) {
+            Map<Integer,MappedZone> before=new HashMap<>(),after=new HashMap<>();
+            for(MappedZone zone:previous.zones)before.put(zone.id,zone);
+            for(MappedZone zone:zones)after.put(zone.id,zone);
+            List<Integer> appended=new ArrayList<>(),expected=new ArrayList<>();
+            for(MappedZone old:previous.zones) {
+                MappedZone target=after.get(old.id);
+                if(target!=null&&target.panelId==old.panelId)appended.add(old.id);
+            }
+            for(MappedZone zone:zones) {
+                MappedZone old=before.get(zone.id);
+                if(old==null||old.panelId!=zone.panelId)appended.add(zone.id);
+                expected.add(zone.id);
+            }
+            return !appended.equals(expected);
+        }
         private boolean requiresRangePlanner() {
             if(panels.size()>1)return true;
             int cursor=0;
@@ -358,21 +375,49 @@ final class GeometryTransactionManager {
             for(MappedZone zone:zones)newById.put(zone.id,zone);
             // UPDATE cannot reorder existing records. Reordering needs a
             // separate, identity-safe plan; do not silently Save a mismatch.
-            int priorPanel=-1,priorZone=-1;
+            int priorPanel=-1;
             for(MappedPanel panel:panels)if(oldPanels.containsKey(panel.id)) {
                 int pos=previous.panels.indexOf(oldPanels.get(panel.id));
                 if(pos<priorPanel)throw new IllegalArgumentException(
                     "Physical Panel reordering is not supported by this live UPDATE");
                 priorPanel=pos;
             }
-            for(MappedZone zone:zones) {
-                MappedZone old=oldById.get(zone.id);
-                if(old==null || old.panelId!=zone.panelId)continue;
-                int pos=previous.zones.indexOf(old);
-                if(pos<priorZone)throw new IllegalArgumentException(
-                    "Physical Zone reordering cannot preserve stable live ordering");
-                priorZone=pos;
+            Set<Integer> recreate=new HashSet<>();
+            if(requiresReorderedSlots(previous)) {
+                // Preview v2 has no reorder opcode. Delete only the affected
+                // suffix and append it in the intended order, keeping the
+                // untouched prefix's IDs and animation phases. Migrated IDs
+                // cannot be recreated from low-byte aliases, so fail closed.
+                int prefix=0;
+                while(prefix<previous.zones.size()&&prefix<zones.size()&&
+                    previous.zones.get(prefix).id==zones.get(prefix).id&&
+                    previous.zones.get(prefix).panelId==zones.get(prefix).panelId)prefix++;
+                for(int i=prefix;i<previous.zones.size();i++) {
+                    MappedZone item=previous.zones.get(i);
+                    MappedZone target=newById.get(item.id);
+                    if(target!=null&&item.id!=(0x4000|(item.id&0xff)))
+                        throw new IllegalArgumentException("Cannot reorder a migrated full Zone ID over v2 aliases");
+                    recreate.add(item.id);
+                }
             }
+            // A suffix rebuild can also remove empty Panels. Verify the
+            // resulting Panel ordering before issuing any destructive UPDATE.
+            List<Integer> eventualPanels=new ArrayList<>();
+            for(MappedPanel panel:previous.panels) {
+                boolean retained=false;
+                for(MappedZone old:previous.zones) {
+                    MappedZone target=newById.get(old.id);
+                    if(old.panelId==panel.id&&!recreate.contains(old.id)&&
+                       target!=null&&target.panelId==old.panelId){retained=true;break;}
+                }
+                if(retained)eventualPanels.add(panel.id);
+            }
+            for(MappedZone zone:zones)if(!eventualPanels.contains(zone.panelId))
+                eventualPanels.add(zone.panelId);
+            List<Integer> wantedPanels=new ArrayList<>();
+            for(MappedPanel panel:panels)wantedPanels.add(panel.id);
+            if(!eventualPanels.equals(wantedPanels))
+                throw new IllegalArgumentException("Physical panel order cannot be preserved by v2 UPDATE");
             List<PanelPreviewProtocol.UpdateDescriptor[]> batches=new ArrayList<>();
             Map<Integer,List<PanelPreviewProtocol.MapRange>> staged=new HashMap<>();
             for(MappedZone old:previous.zones)
@@ -381,7 +426,7 @@ final class GeometryTransactionManager {
             // emptied Panel itself. Never recreate a migrated full ID by guess.
             for(MappedZone old:previous.zones) {
                 MappedZone target=newById.get(old.id);
-                if(target==null||target.panelId!=old.panelId) {
+                if(target==null||target.panelId!=old.panelId||recreate.contains(old.id)) {
                     if(target!=null && target.id!=(0x4000|(target.id&0xff)))
                         throw new IllegalArgumentException("Moving a migrated full Zone ID requires an explicit firmware mapping");
                     batches.add(new PanelPreviewProtocol.UpdateDescriptor[]{
@@ -392,7 +437,8 @@ final class GeometryTransactionManager {
             List<PanelPreviewProtocol.UpdateDescriptor> upserts=new ArrayList<>();
             for(MappedZone zone:zones) {
                 MappedZone old=oldById.get(zone.id);
-                boolean retained=old!=null&&old.panelId==zone.panelId;
+                boolean retained=old!=null&&old.panelId==zone.panelId&&
+                    !recreate.contains(zone.id);
                 if(!retained&&zone.id!=(0x4000|(zone.id&0xff)))
                     throw new IllegalArgumentException("New Zone full ID cannot be recreated from an alias");
                 if(zone.ranges.isEmpty()) {
