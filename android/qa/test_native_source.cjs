@@ -1595,3 +1595,11 @@ assert(compose.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
   compose.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
   compose.includes('fun adjustZone(zoneIndex: Int, newLength: Int)'),
   'Manual zero-based physical offsets must retain explicit v4 range slots and active capacity');
+
+// Independent physical outputs: do not overlay local design-project geometry
+// onto the OTHER verified lane while current lane is being live-edited.
+assert(compose.includes('else savedMapping.withLane(lane,') &&
+  compose.includes('else roleBase.withLane(panelGeometryActiveLane,') &&
+  compose.includes('withCurrentEditorDraft(projected,lane)') &&
+  compose.includes('withCurrentEditorDraft(projected,panelGeometryActiveLane)'),
+  'Both outputs must preserve unedited authoritative Panel v4 geometry');
