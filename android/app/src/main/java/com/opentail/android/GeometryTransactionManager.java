@@ -280,6 +280,11 @@ final class GeometryTransactionManager {
             if(snapshot==null||snapshot.lane!=lane)
                 throw new IllegalArgumentException("Authoritative geometry lane mismatch");
             PanelPreviewProtocol.MapIdentity current=PanelPreviewProtocol.MapIdentity.parse(snapshot);
+            // An authoritative multi-panel or noncontiguous map is a full
+            // physical candidate, not a single-range project approximation.
+            if(requiresRangePlanner()||current.panels.size()>1||
+                current.zones.stream().anyMatch(z -> z.flags!=0||z.ranges.size()!=1))
+                return descriptorBatches(fromV4SaveCandidate(lane,snapshot.wire),mtu);
             Map<Integer,ExistingZone> old=new HashMap<>();
             Map<Integer,PanelPreviewProtocol.MapZone> currentById=new HashMap<>();
             List<PanelPreviewProtocol.UpdateDescriptor> deletes=new ArrayList<>();
@@ -306,6 +311,8 @@ final class GeometryTransactionManager {
         List<PanelPreviewProtocol.UpdateDescriptor[]> descriptorBatches(MappedLane previous,int mtu) {
             if(previous==null||previous.lane!=lane)
                 throw new IllegalArgumentException("Previous geometry lane mismatch");
+            if(requiresRangePlanner()||previous.requiresRangePlanner())
+                return rangeAwareBatches(previous,mtu);
             Map<Integer,MappedZone> targetById=new HashMap<>();
             for(MappedZone zone:zones)targetById.put(zone.id,zone);
             Map<Integer,ExistingZone> old=new HashMap<>();
@@ -318,6 +325,172 @@ final class GeometryTransactionManager {
             }
             return buildBatches(old,deletes,mtu);
         }
+
+        private boolean requiresRangePlanner() {
+            if(panels.size()>1)return true;
+            int cursor=0;
+            for(MappedZone zone:zones) {
+                if(zone.flags!=0||zone.ranges.size()!=1||zone.start!=cursor)return true;
+                cursor+=zone.count;
+            }
+            return cursor!=activePixels;
+        }
+        /**
+         * Firmware Panel Preview v2 is a range-slot protocol: preserve each
+         * physical range, its ordering and stable full identity. The old
+         * single-range planner must never flatten an imported map. A partial
+         * or unrepresentable transition fails before any descriptor is sent.
+         */
+        private List<PanelPreviewProtocol.UpdateDescriptor[]> rangeAwareBatches(
+                MappedLane previous,int mtu) {
+            if(mtu<PanelPreviewProtocol.TX_MIN_ATT_MTU)
+                throw new IllegalArgumentException("ATT MTU is below the BLE minimum");
+            final int perPacket=Math.min(4,(mtu-3-11)/8);
+            if(perPacket<1)throw new IllegalArgumentException("ATT MTU cannot carry an UPDATE");
+            Map<Integer,MappedZone> oldById=new HashMap<>(),newById=new HashMap<>();
+            Map<Integer,MappedPanel> oldPanels=new HashMap<>();
+            for(MappedPanel panel:previous.panels)oldPanels.put(panel.id,panel);
+            for(MappedPanel panel:panels)
+                if(!oldPanels.containsKey(panel.id) &&
+                   panel.id!=(0x8000|(panel.id&0xff)))
+                    throw new IllegalArgumentException("New Panel full ID cannot be created by v2 alias");
+            for(MappedZone old:previous.zones)oldById.put(old.id,old);
+            for(MappedZone zone:zones)newById.put(zone.id,zone);
+            // UPDATE cannot reorder existing records. Reordering needs a
+            // separate, identity-safe plan; do not silently Save a mismatch.
+            int priorPanel=-1,priorZone=-1;
+            for(MappedPanel panel:panels)if(oldPanels.containsKey(panel.id)) {
+                int pos=previous.panels.indexOf(oldPanels.get(panel.id));
+                if(pos<priorPanel)throw new IllegalArgumentException(
+                    "Physical Panel reordering is not supported by this live UPDATE");
+                priorPanel=pos;
+            }
+            for(MappedZone zone:zones) {
+                MappedZone old=oldById.get(zone.id);
+                if(old==null || old.panelId!=zone.panelId)continue;
+                int pos=previous.zones.indexOf(old);
+                if(pos<priorZone)throw new IllegalArgumentException(
+                    "Physical Zone reordering cannot preserve stable live ordering");
+                priorZone=pos;
+            }
+            List<PanelPreviewProtocol.UpdateDescriptor[]> batches=new ArrayList<>();
+            Map<Integer,List<PanelPreviewProtocol.MapRange>> staged=new HashMap<>();
+            for(MappedZone old:previous.zones)
+                staged.put(old.id,new ArrayList<>(old.ranges));
+            // Delete removed or moved Zones first; the firmware drops an
+            // emptied Panel itself. Never recreate a migrated full ID by guess.
+            for(MappedZone old:previous.zones) {
+                MappedZone target=newById.get(old.id);
+                if(target==null||target.panelId!=old.panelId) {
+                    if(target!=null && target.id!=(0x4000|(target.id&0xff)))
+                        throw new IllegalArgumentException("Moving a migrated full Zone ID requires an explicit firmware mapping");
+                    batches.add(new PanelPreviewProtocol.UpdateDescriptor[]{
+                        new PanelPreviewProtocol.UpdateDescriptor(old.panelId,old.id,0,0,0,0x20)});
+                    staged.remove(old.id);
+                }
+            }
+            List<PanelPreviewProtocol.UpdateDescriptor> upserts=new ArrayList<>();
+            for(MappedZone zone:zones) {
+                MappedZone old=oldById.get(zone.id);
+                boolean retained=old!=null&&old.panelId==zone.panelId;
+                if(!retained&&zone.id!=(0x4000|(zone.id&0xff)))
+                    throw new IllegalArgumentException("New Zone full ID cannot be recreated from an alias");
+                if(zone.ranges.isEmpty()) {
+                    if(!retained||!old.ranges.isEmpty()||old.flags!=zone.flags)
+                        throw new IllegalArgumentException("Legacy empty Zone cannot be created by live UPDATE");
+                    continue;
+                }
+                if(retained&&old.ranges.size()>zone.ranges.size()) {
+                    if(zone.ranges.isEmpty())throw new IllegalArgumentException("Cannot produce an empty live Zone");
+                    // Highest slot first: lower slots never shift identity.
+                    for(int slot=old.ranges.size()-1;slot>=zone.ranges.size();slot--) {
+                        batches.add(new PanelPreviewProtocol.UpdateDescriptor[]{
+                            new PanelPreviewProtocol.UpdateDescriptor(zone.panelId,zone.id,slot,0,0,0x10)});
+                        staged.get(zone.id).remove(slot);
+                    }
+                }
+                for(int slot=0;slot<zone.ranges.size();slot++) {
+                    PanelPreviewProtocol.MapRange wanted=zone.ranges.get(slot);
+                    boolean changed=!retained||slot>=old.ranges.size();
+                    if(!changed) {
+                        PanelPreviewProtocol.MapRange was=old.ranges.get(slot);
+                        changed=was.start!=wanted.start||was.count!=wanted.count||
+                            (slot==0&&old.roleFlags!=zone.roleFlags);
+                    }
+                    if(changed)upserts.add(zone.descriptorAt(slot));
+                }
+            }
+            // A candidate is sent only if every ACK-bound intermediate image
+            // is nonoverlapping. Atomic swaps fit one packet; larger unsafe
+            // cycles are rejected rather than corrupting a physical output.
+            while(!upserts.isEmpty()) {
+                int safe=-1;
+                for(int i=0;i<upserts.size();i++) {
+                    Map<Integer,List<PanelPreviewProtocol.MapRange>> trial=copyRanges(staged);
+                    if(stageRange(trial,upserts.get(i))&&validRanges(trial,activePixels)) {
+                        safe=i;break;
+                    }
+                }
+                if(safe>=0) {
+                    PanelPreviewProtocol.UpdateDescriptor one=upserts.remove(safe);
+                    if(!stageRange(staged,one))throw new IllegalStateException("Invalid range slot order");
+                    batches.add(new PanelPreviewProtocol.UpdateDescriptor[]{one});
+                    continue;
+                }
+                if(upserts.size()>perPacket)
+                    throw new IllegalArgumentException("Unsafe noncontiguous range transition exceeds atomic ATT batch");
+                Map<Integer,List<PanelPreviewProtocol.MapRange>> trial=copyRanges(staged);
+                for(PanelPreviewProtocol.UpdateDescriptor d:upserts)
+                    if(!stageRange(trial,d))
+                        throw new IllegalArgumentException("Range slot must be appended in order");
+                if(!validRanges(trial,activePixels))
+                    throw new IllegalArgumentException("Physical range transition overlaps another range");
+                batches.add(upserts.toArray(new PanelPreviewProtocol.UpdateDescriptor[0]));
+                staged=trial;
+                upserts.clear();
+            }
+            for(MappedZone target:zones) {
+                List<PanelPreviewProtocol.MapRange> applied=staged.get(target.id);
+                if(applied==null||applied.size()!=target.ranges.size())
+                    throw new IllegalArgumentException("Live range slot count differs from Save candidate");
+                for(int slot=0;slot<applied.size();slot++)
+                    if(applied.get(slot).start!=target.ranges.get(slot).start||
+                       applied.get(slot).count!=target.ranges.get(slot).count)
+                        throw new IllegalArgumentException("Live range order differs from Save candidate");
+            }
+            return Collections.unmodifiableList(batches);
+        }
+        private static Map<Integer,List<PanelPreviewProtocol.MapRange>> copyRanges(
+                Map<Integer,List<PanelPreviewProtocol.MapRange>> source) {
+            Map<Integer,List<PanelPreviewProtocol.MapRange>> result=new HashMap<>();
+            for(Map.Entry<Integer,List<PanelPreviewProtocol.MapRange>> e:source.entrySet())
+                result.put(e.getKey(),new ArrayList<>(e.getValue()));
+            return result;
+        }
+        private static boolean stageRange(
+                Map<Integer,List<PanelPreviewProtocol.MapRange>> state,
+                PanelPreviewProtocol.UpdateDescriptor d) {
+            List<PanelPreviewProtocol.MapRange> ranges=state.get(d.zoneId);
+            if(ranges==null){ranges=new ArrayList<>();state.put(d.zoneId,ranges);}
+            if(d.rangeSlot>ranges.size()||d.count==0)return false;
+            PanelPreviewProtocol.MapRange value=new PanelPreviewProtocol.MapRange(d.start,d.count);
+            if(d.rangeSlot==ranges.size())ranges.add(value);
+            else ranges.set(d.rangeSlot,value);
+            return true;
+        }
+        private static boolean validRanges(
+                Map<Integer,List<PanelPreviewProtocol.MapRange>> state,int capacity) {
+            List<PanelPreviewProtocol.MapRange> occupied=new ArrayList<>();
+            for(List<PanelPreviewProtocol.MapRange> zone:state.values())
+                for(PanelPreviewProtocol.MapRange range:zone) {
+                    if(range.count<=0||(long)range.start+range.count>capacity)return false;
+                    for(PanelPreviewProtocol.MapRange p:occupied)
+                        if(range.start<p.start+p.count&&p.start<range.start+range.count)return false;
+                    occupied.add(range);
+                }
+            return true;
+        }
+
         private static final class ExistingZone {
             final int panelId,roleFlags,start,count;
             ExistingZone(int panelId,int roleFlags,int start,int count) {
