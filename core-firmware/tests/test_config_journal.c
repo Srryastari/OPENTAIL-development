@@ -56,6 +56,7 @@ static void om_case(void){
     ot_om_output_t a[OT_OM_OUTPUTS]={0},b[OT_OM_OUTPUTS]={0},live[OT_OM_OUTPUTS];
     ot_om_defaults(a);memcpy(b,a,sizeof(b));
     for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        b[i].zone_count=1u;strcpy(b[i].zones[0].name,"User zone");
         b[i].active_pixels=17u;
         b[i].zones[0].pixels=17u;
         b[i].color_order=OT_OM_GRB;

@@ -3445,7 +3445,6 @@ static void led_task(void *p) {
        uint8_t physical=0;
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
        uint32_t local_stop_generation=0;
-       uint8_t fallback_mask=0u;
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
        ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_pz_output_t local_panel[OT_PZ_OUTPUTS];
        ot_pz_diag_state_t local_diag={0};ot_tm_profile_t local_tm;
@@ -3472,9 +3471,8 @@ static void led_task(void *p) {
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
        combined=ot_tm_resolve(&local_tm,physical);
-       fallback_mask=physical;
        if(before_deadline(now,sim_deadline)){
-           combined|=sim_mask;fallback_mask|=sim_mask;
+           combined|=sim_mask;
        }
        (void)ot_pz_diag_expire(&pz_diag,(uint32_t)(esp_timer_get_time()/1000LL));
        local_diag=pz_diag;
@@ -3683,8 +3681,8 @@ static void led_task(void *p) {
                    for(unsigned z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
                /* Physical trigger overlays outrank diagnostics, which outrank
-                * show/demo pixels. Gaps and UNASSIGNED zones use raw fixed-input
-                * commissioning fallback; explicit OFF zones remain dark. */
+                * show/demo pixels only in explicitly assigned zones. Gaps and
+                * UNASSIGNED zones have no implicit road-light function. */
                frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
                                         render_pixels[ch],frame_index+1u);
                bool pixel_write_failed=false;
@@ -3706,15 +3704,9 @@ static void led_task(void *p) {
                        !legacy_here&&local_demo.mode!=OT_DEMO_OFF;
                    const bool decorated=fx_here||legacy_here||demo_here;
                    bool trigger_here=false;
-                   if(zone<0||role==OT_PZ_ROLE_UNASSIGNED){
-                       /* An entirely unconfigured output has ZERO physical
-                        * pixels and must stay inert. Only an explicitly sized
-                        * output permits road-signal fallback in unassigned
-                        * ranges. Pixel Probe is evaluated independently below. */
-                       if(local_panel[ch].active_pixels!=0u)
-                           c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u);
-                       trigger_here=c.r!=0u||c.g!=0u||c.b!=0u;
-                   }else if(role!=OT_OM_OFF){
+                   /* Physical inputs own only explicitly assigned roles.
+                    * Gaps and unassigned zones never infer a vehicle function. */
+                   if(zone>=0&&role!=OT_PZ_ROLE_UNASSIGNED&&role!=OT_OM_OFF){
                        trigger_here=ot_om_trigger_overlay(role,combined,decorated,
                                              255u,&c);
                    }

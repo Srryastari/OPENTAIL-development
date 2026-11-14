@@ -52,8 +52,8 @@ assert "save_elapsed_ms" in v4save and "pz_pair_commit_phase" in v4save
 panel_cfg=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
 assert "ot_ble_panel_save(lane,&output,panel_upload_revision)" in panel_cfg
 render=core.split("static void led_task(void *p) {",1)[1]
-assert "if(local_panel[ch].active_pixels!=0u)" in render
-assert "c=ot_pz_fallback_color((unsigned)ch,fallback_mask,255u)" in render
+assert "if(zone>=0&&role!=OT_PZ_ROLE_UNASSIGNED&&role!=OT_OM_OFF)" in render
+assert "c=ot_pz_fallback_color" not in render
 assert "ot_pz_diag_render(&local_diag" in render
 assert "PIXEL_PROBE_ACCEPT" in core and "PIXEL_PROBE_REJECT" in core
 reset=core.split("int ot_ble_panel_reset_confirm(",1)[1].split("int ot_ble_panel_save(",1)[0]
@@ -93,7 +93,7 @@ assert "ot_pz_to_fx_view(&candidate->candidate.outputs[lane]" in live_update
 assert "probe_rmt_first_frame_generation" in core
 assert "probe_rmt_bright_frame_generation" in core
 assert "probe_nonblack[ch]=true" in render
-assert "if(local_panel[ch].active_pixels!=0u)" in render
+assert "if(zone>=0&&role!=OT_PZ_ROLE_UNASSIGNED&&role!=OT_OM_OFF)" in render
 assert "led_strip_refresh_async(strip[ch])" in render
 assert "led_strip_refresh_async_done(strip[ch])" in render
 assert "OT_OUT_LEFT_GPIO 16" in (root/"main/board_config.h").read_text()

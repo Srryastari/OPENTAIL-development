@@ -58,6 +58,27 @@ static void defaults_and_fallback(void){
     got=ot_pz_priority_color(false,false,black,true,cyan,red);
     assert(memcmp(&got,&cyan,3)==0);
 }
+static void empty_adapters_and_saved_one_pixel(void){
+    ot_pz_controller_t cfg;ot_pz_defaults(&cfg);
+    ot_om_output_t legacy[OT_OM_OUTPUTS];ot_om_defaults(legacy);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        ot_om_output_t view;
+        assert(ot_pz_to_legacy(&cfg.outputs[lane],lane,&view));
+        assert(view.active_pixels==0u&&view.zone_count==0u&&ot_om_valid(&view));
+        assert(ot_pz_to_fx_view(&cfg.outputs[lane],lane,&view));
+        assert(view.active_pixels==0u&&view.zone_count==0u);
+        ot_pz_output_t imported;
+        assert(ot_pz_from_legacy_output(&legacy[lane],lane,&cfg,&imported));
+        assert(imported.active_pixels==0u&&imported.panel_count==0u&&imported.zone_count==0u);
+    }
+    assert(ot_pz_migrate_legacy(legacy,true,&cfg));
+    assert(cfg.outputs[0].panel_count==0u&&cfg.outputs[1].zone_count==0u);
+    legacy[0].active_pixels=1;legacy[0].zone_count=1;
+    strcpy(legacy[0].zones[0].name,"Owner pixel");legacy[0].zones[0].pixels=1;
+    assert(ot_pz_migrate_legacy(legacy,true,&cfg));
+    assert(cfg.outputs[0].active_pixels==1u&&cfg.outputs[0].zone_count==1u);
+    assert(cfg.outputs[1].active_pixels==0u&&cfg.outputs[1].panel_count==0u);
+}
 static void hierarchy_and_ranges(void){
     ot_pz_controller_t cfg;ot_pz_defaults(&cfg);
     ot_pz_output_t *o=&cfg.outputs[0];make_output(o,0,100);
@@ -301,6 +322,7 @@ static void legacy_output_replace_stack_safe(void){
     ot_om_output_t profile[OT_OM_OUTPUTS];
     ot_om_defaults(profile);
     ot_om_output_t *left=&profile[0];
+    left->zone_count=1u;strcpy(left->zones[0].name,"User zone");
     left->active_pixels=100u;
     left->zones[0].pixels=100u;
     left->zones[0].role=OT_OM_DECORATIVE;
@@ -334,7 +356,7 @@ static void wire_roundtrip(void){
     wire[40]=0xff;assert(!ot_pz_wire_decode(wire,1,&decoded)); /* malformed panel ID/structure */
 }
 int main(void){
-    defaults_and_fallback();hierarchy_and_ranges();invalid_maps();
+    defaults_and_fallback();empty_adapters_and_saved_one_pixel();hierarchy_and_ranges();invalid_maps();
     legacy_migration();capacity_cases();storage_split_roundtrip();
     legacy_output_replace_stack_safe();wire_roundtrip();
     puts("PASS Issue126 Panel/Zone model: migration, ranges, fallback, 256 masks, 1,246 pixels, 2,048/lane and v3 codec");

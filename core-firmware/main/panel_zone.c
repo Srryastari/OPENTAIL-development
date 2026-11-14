@@ -487,6 +487,7 @@ bool ot_pz_migrate_legacy(const ot_om_output_t legacy[OT_OM_OUTPUTS],
         memcpy(dst->rgb_gain,src->rgb_gain,sizeof(dst->rgb_gain));
         memcpy(dst->white_gain,src->white_gain,sizeof(dst->white_gain));
         dst->gamma_enabled=src->gamma_enabled;
+        if(src->active_pixels==0u)continue;
         dst->panel_count=1u;
         dst->zone_count=src->zone_count;
         ot_pz_panel_t *panel=&dst->panels[0];
@@ -550,6 +551,7 @@ bool ot_pz_from_legacy_output(const ot_om_output_t *legacy,unsigned lane,
     memcpy(next.rgb_gain,legacy->rgb_gain,sizeof(next.rgb_gain));
     memcpy(next.white_gain,legacy->white_gain,sizeof(next.white_gain));
     next.gamma_enabled=legacy->gamma_enabled;
+    if(legacy->active_pixels==0u){*out=next;return true;}
     next.panel_count=1u;next.zone_count=legacy->zone_count;
     const uint16_t panel_id=pz_allocate_id(existing,lane,&next,
         (uint16_t)(OT_PZ_PANEL_ID_PREFIX+1u+lane));
@@ -589,8 +591,16 @@ bool ot_pz_to_legacy(const ot_pz_output_t *src,unsigned lane,
     if(!src||!dst||lane>=OT_PZ_OUTPUTS||
        !ot_pz_output_valid(src,lane))return false;
     if(src->panel_count==0u&&src->zone_count==0u){
-        ot_om_output_t defaults[OT_OM_OUTPUTS];ot_om_defaults(defaults);
-        *dst=defaults[lane];return true;
+        /* A sized but unassigned lane cannot be represented by the v1
+         * contiguous-zone format. Never fabricate geometry for compatibility. */
+        if(src->active_pixels!=0u)return false;
+        ot_om_output_t empty={0};
+        memcpy(empty.name,src->name,OT_OM_NAME_LEN);
+        empty.color_order=src->color_order;
+        memcpy(empty.rgb_gain,src->rgb_gain,sizeof(empty.rgb_gain));
+        memcpy(empty.white_gain,src->white_gain,sizeof(empty.white_gain));
+        empty.gamma_enabled=src->gamma_enabled;
+        *dst=empty;return true;
     }
     if(src->panel_count!=1u||src->zone_count==0u||
        src->panels[0].zone_count!=src->zone_count)return false;
@@ -631,9 +641,8 @@ bool ot_pz_to_fx_view(const ot_pz_output_t *src,unsigned lane,
     for(unsigned z=0;z<src->zone_count;z++)
         total+=ot_pz_zone_pixel_count(&src->zones[z]);
     if(total==0u){
-        view.active_pixels=1u;view.zone_count=1u;
-        (void)snprintf(view.zones[0].name,sizeof(view.zones[0].name),"Unconfigured");
-        view.zones[0].pixels=1u;view.zones[0].role=OT_OM_OFF;
+        /* No logical pixels means no effect target, even when RMT has capacity. */
+        view.active_pixels=0u;view.zone_count=0u;
         *dst=view;return true;
     }
     if(total>OT_PZ_MAX_PIXELS)return false;

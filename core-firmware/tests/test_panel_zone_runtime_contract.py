@@ -10,7 +10,7 @@ for token in (
     "ot_pz_build_pixel_map(&local_panel[ch],pixel_zone_map[ch],pixel_logical_map[ch])",
     "pixel_zone_map[ch][px]",
     "pixel_logical_map[ch][px]",
-    "ot_pz_fallback_color",
+    "ot_om_trigger_overlay",
     "ot_pz_diag_render",
     "prior_pixel_zone_map",
     "fx_zone_scratch",
