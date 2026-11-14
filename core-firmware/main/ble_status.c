@@ -124,6 +124,7 @@ typedef struct {
     uint16_t base_revision,pixel_capacity;
     uint8_t lane,status,last_error,last_rejected_reason;
     bool active,has_sequence,committing;
+    bool durable_save_in_progress; /* Geometry CRC may equal baseline on metadata Save. */
     bool sequence_sync_warning,sequence_sync_fault;
 } ot_pz_tx_session_t;
 /* Per-output BLE sessions; callbacks are serialized on NimBLE host task. */
@@ -545,10 +546,27 @@ static int panel_cfg_write(uint16_t conn,uint16_t handle,
             const int save_rc=ot_ble_panel_save(lane,&output,panel_upload_revision);
             panel_ack(opcode,lane,panel_save_status(save_rc));
             if(save_rc==0&&panel_preview_tx.active&&panel_preview_tx.lane==lane){
-                /* The same verified shadow stays physically rendered until
-                 * the v4 pair promoter publishes active revision and frame. */
-                panel_preview_tx.committing=true;
-                panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+                /* Exact no-op leaves the revision unchanged. A metadata-only
+                 * Save does NOT: wait for durable v4 pair promotion even if
+                 * preview geometry CRC equals the baseline CRC. Reuse the
+                 * existing output stack buffer for revision readback. */
+                uint16_t active_revision=0u,staged_revision=0u;
+                bool pending=false,persistent=false;
+                const bool known=ot_ble_panel_get(lane,&output,&active_revision,
+                                      &staged_revision,&pending,&persistent);
+                const bool noop=known&&!pending&&
+                    active_revision==panel_upload_revision&&
+                    staged_revision==panel_upload_revision;
+                if(noop){
+                    panel_preview_tx.active=false;
+                    panel_preview_tx.committing=false;
+                    panel_preview_tx.durable_save_in_progress=false;
+                    panel_preview_tx.status=OT_PZ_TX_COMMITTED;
+                }else{
+                    panel_preview_tx.durable_save_in_progress=true;
+                    panel_preview_tx.committing=true;
+                    panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+                }
                 panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
             }
             panel_upload_index=255;break;
@@ -671,7 +689,9 @@ static void panel_preview_refresh_commit_state(void){
         return;
     }
     (void)persistent;
-    if(panel_preview_tx.candidate_crc32==panel_preview_tx.base_crc32){
+    if(!panel_preview_tx.durable_save_in_progress&&
+       panel_preview_tx.candidate_crc32==panel_preview_tx.base_crc32){
+        /* Only a no-change preview COMMIT may finish without NVS revision. */
         panel_preview_tx.committing=false;panel_preview_tx.active=false;
         panel_preview_tx.status=OT_PZ_TX_COMMITTED;return;
     }
@@ -682,6 +702,7 @@ static void panel_preview_refresh_commit_state(void){
     if(!pending&&active_revision==target&&
        ot_ble_panel_render_revision(panel_preview_tx.lane)==target){
         panel_preview_tx.committing=false;panel_preview_tx.active=false;
+        panel_preview_tx.durable_save_in_progress=false;
         panel_preview_tx.status=OT_PZ_TX_COMMITTED;return;
     }
     if(!pending&&active_revision==panel_preview_tx.base_revision&&
