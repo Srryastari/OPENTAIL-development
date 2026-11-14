@@ -78,8 +78,8 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('val columns = 30') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
-       compose.includes('Developer · Trigger Testing') &&
-        compose.includes('project.assignMany(selections,zoneId,!checked)'),
+       !compose.includes('Developer · Trigger Testing') &&
+       compose.includes('project.assignMany(selections,zoneId,!checked)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
 assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && !compose.includes('if (i != 1) offlinePreview.value = false') && compose.includes('offlinePreview.value && hasProjectColors'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
@@ -282,23 +282,26 @@ for(const required of [
   'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())',
   'scopeKey = "triggers:"'
 ]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
-assert(triggers.includes('IconAction("Edit " + name, "edit", t)') &&
+assert(!triggers.includes('IconAction("Edit " + name, "edit", t)') &&
        triggers.includes('if (profile.optString("kind") == "trigger-custom")') &&
        triggers.includes('IconAction("Delete " + name, "delete", t)') &&
        triggers.includes('title = { Text("Delete custom trigger?") }') &&
        triggers.includes('project.deleteTrigger(target)') &&
        triggers.includes('scopeKey = "triggers:" + selections.sorted().joinToString("|")') &&
-       triggers.includes('disabled()'),
-       'Builtins cannot be deleted; custom trigger confirmation and bulk editing refresh required');
+       !triggers.includes('Test " + name + " unavailable') &&
+       !triggers.includes('Pill("Close",t)'),
+       'Keep one functional trigger selection/edit path; no inert tests or duplicate close');
 const settings=compose.split('private fun SettingsPage(')[1]
   .split('private fun HardwareOutputEditor(')[0];
-assert(settings.includes('Developer · Trigger Testing') &&
-       settings.includes('var simulatedTriggers by remember') &&
-       settings.includes('defaults.chunked(2).forEach') &&
-       settings.includes('Clear test states') &&
-       settings.includes('Local simulation only') &&
+assert(!settings.includes('Developer · Trigger Testing') &&
+       !settings.includes('var simulatedTriggers by remember') &&
+       !settings.includes('Developer · Controller playback') &&
+       !settings.includes('Reset Configuration') &&
+       !settings.includes('SettingsRow("Controller"') &&
+       settings.includes('ble.readFxCapabilities()') &&
+       settings.includes('CorePaletteTransferPanel(t)') &&
        !settings.includes('ble.simulate'),
-       'Developer-only trigger testing belongs in Settings and must not touch physical GPIO');
+       'Normal Settings must not duplicate Home/Show Modes or expose inert developer controls; retain BLE/palette diagnostics');
 assert(model.includes('.put("zones", new JSONArray())') &&
        model.includes('"Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse"') &&
        model.includes('!"trigger-custom".equals(p.optString("kind"))'),
@@ -1475,3 +1478,35 @@ assert(unclutteredLayout && unclutteredTriggers &&
   unclutteredTriggers.includes('project.assignMany(selections,zoneId,!checked)') &&
   unclutteredTriggers.includes('Assign zones to '),
   'Keep existing Triggers zone assignments; no duplicate role card in Layout or Triggers');
+
+// One purpose per control. Existing UI contracts, no replacement screens:
+// - Save is the only everyday persistence action, Start Fresh behind More.
+// - Triggers preserves bulk assignment with one Done and no inert Test.
+// - Auto Events has one entry via its card and a zero-inclusive fade slider.
+// - Home owns connection/status; essential hardware diagnostics stay in Settings.
+const simpleOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+const simpleEvents=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
+  ?.split('private fun CorePaletteTransferPanel(')[0];
+const simpleHome=compose.split('private fun HomePage(')[1]
+  ?.split('private fun capturePreviewFrame()')[0];
+const simpleLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
+  !simpleHome.includes('Text("Controller Status"') &&
+  !simpleLayout.includes('Pill("Refresh CORE",t)') &&
+  simpleLayout.includes('if(panelGeometryMapping!=null && panelGeometryActiveLane==captureOutput.intValue)') &&
+  !simpleOutput.includes('PixelStrip(t,') &&
+  simpleOutput.includes('ValueSlider("Total output pixels"') &&
+  simpleOutput.includes('PixelStepPill("−",t)') &&
+  simpleOutput.includes('PixelStepPill("+",t)') &&
+  simpleOutput.includes('Field(outputCountText, "Pixel count"') &&
+  simpleOutput.includes('Pill("Start Fresh"') &&
+  simpleOutput.indexOf('Pill("Start Fresh"') > simpleOutput.indexOf('Pill("Reload from controller"') &&
+  simpleOutput.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
+  !simpleEvents.includes('IconAction("Edit " + key, "edit"') &&
+  !simpleEvents.includes('Pill("Instant Snap"') &&
+  !simpleEvents.includes('Pill("Smooth Fade"') &&
+  simpleEvents.includes('ValueSlider("Transition fade (ms)", fade, 5000, t)') &&
+  triggers.includes('Pill("Edit Selected"') &&
+  triggers.includes('confirmButton = { Pill("Done",t,true) { editing=false } })'),
+  'UI de-clutter regression: unique controls must remain, duplicate/dead UI must not reappear');
