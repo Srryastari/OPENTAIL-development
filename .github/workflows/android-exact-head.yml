@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'android/**'
+      - 'docs/SOFTWARE-COMPATIBILITY-MATRIX.json'
       - '.github/workflows/android-exact-head.yml'
   workflow_dispatch:
 permissions:
@@ -41,26 +42,28 @@ jobs:
         with:
           ref: 1767b144e193ed6978816899ebb5eba237ee6e2d
           path: pinned-effects50
-      - name: Checkout Effects-owned proprietary seamless-loop contract
+      - name: Checkout reconciled Effects #110 authoritative CORE source (all 140)
         uses: actions/checkout@v4
         with:
-          ref: 7c0fcc450a7619a57603aabf833dea855a18bcd8
-          path: pinned-effects80
-      - name: Checkout exact Effects #95 source color-slot contract
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
+          path: pinned-effects110
+      - name: Checkout exact Firmware #127 Panel/Zone and BLE contract
         uses: actions/checkout@v4
         with:
-          ref: 984a12aeec4e348b869ba2504a2f994fc944f7f2
-          path: pinned-effects95
+          ref: dfe1a48c3f48dddf7f4c511f063d3743298ccd6a
+          path: pinned-firmware127
       - name: Assert exact CORE/Trigger/Effects SHA and Android BLE/REST ABI
-        run: python3 android/qa/check_pinned_core49_contract.py
+        run: |
+          python3 android/qa/check_pinned_core49_contract.py
+          python3 android/qa/check_pinned_firmware127_contract.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - name: All 140 local preview effects against immutable CORE oracle
-        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50 --continuity-dir pinned-effects80 --color-dir pinned-effects95 > offline-preview-140.json
+        run: python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects110 --continuity-dir pinned-effects110 --color-dir pinned-effects110 --state-dir pinned-firmware127 > offline-preview-140.json
       - name: Preserve authoritative proprietary loop goldens and seven one-shot endpoints
-        working-directory: pinned-effects80/core-firmware
+        working-directory: pinned-effects110/core-firmware
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/ot_auto_effects.c main/effects_1d.c main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c main/wled_1d.c tests/test_proprietary_loop_continuity.c -o /tmp/ot-preview-continuity -lm
           /tmp/ot-preview-continuity
@@ -78,7 +81,11 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - name: Native Compose, BLE v3 and UI contracts
+        env:
+          OPENTAIL_FIRMWARE_SOURCE_DIR: pinned-firmware127/core-firmware/main
+          OPENTAIL_EFFECTS_SOURCE_DIR: pinned-effects110/core-firmware/main
         run: |
+          python3 android/qa/check_pinned_firmware127_contract.py
           node --check android/qa/test_native_source.cjs
           node android/qa/test_native_source.cjs
           node android/qa/test_live_edit.cjs

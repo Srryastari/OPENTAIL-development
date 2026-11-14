@@ -58,6 +58,16 @@ final class BleDiscovery {
     private static final UUID PALETTE_CMD_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2d");
     private static final UUID PALETTE_RSP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2e");
     private static final UUID PALETTE_CAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf2f");
+    // Issue #126 authenticated Panel/Zone protocol. Optional on older CORE builds.
+    private static final UUID PANEL_CAP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf30");
+    private static final UUID PANEL_CFG_CMD_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf31");
+    private static final UUID PANEL_CFG_RSP_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf32");
+    // Firmware #127 Panel v4's authenticated two-second white/cyan Pixel Probe.
+    // This diagnostic does not alter zones, ownership, flash or Show Modes.
+    private static final UUID PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf33");
+    private static final UUID PANEL_PREVIEW_CONTROL_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf35");
+    private static final UUID PANEL_PREVIEW_UPDATE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf36");
+    private static final UUID PANEL_PREVIEW_STATUS_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf37");
     private static final int REQUEST_NEARBY = 137;
     private static final long SCAN_DURATION_MS = 10000L;
 
@@ -190,7 +200,10 @@ final class BleDiscovery {
     boolean canTransferPalettes(){return canControl() && palette.supported();}
     void cancelPaletteTransfer(){palette.abortForStop();}
     private boolean paletteGate(){
+        if(pixelProbeWritePending||panelSaveBusy)return false;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
+           panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry palette action after STOP/transfer");return false;
@@ -250,13 +263,17 @@ final class BleDiscovery {
     void cancelFrameCapture() { frameCapture.abortForStop(); }
     boolean captureFrame(int output) {
         if(!canCaptureFrame())return false;
+        if(ownerPinQueued!=null)return false;
+        if(pixelProbeRequests.blocksBackgroundTransfer(pixelProbeWritePending,panelSaveBusy))return false;
         // UI preview probes at display cadence. A refused opportunistic capture
         // is normal backpressure, not a connection failure or user-facing BLE
         // error. Do not publish status on every busy tick (or restart Compose's
         // effect coroutine). Crucially, never overlap any pending ATT action.
         if(previewCommand!=null)return false;
         if(frameCapture.busy() || palette.busy() || frameCallbackPending || cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending || nextPacket!=null ||
-           readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy || authPending || pairPending || challengePending)return false;
+           readReplyPending || fxCapsBusy || infoReadPending || triggerMapBusy || authPending || pairPending || challengePending ||
+           panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
+           panelSnapshotQueuedLane>=0 || panelCancelQueued)return false;
         frameCapture.request(output);
         return true;
     }
@@ -280,6 +297,136 @@ final class BleDiscovery {
     // The owner can explicitly retry, but auto-auth must not loop on the same stalled read.
     private volatile boolean fxCapsAutoReadSuppressed=false;
     private BluetoothGattCharacteristic triggerMapping;
+    private BluetoothGattCharacteristic panelCapabilitiesCharacteristic;
+    private BluetoothGattCharacteristic panelConfigCommand,panelConfigReply;
+    private BluetoothGattCharacteristic panelPreviewControl,panelPreviewUpdate,panelPreviewStatus;
+    private boolean ownerBondingSupported=false,offerOwnerPin=false,ownerPinWritePending=false;
+    private boolean ownerAutoAuthQueued=false;
+    private byte[] ownerPinQueued;
+    private BluetoothGatt ownerPinQueuedOwner;
+    private int ownerBondLease;
+    @SuppressWarnings("MissingPermission")
+    private boolean ensureOwnerBond() {
+        final BluetoothGatt owner=gatt;
+        if(owner==null||!connected)return false;
+        BluetoothDevice device=owner.getDevice();
+        try {
+        if(device.getBondState()==BluetoothDevice.BOND_BONDED)return true;
+        if(pairPending)return false;
+        pairPending=true;
+        final int lease=++ownerBondLease;
+        if(device.getBondState()==BluetoothDevice.BOND_NONE&&!device.createBond()){
+            pairPending=false;notifyStatus("Bluetooth pairing could not start");return false;
+        }
+        notifyStatus("Securing controller connection…");
+        waitForOwnerBond(owner,lease,0);
+        } catch(SecurityException ex) {pairPending=false;notifyStatus("Bluetooth permission is required to connect");}
+        return false;
+    }
+    @SuppressWarnings("MissingPermission")
+    private void waitForOwnerBond(BluetoothGatt owner,int lease,int attempts) {
+        ui.postDelayed(()->{
+            if(stopped||owner!=gatt||lease!=ownerBondLease)return;
+            final int state;
+            try {state=owner.getDevice().getBondState();}
+            catch(SecurityException ex){pairPending=false;notifyStatus("Bluetooth permission is required to connect");return;}
+            if(state==BluetoothDevice.BOND_BONDED){pairPending=false;ownerAutoAuthQueued=true;pumpQueue();return;}
+            if(attempts>=240||(attempts>4&&state==BluetoothDevice.BOND_NONE)){
+                pairPending=false;notifyStatus("Bluetooth pairing not completed; select controller to retry");pumpQueue();return;
+            }
+            waitForOwnerBond(owner,lease,attempts+1);
+        },250L);
+    }
+    void promptOwnerPin() {
+        if(!canControl()||!ownerBondingSupported){notifyStatus("Connect a controller with updated firmware to set a PIN");return;}
+        android.widget.EditText input=new android.widget.EditText(activity);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});
+        input.setHint("6-digit PIN");
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("Controller PIN (optional)")
+            .setMessage("Protect enrollment of another phone. Skip keeps your current setting; you can set a PIN later here.")
+            .setView(input).setPositiveButton("Set PIN",null).setNegativeButton("Skip",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String pin=input.getText().toString();
+            if(!pin.matches("[0-9]{6}")){input.setError("Enter six digits");return;}
+            if(setOwnerPin(pin))dialog.dismiss();
+        }));
+        dialog.show();
+    }
+    boolean setOwnerPin(String pin) {
+        if(!canControl()||!ownerBondingSupported||enroll==null||ownerPinQueued!=null||ownerPinWritePending||
+           pin==null||!pin.matches("[0-9]{6}"))return false;
+        ownerPinQueued=OwnerPinCommand.encode(pin);
+        ownerPinQueuedOwner=gatt;pumpQueue();return true;
+    }
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startOwnerPinWrite(byte[] packet) {
+        final BluetoothGatt owner=gatt;ownerPinWritePending=true;pairPending=true;
+        boolean ok=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)ok=owner.writeCharacteristic(enroll,packet,BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {enroll.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);enroll.setValue(packet);ok=owner.writeCharacteristic(enroll);}
+        }catch(SecurityException ignored){}
+        if(!ok){ownerPinWritePending=false;pairPending=false;notifyStatus("PIN update could not start");ui.post(this::pumpQueue);}
+        else watchOwnerTransaction(owner);
+    }
+    private BluetoothGattCharacteristic pixelProbeCharacteristic;
+    private volatile boolean pixelProbeWritePending=false;
+    private volatile int pixelProbeWatchLease=0,pixelProbeLane=-1;
+    // One owner request waits behind normal ATT initialization instead of
+    // failing just because automatic Panel status/snapshot reads are queued.
+    private final PixelProbeRequestQueue pixelProbeRequests=new PixelProbeRequestQueue();
+    private BluetoothGatt pixelProbeQueuedOwner;
+    private int pixelProbeRequestLease=0;
+    private Consumer<String> pixelProbeListener;
+    private PanelPreviewProtocol.Capabilities panelCapabilities;
+    private final TelemetrySequenceWatchdog[] panelWatchdogs={new TelemetrySequenceWatchdog(),new TelemetrySequenceWatchdog()};
+    private PanelPreviewProtocol.Status panelLastStatus;
+    private final PanelPreviewProtocol.Status[] panelStatuses=new PanelPreviewProtocol.Status[2];
+    private final boolean[] panelStatusFresh=new boolean[2];
+    private final PanelPreviewProtocol.LaneSnapshot[] panelConfirmedSnapshots=
+        new PanelPreviewProtocol.LaneSnapshot[2];
+    private final GeometryTransactionManager[] panelGeometryManagers=
+        new GeometryTransactionManager[2];
+    private final boolean[] panelSnapshotFresh=new boolean[2];
+    private Consumer<PanelPreviewProtocol.Status> panelStatusListener;
+    private Consumer<TelemetrySequenceWatchdog.Decision> panelSyncListener;
+    private Consumer<PanelPreviewProtocol.LaneSnapshot> panelSnapshotListener;
+    // Durable v4 writes use the same Panel CFG characteristic as snapshots.
+    // ATT acknowledgement never establishes persistence; verify active readback.
+    private boolean panelSaveBusy, panelSaveWaitingWrite, panelSaveWaitingRead;
+    private int panelSaveLane=-1,panelSavePhase,panelSaveOffset,panelSaveLastCount;
+    private int panelSaveRevision,panelSaveLease,panelSaveVerificationReads;
+    private long panelSaveVerifyDeadlineMs;
+    private byte[] panelSaveWire,panelSaveBaseWire;
+
+    private volatile int panelReadQueued=0; // 1=capabilities, 2=status
+    private volatile boolean panelReadPending=false;
+    private volatile int panelReadKind=0,panelReadWatchLease=0;
+    private volatile int panelStatusExpectedLane=-1;
+    private int panelStatusReadRetries=0,panelStatusRetryLease=0;
+    private volatile int panelSnapshotQueuedLane=-1;
+    private volatile boolean panelSnapshotBusy=false,panelSnapshotWaitingWrite=false,
+                             panelSnapshotWaitingRead=false,panelSnapshotAbortForStop=false;
+    private volatile int panelSnapshotPhase=0,panelSnapshotOffset=0,panelSnapshotWatchLease=0;
+    private int panelSnapshotLane=-1;
+    private byte[] panelSnapshotWire;
+    private PanelPreviewProtocol.SnapshotHeader panelSnapshotHeader;
+    private static final int PANEL_CONTROL_BEGIN=1,PANEL_CONTROL_COMMIT=2,PANEL_CONTROL_HEARTBEAT=3;
+    private volatile boolean panelCancelQueued=false,panelCancelWaitingWrite=false;
+    private volatile boolean panelControlQueued=false,panelControlWaitingWrite=false;
+    private volatile boolean panelUpdateQueued=false,panelUpdateWritePending=false;
+    private volatile boolean panelControlWritePending=false;
+    private byte[] panelCancelPacket,panelControlPacket,panelUpdatePacket;
+    private int panelControlAction=0,panelControlLane=-1,panelUpdateLane=-1;
+    private int panelControlWriteLease=0,panelUpdateWriteLease=0,negotiatedMtu=23;
+    private long panelCancelAttemptedSession=-1L;
+    private volatile int panelPollLease=0;
+    private final int[] panelTransactionPollAttempts={0,0};
+    private final boolean[] panelTransactionTimeoutLatched={false,false};
+    private boolean panelReconciliationPending=false,panelReconciliationSnapshotVerified=false;
+    private int panelReconciliationAttempts=0,panelReconciliationLane=-1;
+    private PanelPreviewProtocol.LaneSnapshot panelReconciliationSnapshot;
     private volatile boolean triggerMapBusy=false;
     private boolean triggerMapSavePending=false;
     private int[] triggerMapExpected;
@@ -288,6 +435,7 @@ final class BleDiscovery {
     private volatile boolean mtuNegotiating=false;
     private volatile boolean infoReadPending=false;
     private BluetoothGattCharacteristic coreInfo;
+    private volatile String coreInfoText;
     private boolean infoReadQueued=false;
     private Consumer<String> infoListener;
     private volatile boolean continuousFx=false;
@@ -297,7 +445,7 @@ final class BleDiscovery {
     void setInfoListener(Consumer<String> listener){infoListener=listener;}
     private void clearInfo(){
         continuousFx=false;tertiaryFx=false;
-        coreInfo=null;infoReadQueued=false;
+        coreInfo=null;coreInfoText=null;infoReadQueued=false;
         final Consumer<String> receiver=infoListener;
         if(receiver!=null)ui.post(()->receiver.accept(null));
     }
@@ -306,10 +454,553 @@ final class BleDiscovery {
     void setTriggerMapListener(Consumer<NativeTriggerMappingCodec.Snapshot> listener){
         triggerMapListener=listener;
     }
+    void setPanelStatusListener(Consumer<PanelPreviewProtocol.Status> status,
+                                Consumer<TelemetrySequenceWatchdog.Decision> sync) {
+        panelStatusListener=status;panelSyncListener=sync;
+    }
+    void setPanelSnapshotListener(Consumer<PanelPreviewProtocol.LaneSnapshot> listener) {
+        panelSnapshotListener=listener;
+    }
+    void setPixelProbeListener(Consumer<String> listener) { pixelProbeListener=listener; }
+    private void probeNotify(String message) {
+        final BluetoothGatt owner=gatt;
+        notifyStatus(message);
+        if(pixelProbeListener!=null)ui.post(()->{
+            if(!stopped && owner==gatt && pixelProbeListener!=null)
+                pixelProbeListener.accept(message);
+        });
+    }
+    boolean canProbeFirstPixel() {
+        return canControl() && panelCapabilities!=null &&
+               (panelCapabilities.flags&1)!=0 && pixelProbeCharacteristic!=null;
+    }
+    /** White fixed pixel zero for two seconds, unlike a role-gated Solid FX.
+     * This is firmware's existing 0xAA five-byte diagnostic, not a new opcode,
+     * not a moving sweep, and never a durable config write.
+     */
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    boolean probeFirstPixel(int lane) {
+        if(lane<0||lane>1||!canProbeFirstPixel()||gatt==null) {
+            probeNotify("Pixel probe unavailable: authorize BLE and read Panel capabilities");
+            return false;
+        }
+        // Never send a second probe while the first request is queued or its
+        // GATT write is pending. No auto-retry/duplicate physical white pulse.
+        if(pixelProbeRequests.pending()||pixelProbeWritePending) {
+            probeNotify("Pixel probe already queued or in flight on this connection");
+            return false;
+        }
+        if(!pixelProbeRequests.offer(lane))return false;
+        final BluetoothGatt owner=gatt;
+        pixelProbeQueuedOwner=owner;
+        final int lease=++pixelProbeRequestLease;
+        final String blocker=pixelProbeBlockingOperation();
+        if(blocker!=null) {
+            probeNotify("Pixel probe queued behind "+blocker+"; will run automatically when BLE is idle");
+        }
+        // pumpQueue owns ALL GATT writes. It gives STOP/FX, cancellation and
+        // in-flight transactions precedence, but not new status polling over
+        // this single explicit owner-requested diagnostic.
+        pumpQueue();
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&pixelProbeRequests.pending()&&
+               pixelProbeRequestLease==lease) {
+                final String outstanding=pixelProbeBlockingOperation();
+                probeNotify("Pixel probe queued too long behind "+
+                    (outstanding==null?"an unresponsive GATT queue":outstanding)+
+                    "; recovering the stalled Bluetooth session");
+                pixelProbeRequests.clear();
+                pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+                // A verified read never occurred. Recover rather than overlap
+                // the unknown in-flight ATT owner with a second write.
+                recoverStalledGatt(owner,"Pixel probe waited on stuck BLE transfer");
+            }
+        },20000L);
+        return true;
+    }
+
+    /** Most specific blocker at the instant the owner requests diagnostics. */
+    private String pixelProbeBlockingOperation() {
+        if(panelSaveBusy)return "Panel v4 Save/readback";
+        if(pixelProbeWritePending)return "previous Pixel Probe write";
+        if(cfgBusy)return "Output configuration read/write";
+        if(queuedOutputRead>=0)return "queued Output read";
+        if(writePending||readReplyPending)return "effect/STOP acknowledgement";
+        if(fxCapsBusy)return "effects capabilities read";
+        if(infoReadPending)return "firmware information read";
+        if(infoReadQueued)return "queued firmware information read";
+        if(triggerMapBusy)return "trigger input mapping transfer";
+        if(panelReadPending)return "Panel capabilities/status read";
+        if(panelSnapshotBusy)return "Panel v4 snapshot transfer";
+        if(panelControlWritePending||panelControlQueued)return "Panel preview control";
+        if(panelUpdateWritePending||panelUpdateQueued)return "Panel live UPDATE";
+        if(panelReadQueued!=0)return "queued Panel status read";
+        if(panelSnapshotQueuedLane>=0)return "queued Panel v4 snapshot";
+        if(panelCancelQueued)return "Panel preview cancellation";
+        if(frameCapture.busy())return "LED frame capture";
+        if(palette.busy())return "palette transfer";
+        if(nextPacket!=null)return isStopPacket(nextPacket)?"queued safety STOP":"queued effect command";
+        if(authPending||pairPending||challengePending)return "authorization";
+        if(previewCommand!=null)return "queued LED preview command";
+        return null;
+    }
+
+    /**
+     * Dispatch ONLY after the main GATT queue selects this owner request.
+     * No Save, zone creation, NVS changes or manual reconnection are required.
+     */
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPixelProbe(int lane) {
+        if(lane<0||lane>1||!canProbeFirstPixel()||gatt==null) {
+            probeNotify("Pixel probe dropped: BLE authorization or capabilities changed");
+            return;
+        }
+        // [0xAA, output (one-based), index high, index low, white].
+        final byte[] packet=new byte[]{(byte)0xaa,(byte)(lane+1),0,0,1};
+        final BluetoothGatt owner=gatt;
+        pixelProbeWritePending=true;
+        pixelProbeLane=lane;
+        final int lease=++pixelProbeWatchLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(pixelProbeCharacteristic,packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                pixelProbeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                pixelProbeCharacteristic.setValue(packet);
+                started=owner.writeCharacteristic(pixelProbeCharacteristic);
+            }
+        }catch(SecurityException ex) {
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+            probeNotify("Pixel probe failed: Bluetooth write permission missing");
+            ui.post(this::pumpQueue);
+            return;
+        }
+        if(!started) {
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+            probeNotify("Pixel probe failed: GATT write did not start");
+            ui.post(this::pumpQueue);
+            return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && pixelProbeWritePending &&
+               lease==pixelProbeWatchLease) {
+                pixelProbeWritePending=false;pixelProbeLane=-1;
+                pixelProbeWatchLease++;
+                probeNotify("Pixel probe timed out; BLE state uncertain, reconnect before retry");
+                recoverStalledGatt(owner,"Pixel probe ATT write timeout");
+            }
+        },8000L);
+    }
+    boolean canReadPanelPreview() {
+        return canControl() && panelCapabilities!=null && panelCapabilities.supportsPreviewV2() &&
+               panelPreviewStatus!=null && panelConfigCommand!=null && panelConfigReply!=null;
+    }
+    /** Each v4 lane has its own live lease. A different ACTIVE lane must
+     * never block editing this lane or be cancelled as a side effect. */
+    boolean panelGeometryReady(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview())return false;
+        for(int i=0;i<2;i++) {
+            PanelPreviewProtocol.Status status=panelStatuses[i];
+            GeometryTransactionManager manager=panelGeometryManagers[i];
+            if(!panelSnapshotFresh[i]||!panelStatusFresh[i]||
+               panelConfirmedSnapshots[i]==null||status==null||manager==null||
+               manager.syncUncertain())return false;
+            boolean idle=status.state==PanelPreviewProtocol.STATE_IDLE&&
+                status.sessionId==0&&manager.state()==GeometryTransactionManager.State.READY;
+            boolean retainedPreview=status.state==PanelPreviewProtocol.STATE_ACTIVE&&
+                status.sessionId!=0&&status.leaseRemainingMs>0&&
+                manager.state()==GeometryTransactionManager.State.ACTIVE;
+            if(i==lane?!idle:!(idle||retainedPreview))return false;
+        }
+        return true;
+    }
+    boolean panelGeometryReady(){return panelGeometryReady(0)||panelGeometryReady(1);}
+    /** Current negotiated ATT MTU used by both the batch planner and the writer. */
+    int panelUpdateMtu(){return Math.max(23,negotiatedMtu);}
+    boolean readPanelStatus() {
+        if(!canControl() || panelPreviewStatus==null || panelCapabilities==null ||
+           !panelCapabilities.supportsPreviewV2())return false;
+        panelStatusReadRetries=0;panelStatusRetryLease++;
+        panelReadQueued=2;pumpQueue();return true;
+    }
+    boolean readPanelLaneSnapshot(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview())return false;
+        panelSnapshotFresh[lane]=false;panelStatusFresh[lane]=false;
+        panelSnapshotQueuedLane=lane;pumpQueue();return true;
+    }
+    /** Begin only from two fresh, stable, authoritative lane maps/statuses. */
+    boolean beginPanelPreview(int lane,GeometryTransactionManager.LayoutMapping mapping) {
+        if(lane<0||lane>1||!panelGeometryReady(lane)||panelPreviewControl==null||
+           mapping==null||panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        for(int i=0;i<2;i++)
+            if(!panelSnapshotFresh[i]||!panelStatusFresh[i]||
+               panelConfirmedSnapshots[i]==null||panelStatuses[i]==null)return false;
+        PanelPreviewProtocol.LaneSnapshot[] snapshots=panelConfirmedSnapshots.clone();
+        PanelPreviewProtocol.Status[] statuses=panelStatuses.clone();
+        try {GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,snapshots,statuses);}
+        catch(IllegalArgumentException ex){notifyStatus("Panel geometry preflight rejected: "+ex.getMessage());return false;}
+        PanelPreviewProtocol.Status status=statuses[lane];
+        int desiredCapacity=mapping.lane(lane).activePixels;
+        if(desiredCapacity!=status.pixelCapacity&&
+           (panelCapabilities==null||!panelCapabilities.supportsLiveCapacity())){
+            notifyStatus("Controller firmware does not support live capacity changes; update firmware, do not Save as a workaround");
+            return false;
+        }
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        if(manager==null||manager.state()!=GeometryTransactionManager.State.READY||
+           status.state!=PanelPreviewProtocol.STATE_IDLE||status.sessionId!=0)return false;
+        GeometryTransactionManager.Snapshot confirmed=manager.lastConfirmed();
+        if(confirmed==null||confirmed.revision!=snapshots[lane].activeRevision||
+           !Arrays.equals(confirmed.wire,snapshots[lane].wire))return false;
+        if(!manager.requestBegin())return false;
+        byte[] packet;
+        // activeRevision is decoded as uint32 for shared status telemetry;
+        // BEGIN carries the authoritative uint16 active revision.
+        try {packet=PanelPreviewProtocol.begin(lane,(int)status.activeRevision,
+            desiredCapacity,panelCapabilities.schemaVersion);}
+        catch(IllegalArgumentException ex) {
+            manager.markSynchronizationUncertain("Panel BEGIN values changed after preflight");
+            panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
+        }
+        if(queuePanelControl(lane,PANEL_CONTROL_BEGIN,packet))return true;
+        manager.markSynchronizationUncertain("Panel BEGIN could not enter the serialized GATT queue");
+        panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
+    }
+
+    /** One acknowledged UPDATE at a time; callers send the next MTU batch only after status-v2 ACK. */
+    boolean updatePanelPreview(int lane,byte[] candidateWire,
+            PanelPreviewProtocol.UpdateDescriptor[] descriptors) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewUpdate==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        GeometryTransactionManager.Update update;
+        try {update=manager.queueUpdate(candidateWire,descriptors,negotiatedMtu);}
+        catch(IllegalArgumentException|IllegalStateException ex) {
+            notifyStatus("Panel UPDATE rejected before BLE write: "+ex.getMessage());return false;
+        }
+        if(update==null)return false;
+        panelUpdatePacket=update.packet;panelUpdateLane=lane;panelUpdateQueued=true;
+        pumpQueue();return true;
+    }
+
+    boolean commitPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        byte[] packet=manager.requestCommit(status);
+        if(packet==null)return false;
+        if(queuePanelControl(lane,PANEL_CONTROL_COMMIT,packet))return true;
+        manager.markSynchronizationUncertain("Panel COMMIT could not enter the serialized GATT queue");
+        panelStatusExpectedLane=lane;panelReadQueued=2;pumpQueue();return false;
+    }
+
+    boolean heartbeatPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        return queuePanelControl(lane,PANEL_CONTROL_HEARTBEAT,
+            PanelPreviewProtocol.heartbeat(lane,manager.sessionId()));
+    }
+
+    boolean cancelPanelPreview(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelPreviewControl==null||
+           panelCancelQueued||panelControlQueued||panelControlWritePending||
+           panelUpdateQueued||panelUpdateWritePending)return false;
+        GeometryTransactionManager manager=panelGeometryManagers[lane];
+        PanelPreviewProtocol.Status status=panelStatuses[lane];
+        if(manager==null||status==null||!panelStatusFresh[lane]||
+           manager.state()!=GeometryTransactionManager.State.ACTIVE||
+           status.state!=PanelPreviewProtocol.STATE_ACTIVE||
+           status.sessionId!=manager.sessionId())return false;
+        manager.markSynchronizationUncertain("Preview cancelled by owner");
+        panelCancelPacket=PanelPreviewProtocol.cancel(lane,manager.sessionId());
+        panelCancelQueued=true;pumpQueue();return true;
+    }
+
+    private boolean queuePanelControl(int lane,int action,byte[] packet) {
+        if(packet==null||lane<0||lane>1||gatt==null||!canControl()||
+           panelControlQueued||panelControlWritePending||panelUpdateQueued||
+           panelUpdateWritePending||panelCancelQueued)return false;
+        panelControlPacket=packet;panelControlLane=lane;panelControlAction=action;
+        panelControlQueued=true;pumpQueue();return true;
+    }
+
+    boolean startFreshPanelV4(int lane) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelSaveBusy||
+           panelSnapshotBusy||panelSnapshotQueuedLane>=0||panelReadPending||
+           panelReadQueued!=0||panelControlQueued||panelUpdateQueued||
+           panelControlWritePending||panelUpdateWritePending||panelCancelQueued||
+           cfgBusy||writePending||readReplyPending||pixelProbeWritePending||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||
+           triggerMapBusy||fxCapsBusy||authPending||pairPending||challengePending)
+            return false;
+        PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane);
+        if(base==null||base.pending||!base.persistent)return false;
+        panelSaveBusy=true;panelSaveLane=lane;panelSaveWire=
+            PanelV4LayoutProtocol.expectedFactoryMap(lane);
+        panelSaveRevision=base.activeRevision;
+        panelSavePhase=5;
+        panelSaveWrite(PanelV4LayoutProtocol.startFreshChallenge(lane,panelSaveRevision));
+        return true;
+    }
+
+    boolean savePanelV4(int lane,String json) {
+        if(lane<0||lane>1||!canReadPanelPreview()||panelSaveBusy||
+           panelSnapshotBusy||panelSnapshotQueuedLane>=0||panelReadPending||
+           panelReadQueued!=0||panelControlQueued||panelUpdateQueued||
+           panelControlWritePending||panelUpdateWritePending||
+           panelCancelQueued||cfgBusy||writePending||readReplyPending||
+           pixelProbeWritePending||frameCapture.busy()||palette.busy()||
+           nextPacket!=null||triggerMapBusy||fxCapsBusy||authPending||
+           pairPending||challengePending)return false;
+        PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane);
+        if(base==null||base.pending||!base.persistent||base.activeRevision>=65535)
+            return false;
+        try {
+            byte[] candidate=PanelV4DraftCodec.encode(
+                lane,new org.json.JSONObject(json),base);
+            panelSaveBusy=true;panelSaveLane=lane;panelSaveWire=candidate;
+            panelSaveBaseWire=Arrays.copyOf(base.wire,base.wire.length);
+            panelSaveRevision=base.activeRevision;panelSavePhase=0;
+            panelSaveOffset=0;
+            panelSaveWrite(PanelV4LayoutProtocol.beginSave(lane,panelSaveRevision,candidate));
+            return true;
+        }catch(Exception ex){
+            notifyStatus("Panel v4 Save validation failed: "+ex.getMessage());
+            return false;
+        }
+    }
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void panelSaveWrite(byte[] packet) {
+        if(gatt==null||panelConfigCommand==null) {
+            panelSaveFinish(false,"Panel Save connection unavailable; reconcile before retry",null);
+            return;
+        }
+        BluetoothGatt owner=gatt;
+        int lease=++panelSaveLease;
+        panelSaveWaitingWrite=true;
+        boolean ok=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                ok=owner.writeCharacteristic(panelConfigCommand,packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelConfigCommand.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelConfigCommand.setValue(packet);
+                ok=owner.writeCharacteristic(panelConfigCommand);
+            }
+        }catch(SecurityException ex){notifyStatus("Panel Save Bluetooth permission denied");}
+        if(!ok) {
+            panelSaveFinish(false,"Panel Save write unavailable; outcome uncertain",null);
+            return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelSaveBusy&&panelSaveLease==lease)
+                recoverStalledGatt(owner,"Panel v4 Save timed out; reconnect and reconcile");
+        },8000L);
+    }
+    private void panelSaveWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelSaveBusy||!panelSaveWaitingWrite)return;
+        panelSaveWaitingWrite=false;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            panelSaveFinish(false,"Panel v4 Save GATT "+status+"; outcome uncertain",null);
+            return;
+        }
+        panelSaveWaitingRead=true;
+        boolean ok=false;
+        try{ok=owner.readCharacteristic(panelConfigReply);}
+        catch(SecurityException ex){notifyStatus("Panel Save ACK permission denied");}
+        if(!ok)panelSaveFinish(false,"Panel Save ACK unavailable; outcome uncertain",null);
+    }
+    private void panelSaveRead(BluetoothGatt owner,byte[] bytes,int status) {
+        if(owner!=gatt||!panelSaveBusy||!panelSaveWaitingRead)return;
+        panelSaveWaitingRead=false;panelSaveLease++;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            panelSaveFinish(false,"Panel Save ACK GATT "+status+"; outcome uncertain",null);
+            return;
+        }
+        if(panelSavePhase==5) {
+            final long challenge;
+            try{challenge=PanelV4LayoutProtocol.parseStartFreshChallenge(
+                    panelSaveLane,panelSaveRevision,bytes);}
+            catch(IllegalArgumentException ex){
+                panelSaveFinish(false,"Start Fresh challenge mismatch; no reset confirmed",null);return;
+            }
+            panelSavePhase=6;
+            panelSaveWrite(PanelV4LayoutProtocol.startFreshConfirm(
+                panelSaveLane,panelSaveRevision,challenge));
+            return;
+        }
+        if(panelSavePhase==6) {
+            final int resetCode;
+            try{resetCode=PanelV4LayoutProtocol.parseStartFreshAck(panelSaveLane,bytes);}
+            catch(IllegalArgumentException ex){
+                panelSaveFinish(false,"Start Fresh outcome unknown; reconcile before retry",null);
+                return;
+            }
+            if(resetCode!=0){
+                panelSaveFinish(false,"Controller rejected Start Fresh (code "+resetCode+")",null);
+                return;
+            }
+            panelSavePhase=7;
+            panelSaveVerificationReads=0;
+            panelSaveVerifyDeadlineMs=android.os.SystemClock.elapsedRealtime()+20000L;
+            startPanelSnapshot(panelSaveLane);
+            return;
+        }
+        int opcode=panelSavePhase==0?3:panelSavePhase==1?4:
+            panelSavePhase==2?5:6;
+        int result;
+        try{result=PanelV4LayoutProtocol.parseSaveAck(panelSaveLane,opcode,bytes);}
+        catch(IllegalArgumentException ex){
+            panelSaveFinish(false,"Panel Save ACK mismatch; reconcile before retry",null);
+            return;
+        }
+        if(result!=0) {
+            panelSaveFinish(false,"Controller rejected Panel v4 Save: "+
+                PanelV4LayoutProtocol.saveRejectionMessage(result),null);
+            return;
+        }
+        if(panelSavePhase==3) {
+            panelSaveFinish(false,"Save interrupted by STOP before finalization",null);
+            return;
+        }
+        if(panelSavePhase==2) {
+            // Final ACK is admission, not durable promotion. A queued STOP
+            // must take precedence over long snapshot polling.
+            if(isStopPacket(nextPacket)) {
+                panelSaveFinish(false,"STOP prioritized; Panel Save outcome requires reconnect verification",null);
+                return;
+            }
+            panelSavePhase=4;
+            panelSaveVerificationReads=0;
+            panelSaveVerifyDeadlineMs=android.os.SystemClock.elapsedRealtime()+20000L;
+            startPanelSnapshot(panelSaveLane);
+            return;
+        }
+        if(panelSavePhase==1)panelSaveOffset+=panelSaveLastCount;
+        else panelSavePhase=1;
+        if(isStopPacket(nextPacket)) {
+            panelSavePhase=3;
+            panelSaveWrite(PanelV4LayoutProtocol.cancelUncommittedSave(panelSaveLane));
+        }else if(panelSaveOffset>=panelSaveWire.length) {
+            panelSavePhase=2;
+            panelSaveWrite(PanelV4LayoutProtocol.completeSave(panelSaveLane));
+        }else {
+            byte[] chunk=PanelV4LayoutProtocol.saveChunk(
+                panelSaveLane,panelSaveWire,panelSaveOffset);
+            panelSaveLastCount=chunk.length-5;
+            panelSaveWrite(chunk);
+        }
+    }
+    private void panelSaveFinish(boolean success,String message,org.json.JSONObject confirmed) {
+        int lane=panelSaveLane;
+        panelSaveBusy=false;panelSaveWaitingWrite=false;panelSaveWaitingRead=false;
+        panelSaveLane=-1;panelSaveWire=null;panelSaveBaseWire=null;
+        panelSavePhase=0;panelSaveOffset=0;panelSaveVerificationReads=0;
+        panelSaveVerifyDeadlineMs=0L;panelSaveLease++;
+        if(lane>=0&&lane<2)cfgNotify(success,message,confirmed,lane);
+        if(!success)notifyStatus(message);
+        pumpQueue();
+    }
+
+    PanelPreviewProtocol.LaneSnapshot lastConfirmedPanelSnapshot(int lane) {
+        if(lane<0||lane>1||!panelSnapshotFresh[lane])return null;
+        return panelConfirmedSnapshots[lane];
+    }
+    GeometryTransactionManager panelGeometryManager(int lane) {
+        if(lane<0||lane>1)return null;
+        return panelGeometryManagers[lane];
+    }
+    private void queuePanelCapabilitiesRead() {
+        if(canControl() && panelCapabilitiesCharacteristic!=null) {
+            panelReadQueued=1;pumpQueue();
+        }
+    }
+    private void panelNotify(PanelPreviewProtocol.Status status,
+                             TelemetrySequenceWatchdog.Decision decision) {
+        final BluetoothGatt owner=gatt;
+        if(panelStatusListener!=null)ui.post(()->{
+            if(!stopped && owner==gatt && panelStatusListener!=null)
+                panelStatusListener.accept(status);
+        });
+        if(panelSyncListener!=null && decision!=null)ui.post(()->{
+            if(!stopped && (owner==gatt || status==null) && panelSyncListener!=null)
+                panelSyncListener.accept(decision);
+        });
+    }
+    private void panelDisconnected() {
+        ownerPinQueued=null;ownerPinQueuedOwner=null;ownerPinWritePending=false;offerOwnerPin=false;ownerAutoAuthQueued=false;ownerBondLease++;ownerBondingSupported=false;
+        for(int lane=0;lane<2;lane++) {
+            TelemetrySequenceWatchdog watcher=panelWatchdogs[lane];
+            if(watcher.hasSession())panelNotify(null,watcher.markDisconnected());
+        }
+        // The old BLE session is no longer authoritative. A reconnect may
+        // discover another controller or a newer committed map, even if the
+        // previous manager was READY. Never reuse that manager's revision or
+        // its Panel/Zone aliases to authorize a new BEGIN.
+        for(int lane=0;lane<2;lane++) {
+            if(panelGeometryManagers[lane]!=null)
+                panelGeometryManagers[lane].connectionLost();
+            panelGeometryManagers[lane]=null;
+            panelConfirmedSnapshots[lane]=null;
+        }
+        // Reconnect requires fresh controller identity and fresh per-lane
+        // telemetry; never compare an O2 sequence against an old O1 lease.
+        for(int lane=0;lane<2;lane++)panelWatchdogs[lane]=new TelemetrySequenceWatchdog();
+        panelCapabilities=null;panelLastStatus=null;
+        panelStatuses[0]=null;panelStatuses[1]=null;
+        panelStatusFresh[0]=false;panelStatusFresh[1]=false;
+        panelSnapshotFresh[0]=false;panelSnapshotFresh[1]=false;
+        panelCapabilitiesCharacteristic=null;panelConfigCommand=null;panelConfigReply=null;
+        panelPreviewControl=null;panelPreviewUpdate=null;panelPreviewStatus=null;
+        pixelProbeCharacteristic=null;pixelProbeWritePending=false;
+        pixelProbeLane=-1;pixelProbeWatchLease++;
+        pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+        panelReadQueued=0;panelReadPending=false;panelReadKind=0;panelReadWatchLease++;
+        panelStatusExpectedLane=-1;panelStatusReadRetries=0;panelStatusRetryLease++;
+        panelSnapshotQueuedLane=-1;panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;
+        panelSnapshotWaitingRead=false;panelSnapshotAbortForStop=false;
+        if(panelSaveBusy)panelSaveFinish(false,"Panel v4 Save interrupted; outcome uncertain",null);
+        panelSnapshotWatchLease++;panelCancelQueued=false;
+        panelCancelWaitingWrite=false;panelControlWritePending=false;panelCancelPacket=null;
+        panelControlQueued=false;panelControlWaitingWrite=false;panelControlPacket=null;
+        panelControlAction=0;panelControlLane=-1;panelControlWriteLease++;
+        panelUpdateQueued=false;panelUpdateWritePending=false;panelUpdatePacket=null;
+        panelUpdateLane=-1;panelUpdateWriteLease++;negotiatedMtu=23;
+        panelPollLease++;panelReconciliationPending=false;panelReconciliationLane=-1;
+        Arrays.fill(panelTransactionPollAttempts,0);
+        Arrays.fill(panelTransactionTimeoutLatched,false);
+        panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
+    }
     boolean canMapTriggers(){return canControl() && triggerMapping!=null;}
     private boolean triggerMapAvailable(){
+        if(pixelProbeWritePending||panelSaveBusy)return false;
         if(!canMapTriggers()){notifyStatus("CORE trigger mapping BLE v1 unavailable or unauthorized");return false;}
         if(gatt==null||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
+           panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry trigger mapping");return false;
         }
@@ -427,6 +1118,10 @@ final class BleDiscovery {
     }
     @SuppressWarnings("MissingPermission")
     private void readFxCapabilitiesInternal() {
+        if(panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending){
+            notifyStatus("Panel transaction owns BLE; retry after completion");return;
+        }
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         final BluetoothGatt owner=gatt;
         if(!connected||owner==null){
             notifyStatus("BLE effects catalog unavailable: CORE disconnected");
@@ -514,14 +1209,47 @@ final class BleDiscovery {
     private final int[] cfgKnownRevision=new int[]{-1,-1};
     private final byte[][] cfgLatest=new byte[2][];
     private volatile int cfgWatchdog=0;
+    // Monotonic physical BLE timing. These are measurements, not fabricated
+    // guarantees of flash persistence or on-device light output.
+    private long cfgRequestedMs=0L,cfgTransferMs=0L,cfgReadbackMs=0L;
+    private int cfgReadFragments=0;
+    private String cfgTimingDetail() {
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(cfgRequestedMs<=0L)return "";
+        long elapsed=Math.max(0L,now-cfgRequestedMs);
+        long queue=cfgTransferMs>0L?Math.max(0L,cfgTransferMs-cfgRequestedMs):0L;
+        long readback=cfgReadbackMs>0L?Math.max(0L,now-cfgReadbackMs):0L;
+        return " · BLE "+elapsed+" ms (queue "+queue+" ms, readback "+
+            readback+" ms, "+cfgReadFragments+" fragments)";
+    }
     void setConfigListener(java.util.function.Consumer<String> listener){configListener=listener;}
     boolean canConfigure(){return canControl() && cfgCommand!=null && cfgReply!=null;}
+    /** Non-destructive automatic read after authorization. Busy GATT
+     * operations are not interrupted or duplicated; UI may try later. */
+    boolean readOutputIfReady(int index) {
+        if(pixelProbeWritePending||panelSaveBusy)return false;
+        if(index<0||index>1||!canConfigure()||cfgBusy||queuedOutputRead>=0||
+           writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||
+           panelUpdateWritePending||panelControlQueued||panelUpdateQueued||
+           panelReadQueued!=0||panelSnapshotQueuedLane>=0||panelCancelQueued||
+           palette.busy()||nextPacket!=null||authPending||pairPending||challengePending)
+            return false;
+        readOutput(index);
+        return true;
+    }
     void readOutput(int index){
+        if(panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending){
+            notifyStatus("Panel transaction owns BLE; retry after completion");return;
+        }
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before editing CORE outputs",null,index);return;}
         if(index<0||index>1){cfgNotify(false,"Invalid CORE output index",null,index);return;}
         if(cfgBusy || queuedOutputRead>=0){
             cfgNotify(false,"Output configuration read/save already in progress",null,index);return;
         }
+        cfgRequestedMs=android.os.SystemClock.elapsedRealtime();
+        cfgTransferMs=0L;cfgReadbackMs=0L;cfgReadFragments=0;
         // Preview frames are optional telemetry. Unlike a write or STOP, a
         // read-only Output Manager reload should queue rather than fail while
         // the Layout's auto-refreshing LED Preview owns the GATT operation.
@@ -550,6 +1278,8 @@ final class BleDiscovery {
     }
     private void beginOutputRead(int index){
         cfgBusy=true;cfgSaving=false;cfgIndex=index;cfgPhase=1;cfgOffset=0;
+        cfgTransferMs=android.os.SystemClock.elapsedRealtime();
+        cfgReadbackMs=cfgTransferMs;
         cfgSend(new byte[]{2,1,(byte)index});
     }
     private String configReadBlocker(){
@@ -564,14 +1294,20 @@ final class BleDiscovery {
     /** True means admitted (possibly waiting for one preview ATT callback).
      * Only revision-checked readback proves application. */
     boolean saveOutput(int index,String json){
+        if(pixelProbeWritePending||panelSaveBusy)return false;
         if(!canConfigure()){cfgNotify(false,"Pair and authorize BLE before saving CORE outputs",null,index);return false;}
         if(index>=0 && index<=1 && deferBehindFrame(()->saveOutput(index,json)))return true;
-        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
+        if(index<0||index>1||cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
+           panelSnapshotQueuedLane>=0||panelCancelQueued||
+           frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending){cfgNotify(false,"BLE is busy; retry after current transfer",null,index);return false;}
         if(cfgKnownRevision[index]<0){cfgNotify(false,"Load this output over BLE before saving",null,index);return false;}
         if(cfgKnownRevision[index]>=65535){cfgNotify(false,"CORE output revision exhausted; no wrap or additional save permitted",null,index);return false;}
         try {cfgBytes=BleConfigCodec.encode(new org.json.JSONObject(json));}
         catch(Exception e){cfgNotify(false,"Invalid draft: "+e.getMessage(),null,index);return false;}
         cfgExpected=Arrays.copyOf(cfgBytes,cfgBytes.length);
+        cfgRequestedMs=android.os.SystemClock.elapsedRealtime();
+        cfgTransferMs=cfgRequestedMs;cfgReadbackMs=0L;cfgReadFragments=0;
         cfgBusy=true;cfgSaving=true;cfgIndex=index;cfgPhase=3;cfgOffset=0;
         cfgCrc=BleConfigCodec.crc16(cfgBytes);cfgRevision=cfgKnownRevision[index];cfgSaveBase=cfgRevision;
         return cfgSend(new byte[]{2,3,(byte)index,(byte)cfgBytes.length,(byte)(cfgBytes.length>>8),
@@ -600,8 +1336,15 @@ final class BleDiscovery {
             cfgKnownRevision[index]=-1;
             cfgLatest[index]=null;
         }
+        boolean wasSaving=cfgSaving;
         cfgBusy=false;cfgSaving=false;cfgWaitingWrite=false;cfgWaitingRead=false;
-        cfgWatchdog++;cfgNotify(false,message,null,index);pumpQueue();
+        cfgWatchdog++;
+        // A GATT 133 or lost ACK can arrive after flash commit. Treat the
+        // result as unknown; never issue an automatic second write.
+        cfgNotify(false,wasSaving?
+            message+" · Save unverified; reconnect and Reload before retrying.":
+            message,null,index);
+        pumpQueue();
     }
     @SuppressWarnings({"MissingPermission","deprecation"})
     private boolean cfgSend(byte[] packet){
@@ -651,6 +1394,7 @@ final class BleDiscovery {
             int offset=(packet[4]&255)|((packet[5]&255)<<8),count=packet.length-6;
             if(offset!=cfgOffset||count<1||count>14||offset+count>cfgBytes.length){cfgFail("BLE output chunk missing or out of order");return;}
             System.arraycopy(packet,6,cfgBytes,offset,count);cfgOffset+=count;
+            cfgReadFragments++;
             if(cfgOffset<cfgBytes.length){cfgReadNext();return;}
             if(BleConfigCodec.crc16(cfgBytes)!=cfgCrc){cfgFail("BLE output read checksum mismatch");return;}
             try{
@@ -666,11 +1410,11 @@ final class BleDiscovery {
                 }
                 cfgKnownRevision[cfgIndex]=cfgRevision;cfgLatest[cfgIndex]=Arrays.copyOf(cfgBytes,cfgBytes.length);
                 cfgBusy=false;cfgWatchdog++;
-                cfgNotify(true,cfgSaving?
+                cfgNotify(true,(cfgSaving?
                     (cfgRevision==cfgSaveBase?
                         "CORE active output already matched; no new revision committed":
                         "Saved to CORE and active output verified over BLE"):
-                    "Loaded active output from CORE over BLE",output,cfgIndex);
+                    "Loaded active output from CORE over BLE")+cfgTimingDetail(),output,cfgIndex);
                 cfgSaving=false;pumpQueue();return;
             }catch(Exception e){cfgFail("CORE returned invalid output: "+e.getMessage());return;}
         }
@@ -680,6 +1424,7 @@ final class BleDiscovery {
             cfgPhase=5;cfgSend(new byte[]{2,5,(byte)cfgIndex});return;
         }
         if(cfgPhase==5 && opcode==0x85){
+            cfgReadbackMs=android.os.SystemClock.elapsedRealtime();
             cfgPhase=1;cfgSend(new byte[]{2,1,(byte)cfgIndex});return;
         }
         cfgFail("Unexpected BLE configuration state");
@@ -737,6 +1482,7 @@ final class BleDiscovery {
         autoReconnectLease++;autoReconnectBudget=1;infoReadPending=false;
         stopScan();
         frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback
+        panelDisconnected(); // also clear stale Panel/Probe capability and in-flight diagnostic lease
         clearQueuedOutputRead();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
@@ -754,7 +1500,7 @@ final class BleDiscovery {
     }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
-    /** One UI action: use the stored owner key or enroll with physical BOOT once. */
+    /** One UI action: use the stored owner key or enroll the first encrypted bonded phone. */
     void authorizeOrPair() {
         // The combined Home/Settings action must not open a second GATT
         // challenge while this session is already authorized.
@@ -763,10 +1509,12 @@ final class BleDiscovery {
         if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
         else authorizeStored();
     }
-    /** Physical BOOT/GPIO0 button must be held after CORE starts, until read completes. */
+    /** Compatibility method name; enrollment now requires an encrypted owner bond, never BOOT. */
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
-        if(!connected||enroll==null){notifyStatus("Connect CORE v0.1.24 via BLE first");return;}
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
+        if(!connected||enroll==null||!ownerBondingSupported){notifyStatus("Connect updated CORE for automatic owner enrollment");return;}
+        if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::pairWithBoot))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
@@ -778,8 +1526,10 @@ final class BleDiscovery {
     /** Prefer owner-key authentication, with Wi-Fi token retained only as manual fallback. */
     @SuppressWarnings("MissingPermission")
     void authorizeStored(){
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if(!connected||challenge==null){notifyStatus("Connect CORE v0.1.24 first, or use legacy Wi-Fi authorization");return;}
-        if(BleOwnerVault.load(activity,activeAddress)==null){notifyStatus("Not paired yet: hold BOOT and tap Pair with BOOT");return;}
+        if(BleOwnerVault.load(activity,activeAddress)==null){pairWithBoot();return;}
+        if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::authorizeStored))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE busy; retry authorization");return;}
         challengePending=true;
@@ -790,9 +1540,9 @@ final class BleDiscovery {
     private void ownerRead(BluetoothGatt connection,byte[] value,int status){
         pairPending=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null||value.length!=16){
-            notifyStatus("Enrollment refused: hold BOOT on powered-on CORE during Pair (GATT "+status+")");return;
+            notifyStatus("Owner enrollment refused: this controller belongs to another phone or needs its configured PIN (GATT "+status+")");return;
         }
-        try{BleOwnerVault.save(activity,activeAddress,value);notifyStatus("Bench owner key saved to Android Keystore; authorizing…");ui.post(()->authorizeStored());}
+        try{BleOwnerVault.save(activity,activeAddress,value);offerOwnerPin=true;notifyStatus("Controller owner remembered; connecting…");ui.post(()->authorizeStored());}
         catch(Exception e){notifyStatus("Could not securely store owner key; pairing not complete");}
     }
     private void ownerChallenge(byte[] value,int status){
@@ -812,6 +1562,7 @@ final class BleDiscovery {
 
     /** Token must come from the paired phone's Wi-Fi connection to CORE; never persist it. */
     void authorize(String tokenHex) {
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if (!connected || command == null || reply == null) {
             notifyStatus("Connect OpenTail BLE before authorizing lighting controls"); return;
         }
@@ -866,7 +1617,12 @@ final class BleDiscovery {
     void showContinuousTertiaryFx(int id,int chains,int zones,int r,int g,int b,
           int br,int bg,int bb,int brightness,int speed,int intensity,int palette,int third) {
         if(!canTertiaryFx()){
-            notifyStatus("CORE fx-tertiary-v1 unavailable or unauthorized; third color is local only");
+            notifyStatus("CORE third-color capability unavailable or unauthorized; third color is local only");
+            return;
+        }
+        if(!TertiaryFxCommand.supportedForFirmware(id,palette,coreInfoText)){
+            notifyStatus("CORE advertised capability does not admit effect "+id+
+                " palette "+palette+"; third-color command rejected without legacy fallback");
             return;
         }
         try {enqueueWrite(TertiaryFxCommand.encode(id,chains,zones,r,g,b,br,bg,bb,
@@ -885,6 +1641,7 @@ final class BleDiscovery {
     }
     /** Explicit NVS preset actions: 8 slots, owner authorized; no auto-start on boot. */
     void fxPreset(int action,int slot) {
+        if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if (!canControl()) {notifyStatus("Authorize BLE before preset changes");return;}
         if (action<6||action>8||slot<0||slot>=8){
             notifyStatus("Invalid CORE preset action or slot");return;
@@ -897,6 +1654,8 @@ final class BleDiscovery {
         if(deferBehindFrame(()->fxPreset(action,slot)))return;
         // Explicit preset NVS actions cannot be overwritten by live FX coalescing.
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||panelControlQueued||panelUpdateQueued||panelReadQueued!=0||
+           panelSnapshotQueuedLane>=0||panelCancelQueued||
            frameCapture.busy()||palette.busy()||nextPacket!=null||
            authPending||pairPending||challengePending){
             notifyStatus("BLE busy; retry preset action");return;
@@ -930,6 +1689,13 @@ final class BleDiscovery {
     }
     private void enqueueWrite(byte[] data) {
         final boolean stop = isStopPacket(data);
+        if(stop && pixelProbeRequests.pending()) {
+            // A pending diagnostic must NOT follow STOP and relight pixel 0.
+            // An already in-flight probe still drains before queued STOP.
+            pixelProbeRequests.clear();pixelProbeQueuedOwner=null;
+            pixelProbeRequestLease++;
+            probeNotify("Pixel probe cancelled by safety STOP");
+        }
         if(palette.busy() && stop) palette.abortForStop();
         if(frameCapture.busy() && stop) {
             // STOP supersedes diagnostic reads. Drain the one in-flight GATT
@@ -939,10 +1705,27 @@ final class BleDiscovery {
             frameCapture.abortForStop();
             return;
         }
-        if (writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy || frameCapture.busy() || palette.busy() || nextPacket!=null) {
+        if (stop&&panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&
+            !panelSnapshotBusy&&!panelSaveWaitingWrite&&!panelSaveWaitingRead) {
+            // Queue STOP before releasing the Save owner; pumpQueue must never
+            // dispatch an earlier FX packet ahead of this safety command.
+            nextPacket=Arrays.copyOf(data,data.length);
+            afterStopPacket=null;
+            panelSaveFinish(false,"STOP prioritized; durable Save must be reconciled after reconnect",null);
+            return;
+        }
+        if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending || cfgBusy || fxCapsBusy || infoReadPending || triggerMapBusy || ownerPinWritePending ||
+            panelReadPending || panelSnapshotBusy || panelControlWritePending || panelUpdateWritePending || panelControlQueued || panelUpdateQueued || panelReadQueued!=0 ||
+            panelSnapshotQueuedLane>=0 || panelCancelQueued ||
+            frameCapture.busy() || palette.busy() || nextPacket!=null) {
             if (stop) {
                 nextPacket=Arrays.copyOf(data,data.length);
                 afterStopPacket=null;
+                if(panelSnapshotBusy) {
+                    panelSnapshotAbortForStop=true;
+                    if(!panelSnapshotWaitingWrite&&!panelSnapshotWaitingRead)
+                        panelSnapshotFail("Panel snapshot aborted to prioritize STOP");
+                }
             } else if (isStopPacket(nextPacket)) {
                 // A later FX edit must not erase a STOP waiting behind ATT.
                 // Coalesce newer edits in one successor slot after STOP.
@@ -975,7 +1758,8 @@ final class BleDiscovery {
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
-        if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
+        if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||
+           panelReadPending||panelSnapshotBusy||panelControlWritePending||panelUpdateWritePending||
            frameCapture.busy()||palette.busy()||authPending||pairPending||challengePending)return;
         // Preserve existing STOP-before-FX order. Never prioritize a read
         // over a previously queued safety STOP.
@@ -984,6 +1768,15 @@ final class BleDiscovery {
             nextPacket=isStopPacket(pendingPacket)?afterStopPacket:null;
             afterStopPacket=null;
             writeNow();
+            return;
+        }
+        if(ownerAutoAuthQueued){
+            ownerAutoAuthQueued=false;authorizeOrPair();return;
+        }
+        if(ownerPinQueued!=null){
+            byte[] packet=ownerPinQueued;BluetoothGatt owner=ownerPinQueuedOwner;
+            ownerPinQueued=null;ownerPinQueuedOwner=null;
+            if(owner==gatt&&canControl())startOwnerPinWrite(packet);
             return;
         }
         if(previewCommand!=null) {
@@ -1005,14 +1798,54 @@ final class BleDiscovery {
             beginOutputRead(index);
             return;
         }
+        if(panelCancelQueued) {
+            startPanelCancel();
+            return;
+        }
+        if(panelControlQueued) {
+            startPanelControl();
+            return;
+        }
+        if(panelUpdateQueued) {
+            startPanelUpdate();
+            return;
+        }
+        if(pixelProbeRequests.pending()) {
+            // One explicit owner action preempts background status polling,
+            // never a queued STOP, in-flight ATT, panel UPDATE or cancellation.
+            int lane=pixelProbeRequests.take();
+            BluetoothGatt owner=pixelProbeQueuedOwner;
+            pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+            if(owner==gatt&&canProbeFirstPixel())startPixelProbe(lane);
+            else probeNotify("Pixel probe cancelled: connection changed before admission");
+            return;
+        }
+        if(panelSnapshotQueuedLane>=0) {
+            int lane=panelSnapshotQueuedLane;panelSnapshotQueuedLane=-1;
+            startPanelSnapshot(lane);
+            return;
+        }
+        if(panelReadQueued!=0) {
+            startPanelRead();
+            return;
+        }
         if(infoReadQueued && coreInfo!=null && gatt!=null){
             infoReadQueued=false;
             infoReadPending=true;
             boolean started=false;
             try{started=gatt.readCharacteristic(coreInfo);}
             catch(SecurityException ex){notifyStatus("CORE firmware information read permission denied");}
-            if(!started)infoReadPending=false;
+            if(!started){infoReadPending=false;ui.post(this::pumpQueue);}
+            else watchInfoRead(gatt);
         }
+    }
+    private int infoReadWatchLease;
+    private void watchInfoRead(BluetoothGatt owner) {
+        final int lease=++infoReadWatchLease;
+        ui.postDelayed(()->{
+            if(!stopped && owner==gatt && infoReadPending && lease==infoReadWatchLease)
+                recoverStalledGatt(owner,"CORE information ATT read timed out");
+        },8000L);
     }
     private String preferredPending = null;
     private Consumer<String> preferredListener;
@@ -1217,6 +2050,7 @@ final class BleDiscovery {
             scanFallbackAllowed=false;
             connectionAttempt++;
             connected=false;connecting=false;authorized=false;mtuNegotiating=false;infoReadPending=false;
+            panelDisconnected();
             frameCapture.cancel();clearPreviewCommand();palette.reset();clearQueuedOutputRead();fxCaps=null;fxCapsBusy=false;
             command=null;reply=null;enroll=null;challenge=null;triggerMapping=null;
             triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;
@@ -1251,6 +2085,8 @@ final class BleDiscovery {
             notifyStatus("Nearby-device permission required");
             return;
         }
+        // A controller switch invalidates every old Panel session and readback.
+        panelDisconnected();
         // Never overlap a stale client registration with a new GATT connection.
         if (gatt != null) {
             BluetoothGatt previous=gatt;gatt=null;
@@ -1300,8 +2136,9 @@ final class BleDiscovery {
                 infoReadPending=false;
                 connecting = false;
                 connected = false;
-                frameCapture.cancel();clearPreviewCommand();palette.reset();clearQueuedOutputRead();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
-                notifyStatus("BLE disconnected (GATT status " + status + ")");
+                frameCapture.cancel();clearPreviewCommand();palette.reset();clearQueuedOutputRead();panelDisconnected();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
+                notifyStatus("BLE disconnected (GATT status " + status + ")" +
+                    (status==133?" · Android GATT 133; pending transfers and Pixel Probe canceled":""));
                 connection.close();
                 if (gatt == connection) gatt = null;
                 scheduleReconnect(connectingAddress,fallback);
@@ -1316,7 +2153,8 @@ final class BleDiscovery {
             if(stopped || connection!=gatt)return;
             if(mtuNegotiating){
                 mtuNegotiating=false;
-                notifyStatus("BLE MTU "+mtu+"; discovering services…");
+                negotiatedMtu=status==BluetoothGatt.GATT_SUCCESS?Math.max(23,mtu):23;
+                notifyStatus("BLE MTU "+negotiatedMtu+"; discovering services…");
                 discoverCoreServices(connection);
             }
         }
@@ -1361,6 +2199,16 @@ final class BleDiscovery {
             reply = service.getCharacteristic(REPLY_UUID);
             fxCaps = service.getCharacteristic(FX_CAPS_UUID);
             triggerMapping = service.getCharacteristic(TRIGGER_MAP_UUID);
+            panelCapabilitiesCharacteristic=service.getCharacteristic(PANEL_CAP_UUID);
+            panelConfigCommand=service.getCharacteristic(PANEL_CFG_CMD_UUID);
+            panelConfigReply=service.getCharacteristic(PANEL_CFG_RSP_UUID);
+            pixelProbeCharacteristic=service.getCharacteristic(PIXEL_PROBE_UUID);
+            pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+            pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;
+            panelPreviewControl=service.getCharacteristic(PANEL_PREVIEW_CONTROL_UUID);
+            panelPreviewUpdate=service.getCharacteristic(PANEL_PREVIEW_UPDATE_UUID);
+            panelPreviewStatus=service.getCharacteristic(PANEL_PREVIEW_STATUS_UUID);
+            panelCapabilities=null;
             enroll = service.getCharacteristic(ENROLL_UUID);
             challenge = service.getCharacteristic(CHALLENGE_UUID);
             activeAddress=connection.getDevice().getAddress();
@@ -1386,6 +2234,7 @@ final class BleDiscovery {
             infoReadPending=true;
             try { infoStarted=connection.readCharacteristic(info); }
             catch (SecurityException ex) { notifyStatus("Bluetooth permission missing for CORE information read"); }
+            if(infoStarted)watchInfoRead(connection);
             if (!infoStarted) {
                 infoReadPending=false;
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
@@ -1406,6 +2255,9 @@ final class BleDiscovery {
             if (REPLY_UUID.equals(characteristic.getUuid())) { acceptReply(value,status);return; }
             if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(value,status);return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,value,status);return;}
+            if (PANEL_CAP_UUID.equals(characteristic.getUuid())) {panelCapabilitiesRead(connection,value,status);return;}
+            if (PANEL_PREVIEW_STATUS_UUID.equals(characteristic.getUuid())) {panelStatusRead(connection,value,status);return;}
+            if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingRead)panelSaveRead(connection,value,status);else panelSnapshotRead(connection,value,status);return;}
             if (INFO_UUID.equals(characteristic.getUuid())) {
                 finishInfoRead(connection,value,status);
             }
@@ -1427,6 +2279,9 @@ final class BleDiscovery {
                 }
                 if (FX_CAPS_UUID.equals(characteristic.getUuid())) {fxRead(characteristic.getValue(),status);return;}
                 if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapRead(connection,characteristic.getValue(),status);return;}
+                if (PANEL_CAP_UUID.equals(characteristic.getUuid())) {panelCapabilitiesRead(connection,characteristic.getValue(),status);return;}
+                if (PANEL_PREVIEW_STATUS_UUID.equals(characteristic.getUuid())) {panelStatusRead(connection,characteristic.getValue(),status);return;}
+                if (PANEL_CFG_RSP_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingRead)panelSaveRead(connection,characteristic.getValue(),status);else panelSnapshotRead(connection,characteristic.getValue(),status);return;}
                 if (INFO_UUID.equals(characteristic.getUuid())) {
                     finishInfoRead(connection,characteristic.getValue(),status);
                 }
@@ -1434,10 +2289,41 @@ final class BleDiscovery {
         }
         @Override public void onCharacteristicWrite(BluetoothGatt connection,BluetoothGattCharacteristic characteristic,int status){
             if(stopped || connection!=gatt)return;
+            if (ENROLL_UUID.equals(characteristic.getUuid())&&ownerPinWritePending) {
+                ownerPinWritePending=false;pairPending=false;
+                notifyStatus(status==BluetoothGatt.GATT_SUCCESS?"Controller PIN saved":"PIN update uncertain; reconnect before retry");
+                if(status!=BluetoothGatt.GATT_SUCCESS)recoverStalledGatt(connection,"PIN write failed");
+                else pumpQueue();return;
+            }
+            if (PIXEL_PROBE_UUID.equals(characteristic.getUuid())) {
+                if(!pixelProbeWritePending)return;
+                final int lane=pixelProbeLane;
+                pixelProbeWritePending=false;pixelProbeLane=-1;pixelProbeWatchLease++;
+                probeNotify(status==BluetoothGatt.GATT_SUCCESS?
+                    "Pixel 0 white probe accepted by CORE on O"+(lane+1)+
+                    "; 2-second lease, actual illumination still requires physical check":
+                    "Pixel 0 probe rejected on O"+(lane+1)+" (GATT "+status+")");
+                if(status==133) {
+                    // Android GATT 133 means the ATT outcome is unknown.
+                    // Retire this connection instead of dispatching more
+                    // requests on a possibly wedged stack. Never replay probe.
+                    recoverStalledGatt(connection,"Pixel Probe GATT 133; request not retried");
+                } else pumpQueue();
+                return;
+            }
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
             if (PALETTE_CMD_UUID.equals(characteristic.getUuid())) {palette.written(connection,status);return;}
             if (FRAME_CMD_UUID.equals(characteristic.getUuid())) {ui.post(()->frameCapture.written(connection,status));return;}
             if (TRIGGER_MAP_UUID.equals(characteristic.getUuid())) {triggerMapWritten(connection,status);return;}
+            if (PANEL_CFG_CMD_UUID.equals(characteristic.getUuid())) {if(panelSaveWaitingWrite)panelSaveWritten(connection,status);else panelSnapshotWritten(connection,status);return;}
+            if (PANEL_PREVIEW_CONTROL_UUID.equals(characteristic.getUuid())) {
+                if(panelCancelWaitingWrite)panelCancelWritten(connection,status);
+                else panelControlWritten(connection,status);
+                return;
+            }
+            if (PANEL_PREVIEW_UPDATE_UUID.equals(characteristic.getUuid())) {
+                panelUpdateWritten(connection,status);return;
+            }
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
@@ -1456,15 +2342,625 @@ final class BleDiscovery {
         }
     };
 
+    @SuppressWarnings("MissingPermission")
+    private void startPanelRead() {
+        final int kind=panelReadQueued;panelReadQueued=0;
+        final BluetoothGatt owner=gatt;
+        BluetoothGattCharacteristic characteristic=kind==1?
+            panelCapabilitiesCharacteristic:panelPreviewStatus;
+        if(owner==null||characteristic==null||!canControl()) {
+            panelReadPending=false;panelReadKind=0;pumpQueue();return;
+        }
+        panelReadPending=true;panelReadKind=kind;
+        final int lease=++panelReadWatchLease;
+        boolean started=false;
+        try{started=owner.readCharacteristic(characteristic);}
+        catch(SecurityException ex){notifyStatus("Panel telemetry read permission denied");}
+        if(!started){
+            panelReadPending=false;panelReadKind=0;
+            notifyStatus("Panel telemetry read could not start");pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelReadPending&&panelReadWatchLease==lease)
+                recoverStalledGatt(owner,"Panel telemetry ATT read timed out; reconnect required");
+        },10000L);
+    }
+
+    private void panelCapabilitiesRead(BluetoothGatt owner,byte[] value,int status) {
+        if(owner!=gatt)return;
+        if(panelReadPending&&panelReadKind==1){panelReadPending=false;panelReadKind=0;panelReadWatchLease++;}
+        if(status!=BluetoothGatt.GATT_SUCCESS||value==null){
+            panelCapabilities=null;notifyStatus("CORE Panel capability read failed: "+status);
+            pumpQueue();return;
+        }
+        try {
+            panelCapabilities=PanelPreviewProtocol.Capabilities.parse(value);
+            if(panelCapabilities.supportsPreviewV2()) {
+                // Android's GATT stack performs the characteristic long-read;
+                // the app validates the complete 61-byte value and never
+                // applies the ATT read offset a second time.
+                panelReadQueued=2;
+            } else notifyStatus("CORE Panel preview v2 is not fully advertised; geometry editing remains read-only");
+        } catch(IllegalArgumentException ex) {
+            panelCapabilities=null;notifyStatus("Invalid CORE Panel capabilities: "+ex.getMessage());
+        }
+        pumpQueue();
+    }
+
+    private void panelRetryStatusRead(BluetoothGatt owner) {
+        if(panelStatusReadRetries>=3) {
+            notifyStatus("CORE Panel status retries exhausted; reconnect or request a fresh status read");
+            return;
+        }
+        panelStatusReadRetries++;
+        final int lease=++panelStatusRetryLease;
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelStatusRetryLease==lease&&
+               !panelReadPending&&panelReadQueued==0) {
+                panelReadQueued=2;pumpQueue();
+            }
+        },250L);
+    }
+
+    private void panelStatusRead(BluetoothGatt owner,byte[] value,int status) {
+        if(owner!=gatt)return;
+        if(panelReadPending&&panelReadKind==2){panelReadPending=false;panelReadKind=0;panelReadWatchLease++;}
+        if(status!=BluetoothGatt.GATT_SUCCESS||value==null){
+            int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
+                (panelLastStatus!=null?panelLastStatus.lane:0);
+            panelStatusFresh[lane]=false;
+            panelStatusExpectedLane=-1;
+            TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
+                "CORE Panel status read failed; transaction synchronization is uncertain");
+            GeometryTransactionManager affected=panelGeometryManagers[lane];
+            if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
+            panelNotify(null,malformed);
+            notifyStatus("CORE Panel status read failed: "+status);
+            panelRetryStatusRead(owner);pumpQueue();return;
+        }
+        final PanelPreviewProtocol.Status current;
+        try{current=PanelPreviewProtocol.Status.parse(value);}
+        catch(IllegalArgumentException ex){
+            int lane=panelStatusExpectedLane>=0?panelStatusExpectedLane:
+                (panelLastStatus!=null?panelLastStatus.lane:0);
+            panelStatusFresh[lane]=false;
+            panelStatusExpectedLane=-1;
+            TelemetrySequenceWatchdog.Decision malformed=panelWatchdogs[lane].markMalformedTelemetry(
+                "Invalid or truncated 61-byte CORE Panel status; authoritative reconciliation required");
+            GeometryTransactionManager affected=panelGeometryManagers[lane];
+            if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
+            panelNotify(null,malformed);
+            notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());
+            panelRetryStatusRead(owner);pumpQueue();return;
+        }
+        if(panelStatusExpectedLane>=0&&current.lane!=panelStatusExpectedLane) {
+            panelStatusFresh[panelStatusExpectedLane]=false;
+            panelStatusExpectedLane=-1;
+            notifyStatus("CORE Panel status lane did not match the requested snapshot/transaction lane");
+            pumpQueue();return;
+        }
+        panelStatusExpectedLane=-1;
+        panelStatusReadRetries=0;panelStatusRetryLease++;
+        panelLastStatus=current;
+        panelStatuses[current.lane]=current;
+        panelStatusFresh[current.lane]=true;
+        // Both lanes may be ACTIVE simultaneously, with independent sequence
+        // numbers and lease IDs. A global watchdog would falsely hard-fault
+        // when switching telemetry between O1 and O2.
+        TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane];
+        GeometryTransactionManager manager=panelGeometryManagers[current.lane];
+        if(manager!=null) {
+            manager.observeStatus(current);
+            if(manager.state()==GeometryTransactionManager.State.BEGINNING &&
+               current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acceptBegin(current);
+            else if(manager.state()==GeometryTransactionManager.State.UPDATE_PENDING &&
+                    current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acknowledgeUpdate(current);
+            if(current.lastRejectedReason==PanelPreviewProtocol.ERR_COMMITTING_LOCKED)
+                manager.rejectUpdateDuringCommit(PanelPreviewProtocol.ERR_COMMITTING_LOCKED);
+        }
+        TelemetrySequenceWatchdog.Decision decision=panelWatchdog.observe(current);
+        if(manager!=null&&decision.warning)manager.markSynchronizationUncertain(decision.message);
+        panelNotify(current,decision);
+
+        if(manager!=null&&(!panelReconciliationPending||
+           panelReconciliationLane==current.lane)&&
+           manager.state()==GeometryTransactionManager.State.RECONCILING) {
+            if(!decision.requiresReconciliation)
+                decision=panelWatchdog.markReconciliationFailed(manager.lastError());
+            panelNotify(current,decision);
+            panelBeginReconciliation(owner,current,decision);
+            pumpQueue();return;
+        }
+
+        if(panelReconciliationPending&&panelReconciliationLane==current.lane&&
+           panelReconciliationSnapshotVerified) {
+            if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
+                panelReconciliationSnapshotVerified=false;
+                if(panelTransactionPollAttempts[current.lane]>=40&&
+                   !panelTransactionTimeoutLatched[current.lane]) {
+                    panelTransactionTimeoutLatched[current.lane]=true;
+                    TelemetrySequenceWatchdog.Decision timeout=panelWatchdog.markReconciliationFailed(
+                        "CORE commit remains COMMITTING beyond the bounded acknowledgement window; observing same commit");
+                    if(manager!=null)manager.markSynchronizationUncertain(timeout.message);
+                    panelNotify(current,timeout);
+                }
+                panelScheduleCommitPoll(owner);
+                pumpQueue();return;
+            }
+            PanelPreviewProtocol.LaneSnapshot snapshot=panelReconciliationSnapshot;
+            boolean stable=snapshot!=null&&snapshot.lane==current.lane&&
+                snapshot.activeRevision==current.activeRevision&&
+                snapshot.activeRevision==current.renderRevision&&
+                snapshot.stagedRevision==current.stagedRevision&&
+                snapshot.pending==current.configPending;
+            boolean managerReconciled=true;
+            if(stable) {
+                GeometryTransactionManager.Snapshot confirmed=new GeometryTransactionManager.Snapshot(
+                    snapshot.lane,snapshot.activeRevision,snapshot.wire);
+                if(manager==null) {
+                    manager=new GeometryTransactionManager(confirmed);
+                    panelGeometryManagers[current.lane]=manager;
+                } else managerReconciled=manager.reconcile(current,confirmed);
+            }
+            boolean watchdogReconciled=stable&&managerReconciled&&panelWatchdog.reconcile(current,true);
+            boolean reconciled=stable&&managerReconciled&&watchdogReconciled;
+            TelemetrySequenceWatchdog.Decision reconciliationFailure=null;
+            if(stable&&!reconciled) {
+                String why=!managerReconciled
+                    ?"CORE telemetry sequence/candidate CRC does not match the authoritative geometry snapshot"
+                    :"CORE telemetry watchdog rejected the authoritative geometry reconciliation";
+                reconciliationFailure=panelWatchdog.markReconciliationFailed(why);
+                if(manager!=null)manager.markSynchronizationUncertain(why);
+            }
+            panelReconciliationPending=false;
+            panelReconciliationLane=-1;
+            panelReconciliationSnapshotVerified=false;
+            if(reconciled) {
+                panelReconciliationAttempts=0;
+                panelTransactionPollAttempts[current.lane]=0;
+                panelTransactionTimeoutLatched[current.lane]=false;
+                panelNotify(current,panelWatchdog.snapshot());
+            } else if(!stable&&panelReconciliationAttempts<1) {
+                panelReconciliationAttempts++;
+                panelReconciliationPending=true;
+                panelSnapshotQueuedLane=current.lane;
+            } else if(reconciliationFailure!=null) {
+                panelNotify(current,reconciliationFailure);
+                if(reconciliationFailure.hardFault&&
+                   !panelWatchdog.awaitingFreshSession(current))
+                    panelBeginReconciliation(owner,current,reconciliationFailure);
+            }
+            pumpQueue();return;
+        }
+        if(manager!=null) {
+            GeometryTransactionManager.State transactionState=manager.state();
+            boolean awaitingAck=transactionState==GeometryTransactionManager.State.BEGINNING||
+                transactionState==GeometryTransactionManager.State.UPDATE_PENDING||
+                transactionState==GeometryTransactionManager.State.COMMIT_REQUESTED||
+                transactionState==GeometryTransactionManager.State.COMMITTING;
+            if(awaitingAck) {
+                if(panelTransactionPollAttempts[current.lane]>=40&&
+                   !panelTransactionTimeoutLatched[current.lane]) {
+                    panelTransactionTimeoutLatched[current.lane]=true;
+                    TelemetrySequenceWatchdog.Decision timeout=panelWatchdog.markReconciliationFailed(
+                        "CORE Panel transaction did not acknowledge its latest phase within the bounded poll window");
+                    manager.markSynchronizationUncertain(timeout.message);
+                    panelNotify(current,timeout);
+                    panelBeginReconciliation(owner,current,timeout);
+                    pumpQueue();return;
+                }
+                panelScheduleTransactionPoll(owner,current.lane);
+            } else {
+                panelTransactionPollAttempts[current.lane]=0;
+                panelTransactionTimeoutLatched[current.lane]=false;
+            }
+        }
+        if(decision.requiresReconciliation)panelBeginReconciliation(owner,current,decision);
+        pumpQueue();
+    }
+
+    private void panelBeginReconciliation(BluetoothGatt owner,
+            PanelPreviewProtocol.Status current,TelemetrySequenceWatchdog.Decision decision) {
+        if(owner!=gatt||!canControl())return;
+        if(panelReconciliationPending&&panelReconciliationLane!=current.lane) {
+            // The other lane's verified transaction is in progress.
+            // Never assign its snapshot or session ID to this lane.
+            return;
+        }
+        if(current.state==PanelPreviewProtocol.STATE_COMMITTING) {
+            panelReconciliationPending=true;
+            panelReconciliationLane=current.lane;
+            panelScheduleCommitPoll(owner);return;
+        }
+        if(!panelReconciliationPending) {
+            panelReconciliationPending=true;
+            panelReconciliationLane=current.lane;
+            panelReconciliationAttempts=0;
+            panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
+        }
+        if(panelWatchdogs[current.lane].requiresCancelFor(current)) {
+            if(panelCancelAttemptedSession!=current.sessionId) {
+                panelCancelPacket=PanelPreviewProtocol.cancel(current.lane,current.sessionId);
+                panelCancelQueued=true;pumpQueue();return;
+            }
+            notifyStatus("CORE still reports the hard-fault geometry session as ACTIVE after CANCEL; reconnect before editing");
+            panelReconciliationPending=false;panelReconciliationLane=-1;
+            panelReconciliationSnapshotVerified=false;
+            panelReconciliationSnapshot=null;return;
+        }
+        panelSnapshotQueuedLane=current.lane;pumpQueue();
+    }
+
+    private void panelScheduleCommitPoll(BluetoothGatt owner) {
+        int lane=panelLastStatus==null?-1:panelLastStatus.lane;
+        if(lane>=0)panelScheduleTransactionPoll(owner,lane);
+    }
+
+    private void panelScheduleTransactionPoll(BluetoothGatt owner,int lane) {
+        if(lane<0||lane>1)return;
+        final int lease=++panelPollLease;
+        final int attempt=++panelTransactionPollAttempts[lane];
+        long delay=attempt<=40?200L:1000L;
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&canControl()&&panelPollLease==lease&&
+               !panelReadPending&&panelReadQueued==0)readPanelStatus();
+        },delay);
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelCancel() {
+        panelCancelQueued=false;
+        if(gatt==null||panelPreviewControl==null||panelCancelPacket==null) {
+            panelCancelPacket=null;panelSnapshotQueuedLane=panelLastStatus==null?-1:panelLastStatus.lane;
+            pumpQueue();return;
+        }
+        panelControlWritePending=true;panelCancelWaitingWrite=true;
+        final BluetoothGatt owner=gatt;final int lease=++panelReadWatchLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelPreviewControl,panelCancelPacket,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelPreviewControl.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelPreviewControl.setValue(panelCancelPacket);
+                started=owner.writeCharacteristic(panelPreviewControl);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel preview CANCEL permission denied");}
+        if(!started) {
+            panelCancelWaitingWrite=false;panelControlWritePending=false;
+            if(panelLastStatus!=null)panelCancelAttemptedSession=panelLastStatus.sessionId;
+            panelCancelPacket=null;
+            if(panelLastStatus!=null)panelSnapshotQueuedLane=panelLastStatus.lane;
+            pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelControlWritePending&&
+               panelCancelWaitingWrite&&panelReadWatchLease==lease)
+                recoverStalledGatt(owner,"Panel preview CANCEL timed out; reconnect required");
+        },8000L);
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelControl() {
+        panelControlQueued=false;
+        if(gatt==null||panelPreviewControl==null||panelControlPacket==null) {
+            GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
+                ?panelGeometryManagers[panelControlLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel control characteristic unavailable");
+            panelStatusExpectedLane=panelControlLane;
+            panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+            panelReadQueued=2;pumpQueue();return;
+        }
+        panelControlWritePending=true;panelControlWaitingWrite=true;
+        final BluetoothGatt owner=gatt;final int lease=++panelControlWriteLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelPreviewControl,panelControlPacket,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelPreviewControl.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelPreviewControl.setValue(panelControlPacket);
+                started=owner.writeCharacteristic(panelPreviewControl);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel preview control permission denied");}
+        if(!started) {
+            panelControlWaitingWrite=false;panelControlWritePending=false;
+            GeometryTransactionManager manager=panelControlLane>=0&&panelControlLane<2
+                ?panelGeometryManagers[panelControlLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel control ATT write could not start");
+            panelStatusExpectedLane=panelControlLane;
+            panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+            panelReadQueued=2;pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelControlWaitingWrite&&panelControlWriteLease==lease)
+                recoverStalledGatt(owner,"Panel preview control write timed out; reconnect required");
+        },8000L);
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelUpdate() {
+        panelUpdateQueued=false;
+        if(gatt==null||panelPreviewUpdate==null||panelUpdatePacket==null) {
+            GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
+                ?panelGeometryManagers[panelUpdateLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE characteristic unavailable");
+            panelStatusExpectedLane=panelUpdateLane;
+            panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
+        }
+        panelUpdateWritePending=true;
+        final BluetoothGatt owner=gatt;final int lease=++panelUpdateWriteLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelPreviewUpdate,panelUpdatePacket,
+                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelPreviewUpdate.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                panelPreviewUpdate.setValue(panelUpdatePacket);
+                started=owner.writeCharacteristic(panelPreviewUpdate);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel UPDATE permission denied");}
+        if(!started) {
+            panelUpdateWritePending=false;
+            GeometryTransactionManager manager=panelUpdateLane>=0&&panelUpdateLane<2
+                ?panelGeometryManagers[panelUpdateLane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("Panel UPDATE ATT write could not start");
+            panelStatusExpectedLane=panelUpdateLane;
+            panelUpdatePacket=null;panelUpdateLane=-1;panelReadQueued=2;pumpQueue();return;
+        }
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelUpdateWritePending&&panelUpdateWriteLease==lease)
+                recoverStalledGatt(owner,"Panel UPDATE write completion timed out; reconnect required");
+        },8000L);
+    }
+
+    private void panelControlWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelControlWaitingWrite)return;
+        int lane=panelControlLane,action=panelControlAction;
+        panelControlWaitingWrite=false;panelControlWritePending=false;
+        panelControlPacket=null;panelControlAction=0;panelControlLane=-1;
+        if(lane>=0&&lane<2) {
+            GeometryTransactionManager manager=panelGeometryManagers[lane];
+            if(status==BluetoothGatt.GATT_SUCCESS) {
+                if(manager!=null&&action==PANEL_CONTROL_COMMIT)manager.commitWriteCompleted();
+            } else if(manager!=null) {
+                manager.markSynchronizationUncertain("CORE Panel control ATT write failed ("+status+")");
+            }
+        }
+        if(status!=BluetoothGatt.GATT_SUCCESS)
+            notifyStatus("CORE Panel control write failed: "+status);
+        if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
+        if(status==BluetoothGatt.GATT_SUCCESS&&action==PANEL_CONTROL_COMMIT&&
+           lane>=0&&lane<2) {
+            // A finalized O1 revision does not invalidate O2's still-active
+            // volatile geometry, status-v2 lease or authenticated snapshot.
+            panelSnapshotFresh[lane]=false;
+            panelStatusFresh[lane]=false;
+        }
+        panelReadQueued=2;pumpQueue();
+    }
+
+    private void panelUpdateWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelUpdateWritePending)return;
+        int lane=panelUpdateLane;
+        panelUpdateWritePending=false;panelUpdatePacket=null;panelUpdateLane=-1;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            GeometryTransactionManager manager=lane>=0&&lane<2?panelGeometryManagers[lane]:null;
+            if(manager!=null)manager.markSynchronizationUncertain("CORE Panel UPDATE ATT write failed ("+status+")");
+            notifyStatus("CORE Panel UPDATE write failed: "+status);
+        }
+        // ATT write completion is not an application ACK. Always read status-v2.
+        if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
+        panelReadQueued=2;pumpQueue();
+    }
+
+    private void panelCancelWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelCancelWaitingWrite)return;
+        panelCancelWaitingWrite=false;panelControlWritePending=false;
+        if(panelLastStatus!=null)panelCancelAttemptedSession=panelLastStatus.sessionId;
+        panelCancelPacket=null;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            notifyStatus("CORE Panel preview CANCEL write failed: "+status);
+            if(panelLastStatus!=null)panelSnapshotQueuedLane=panelLastStatus.lane;
+        } else {
+            if(panelLastStatus!=null)panelStatusExpectedLane=panelLastStatus.lane;
+            panelReadQueued=2;
+        }
+        pumpQueue();
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void startPanelSnapshot(int lane) {
+        if(!canReadPanelPreview()||gatt==null)return;
+        panelSnapshotBusy=true;panelSnapshotLane=lane;panelSnapshotPhase=0;
+        panelSnapshotOffset=0;panelSnapshotHeader=null;panelSnapshotAbortForStop=false;
+        panelSnapshotFresh[lane]=false;panelStatusFresh[lane]=false;
+        panelSnapshotWire=new byte[PanelPreviewProtocol.MAP_BYTES];
+        panelSnapshotWrite(new byte[]{3,1,(byte)lane});
+    }
+
+    @SuppressWarnings({"MissingPermission","deprecation"})
+    private void panelSnapshotWrite(byte[] packet) {
+        if(!panelSnapshotBusy||gatt==null||panelConfigCommand==null) {
+            panelSnapshotFail("Panel snapshot write lost its GATT session");return;
+        }
+        panelSnapshotWaitingWrite=true;panelSnapshotWaitingRead=false;
+        final BluetoothGatt owner=gatt;final int lease=++panelSnapshotWatchLease;
+        boolean started=false;
+        try {
+            if(Build.VERSION.SDK_INT>=33)
+                started=owner.writeCharacteristic(panelConfigCommand,packet,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)==BluetoothStatusCodes.SUCCESS;
+            else {
+                panelConfigCommand.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                panelConfigCommand.setValue(packet);
+                started=owner.writeCharacteristic(panelConfigCommand);
+            }
+        } catch(SecurityException ex){notifyStatus("Panel snapshot write permission denied");}
+        if(!started){panelSnapshotFail("CORE Panel snapshot command could not start");return;}
+        ui.postDelayed(()->{
+            if(!stopped&&owner==gatt&&panelSnapshotBusy&&panelSnapshotWatchLease==lease)
+                recoverStalledGatt(owner,"Panel snapshot transfer timed out; reconnect required");
+        },20000L);
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void panelSnapshotWritten(BluetoothGatt owner,int status) {
+        if(owner!=gatt||!panelSnapshotBusy||!panelSnapshotWaitingWrite)return;
+        panelSnapshotWaitingWrite=false;
+        if(status!=BluetoothGatt.GATT_SUCCESS) {
+            panelSnapshotFail("CORE Panel snapshot write failed: "+status);return;
+        }
+        if(panelSnapshotAbortForStop) {
+            panelSnapshotFail("Panel snapshot aborted to prioritize STOP");return;
+        }
+        panelSnapshotWaitingRead=true;
+        try {
+            if(!owner.readCharacteristic(panelConfigReply))
+                panelSnapshotFail("CORE Panel snapshot read did not start");
+        } catch(SecurityException ex){panelSnapshotFail("Panel snapshot read permission denied");}
+    }
+
+    private void panelSnapshotRead(BluetoothGatt owner,byte[] value,int status) {
+        if(owner!=gatt||!panelSnapshotBusy||!panelSnapshotWaitingRead)return;
+        panelSnapshotWaitingRead=false;
+        if(panelSnapshotAbortForStop) {
+            panelSnapshotFail("Panel snapshot aborted to prioritize STOP");return;
+        }
+        if(status!=BluetoothGatt.GATT_SUCCESS||value==null) {
+            panelSnapshotFail("CORE Panel snapshot response failed: "+status);return;
+        }
+        try {
+            if(panelSnapshotPhase==0) {
+                panelSnapshotHeader=PanelPreviewProtocol.SnapshotHeader.parse(value,panelSnapshotLane);
+                panelSnapshotPhase=1;panelSnapshotOffset=0;
+                panelSnapshotReadNextChunk();return;
+            }
+            if(value.length<6||PanelPreviewProtocol.u8(value[0])!=PanelPreviewProtocol.WIRE_VERSION||
+               PanelPreviewProtocol.u8(value[1])!=0x82||
+               PanelPreviewProtocol.u8(value[2])!=panelSnapshotLane||
+               PanelPreviewProtocol.u16(value,3)!=panelSnapshotOffset)
+                throw new IllegalArgumentException("Panel snapshot chunk header/offset mismatch");
+            int count=value.length-5;
+            if(count<1||count>15||panelSnapshotOffset+count>panelSnapshotWire.length)
+                throw new IllegalArgumentException("Panel snapshot chunk length out of range");
+            System.arraycopy(value,5,panelSnapshotWire,panelSnapshotOffset,count);
+            panelSnapshotOffset+=count;
+            if(panelSnapshotOffset<panelSnapshotWire.length) {
+                panelSnapshotReadNextChunk();return;
+            }
+            panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane);
+            PanelPreviewProtocol.LaneSnapshot snapshot=
+                new PanelPreviewProtocol.LaneSnapshot(panelSnapshotHeader,panelSnapshotWire);
+            panelConfirmedSnapshots[panelSnapshotLane]=snapshot;
+            panelSnapshotFresh[panelSnapshotLane]=true;
+            boolean retrySaveReadback=false;
+            if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7)&&panelSaveLane==snapshot.lane) {
+                // No-op saves retain the revision. A changed durable map must
+                // advance it, and every success must match the whole 667-byte
+                // active image, not an ATT write ACK or staged NVS contents.
+                boolean unchanged=panelSavePhase==4&&
+                    Arrays.equals(panelSaveBaseWire,panelSaveWire);
+                boolean revisionMatches=snapshot.activeRevision!=panelSaveRevision||
+                    (unchanged&&snapshot.activeRevision==panelSaveRevision)||
+                    panelSavePhase==7;
+                boolean durable=Arrays.equals(panelSaveWire,snapshot.wire)&&
+                    revisionMatches&&!snapshot.pending&&snapshot.persistent;
+                if(durable) {
+                    try {
+                        org.json.JSONObject result=PanelV4DraftCodec.fromSnapshot(snapshot);
+                        panelGeometryManagers[snapshot.lane]=new GeometryTransactionManager(
+                            new GeometryTransactionManager.Snapshot(snapshot.lane,
+                                snapshot.activeRevision,snapshot.wire));
+                        panelSaveFinish(true,
+                            (panelSavePhase==7?"Start Fresh confirmed · revision ":"Panel v4 Saved · revision ")+
+                            snapshot.activeRevision,result);
+                    }catch(Exception ex){
+                        panelSaveFinish(false,"Panel v4 readback decode failed; outcome unknown",null);
+                    }
+                }else if(++panelSaveVerificationReads<=8&&
+                    android.os.SystemClock.elapsedRealtime()<panelSaveVerifyDeadlineMs&&
+                    !isStopPacket(nextPacket)){
+                    retrySaveReadback=true;
+                }else {
+                    panelSaveFinish(false,
+                        "Panel v4 Save not confirmed after bounded active readback; reconnect and reconcile before retry",null);
+                }
+            }
+            if(panelGeometryManagers[panelSnapshotLane]==null) {
+                panelGeometryManagers[panelSnapshotLane]=new GeometryTransactionManager(
+                    new GeometryTransactionManager.Snapshot(snapshot.lane,snapshot.activeRevision,snapshot.wire));
+            }
+            panelSnapshotBusy=false;panelSnapshotWire=null;panelSnapshotHeader=null;
+            if(retrySaveReadback) {
+                final BluetoothGatt session=gatt;
+                final int lane=snapshot.lane,lease=panelSaveLease;
+                ui.postDelayed(()->{
+                    if(!stopped&&session==gatt&&panelSaveBusy&&
+                       panelSaveLease==lease&&panelSaveLane==lane&&
+                       !panelSnapshotBusy&&!isStopPacket(nextPacket))
+                        startPanelSnapshot(lane);
+                },250L);
+            }
+            if(panelSnapshotListener!=null) {
+                final BluetoothGatt current=gatt;
+                ui.post(()->{
+                    if(!stopped&&current==gatt&&panelSnapshotListener!=null)
+                        panelSnapshotListener.accept(snapshot);
+                });
+            }
+            if(panelReconciliationPending&&panelReconciliationLane==snapshot.lane) {
+                panelReconciliationSnapshot=snapshot;
+                panelReconciliationSnapshotVerified=true;
+            }
+            // Every fresh lane map is paired with a fresh status-v2 read before
+            // it can authorize a new preview transaction.
+            panelStatusExpectedLane=panelSnapshotLane;
+            panelReadQueued=2;
+            pumpQueue();
+        } catch(IllegalArgumentException ex) {
+            panelSnapshotFail("CORE Panel snapshot rejected: "+ex.getMessage());
+        }
+    }
+
+    private void panelSnapshotReadNextChunk() {
+        byte[] packet=new byte[]{3,2,(byte)panelSnapshotLane,
+            (byte)panelSnapshotOffset,(byte)(panelSnapshotOffset>>>8)};
+        panelSnapshotWrite(packet);
+    }
+
+    private void panelSnapshotFail(String message) {
+        panelSnapshotBusy=false;panelSnapshotWaitingWrite=false;panelSnapshotWaitingRead=false;
+        panelSnapshotAbortForStop=false;
+        if(panelSnapshotLane>=0&&panelSnapshotLane<2) {
+            panelSnapshotFresh[panelSnapshotLane]=false;
+            panelStatusFresh[panelSnapshotLane]=false;
+        }
+        panelStatusExpectedLane=-1;
+        panelSnapshotWire=null;panelSnapshotHeader=null;panelSnapshotWatchLease++;
+        if(panelSaveBusy&&(panelSavePhase==4||panelSavePhase==7))
+            panelSaveFinish(false,"Panel v4 readback interrupted; Save outcome uncertain: "+message,null);
+        notifyStatus(message);
+        if(panelReconciliationPending&&panelReconciliationLane==panelSnapshotLane) {
+            panelReconciliationPending=false;panelReconciliationLane=-1;
+            panelReconciliationSnapshotVerified=false;
+        }
+        pumpQueue();
+    }
+
     // INFO is optional metadata, not a prerequisite for owner authentication.
     // Both API-level GATT read callbacks must continue the same auth flow,
     // including when a started read returns a failure status.
     private void finishInfoRead(BluetoothGatt connection,byte[] value,int status) {
-        infoReadPending=false;
-        continuousFx=false;tertiaryFx=false;
         if(connection!=gatt)return;
+        infoReadPending=false;infoReadWatchLease++;
+        continuousFx=false;tertiaryFx=false;coreInfoText=null;
         if(status==BluetoothGatt.GATT_SUCCESS && value!=null){
             String info=new String(value,StandardCharsets.UTF_8);
+            coreInfoText=info;ownerBondingSupported=info.contains("owner-bond-v3");
             continuousFx=ContinuousFxCommand.advertised(info);
             tertiaryFx=TertiaryFxCommand.advertised(info);
             String version=info.startsWith("OpenTail CORE ")
@@ -1479,12 +2975,14 @@ final class BleDiscovery {
         if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null &&
            !canControl() && !challengePending && !authPending)
             ui.post(thisAutoAuth(connection));
+        if(ownerBondingSupported&&!canControl()&&!pairPending&&!challengePending&&!authPending)
+            ui.post(thisAutoAuth(connection));
         pumpQueue();
     }
 
     private Runnable thisAutoAuth(BluetoothGatt owner) {
         return ()->{
-            if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();
+            if (!stopped && owner==gatt && connected && !canControl()) {ownerAutoAuthQueued=true;pumpQueue();}
         };
     }
 
@@ -1492,6 +2990,7 @@ final class BleDiscovery {
     private void revokeOwnerSession(){
         clearQueuedOutputRead();
         authorized=false;
+        panelDisconnected();
         Arrays.fill(cfgKnownRevision,-1);
         Arrays.fill(cfgLatest,null);
         nextPacket=null;
@@ -1507,6 +3006,8 @@ final class BleDiscovery {
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
         if(authPending){
             authorized="OK AUTH".equals(response);authPending=false;
+            if(authorized)queuePanelCapabilitiesRead();
+            if(authorized&&offerOwnerPin){offerOwnerPin=false;ui.post(this::promptOwnerPin);}
             if(authorized && coreInfo!=null) {
                 final BluetoothGatt owner=gatt;
                 // Allow the existing authorized FX catalog read to start
@@ -1543,6 +3044,7 @@ final class BleDiscovery {
         authorized = false;cfgBusy=false;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;cfgWatchdog++;
         stopScan();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
+        panelDisconnected();
         if (gatt != null) { gatt.disconnect(); gatt.close(); gatt = null; }
     }
 
@@ -1551,4 +3053,34 @@ final class BleDiscovery {
             if (!stopped) listener.onStatus(message);
         });
     }
+}
+
+/**
+ * One owner-requested diagnostic per connection. GATT admission is controlled
+ * exclusively by BleDiscovery.pumpQueue(); this class never starts an ATT write.
+ * No probe may be synthesized by connection, status, or readback initialization.
+ */
+final class PixelProbeRequestQueue {
+    private int queuedLane=-1;
+
+    synchronized boolean offer(int lane) {
+        if(lane<0||lane>1||queuedLane!=-1)return false;
+        queuedLane=lane;
+        return true;
+    }
+
+    synchronized boolean pending() { return queuedLane>=0; }
+
+    /** Automatic frame polling cannot steal ATT from an owner diagnostic/Save. */
+    synchronized boolean blocksBackgroundTransfer(boolean probeInFlight,boolean saveInFlight) {
+        return queuedLane>=0 || probeInFlight || saveInFlight;
+    }
+
+    synchronized int take() {
+        int lane=queuedLane;
+        queuedLane=-1;
+        return lane;
+    }
+
+    synchronized void clear() { queuedLane=-1; }
 }

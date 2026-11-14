@@ -17,7 +17,7 @@ assert(zoneBlock && triggerBlock && effectBlock && hardwareBlock);
 
 for(const required of [
   'project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.editZone(id,label,n,reverse)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
@@ -133,20 +133,33 @@ assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview
  'Live hardware preview must STOP on activity background/exit.');
 assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('fun adjustOutput(') &&
-       hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
-       hardwareBlock.includes('next.put("pixels", total)') &&
+       hardwareBlock.includes('ValueSlider("Start pixel · zero-based"') &&
+       hardwareBlock.includes('next.put("pixels",total)') &&
        hardwareBlock.includes('it.put("pixels", remaining)') &&
        hardwareBlock.includes('structureVersion++') &&
-       hardwareBlock.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+       hardwareBlock.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardwareBlock.includes('623') &&
-       hardwareBlock.includes('PixelStrip(t,'),
-       'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
-assert(hardwareBlock.includes('ble.saveOutput(index, draftText)') &&
-       hardwareBlock.includes('BleConfigCodec.encode(JSONObject(draftText))') &&
-       hardwareBlock.includes('Save to CORE · verify readback'),
- 'Persistent hardware mapping requires explicit validated commit and readback.');
+       !hardwareBlock.includes('PixelStrip(t,') &&
+       hardwareBlock.includes('layoutLiveEditPending.value=true') &&
+       hardwareBlock.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
+       hardwareBlock.includes('next.put("v4_advanced",true)') &&
+       hardwareBlock.includes('item.put("start",nextStart)') &&
+       hardwareBlock.includes('next.put("pixels",maxOf(next.optInt("pixels",0),end))') &&
+       hardwareBlock.includes('outputDrafts[index] = draftText') &&
+       compose.includes('queuePanelGeometryDraftUpdate()'),
+       'Live hardware draft cursor/total and shared volatile preview must recompute with each slider gesture without duplicate UI.');
+assert(hardwareBlock.includes('panelSaveQueuedLane=index') &&
+       compose.includes('ble.savePanelV4(lane,requested)') &&
+       hardwareBlock.includes('PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)') &&
+       hardwareBlock.includes('savingOutput.intValue=index') &&
+       hardwareBlock.includes('if (savingOutput.intValue == index) Caption("Saving…') &&
+       hardwareBlock.includes('"Saving…" else "Save"') &&
+       compose.includes('val completedSave = index == savingOutput.intValue') &&
+       ble.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
+  'Single Save must validate its draft, show Saving until CORE acknowledgement and require identical readback.');
 assert(ble.includes('frameCapture.cancel();clearPreviewCommand();palette.reset(); // GATT close may never produce a disconnect callback') &&
-       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
+       compose.includes('outputDrafts[index] = confirmed.toString()') &&
        ble.includes('||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||authPending||pairPending||challengePending'),
        'Disconnect and GATT operation sequencing regression');
 assert(ble.includes('void showFx(') && ble.includes('void stopShow()'),
@@ -207,6 +220,18 @@ console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Controller output"') &&
+        compose.includes('Text("Output",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
+
+assert(hardwareBlock.includes('ble.readPanelLaneSnapshot(index)') &&
+       hardwareBlock.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
+       hardwareBlock.includes('if(outputToolsOpen)') &&
+       compose.includes('if(advancedOpen) {') &&
+       compose.includes('layoutLiveEditPending.value=true') &&
+       project.includes('updateZoneOrganization(String id, String field, String text)'),
+       hardwareBlock.includes('Pill("Remove zone",t)') &&
+       hardwareBlock.includes('if(outputToolsOpen) Pill("Test Solid Red') &&
+       hardwareBlock.includes('if(outputToolsOpen) Pill("Check first LED') &&
+       compose.includes('lastAutoGeometryRefresh.intValue!=modelRevision'),
+       'Owner minimal Layout: single output chooser, visible removal, diagnostics under More, bounded auto-reload');

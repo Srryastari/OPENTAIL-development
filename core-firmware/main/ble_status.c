@@ -140,7 +140,7 @@ static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0x
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY;
+    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
     return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){

@@ -1,0 +1,188 @@
+package com.opentail.android;
+
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+public class TelemetrySequenceWatchdogTest {
+    private static void put16(byte[] b,int at,int v){b[at]=(byte)v;b[at+1]=(byte)(v>>>8);}
+    private static void put32(byte[] b,int at,long v){for(int i=0;i<4;i++)b[at+i]=(byte)(v>>>(8*i));}
+    private static PanelPreviewProtocol.Status status(int state,long session,long seq,
+        long missing,long outOfOrder,long duplicates,long conflicts,long committing,
+        int rejectedReason,int flags) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=0;b[3]=3;
+        put32(b,4,session);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,seq);put32(b,18,0x1234);put16(b,22,7);put16(b,24,7);put16(b,26,7);
+        b[29]=1;b[39]=(byte)rejectedReason;
+        put32(b,40,missing);put32(b,44,outOfOrder);put32(b,48,duplicates);
+        put32(b,52,conflicts);put32(b,56,committing);b[60]=(byte)flags;
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
+    private static PanelPreviewProtocol.Status statusForLane(int lane,int state,long session,long sequence) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=(byte)lane;b[3]=3;
+        put32(b,4,session);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,sequence);put32(b,18,0x1234);
+        put16(b,22,7);put16(b,24,7);put16(b,26,7);
+        b[29]=1;b[60]=(byte)(sequence==0?0:4);
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
+    @Test public void independentO1O2SequenceWatchdogsNeverFaultOnLaneSwitch() {
+        TelemetrySequenceWatchdog[] watchers={
+            new TelemetrySequenceWatchdog(),new TelemetrySequenceWatchdog()};
+        assertFalse(watchers[0].observe(statusForLane(0,1,100,1)).warning);
+        assertFalse(watchers[1].observe(statusForLane(1,1,200,1)).warning);
+        assertFalse(watchers[0].observe(statusForLane(0,1,100,2)).hardFault);
+        assertFalse(watchers[1].observe(statusForLane(1,1,200,2)).hardFault);
+        assertFalse(watchers[0].snapshot().warning);
+        assertFalse(watchers[1].snapshot().warning);
+        assertTrue(watchers[0].observe(statusForLane(0,1,100,4)).hardFault);
+        assertFalse(watchers[1].snapshot().warning);
+    }
+
+    @Test public void contiguousAcceptedSequencesRemainHealthy() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        assertFalse(w.observe(status(1,10,1,0,0,0,0,0,0,4)).warning);
+        TelemetrySequenceWatchdog.Decision d=w.observe(status(1,10,2,0,0,0,0,0,0,4));
+        assertFalse(d.warning);assertFalse(d.hardFault);assertFalse(d.requiresReconciliation);
+    }
+
+    @Test public void missingSequenceCounterLatchesHardFault() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,10,1,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision d=w.observe(status(1,10,1,2,0,0,0,0,6,7));
+        assertTrue(d.warning);assertTrue(d.hardFault);assertTrue(d.requiresReconciliation);
+        assertFalse(w.reconcile(status(4,10,1,2,0,0,0,0,6,7),true));
+        PanelPreviewProtocol.Status recovered=status(4,11,0,0,0,0,0,0,0,0);
+        w.observe(recovered);
+        assertFalse(w.reconcile(recovered,false));
+        assertTrue(w.reconcile(recovered,true));
+        assertFalse(w.snapshot().warning);
+    }
+
+    @Test public void forwardGapAcrossUint32WrapIsReportedNotMisclassifiedAsBackwards() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,22,0xfffffffeL,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision gap=
+            w.observe(status(1,22,1,0,0,0,0,0,0,4));
+        assertTrue(gap.hardFault);
+        assertTrue(gap.message.contains("missing sequence 4294967295"));
+
+        TelemetrySequenceWatchdog multiGap=new TelemetrySequenceWatchdog();
+        multiGap.observe(status(1,23,0xfffffffdL,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision wrapped=
+            multiGap.observe(status(1,23,2,0,0,0,0,0,0,4));
+        assertTrue(wrapped.hardFault);
+        assertTrue(wrapped.message.contains("4294967294–4294967295, 1–1 (wrap)"));
+    }
+
+    @Test public void acceptedSequenceJumpAndOutOfOrderCounterAreHardFaults() {
+        TelemetrySequenceWatchdog jump=new TelemetrySequenceWatchdog();
+        jump.observe(status(1,20,1,0,0,0,0,0,0,4));
+        TelemetrySequenceWatchdog.Decision gap=jump.observe(status(1,20,3,0,0,0,0,0,0,4));
+        assertTrue(gap.hardFault);
+        assertTrue(gap.message.contains("missing sequence 2"));
+        TelemetrySequenceWatchdog order=new TelemetrySequenceWatchdog();
+        order.observe(status(1,21,2,0,0,0,0,0,0,4));
+        assertTrue(order.observe(status(1,21,2,0,1,0,0,0,7,7)).hardFault);
+    }
+
+    @Test public void duplicateRequiresReadbackButCanReconcileSameSession() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status first=status(1,30,1,0,0,0,0,0,0,4);
+        w.observe(first);
+        PanelPreviewProtocol.Status duplicate=status(1,30,1,0,0,1,0,0,8,5);
+        TelemetrySequenceWatchdog.Decision d=w.observe(duplicate);
+        assertTrue(d.warning);assertFalse(d.hardFault);assertTrue(d.requiresReconciliation);
+        assertTrue(w.reconcile(duplicate,true));
+        assertFalse(w.snapshot().warning);
+        assertFalse(w.observe(duplicate).warning); // firmware's warning bit remains latched; local reconciliation is authoritative.
+    }
+
+    @Test public void sameRejectedReasonWithNewRejectedSequenceIsDetected() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,64,1,0,0,0,0,0,0,4));
+        byte[] b=new byte[61];b[0]=2;b[1]=1;b[2]=0;b[3]=3;
+        put32(b,4,64);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,1);put32(b,18,0x1234);put16(b,22,7);put16(b,24,7);put16(b,26,7);
+        put32(b,35,2);b[39]=5;b[60]=5;
+        TelemetrySequenceWatchdog.Decision d=w.observe(PanelPreviewProtocol.Status.parse(b));
+        assertTrue(d.warning);assertFalse(d.hardFault);
+        assertEquals(2L,w.snapshot().status.lastRejectedSequence);
+    }
+
+    @Test public void disconnectDuringActivePreviewRequiresFreshSessionReconciliation() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status active=status(1,51,0,0,0,0,0,0,0,0);
+        w.observe(active);
+        TelemetrySequenceWatchdog.Decision disconnected=w.markDisconnected();
+        assertTrue(disconnected.warning);assertTrue(disconnected.hardFault);
+        PanelPreviewProtocol.Status stillActive=status(1,51,0,0,0,0,0,0,0,0);
+        assertTrue(w.observe(stillActive).hardFault);
+        assertFalse(w.reconcile(stillActive,true));
+        PanelPreviewProtocol.Status fresh=status(0,0,0,0,0,0,0,0,0,0);
+        w.observe(fresh);
+        assertTrue(w.reconcile(fresh,true));
+        assertFalse(w.snapshot().warning);
+    }
+
+    @Test public void hardFaultCancellationTargetsOnlyTheSessionThatLatchedIt() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status oldSession=status(1,51,0,0,0,0,0,0,0,0);
+        w.observe(oldSession);
+        assertTrue(w.markDisconnected().hardFault);
+        assertTrue(w.requiresCancelFor(oldSession));
+
+        PanelPreviewProtocol.Status cancelled=status(4,51,0,0,0,0,0,0,0,0);
+        w.observe(cancelled);
+        assertFalse(w.requiresCancelFor(cancelled));
+        assertTrue(w.awaitingFreshSession(cancelled));
+        assertFalse(w.reconcile(cancelled,true));
+
+        PanelPreviewProtocol.Status freshSession=status(1,52,0,0,0,0,0,0,0,0);
+        assertTrue(w.observe(freshSession).hardFault);
+        assertFalse(w.requiresCancelFor(freshSession));
+        assertFalse(w.awaitingFreshSession(freshSession));
+        assertTrue(w.reconcile(freshSession,true));
+        assertFalse(w.snapshot().warning);
+    }
+
+    @Test public void malformedStatusLatchesWarningAndActiveSessionFault() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status active=status(1,61,0,0,0,0,0,0,0,0);
+        w.observe(active);
+        TelemetrySequenceWatchdog.Decision malformed=w.markMalformedTelemetry("truncated status");
+        assertTrue(malformed.warning);assertTrue(malformed.hardFault);
+        assertFalse(w.reconcile(active,true));
+        PanelPreviewProtocol.Status fresh=status(0,0,0,0,0,0,0,0,0,0);
+        w.observe(fresh);
+        assertTrue(w.reconcile(fresh,true));
+    }
+
+    private static PanelPreviewProtocol.Status statusWithRender(int state,long session,long seq,int render) {
+        byte[] b=new byte[61];b[0]=2;b[1]=(byte)state;b[2]=0;b[3]=3;
+        put32(b,4,session);put16(b,8,7);put16(b,10,944);put16(b,12,5000);
+        put32(b,14,seq);put32(b,18,0x1234);put16(b,22,7);put16(b,24,7);put16(b,26,render);
+        b[29]=1;b[60]=(byte)(seq==0?0:4);
+        return PanelPreviewProtocol.Status.parse(b);
+    }
+
+    @Test public void renderRevisionMismatchPreventsTelemetryReconciliation() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        PanelPreviewProtocol.Status active=statusWithRender(1,63,0,7);
+        w.observe(active);
+        PanelPreviewProtocol.Status staleRender=statusWithRender(1,63,0,6);
+        assertFalse(w.reconcile(staleRender,true));
+        assertTrue(w.snapshot().warning);
+    }
+
+    @Test public void committingRejectionWaitsForTerminalCommitBeforeClear() {
+        TelemetrySequenceWatchdog w=new TelemetrySequenceWatchdog();
+        w.observe(status(1,40,1,0,0,0,0,0,0,4));
+        PanelPreviewProtocol.Status locked=status(2,40,1,0,0,0,0,1,5,5);
+        assertTrue(w.observe(locked).warning);
+        assertFalse(w.reconcile(locked,true));
+        PanelPreviewProtocol.Status committed=status(3,40,1,0,0,0,0,1,5,5);
+        assertTrue(w.reconcile(committed,true));
+    }
+}

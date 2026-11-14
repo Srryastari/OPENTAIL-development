@@ -134,7 +134,7 @@ final class NativeProject {
             String id = z.optString("id", "");
             String name = z.optString("name", "");
             if (!wholeNumber(z.opt("start"), 0, 999999)
-                    || !wholeNumber(z.opt("length"), 1, 10000))
+                    || !wholeNumber(z.opt("length"), 0, 10000))
                 throw new JSONException("Zone index and length must be whole numbers");
             long start = ((Number)z.opt("start")).longValue();
             long length = ((Number)z.opt("length")).longValue();
@@ -142,6 +142,13 @@ final class NativeProject {
                     || start + length > 1000000)
                 throw new JSONException("Invalid or overlapping zone layout");
             if (start < lastEnd) throw new JSONException("Overlapping zone indexes");
+            // Vehicle-neutral, app-only organization. A light may remain
+            // unassigned and empty until matching hardware is installed.
+            for (String key : new String[]{"assembly", "location", "lightingType"}) {
+                if (z.has(key) && (!(z.opt(key) instanceof String)
+                        || z.optString(key).length() > 64))
+                    throw new JSONException("Invalid lighting organization label");
+            }
             // Optional local Output Manager link, never a physical NVS write.
             // Old Studio v4 documents omit these fields and remain compatible.
             if (z.has("physicalOutput") || z.has("physicalSection")) {
@@ -318,7 +325,7 @@ final class NativeProject {
     /** Insert and reindex once. An "Add next" edit must not commit an
      * appended zone and then fail during a second reorder transaction. */
     synchronized boolean addZoneAt(String label, int length, int insertAt) {
-        if (zoneCount() >= MAX_ZONES || length < 1 || length > 10000
+        if (zoneCount() >= MAX_ZONES || length < 0 || length > 10000
                 || insertAt < 0 || insertAt > zoneCount() || label == null
                 || label.length() > 48) return false;
         try {
@@ -344,8 +351,8 @@ final class NativeProject {
      * dragging nor typing can send BLE commands or persist a draft. */
     synchronized String previewZoneOffsets(String id, int suggestedLength) {
         int selected=indexOfZone(id);
-        if(selected<0 || suggestedLength<1 || suggestedLength>10000)
-            return "Pixel count must be between 1 and 10,000";
+        if(selected<0 || suggestedLength<0 || suggestedLength>10000)
+            return "Pixel count must be between 0 and 10,000";
         long end=0;
         StringBuilder summary=new StringBuilder();
         for(int i=0;i<zoneCount();i++){
@@ -359,7 +366,8 @@ final class NativeProject {
                 if(summary.length()>0)summary.append("\n");
                 summary.append(zone.optString("name","Zone "+(i+1)))
                        .append(": ").append(start).append("–")
-                       .append(start+len-1).append(" · next ").append(start+len);
+                       .append(len==0?"empty":String.valueOf(start+len-1))
+                       .append(" · next ").append(start+len);
             }
             end=start+len;
         }
@@ -369,7 +377,7 @@ final class NativeProject {
 
     synchronized boolean editZone(String id, String label, int length, boolean reverse) {
         int index = indexOfZone(id);
-        if (index < 0 || length < 1 || length > 10000 || label.trim().isEmpty()
+        if (index < 0 || length < 0 || length > 10000 || label.trim().isEmpty()
                 || label.trim().length() > 48) return false;
         try {
             JSONObject z = zone(index);
@@ -407,10 +415,67 @@ final class NativeProject {
                 }
             }
             JSONObject z=zone(selected);
-            if(output==-1){z.remove("physicalOutput");z.remove("physicalSection");}
-            else z.put("physicalOutput",output).put("physicalSection",section);
+            if(output==-1) {
+                z.remove("physicalOutput");z.remove("physicalSection");
+                z.remove("physicalPanelId");z.remove("physicalPanelName");
+            } else {
+                // A universal first-run section needs an actual stable Panel
+                // identity. The previous mapping only set Output/Section,
+                // leaving GeometryTransactionManager unable to map 100 LEDs.
+                int oldLane=z.optInt("physicalOutput",-1);
+                boolean preserve=oldLane==output&&
+                    z.optInt("physicalPanelId",0)>0&&
+                    !z.optString("physicalPanelName","").trim().isEmpty();
+                if(!preserve) {
+                    int chosen=0;
+                    String panelName="";
+                    java.util.Set<Integer> reserved=new java.util.HashSet<>();
+                    for(int i=0;i<zoneCount();i++) {
+                        if(i==selected)continue;
+                        JSONObject other=zone(i);
+                        if(other.optInt("physicalOutput",-1)<0)continue;
+                        int otherId=other.optInt("physicalPanelId",0);
+                        if(otherId<1||otherId>127)continue;
+                        reserved.add(otherId);
+                        if(other.optInt("physicalOutput",-1)==output&&chosen==0) {
+                            chosen=otherId;
+                            panelName=other.optString("physicalPanelName","").trim();
+                        }
+                    }
+                    if(chosen==0) {
+                        // Prefer deterministic independent O1/O2 IDs, but
+                        // never steal an existing controller-wide identity.
+                        int desired=output+1;
+                        if(reserved.contains(desired)) {
+                            desired=1;
+                            while(desired<=127&&reserved.contains(desired))desired++;
+                        }
+                        if(desired>127)throw new JSONException("No available Panel identity");
+                        chosen=desired;
+                        panelName="Panel O"+(output+1);
+                    }
+                    if(panelName.isEmpty())
+                        throw new JSONException("Existing Panel identity has no name");
+                    z.put("physicalPanelId",chosen)
+                     .put("physicalPanelName",panelName);
+                }
+                z.put("physicalOutput",output).put("physicalSection",section);
+            }
             return save();
         }catch(JSONException ex){restoreCommitted();return false;}
+    }
+
+    /** Freeform labels are project metadata, not a hidden hardware mapping
+     * or a firmware-specific list of headlight/taillight categories. */
+    synchronized boolean updateZoneOrganization(String id, String field, String text) {
+        int index=indexOfZone(id);
+        if(index<0 || !("assembly".equals(field)||"location".equals(field)||
+                "lightingType".equals(field)) || text==null || text.length()>64)
+            return false;
+        try {
+            zone(index).put(field,text);
+            return save();
+        } catch (JSONException e) {restoreCommitted();return false;}
     }
 
     synchronized boolean removeZone(String id) {

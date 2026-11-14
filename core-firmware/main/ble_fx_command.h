@@ -19,6 +19,7 @@
 #define OT_BLE_FX_TERTIARY_CONTINUOUS_OPCODE 11u
 #define OT_BLE_FX_TERTIARY_WIRE_BYTES 20u
 #define OT_BLE_FX_TERTIARY_CAPABILITY "fx-tertiary-v1"
+#define OT_BLE_FX_TERTIARY13_CAPABILITY "fx-tertiary13-v1"
 typedef struct {
   uint8_t r,g,b;
   bool set;

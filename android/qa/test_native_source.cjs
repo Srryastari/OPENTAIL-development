@@ -6,6 +6,9 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const crypto=require('node:crypto');
+const firmwareSourceDir=process.env.OPENTAIL_FIRMWARE_SOURCE_DIR || 'core-firmware/main';
+const effectsSourceDir=process.env.OPENTAIL_EFFECTS_SOURCE_DIR || 'core-firmware/main';
 // ComposeMainActivity is the shipped UI; Java Views are historical reference only.
 const compose=fs.readFileSync('android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt','utf8');
 const model=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeProject.java','utf8');
@@ -13,6 +16,11 @@ const palettes=fs.readFileSync('android/app/src/main/java/com/opentail/android/N
 const presetRestore=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativePresetRestore.java','utf8');
 const approved=fs.readFileSync('android/app/src/main/java/com/opentail/android/ApprovedWledEffectsEditor.kt','utf8');
 const bleSource=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleDiscovery.java','utf8');
+const panelProtocol=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java','utf8');
+const panelV4=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java','utf8');
+const panelDraft=fs.readFileSync('android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java','utf8');
+const panelWatchdog=fs.readFileSync('android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java','utf8');
+const geometryTransactions=fs.readFileSync('android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java','utf8');
 const codec=fs.readFileSync('android/app/src/main/java/com/opentail/android/BleConfigCodec.java','utf8');
 const catalog=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeEffectCatalog.java','utf8');
 const manifest=fs.readFileSync('android/app/src/main/AndroidManifest.xml','utf8');
@@ -50,11 +58,11 @@ for(const route of ['HomePage(', 'ShowModesPage(', 'LayoutPage(', 'TriggersPage(
 for(const required of ['MaterialTheme(colorScheme = scheme)',
   'lightColorScheme(', 'darkColorScheme(', 'RoundedCornerShape(99.dp)',
   'ConnectPill', 'WindowInsets.safeDrawing', 'ExactLedFrame.fromProjectModel(project)',
-  'frame!!.colorAt(sample)', 'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'frame!!.colorAt(sample)', 'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.previewZoneOffsets(id, n)', 'project.setPixelColor(id,activePixel,hex)',
   'project.assignMany(', 'project.setSequence(', 'project.importJson(', 'project.exportJson()',
-  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.saveOutput(index, draftText)',
-  'BleConfigCodec.encode(JSONObject(draftText))']) {
+  'ble.canControl()', 'supportedIds.value', 'previewCurrentEffect()', 'ble.savePanelV4(lane,requested)',
+  'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)']) {
   assert(compose.includes(required),'Active Compose implementation regressed: '+required);
 }
 assert(compose.includes('private fun CapsuleSlider(') &&
@@ -70,8 +78,8 @@ assert(compose.includes('val pageScroll = remember(page) { ScrollState(0) }') &&
        compose.includes('val columns = 30') &&
        compose.includes('pendingLoad = i') &&
        compose.includes('title = { Text("Replace current design?") }') &&
-       compose.includes('Developer · Trigger Testing') &&
-        compose.includes('project.assignMany(selections,zoneId,!checked)'),
+       !compose.includes('Developer · Trigger Testing') &&
+       compose.includes('project.assignMany(selections,zoneId,!checked)'),
        'Compose destination scroll, exact pixel zoom and destructive-edit UX regressed');
 assert(compose.includes('if (offlinePreview.value) return') && compose.includes('if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return') && !compose.includes('if (i != 1) offlinePreview.value = false') && compose.includes('offlinePreview.value && hasProjectColors'),
        'Preview Offline must be local-only, suppressing all effect and snapshot BLE edits');
@@ -87,7 +95,8 @@ assert(bleSource.includes('frameCapture.cancel();clearPreviewCommand();palette.r
         bleSource.includes('nextPacket!=null') && bleSource.includes('cfgBusy') &&
         bleSource.includes('palette.busy()') && bleSource.includes('triggerMapBusy') &&
        bleSource.includes('queuedOutputOwner!=gatt || !canConfigure()') &&
-       compose.includes('outputs.clear() // readback from a disconnected/unauthorized controller') &&
+       compose.includes('outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts') &&
+       compose.includes('private val outputDrafts = mutableStateMapOf<Int, String>()') &&
        compose.includes('captureMessage.value = "CORE frame not captured"'),
        'Clear stale CORE output UI and prevent conflicting GATT operations');
 assert(!/WebView\(|BottomNavigation|NavigationBar\(/.test(compose),
@@ -120,9 +129,11 @@ assert(presetBlock.includes('snapshot.put("savedPresets", JSONArray())') &&
        presetBlock.includes('presetStatus = if (restored)') &&
        !presetBlock.includes('.put("studio", project.exportJson())'),
        'Presets may not recursively embed or erase their own library');
-assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') && bleSource.includes('String connectionPhase()'),
-       'Bluetooth status pill must reflect actual connection state, not transient messages');
-assert(homeSection.includes('ble.authorizeOrPair()') && !settingsSection.includes('ble.authorizeOrPair()') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
+assert(homeSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') &&
+       !settingsSection.includes('remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }') &&
+       bleSource.includes('String connectionPhase()'),
+       'Home alone owns the connection-status pill; Settings must not duplicate it');
+assert(homeSection.includes('ble.promptOwnerPin()') && !homeSection.includes('Pill("Authorize"') && bleSource.includes('BleOwnerVault.load(activity,activeAddress)==null') && bleSource.includes('if (!connected)'),
        'Locked Home Bluetooth pill and one safe owner authorization/BOOT action regressed');
 
 
@@ -191,13 +202,13 @@ assert(previewSrc &&
        !previewSrc.includes('SIMULATED') &&
        hardwareOutput &&
        hardwareOutput.includes('ValueSlider("Total output pixels"') &&
-       hardwareOutput.includes('ValueSlider("Next start · zero-based"') &&
+       hardwareOutput.includes('ValueSlider("Start pixel · zero-based"') &&
        (hardwareOutput.match(/PixelStepPill\("−",t\)/g)||[]).length >= 2 &&
        (hardwareOutput.match(/PixelStepPill\("\+",t\)/g)||[]).length >= 2 &&
        compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
        hardwareOutput.includes('adjustZone(i,n)') &&
        hardwareOutput.includes('adjustOutput(n)') &&
-       hardwareOutput.includes('Physical boundaries change only after confirmed NVS Save'),
+       hardwareOutput.includes('if(outputToolsOpen) Caption("Draft edits are local;'),
        'Configured-color fallback and zero-NVS pixel +/- controls must be visible without editing locked preview geometry');
 // Owner's full Test 1-80 regression gates (Android-only source contracts).
 assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
@@ -207,8 +218,8 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
        compose.includes('offlinePreview.value -> "Offline design preview"') &&
        compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
-       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
-       compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
+       !homeSection.includes('Text("Controller Status"') &&
+       settingsSection.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
        compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
        approved.includes('it.name.contains(effectSearch.trim(),true)') &&
@@ -256,7 +267,7 @@ assert(layout.includes('Pill("+ Add",t) {') && layout.includes('val created = ad
 assert(layout && triggers && modes && events && hardware,
        'A shipped Compose design page is missing');
 for(const required of ['project.previewZoneOffsets(id, n)',
-  'CapsuleSlider(n, 1, 10000, t,', 'finished={ applyLiveZone() }',
+  'CapsuleSlider(n, 0, 10000, t,', 'finished={ applyLiveZone() }',
   'project.editZone(id,label,n,reverse)',
   'project.setPixelColor(id,activePixel,hex)',
   'project.clearPixelColor(id,activePixel)',
@@ -273,23 +284,29 @@ for(const required of [
   'Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty())',
   'scopeKey = "triggers:"'
 ]) assert(triggers.includes(required),'Assignment-only Triggers regression: '+required);
-assert(triggers.includes('IconAction("Edit " + name, "edit", t)') &&
+assert(!triggers.includes('IconAction("Edit " + name, "edit", t)') &&
        triggers.includes('if (profile.optString("kind") == "trigger-custom")') &&
        triggers.includes('IconAction("Delete " + name, "delete", t)') &&
        triggers.includes('title = { Text("Delete custom trigger?") }') &&
        triggers.includes('project.deleteTrigger(target)') &&
        triggers.includes('scopeKey = "triggers:" + selections.sorted().joinToString("|")') &&
-       triggers.includes('disabled()'),
-       'Builtins cannot be deleted; custom trigger confirmation and bulk editing refresh required');
+       !triggers.includes('Test " + name + " unavailable') &&
+       !triggers.includes('Pill("Close",t)'),
+       'Keep one functional trigger selection/edit path; no inert tests or duplicate close');
 const settings=compose.split('private fun SettingsPage(')[1]
   .split('private fun HardwareOutputEditor(')[0];
-assert(settings.includes('Developer · Trigger Testing') &&
-       settings.includes('var simulatedTriggers by remember') &&
-       settings.includes('defaults.chunked(2).forEach') &&
-       settings.includes('Clear test states') &&
-       settings.includes('Local simulation only') &&
+assert(!settings.includes('Developer · Trigger Testing') &&
+       !settings.includes('var simulatedTriggers by remember') &&
+       !settings.includes('Developer · Controller playback') &&
+       !settings.includes('Reset Configuration') &&
+       !settings.includes('SettingsRow("Controller"') &&
+       settings.includes('Title("Projects", t)') &&
+       settings.includes('exporter.launch("opentail-project.json")') &&
+       settings.includes('importer.launch(arrayOf("application/json", "text/plain"))') &&
+       settings.includes('ble.readFxCapabilities()') &&
+       settings.includes('CorePaletteTransferPanel(t)') &&
        !settings.includes('ble.simulate'),
-       'Developer-only trigger testing belongs in Settings and must not touch physical GPIO');
+       'Normal Settings must not duplicate Home/Show Modes or expose inert developer controls; retain BLE/palette diagnostics');
 assert(model.includes('.put("zones", new JSONArray())') &&
        model.includes('"Park", "Brake", "Left Turn", "Right Turn", "Hazards", "Reverse"') &&
        model.includes('!"trigger-custom".equals(p.optString("kind"))'),
@@ -344,20 +361,25 @@ assert(model.includes('synchronized boolean setAutoEvent(String event, String ke
        model.includes('if (!Double.isFinite(seconds) || seconds < 0.2 || seconds > 30.0)') &&
        model.includes('return save();'),
        'Event authoring must be validated and saved atomically');
-assert(hardware.includes('BleConfigCodec.MAX_LEDS_PER_OUTPUT') &&
+assert(hardware.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardware.includes('623') &&
-       hardware.includes('it.put("pixels", remaining)') &&
+       hardware.includes('it.put("pixels",remaining)') &&
+        hardware.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
+        hardware.includes('applyPhysicalRanges(next)') &&
        hardware.includes('structureVersion++') &&
-       hardware.includes('BleConfigCodec.encode(draft)') &&
-       hardware.includes('ble.saveOutput(index, draftText)'),
+       hardware.includes('PanelV4DraftCodec.encode(index,draft,authoritative)') &&
+       hardware.includes('panelSaveQueuedLane=index') &&
+       compose.includes('ble.savePanelV4(lane,requested)'),
   'CORE output editor must validate universal drafts and synchronize zone totals');
 // A rejected GATT save is not an in-flight hardware commit. Readback, not
 // request admission, remains the only success evidence.
-assert(bleSource.includes('boolean saveOutput(int index,String json)') &&
-       bleSource.includes('Load this output over BLE before saving",null,index);return false;') &&
-       bleSource.includes('BLE is busy; retry after current transfer",null,index);return false;') &&
-       hardware.includes('if (ble.saveOutput(index, draftText))') &&
-       hardware.includes('Save request rejected · see BLE status'),
+assert(bleSource.includes('boolean savePanelV4(int lane,String json)') &&
+       bleSource.includes('PanelPreviewProtocol.LaneSnapshot base=lastConfirmedPanelSnapshot(lane)') &&
+       bleSource.includes('panelSaveBusy=true;panelSaveLane=lane;') &&
+       bleSource.includes('panelSavePhase=4') &&
+       bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)') &&
+       hardware.includes('panelSaveQueuedLane=index') &&
+       compose.includes('Save could not start; live configuration remains unsaved'),
   'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
   'synchronized boolean editZone(', 'synchronized boolean moveZone(',
@@ -379,13 +401,13 @@ assert(!/WLED firmware|WLED UI/.test(compose),'End-user Compose UI must be OpenT
 assert(bleSource.includes('pairWithBoot()') && bleSource.includes('authorizeStored()') &&
        bleSource.includes('HmacSHA256') && bleSource.includes('canControl()'),
   'BLE owner authorization regression');
-assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 65535') &&
+assert(codec.includes('static final int MAX_LEDS_PER_OUTPUT = 2000') &&
        codec.includes('pixels>MAX_LEDS_PER_OUTPUT') &&
        codec.includes('length>MAX_LEDS_PER_OUTPUT') &&
        codec.includes('if(sum!=pixelCount)') &&
        !codec.includes('index==0?16:17') &&
        !hardware.includes('623'),
-  'BLE uint16 geometry must be universal and not invent physical pins');
+  'BLE geometry must enforce the approved 2000-pixel budget without inventing physical pins');
 assert(model.includes('data = previous; // a failed disk commit') &&
        model.includes('pixel>=zone(zoneIndex).optInt("length",0)'),
        'Project import must be atomic and pixel editing must respect zone bounds');
@@ -492,7 +514,7 @@ assert(bleSource.includes('final BluetoothGatt owner=gatt;') &&
        bleSource.includes('if(!stopped && owner==gatt && configListener!=null)') &&
        bleSource.includes('CORE active output differs; may be pending trigger release.') &&
        bleSource.includes('Reload after release; no active change verified') &&
-       bleSource.includes('cfgSaving && (cfgExpected==null||!Arrays.equals(cfgBytes,cfgExpected))'),
+       bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
        'Output Manager must reject stale controller callbacks and fail closed on pending geometry');
 
 // STOP queued behind a GATT transaction must drain before any new capture,
@@ -510,7 +532,7 @@ assert(bleSource.includes('frameCapture.busy() || palette.busy() || frameCallbac
 // Layout Reload Output1 was repeatedly blocked by the 500ms frame-preview
 // capture loop. Explicit READ must win without changing locked visual UI.
 const outputRead = bleSource.split('void readOutput(int index){')[1]
-  ?.split('boolean saveOutput(int index,String json)')[0];
+  ?.split('boolean savePanelV4(int lane,String json)')[0];
 const queuedReadPump = bleSource.split('private void pumpQueue(){')[1]
   ?.split('private String preferredPending')[0];
 assert(outputRead &&
@@ -527,7 +549,7 @@ assert(outputRead &&
        bleSource.includes('cfgBusy || queuedOutputRead>=0 || infoReadPending || infoReadQueued || writePending') &&
        bleSource.includes('CORE snapshot ATT timed out; reconnect required') &&
        bleSource.includes('clearQueuedOutputRead();') &&
-       bleSource.includes('if(writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
+       bleSource.includes('if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy||fxCapsBusy||infoReadPending||triggerMapBusy||'),
        'Output reload must suspend telemetry, drain ATT, honor STOP, and fail closed on timeout');
 
 // Failed output saves can have committed before readback failed. Require a
@@ -613,7 +635,7 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        bleSource.includes('if(status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
        bleSource.includes('finishInfoRead(connection,value,status);') &&
        bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
-       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) authorizeStored();'),
+       bleSource.includes('if (!stopped && owner==gatt && connected && !canControl()) {ownerAutoAuthQueued=true;pumpQueue();}'),
        'Rejected optional CORE info read must preserve owner auto-auth');
 
 // MTU negotiation failures fall through to guarded service discovery.
@@ -756,7 +778,7 @@ assert(compose.includes('NativeProjectDocumentIo.readBounded(reader)') &&
 for (const required of [
  'private static boolean wholeNumber(Object value, long min, long max)',
  '!wholeNumber(z.opt("start"), 0, 999999)',
- '!wholeNumber(z.opt("length"), 1, 10000)',
+ '!wholeNumber(z.opt("length"), 0, 10000)',
  '!wholeNumber(step.opt("ms"), 50, 600000)'
 ]) assert(model.includes(required), 'Strict universal layout/sequence import regression: '+required);
 assert(storageTest.includes('importedPixelOffsetsAndDurationsRejectFractionalOrTextNumbers'),
@@ -827,7 +849,7 @@ assert(model.includes('return addZoneAt(label, length, zoneCount());') &&
        model.includes('synchronized boolean addZoneAt(String label, int length, int insertAt)') &&
        model.includes('if (i == insertAt) layout.put(z);') &&
        model.includes('if (i < zoneCount()) layout.put(zone(i));') &&
-       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position)') && compose.includes('editingId=created') && compose.includes('val id=project.zone(position)?.optString("id")') &&
+       compose.includes('project.addZoneAt("Zone " + (project.zoneCount() + 1), 0, position)') && compose.includes('editingId=created') && compose.includes('val id=project.zone(position)?.optString("id")') &&
        !compose.includes('project.moveZone(project.zoneCount() - 1, index + 1)'),
        'Add next zone must insert and reindex with one persisted transaction');
 assert(compose.includes('if(project.assignMany(selections,zoneId,!checked)) refresh()') && compose.includes('if (project.name(it)) refresh()') && compose.includes('else name = project.name() // restore last committed value') && compose.includes('if(project.setPresets(next))') && compose.includes('Could not remove preset'),
@@ -1038,9 +1060,55 @@ for(const call of ['this::authorizeStored','this::pairWithBoot','this::readTrigg
 assert(frameClient.includes('clearTimers();') && frameClient.includes('watchOperation();') &&
        frameClient.includes('byte[] complete=pixels;'), 'Bound snapshot timers and hand off owned RGB');
 
+const tertiaryCommand=fs.readFileSync('android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java','utf8');
+const bleCommand=fs.readFileSync(path.join(firmwareSourceDir,'ble_fx_command.c'),'utf8');
+const bleHeader=fs.readFileSync(path.join(firmwareSourceDir,'ble_fx_command.h'),'utf8');
+const bleStatus=fs.readFileSync(path.join(firmwareSourceDir,'ble_status.c'),'utf8');
+assert(tertiaryCommand.includes('fx-tertiary13-v1') &&
+       tertiaryCommand.includes('supportedForFirmware') &&
+       bleCommand.includes('return ot_wled_fx_tertiary_supported(id);') &&
+       bleCommand.includes('candidate.effect_id==38u && candidate.palette_id!=4u') &&
+       bleHeader.includes('OT_BLE_FX_TERTIARY13_CAPABILITY') &&
+       bleStatus.includes('OT_BLE_FX_TERTIARY13_CAPABILITY'),
+       'Firmware #127 13-mode capability, Aurora palette gate and Android fail-closed tier must agree');
+
 const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8');
 const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
-assert(nativeManifest.source_commit==='1767b144e193ed6978816899ebb5eba237ee6e2d' &&
+/* Issue103: actual SHA256 and byte-identity checks, not a stale source
+ * comment claiming parity. Only reviewed pure renderer sources are repinned. */
+assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
+       nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
+       nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
+       nativeManifest.core_identity_source_commit==='dfe1a48c3f48dddf7f4c511f063d3743298ccd6a' &&
+       JSON.stringify(nativeManifest.core_identity_files)===JSON.stringify(['effects_1d.c','effects_1d.h']) &&
+       nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
+       nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
+       nativeManifest.tertiary_source_proven_modes===13 &&
+       nativeManifest.tertiary_transport_admitted_modes===13 &&
+       nativeManifest.tertiary_legacy_transport_modes===11 &&
+       nativeManifest.tertiary_transport_capability==='fx-tertiary13-v1' &&
+       nativeManifest.firmware127_ble_contract_head==='dfe1a48c3f48dddf7f4c511f063d3743298ccd6a',
+       'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
+for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
+    const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),expectedHash,
+                 'JNI source manifest mismatch: '+file);
+}
+for(const file of ['effects_1d.c','effects_1d.h']){
+    assert.deepEqual(
+        fs.readFileSync(path.join('android/app/src/main/cpp/core',file)),
+        fs.readFileSync(path.join(firmwareSourceDir,file)),
+        'JNI/Firmware #127 stable-state source divergence: '+file);
+}
+for(const file of ['wled_fx_compat.c','wled_fx_compat.h','ot_auto_effects.c','ot_auto_effects.h']){
+    assert.deepEqual(
+        fs.readFileSync(path.join('android/app/src/main/cpp/core',file)),
+        fs.readFileSync(path.join(effectsSourceDir,file)),
+        'JNI/Effects #110 renderer divergence: '+file);
+}
+assert(fs.readFileSync('android/app/src/main/cpp/core/wled_fx_compat.c','utf8')
+         .includes('bool ot_wled_fx_tertiary_supported(uint16_t id)') &&
+       nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
        nativePreview.includes('ot_wled_palette_global_tick('),
        'All effects must use the pinned authoritative registry and palette producer');
@@ -1053,9 +1121,12 @@ assert(compose.includes('OfflinePreviewSettings.read(effect)') &&
        fs.readFileSync('android/app/src/main/java/com/opentail/android/OfflinePreviewPalettePolicy.kt','utf8')
            .includes('NativeEffectParameters.forId(effectId)?.palette == true'),
        'Scoped parameter edits must update native preview and reject stale palettes for non-palette effects');
+const onStopBlock=(compose.split('override fun onStop() {')[1]||'').split('override fun onDestroy()')[0];
 assert(manifest.includes('android.permission.RECORD_AUDIO') &&
        compose.includes('val needsMic = localSketch && effect==185 && foregroundActivity.value && !previewPaused.value') &&
-       compose.includes('override fun onStop() {\n        localMicrophone.stop()') &&
+       onStopBlock.includes('localMicrophone.stop()') &&
+       onStopBlock.includes('super.onStop()') &&
+       onStopBlock.indexOf('localMicrophone.stop()')<onStopBlock.indexOf('super.onStop()') &&
        !fs.readFileSync('android/app/src/main/java/com/opentail/android/MicAudioPeak.java','utf8').includes('.join('),
        'Owner-approved microphone must remain local, foreground-only and off the UI thread');
 
@@ -1092,6 +1163,435 @@ assert(manifest.includes('android.permission.RECORD_AUDIO') &&
         compose.includes('.then(if(label=="Firmware") Modifier.clickable(onClick=action) else Modifier)'),
         'Authorization belongs on Home; Firmware row is tappable');
  assert(!compose.includes('Title("CORE Output Manager"') &&
-        compose.includes('Text("Controller output"') &&
+        compose.includes('Text("Output",color=t.fg') &&
         releaseSettings.includes('if(mappingExpanded) CoreTriggerMappingPage(t)'),
         'Output editing inline; developer input map only in Firmware');
+
+
+// Owner P0: exact Issue #126 Panel v2 telemetry contract, transaction guards,
+// and conditional warning in the already-approved Settings -> System card.
+assert(panelProtocol.includes('STATUS_BYTES = 61') &&
+       panelProtocol.includes('MAP_BYTES = 667') &&
+       panelProtocol.includes('ERR_COMMITTING_LOCKED = 5') &&
+       panelProtocol.includes('CAP_STATUS_V2') &&
+       panelProtocol.includes('lastRejectedSequence') &&
+       panelProtocol.includes('committingRejectCount') &&
+       panelProtocol.includes('candidateCrc32') &&
+       panelProtocol.includes('SnapshotHeader') &&
+       panelProtocol.includes('crc16(byte[] bytes)'),
+       'Android Panel codec must match the documented 61-byte status-v2 and 667-byte map contract');
+assert(panelWatchdog.includes('missingCount>last.missingCount') &&
+       panelWatchdog.includes('outOfOrderCount>last.outOfOrderCount') &&
+       panelWatchdog.includes('duplicateCount>last.duplicateCount') &&
+       panelWatchdog.includes('conflictCount>last.conflictCount') &&
+       panelWatchdog.includes('hardSyncFault') &&
+       panelWatchdog.includes('reconcile(') &&
+       panelWatchdog.includes('hardFaultSession') &&
+       panelWatchdog.includes('markMalformedTelemetry') &&
+       panelWatchdog.includes('markReconciliationFailed') &&
+       panelWatchdog.includes('requiresCancelFor') &&
+       panelWatchdog.includes('awaitingFreshSession') &&
+       panelWatchdog.includes('current.lastRejectedSequence!=last.lastRejectedSequence') &&
+       panelWatchdog.includes('hardFault=true;hardFaultLane=last.lane;hardFaultSession=last.sessionId'),
+       'Telemetry watchdog must detect sequence anomalies and require authoritative reconciliation');
+for (const state of ['READY','BEGINNING','ACTIVE','UPDATE_PENDING','COMMIT_REQUESTED','COMMITTING','RECONCILING','ERROR']) {
+  assert(geometryTransactions.includes(state),'Geometry transaction state missing: '+state);
+}
+assert(geometryTransactions.includes('ERR_COMMITTING_LOCKED') &&
+       geometryTransactions.includes('lastConfirmed') &&
+       geometryTransactions.includes('candidateCrc32') &&
+       geometryTransactions.includes('connectionLost()') &&
+       geometryTransactions.includes('markSynchronizationUncertain') &&
+       geometryTransactions.includes('authoritative geometry snapshot'),
+       'Geometry manager must preserve last-confirmed geometry through COMMITTING and uncertain disconnects');
+assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf31') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf32') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf35') &&
+       bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf37') &&
+       bleSource.includes('PanelPreviewProtocol.Status.parse(value)') &&
+       bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
+       bleSource.includes('panelScheduleCommitPoll(owner)') &&
+       bleSource.includes('panelWatchdog.reconcile(current,true)') &&
+       bleSource.includes('panelWatchdogs[current.lane].requiresCancelFor(current)') &&
+       bleSource.includes('panelWatchdog.awaitingFreshSession(current)') &&
+       bleSource.includes('manager.observeStatus(current)') &&
+       bleSource.includes('manager.markSynchronizationUncertain(decision.message)') &&
+       bleSource.includes('panelConfirmedSnapshots[panelSnapshotLane]=snapshot') &&
+       bleSource.includes('GATT stack performs the characteristic long-read') &&
+       bleSource.includes('panelWatchdogs[lane].markMalformedTelemetry') &&
+       bleSource.includes('panelScheduleTransactionPoll(owner,current.lane)') &&
+       bleSource.includes('panelTransactionTimeoutLatched[current.lane]') &&
+       bleSource.includes('manager.state()==GeometryTransactionManager.State.RECONCILING') &&
+       bleSource.includes('panelSnapshotQueuedLane=current.lane') &&
+       bleSource.includes('boolean beginPanelPreview(') &&
+       bleSource.includes('boolean updatePanelPreview(') &&
+       bleSource.includes('boolean commitPanelPreview(') &&
+       bleSource.includes('boolean heartbeatPanelPreview(') &&
+       bleSource.includes('boolean cancelPanelPreview(') &&
+       bleSource.includes('GeometryTransactionManager.validateMappingAgainstSnapshots(mapping,snapshots,statuses)') &&
+       bleSource.includes('manager.requestBegin()') &&
+       bleSource.includes('manager.queueUpdate(candidateWire,descriptors,negotiatedMtu)') &&
+       bleSource.includes('manager.requestCommit(status)') &&
+       bleSource.includes('panelStatusFresh[i]') &&
+       bleSource.includes('BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE') &&
+       bleSource.includes('panelStatusExpectedLane=panelSnapshotLane') &&
+       bleSource.includes('private void panelRetryStatusRead(BluetoothGatt owner)') &&
+       bleSource.includes('panelStatusReadRetries>=3') &&
+       bleSource.includes('},250L)') &&
+       bleSource.includes('private void startPanelControl()') &&
+       bleSource.includes('private void startPanelUpdate()') &&
+       bleSource.includes('panelControlWritten(connection,status)') &&
+       bleSource.includes('panelUpdateWritten(connection,status)') &&
+       bleSource.includes('manager.commitWriteCompleted()') &&
+       bleSource.includes('Panel UPDATE write completion timed out') &&
+       bleSource.includes('panelSnapshotAbortForStop=true') &&
+       bleSource.includes('Panel snapshot aborted to prioritize STOP'),
+       'BLE adapter must read negotiated Panel v2 telemetry, verified committed geometry and reconcile without blind retry');
+const systemSection=compose.split('private fun SettingsPage(')[1].split('private fun SettingsDiagnostics(')[0];
+assert(systemSection.includes('panelSyncWarning.value?.let') &&
+       systemSection.includes('Synchronization warning') &&
+       !systemSection.includes('Panel Diagnostics') &&
+       compose.includes('setPanelStatusListener('),
+       'Sequence warnings must appear conditionally in existing Settings -> System without a new screen');
+for (const file of [
+  'android/app/src/test/java/com/opentail/android/PanelPreviewProtocolTest.java',
+  'android/app/src/test/java/com/opentail/android/TelemetrySequenceWatchdogTest.java',
+  'android/app/src/test/java/com/opentail/android/GeometryTransactionManagerTest.java'
+]) assert(fs.existsSync(file),'P0 Android regression suite missing: '+file);
+
+
+// Disconnect/reconnect regression: old GATT session and its authoritative
+// Panel/Zone aliases must never leak into the next verified controller readback.
+const disconnectBlock=bleSource.split('private void panelDisconnected() {')[1]?.split('boolean canMapTriggers()')[0]||'';
+const disconnectedStatusBlock=compose.split('if (!ble.isConnected()) {')[1]?.split('if (!ble.canControl())')[0]||'';
+assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
+       disconnectBlock.includes('panelConfirmedSnapshots[lane]=null;') &&
+       bleSource.includes('new GeometryTransactionManager(') &&
+       bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
+       disconnectedStatusBlock.includes('clearPanelGeometryPreview(') &&
+       disconnectedStatusBlock.includes('panelGeometryLoadInProgress = false') &&
+       disconnectedStatusBlock.includes('reconnect to refresh output status') &&
+       compose.includes('private fun queuePanelGeometryDraftUpdate()') &&
+       compose.includes('panelGeometryQueuedTarget=target') &&
+       compose.includes('Wait for all draft updates to be acknowledged before Commit'),
+       'Live Layout must invalidate disconnected managers and shadow drafts, reload verified CORE map, and serialize rapid edits');
+
+
+// Owner P0: simultaneous O1/O2 live leases have separate Android transaction
+// state, independent sequence watchdogs, and output switching never sends
+// CANCEL or persists the other lane's unsaved geometry.
+assert(compose.includes('private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())') &&
+       compose.includes('private fun activateLaneState(lane:Int)') &&
+       compose.includes('private fun pumpEveryLaneGeometry()') &&
+       compose.includes('activateLaneState(0)') &&
+       compose.includes('activateLaneState(1)') &&
+       compose.includes('ble.panelGeometryReady(captureOutput.intValue)') &&
+       bleSource.includes('private final TelemetrySequenceWatchdog[] panelWatchdogs=') &&
+       bleSource.includes('TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane]') &&
+       bleSource.includes('boolean panelGeometryReady(int lane)') &&
+       !compose.includes('cancelPanelGeometryPreview()\n                } else if(layoutLiveEditPending.value)'),
+       'O1/O2 must preserve concurrent live geometries and independent telemetry without Save');
+
+// Physical bench regression: Reload must not stack a local/project editor
+// beneath a second CORE-output editor, and output selection must route PLAY.
+const layoutEditor = compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+const unifiedEditor = compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(layoutEditor?.includes('val draftZoneCount = layoutDraftZoneCounts[captureOutput.intValue]') &&
+       layoutEditor.includes('HardwareOutputEditor(t)') &&
+       layoutEditor.includes('linked zones are edited inside the cards above') &&
+       unifiedEditor?.includes('liveChainMask.intValue=1') &&
+       unifiedEditor.includes('liveChainMask.intValue=2') &&
+       unifiedEditor.includes('Pill("Test Solid Red · O"') &&
+       unifiedEditor.includes('testSavedOutputSolidRed(index)') &&
+       compose.includes('private fun testSavedOutputSolidRed(index: Int)') &&
+       compose.includes('foreground = 0xffff0000.toInt(), background = 0xff000000.toInt()') &&
+       compose.includes('effectId = 0, chainMask = 1 shl index, zoneMask = 255') &&
+       compose.includes('brightness = 24, speed = 128, intensity = 128, paletteId = 0') &&
+       unifiedEditor.includes('Solid Red targets any configured section.') &&
+       unifiedEditor.includes('panelSaveQueuedLane=index') &&
+       unifiedEditor.includes('"Saving…" else "Save"') &&
+       !unifiedEditor.includes('if (confirm) AlertDialog'),
+       'Layout must display one editor, route playback to selected output and gate Saved on CORE readback');
+
+// An explicit physical red test cannot inherit an unrelated Show Mode
+// effect, palette, color, brightness, or unsaved output draft.
+const savedRedTest = compose.split('private fun testSavedOutputSolidRed(index: Int) {')[1]
+  ?.split('private val importer =')[0];
+assert(savedRedTest &&
+       savedRedTest.includes('if (0 !in supportedIds.value || !ble.canContinuousFx())') &&
+       savedRedTest.includes('livePreview.update(LiveBlePreview.Frame(') &&
+       savedRedTest.includes('ble.lastConfirmedPanelSnapshot(index) != null') &&
+       !savedRedTest.includes('previewCurrentEffect(') &&
+       !savedRedTest.includes('prefs.getInt(') &&
+       !savedRedTest.includes('ble.saveOutput('),
+       'Saved Output test must emit independent, gated volatile Solid Red and never write NVS');
+
+// Readback timing must be collected from real monotonic ATT progression,
+// not predicted from output pixel count or substituted for CRC/revision proof.
+assert(bleSource.includes('private String cfgTimingDetail()') &&
+       bleSource.includes('cfgRequestedMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgTransferMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgReadbackMs=android.os.SystemClock.elapsedRealtime();') &&
+       bleSource.includes('cfgReadFragments++;') &&
+       bleSource.includes(')+cfgTimingDetail(),output,cfgIndex') &&
+       bleSource.includes('Arrays.equals(cfgBytes,cfgExpected)'),
+       'Measure real readback fragments and latency without bypassing verified controller readback');
+
+// Role Off cannot authorize a normal FX show, but Firmware #127's
+// authenticated Pixel Probe can still test physical LED 0 without NVS,
+// without constructing a fake zone, and without bypassing STOP priority.
+const probeBlock = bleSource.split('boolean probeFirstPixel(int lane) {')[1]
+  ?.split('boolean canReadPanelPreview()')[0];
+assert(bleSource.includes('PIXEL_PROBE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf33")') &&
+       bleSource.includes('boolean canProbeFirstPixel()') &&
+       bleSource.includes('(panelCapabilities.flags&1)!=0') &&
+       probeBlock?.includes('new byte[]{(byte)0xaa,(byte)(lane+1),0,0,1}') &&
+       probeBlock.includes('BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT') &&
+       probeBlock.includes('pixelProbeWritePending=true;') &&
+       probeBlock.includes('recoverStalledGatt(owner,"Pixel probe ATT write timeout")') &&
+       bleSource.includes('if (panelSaveBusy || pixelProbeWritePending || writePending || readReplyPending') &&
+       bleSource.includes('if(panelSaveBusy||pixelProbeWritePending||writePending||readReplyPending||cfgBusy') &&
+       bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
+       bleSource.includes('panelDisconnected(); // also clear stale Panel/Probe capability and in-flight diagnostic lease') &&
+       compose.includes('ble.setPixelProbeListener { result ->') &&
+       unifiedEditor.includes('Pill("Check first LED · O"') &&
+       unifiedEditor.includes('enabled=ble.canProbeFirstPixel()') &&
+       unifiedEditor.includes('if(ble.probeFirstPixel(index))') &&
+       !probeBlock.includes('saveOutput(') &&
+       !probeBlock.includes('cfgSend('),
+       'Bench Pixel Probe must use exact authorized five-byte v4 diagnostic, no NVS, serialized behind STOP');
+
+// Regression: a lost GATT confirmation must not erase draft role/count edits,
+// silently retry flash writes, or call an unverified commit "Saved".
+assert(!unifiedEditor.includes('var choosingRole by remember(index,i)') &&
+       !compose.includes('private fun assignPhysicalTriggerRole(') &&
+       compose.includes('project.assignMany(selections,zoneId,!checked)') &&
+       unifiedEditor.includes('if(i != selectedZone.coerceIn(0,zones.length()-1)) continue') &&
+       unifiedEditor.includes('LaunchedEffect(index,pixelCount)') &&
+       unifiedEditor.includes('LaunchedEffect(index,i,count)') &&
+       compose.includes('outputDrafts[index] = confirmed.toString()') &&
+       compose.includes('outputDrafts[index] = draftText') &&
+       bleSource.includes('Save unverified; reconnect and Reload before retrying.') &&
+       !bleSource.includes('cfgFail("BLE config write failed: "+status);saveOutput('),
+       'BLE-133 reconciliation or single selected zone editing regressed');
+
+// Integration regressions: selection must never cancel O1's active shadow
+// just to edit O2; Save sends one durable upload after accepted UPDATEs.
+const layoutPage=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+assert(layoutPage &&
+       layoutPage.includes('if(captureOutput.intValue==panelGeometryActiveLane)') &&
+       compose.includes('private fun pumpEveryLaneGeometry()') &&
+       compose.includes('private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())') &&
+       compose.includes('activateLaneState(0)') &&
+       compose.includes('activateLaneState(1)') &&
+       bleSource.includes('TelemetrySequenceWatchdog panelWatchdog=panelWatchdogs[current.lane]') &&
+       !compose.includes('panelSaveAfterPreviewLane') &&
+       compose.includes('panelSaveQueuedLane=index') &&
+       compose.includes('panelSaveSubmittedDrafts[lane]=requested') &&
+       compose.includes('ble.savePanelV4(lane,requested)') &&
+       !compose.includes('commitPanelGeometryPreview() // automatic') &&
+       bleSource.includes('panelSaveVerificationReads<=8') &&
+       bleSource.includes('STOP prioritized; durable Save must be reconciled') &&
+       compose.includes('ownerEditedAfterSave'),
+       'O1/O2 edit switching, single durable Save, STOP and bounded readback contract regressed');
+
+// Overseer 4 Layout acceptance: one Output / Panel / Zone editor and
+// zero-LED first-run drafts, without making a fake saved CORE output.
+const finalLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+const finalOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+assert(finalLayout && finalOutput &&
+  finalLayout.includes('HardwareOutputEditor(t)') &&
+  finalLayout.includes('linked zones are edited inside the cards above') &&
+  finalLayout.includes('z.optInt("physicalSection",-1) in 0 until draftZoneCount) continue') &&
+  finalLayout.includes('if(showingUnlinked) for(i in 0 until zoneCount)') &&
+  finalOutput.includes('val index = captureOutput.intValue') &&
+  finalOutput.includes('val authoritativeMap = runCatching') &&
+  finalOutput.includes('coreZone.panelId') &&
+  finalOutput.includes('if(linkedId!=null && linkedIndex!=null)') &&
+  finalOutput.includes('ZoneDotPreview(t,localCount,reversed)') &&
+  finalOutput.includes('panelSaveQueuedLane=index') &&
+  compose.includes('ble.savePanelV4(lane,requested)') &&
+  !finalOutput.includes('Saved Output 1') &&
+  !finalOutput.includes('BLE test1'),
+  'One CORE-backed editor must retain all local zone tools without duplicate cards');
+assert(model.includes('wholeNumber(z.opt("length"), 0, 10000)') &&
+  model.includes('zoneCount() >= MAX_ZONES || length < 0') &&
+  model.includes('index < 0 || length < 0') &&
+  finalLayout.includes('CapsuleSlider(n, 0, 10000, t,') &&
+  finalOutput.includes('.put("pixels",0)') &&
+  finalOutput.includes('mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()') &&
+  finalOutput.includes('SideEffect { layoutDraftZoneCounts[index] = zones.length() }') &&
+  finalOutput.includes('if(ble.lastConfirmedPanelSnapshot(index)==null)') &&
+  finalOutput.includes('if (zones.length() < 8) Pill("+ Add zone", t)') &&
+  bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
+  'Zero LED drafts must stay inert; saved CORE state still requires readback');
+
+assert(!compose.includes('ble.saveOutput(index, draftText)') &&
+       !compose.includes('ble.readOutputIfReady(index)') &&
+       panelDraft.includes('PanelPreviewProtocol.MapIdentity.parse(snapshot)') &&
+       panelDraft.includes('v4_editable') &&
+       panelV4.includes('parseStartFreshChallenge') &&
+       bleSource.includes('startFreshPanelV4(int lane)') &&
+       bleSource.includes('panelSavePhase==7') &&
+       finalOutput.includes('Pill("Start Fresh"') &&
+       finalOutput.includes('ble.startFreshPanelV4(index)'),
+       'User-facing Layout must use only authoritative Panel v4 and protected Start Fresh');
+assert(finalLayout.includes('LightingDirectory(t)') &&
+  finalLayout.includes('if(advancedOpen) {') &&
+  finalOutput.includes('Pill(outputTab(0),t,index==0)') &&
+  finalOutput.includes('Pill(outputTab(1),t,index==1)') &&
+  finalOutput.includes('ble.readPanelLaneSnapshot(index)') &&
+  finalOutput.includes('outputDirty[index] = true') &&
+  compose.includes('(!ownerEditedAfterSave && completedSave)') &&
+  compose.includes('outputDirty[index] != true') &&
+  model.includes('updateZoneOrganization(String id, String field, String text)') &&
+  model.includes('z.optString(key).length() > 64') &&
+  finalLayout.includes('EffectsPreview(t, selectedEffect.intValue)'),
+  finalOutput.includes('Pill("Remove zone",t)') &&
+  finalOutput.includes('pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)') &&
+  finalOutput.includes('if(outputToolsOpen) Pill("Check first LED') &&
+  finalOutput.includes('outputLoadStatus[index]=="loading"') &&
+  compose.includes('lastAutoGeometryRefresh.intValue!=modelRevision'),
+  'One-card Output/Zone editing must expose zone removal, restore locked preview and terminate loading attempts safely');
+
+// Owner 0/522 discrepancy regression: saved Panel v4 and unsaved O2 draft
+// must be distinguished, and local discard must be lane-specific and inert.
+assert(finalOutput.includes('PanelV4DraftCodec.savedSelectorPixels(outputs[which])') &&
+  finalOutput.includes('Unsaved draft · ') &&
+  finalOutput.includes('Discard O') &&
+  finalOutput.includes('outputDrafts[index]=confirmed.toString()') &&
+  finalOutput.includes('outputDirty[index]=false') &&
+  finalOutput.includes('outputReadbackEpoch[index]=(outputReadbackEpoch[index]?:0)+1') &&
+  finalOutput.includes('manager.state()!=GeometryTransactionManager.State.READY') &&
+  finalOutput.includes('Finish or cancel O') &&
+  !finalOutput.includes('outputDrafts[which] ?: outputs[which]?.toString()'),
+  'O2 0/522 saved-versus-local display and safe lane-only discard regressed');
+
+
+// Owner scope lock: the existing Triggers editor is the ONLY place to
+// assign zones to trigger profiles. No second override card or Layout role UI.
+const unclutteredLayout=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+const unclutteredTriggers=compose.split('private fun TriggersPage(t: Tone) {')[1]
+  ?.split('private fun CoreTriggerMappingPage(t: Tone) {')[0];
+assert(unclutteredLayout && unclutteredTriggers &&
+  !unclutteredLayout.includes('Text("Lighting role"') &&
+  !unclutteredLayout.includes('var choosingRole by remember') &&
+  !unclutteredTriggers.includes('Controller zone overrides') &&
+  !compose.includes('private fun assignPhysicalTriggerRole(') &&
+  unclutteredTriggers.includes('project.assignMany(selections,zoneId,!checked)') &&
+  unclutteredTriggers.includes('Assign zones to '),
+  'Keep existing Triggers zone assignments; no duplicate role card in Layout or Triggers');
+
+// One purpose per control. Existing UI contracts, no replacement screens:
+// - Save is the only everyday persistence action, Start Fresh behind More.
+// - Triggers preserves bulk assignment with one Done and no inert Test.
+// - Auto Events has one entry via its card and a zero-inclusive fade slider.
+// - Home owns connection/status; essential hardware diagnostics stay in Settings.
+const simpleOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+const simpleEvents=compose.split('private fun AutoEventsPage(t: Tone, previewEffect: (Int) -> Unit) {')[1]
+  ?.split('private fun CorePaletteTransferPanel(')[0];
+const simpleHome=compose.split('private fun HomePage(')[1]
+  ?.split('private fun capturePreviewFrame()')[0];
+const simpleLayout=compose.split('private fun LayoutPage(t: Tone) {')[1]
+  ?.split('private fun refreshPanelGeometry()')[0];
+assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
+  !simpleHome.includes('Text("Controller Status"') &&
+  !simpleLayout.includes('Pill("Refresh CORE",t)') &&
+  simpleLayout.includes('if(panelGeometryMapping!=null && panelGeometryActiveLane==captureOutput.intValue)') &&
+  !simpleOutput.includes('PixelStrip(t,') &&
+  simpleOutput.includes('ValueSlider("Total output pixels"') &&
+  simpleOutput.includes('PixelStepPill("−",t)') &&
+  simpleOutput.includes('PixelStepPill("+",t)') &&
+  simpleOutput.includes('Field(outputCountText, "Pixel count"') &&
+  simpleOutput.includes('Pill("Start Fresh"') &&
+  simpleOutput.lastIndexOf('Pill("Start Fresh"') > simpleOutput.indexOf('Pill("Reload from controller"') &&
+  simpleOutput.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
+  !simpleOutput.includes('Fit last zone to remaining pixels') &&
+  !simpleEvents.includes('IconAction("Edit " + key, "edit"') &&
+  !simpleEvents.includes('Pill("Instant Snap"') &&
+  !simpleEvents.includes('Pill("Smooth Fade"') &&
+  simpleEvents.includes('ValueSlider("Transition fade (ms)", fade, 5000, t)') &&
+  triggers.includes('Pill("Edit Selected"') &&
+  triggers.includes('confirmButton = { Pill("Done",t,true) { editing=false } })'),
+  'UI de-clutter regression: unique controls must remain, duplicate/dead UI must not reappear');
+
+
+// P0 owner physical finding: Pixel Probe was rejected merely because ordinary
+// readback/status telemetry was queued. Reconnect must clear an old request;
+// the one new owner tap must enter the shared ATT queue, behind STOP and live
+// UPDATE/CANCEL but ahead of optional background snapshot/status polling.
+const probeQueue=bleSource.split('final class PixelProbeRequestQueue {')[1];
+const probeQueueTests=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/PixelProbeRequestQueueTest.java','utf8');
+const pump=bleSource.split('private void pumpQueue(){')[1]
+  ?.split('private String preferredPending')[0];
+const ownerProbe=bleSource.split('boolean probeFirstPixel(int lane) {')[1]
+  ?.split('boolean canReadPanelPreview()')[0];
+const disconnectProbe=bleSource.split('private void panelDisconnected()')[1]
+  ?.split('boolean canMapTriggers()')[0];
+assert(probeQueue.includes('synchronized boolean offer(int lane)') &&
+  probeQueue.includes('synchronized int take()') &&
+  probeQueue.includes('synchronized void clear()') &&
+  probeQueueTests.includes('reconnectThenIdleOffersOneRealProbeOnO1') &&
+  probeQueueTests.includes('onlyOneLaneAndNoFabricatedOrRepeatedProbe') &&
+  probeQueueTests.includes('safetyStopCancelsQueuedProbeInsteadOfReplayingAfterAck') &&
+  bleSource.includes('if(stop && pixelProbeRequests.pending())') &&
+  bleSource.includes('probeNotify("Pixel probe cancelled by safety STOP")') &&
+  ownerProbe.includes('pixelProbeRequests.offer(lane)') &&
+  ownerProbe.includes('pixelProbeBlockingOperation()') &&
+  ownerProbe.includes('Pixel probe queued behind') &&
+  ownerProbe.includes('pixelProbeWritePending=true;') &&
+  !ownerProbe.includes('Pixel probe busy: finish the current BLE transfer and retry') &&
+  ownerProbe.includes('recoverStalledGatt(owner,"Pixel probe ATT write timeout")') &&
+  pump.includes('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(nextPacket!=null){') < pump.indexOf('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(panelUpdateQueued)') < pump.indexOf('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(pixelProbeRequests.pending())') < pump.indexOf('if(panelSnapshotQueuedLane>=0)') &&
+  pump.indexOf('if(pixelProbeRequests.pending())') < pump.indexOf('if(panelReadQueued!=0)') &&
+  disconnectProbe.includes('pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;') &&
+  bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
+  !ownerProbe.includes('savePanelV4(') &&
+  !ownerProbe.includes('cfgSend('),
+  'Pixel Probe reconnect/idle admission must be single-shot, serialized, diagnostic and STOP-safe');
+
+// Direct GATT entrypoints must respect the diagnostic/Save owners even when
+// bypassing pumpQueue. Otherwise display-cadence polling can overlap the probe.
+for (const signature of ['private boolean paletteGate(){',
+    'private boolean triggerMapAvailable(){','private void readFxCapabilitiesInternal() {',
+    'boolean readOutputIfReady(int index) {','void readOutput(int index){',
+    'boolean saveOutput(int index,String json){','void pairWithBoot(){',
+    'void authorizeStored(){','void authorize(String tokenHex) {','void fxPreset(int action,int slot) {']) {
+  const entry=bleSource.split(signature)[1];
+  assert(entry && entry.slice(0,500).includes('pixelProbeWritePending||panelSaveBusy'),
+    signature+' must not overlap Pixel Probe/Panel Save ATT ownership');
+}
+assert(bleSource.split('boolean captureFrame(int output) {')[1].split('frameCapture.request(output)')[0]
+  .includes('pixelProbeRequests.blocksBackgroundTransfer(pixelProbeWritePending,panelSaveBusy)'),
+  'display cadence cannot steal ATT from a queued/in-flight Pixel Probe or Save');
+assert(bleSource.includes('else watchInfoRead(gatt);') &&
+  bleSource.includes('if(infoStarted)watchInfoRead(connection);') &&
+  bleSource.includes('owner==gatt && infoReadPending && lease==infoReadWatchLease') &&
+  bleSource.includes('recoverStalledGatt(owner,"CORE information ATT read timed out")'),
+  'each INFO read must retire a stalled session without overlapping ATT or replaying probes');
+
+const legacyOutputUi=fs.readFileSync('android/app/src/main/java/com/opentail/android/NativeOutputManager.java','utf8');
+assert(!/623|1,246/.test(legacyOutputUi),'Historical output UI must not advertise bench-derived capacity');
+assert(codec.includes('((pixelCount==0)!=(zones.length()==0))') &&
+       codec.includes('((pixels==0)!=(count==0))'),
+       'Empty v1 outputs must remain empty in both directions; reject mismatched count/zone pairs');
+
+// Physical range offsets never inherit the old cursor-resize behavior.
+// Imported multi-panel/range geometry stays explicit; only validated
+// candidates flow to the live Panel v2 geometry update engine.
+assert(compose.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
+  compose.includes('PanelV4DraftCodec.encode(index,next,confirmed)') &&
+  compose.includes('val storedRanges=zone.optJSONArray("ranges")') &&
+  compose.includes('item.put("start",nextStart)') &&
+  compose.includes('next.put("v4_advanced",true)') &&
+  compose.includes('if(!it.optBoolean("v4_advanced",false)||next.length()==0)') &&
+  compose.includes('fun adjustZone(zoneIndex: Int, newLength: Int)'),
+  'Manual zero-based physical offsets must retain explicit v4 range slots and active capacity');

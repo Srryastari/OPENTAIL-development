@@ -24,16 +24,10 @@ ot_ble_fx_result_t ot_ble_fx_parse(const uint8_t *p,size_t n,bool authorized,
   return OT_BLE_FX_OK;
 }
 
-/* Only Effects #95's eleven independently exercised authored consumers
- * accept the optional third color. Eight further advertised source grammar
- * roles remain NOT VERIFIED and must not be falsely admitted over BLE. */
+/* Effects #110 is the source authority for the 13 proven third-color
+ * consumers. Aurora is admitted only with its source-authentic RGB3 palette 4. */
 static bool third_color_source_verified(uint16_t id){
-    switch(id){
-        case 28u:case 29u:case 34u:case 50u:case 52u:
-        case 54u:case 55u:case 56u:case 84u:case 87u:case 103u:
-            return true;
-        default:return false;
-    }
+    return ot_wled_fx_tertiary_supported(id);
 }
 ot_ble_fx_result_t ot_ble_fx_parse_tertiary(const uint8_t *p,size_t n,
     bool authorized,ot_ble_fx_packet_t *out,ot_ble_fx_tertiary_t *third){
@@ -52,6 +46,7 @@ ot_ble_fx_result_t ot_ble_fx_parse_tertiary(const uint8_t *p,size_t n,
     if(rc!=OT_BLE_FX_OK)return rc;
     ot_wled_fx_color_role_t roles[3]={0};
     if(!third_color_source_verified(candidate.effect_id)||
+       (candidate.effect_id==38u && candidate.palette_id!=4u)||
        !ot_effects_1d_color_roles(candidate.effect_id,roles)||
        !roles[2].enabled)return OT_BLE_FX_UNSUPPORTED;
     *out=candidate;

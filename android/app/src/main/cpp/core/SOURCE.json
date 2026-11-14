@@ -1,31 +1,42 @@
 {
-  "source_commit": "1767b144e193ed6978816899ebb5eba237ee6e2d",
+  "source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "files": {
-    "wled_fx_compat.c": "ce81638b0300829b7fbc05cff0f7dca3126dd9e53221de27f884d2e9fe2978e5",
-    "wled_fx_compat.h": "d255e1a77e6e7c4f644869dbfe771c90b61eb0119f8659f091f97a44ef11d3c5",
-    "effects_1d.c": "e7d8d1f95f84f828f5c5b8d139e6328ce02fefbd6357a8c026f0cfe4bc0fc0b6",
-    "effects_1d.h": "6e7a45b1d433e56cd7c11d7597fbc09790ff76aa4230230a4587c0961b41aa90",
+    "wled_fx_compat.c": "cc50006aac5b9677d3e8ce911eb4d744e46d5ab4576f19111ed2e7a2cd3f001d",
+    "wled_fx_compat.h": "cd1f8176be2ad867dceffabc3425e86404a884241b1517cf59c4a0835cc614f0",
+    "effects_1d.c": "8be306b43e581fa1ce4264e432ea451ba9cb61ea1f5e9f116287f0a310b7d7fc",
+    "effects_1d.h": "996421582fa06d14d1e5d5c90699d5497b700292bf834e91054daea0ac4b2fec",
     "wled_1d.c": "44116fbc03f467bf61b511f097f4edcbf093251e71818ca71b3525aab47542ab",
     "wled_1d.h": "ffa77e0da8f2f9efee32f20bc8c083beb0831440b39f7bcf3977e571147a3c55",
     "palette_1d.c": "c7b5d24b79d5e0a014eb892d45692a8e22c40996d0e4169786d291d1fad00afa",
     "palette_1d.h": "761471a3856a5ff64d225ae0f588775b441fff741d3669e09ff93be2bf3e28e9",
     "particle_system_1d.c": "3abdf07a051d0d9f4cb89973aed8450533c794b0787753f1df0ad7eb82c5c9cc",
     "particle_system_1d.h": "ab07b4d37ef0097c682d0822d646d839e06dbcfd96b51a35cee61defc98ada0d",
-    "ot_auto_effects.c": "5f6484066a8e070f5804470fee80c06d677cdc87ec6ce3bcc892df9da6cc3d90",
+    "ot_auto_effects.c": "16fe4997a9d4be91375b3ac4e4339b3f6f99be8a734831c9624cdb1e42663f05",
     "ot_auto_effects.h": "3116eb326df2a06c863e86cdf89b15702a2eb9c0ad7daa3617b9fa6f6b73a395",
     "core_logic.h": "ee9c173fe24da57e4e2b4c52ad218f06de77bb789ceb6aa1eca9e7413379ad5e"
   },
-  "seamless_loop_source_commit": "7c0fcc450a7619a57603aabf833dea855a18bcd8",
+  "seamless_loop_source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "seamless_loop_files": [
-    "effects_1d.c",
-    "effects_1d.h",
     "ot_auto_effects.c",
     "ot_auto_effects.h"
   ],
-  "color_slot_source_commit": "984a12aeec4e348b869ba2504a2f994fc944f7f2",
+  "color_slot_source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "color_slot_files": [
     "wled_fx_compat.c",
-    "wled_fx_compat.h",
+    "wled_fx_compat.h"
+  ],
+  "integrated_effects_pr": 110,
+  "integrated_firmware96_head": "df27209b9876630b2b10f3a189f36817a2764009",
+  "integrated_android106_head": "db7bcdff187197c0493b5c38991870224f2c244a",
+  "tertiary_source_proven_modes": 13,
+  "tertiary_transport_admitted_modes": 13,
+  "tertiary_transport_capability": "fx-tertiary13-v1",
+  "tertiary_legacy_capability": "fx-tertiary-v1",
+  "tertiary_legacy_transport_modes": 11,
+  "tertiary_aurora_palette_id": 4,
+  "firmware127_ble_contract_head": "dfe1a48c3f48dddf7f4c511f063d3743298ccd6a",
+  "core_identity_source_commit": "dfe1a48c3f48dddf7f4c511f063d3743298ccd6a",
+  "core_identity_files": [
     "effects_1d.c",
     "effects_1d.h"
   ]

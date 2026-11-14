@@ -90,7 +90,119 @@ class ComposeMainActivity : ComponentActivity() {
     private val coreTriggerMapping = mutableStateOf<NativeTriggerMappingCodec.Snapshot?>(null)
     private val foundDevices = mutableStateMapOf<String, String>()
     private val outputs = mutableStateMapOf<Int, JSONObject>()
+    // Editing drafts are retained across GATT disconnects and navigation;
+    // only verified controller readback is allowed to replace them.
+    private val outputDrafts = mutableStateMapOf<Int, String>()
+    private val outputDirty = mutableStateMapOf<Int, Boolean>()
+    private val outputLoadStatus = mutableStateMapOf<Int, String>()
+    private val layoutAdvancedOpen = mutableStateOf(false)
+    private val lastAutoGeometryRefresh = mutableIntStateOf(-1)
+    private val layoutLiveEditPending = mutableStateOf(false)
+    private val outputReadbackEpoch = mutableStateMapOf<Int, Int>()
+    private val layoutDraftZoneCounts = mutableStateMapOf<Int, Int>()
     private val outputMessage = mutableStateOf("No device output read yet")
+    private val savingOutput = mutableIntStateOf(-1)
+    // Conditional diagnostic only; the approved Settings UI is unchanged when healthy.
+    private val panelSyncWarning = mutableStateOf<String?>(null)
+    private val panelStatusSummary = mutableStateOf("Panel telemetry unavailable")
+    private val panelGeometryMessage = mutableStateOf("Connect and authorize to read CORE geometry")
+    private val panelGeometryRevision = mutableIntStateOf(0)
+    private val panelGeometryEpoch = mutableIntStateOf(0)
+    private var panelGeometryLoadInProgress = false
+    private var panelGeometryLoadLane = -1
+    private var panelGeometryMapping: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryActiveLane = -1
+    private var panelGeometryAppliedMapping: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryPlanTarget: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryQueuedTarget: GeometryTransactionManager.LayoutMapping? = null
+    private var panelGeometryBatches: Array<List<Array<PanelPreviewProtocol.UpdateDescriptor>>> =
+        arrayOf(emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>(),emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>())
+    private var panelGeometryNextBatch = intArrayOf(0,0)
+    private var panelGeometryBeginRequested = booleanArrayOf(false,false)
+    private var panelGeometryChanged = booleanArrayOf(false,false)
+    private var panelGeometryActionStarted = booleanArrayOf(false,false)
+    private var panelGeometryActionCommit = booleanArrayOf(false,false)
+    private var panelGeometryActionDone = booleanArrayOf(false,false)
+    private var panelGeometryBaseRevisions = intArrayOf(-1,-1)
+    private var panelGeometryCommitRequested = false
+    private var panelGeometryCancelRequested = false
+    // A Save captures one owner-selected v4 draft and submits exactly one
+    // durable upload after all volatile UPDATEs have been acknowledged.
+    // No intermediate persistent preview COMMIT or manual Reload.
+    private var panelSaveQueuedLane = -1
+    private var panelSaveQueuedDraft: String? = null
+    private var panelSaveQueuedChecks = 0
+    private val panelSaveSubmittedDrafts = mutableMapOf<Int,String>()
+    private var panelGeometryDraftValid = true
+    /** Lane-specific volatile previews. BLE owns the authoritative
+     * transaction manager; the editor owns only unsaved UI batching.
+     * Switching O1/O2 must never send CANCEL or alter the other lane's state. */
+    private class LanePreviewState {
+        var mapping: GeometryTransactionManager.LayoutMapping? = null
+        var applied: GeometryTransactionManager.LayoutMapping? = null
+        var plan: GeometryTransactionManager.LayoutMapping? = null
+        var queued: GeometryTransactionManager.LayoutMapping? = null
+        var batches: Array<List<Array<PanelPreviewProtocol.UpdateDescriptor>>> =
+            arrayOf(emptyList(),emptyList())
+        var nextBatch = intArrayOf(0,0)
+        var begun = booleanArrayOf(false,false)
+        var changed = booleanArrayOf(false,false)
+        var actionStarted = booleanArrayOf(false,false)
+        var actionCommit = booleanArrayOf(false,false)
+        var actionDone = booleanArrayOf(false,false)
+        var baseRevisions = intArrayOf(-1,-1)
+        var commitRequested = false
+        var cancelRequested = false
+        var draftValid = true
+    }
+    private val lanePreviewStates = arrayOf(LanePreviewState(),LanePreviewState())
+
+    private fun storeActiveLaneState() {
+        val lane=panelGeometryActiveLane
+        if(lane !in 0..1)return
+        lanePreviewStates[lane].apply {
+            mapping=panelGeometryMapping;applied=panelGeometryAppliedMapping
+            plan=panelGeometryPlanTarget;queued=panelGeometryQueuedTarget
+            batches=panelGeometryBatches;nextBatch=panelGeometryNextBatch
+            begun=panelGeometryBeginRequested;changed=panelGeometryChanged
+            actionStarted=panelGeometryActionStarted;actionCommit=panelGeometryActionCommit
+            actionDone=panelGeometryActionDone;baseRevisions=panelGeometryBaseRevisions
+            commitRequested=panelGeometryCommitRequested
+            cancelRequested=panelGeometryCancelRequested;draftValid=panelGeometryDraftValid
+        }
+    }
+
+    private fun activateLaneState(lane:Int) {
+        if(lane !in 0..1)return
+        if(panelGeometryActiveLane==lane)return
+        storeActiveLaneState()
+        lanePreviewStates[lane].apply {
+            panelGeometryMapping=mapping;panelGeometryAppliedMapping=applied
+            panelGeometryPlanTarget=plan;panelGeometryQueuedTarget=queued
+            panelGeometryBatches=batches;panelGeometryNextBatch=nextBatch
+            panelGeometryBeginRequested=begun;panelGeometryChanged=changed
+            panelGeometryActionStarted=actionStarted;panelGeometryActionCommit=actionCommit
+            panelGeometryActionDone=actionDone;panelGeometryBaseRevisions=baseRevisions
+            panelGeometryCommitRequested=commitRequested
+            panelGeometryCancelRequested=cancelRequested;panelGeometryDraftValid=draftValid
+        }
+        panelGeometryActiveLane=lane
+    }
+
+    private fun anyLanePreviewActive():Boolean =
+        panelGeometryMapping!=null ||
+        lanePreviewStates.any { it.mapping!=null }
+
+    private fun pumpEveryLaneGeometry() {
+        val selected=captureOutput.intValue.coerceIn(0,1)
+        storeActiveLaneState()
+        for(lane in 0..1) {
+            activateLaneState(lane)
+            if(panelGeometryMapping!=null)pumpPanelGeometry()
+        }
+        activateLaneState(selected)
+    }
+
     private val paletteTransferMessage = mutableStateOf("CORE palette v3 not negotiated")
     private val paletteV3Supported = mutableStateOf(false)
     private val paletteLoadedSlot = mutableIntStateOf(-1)
@@ -204,6 +316,59 @@ class ComposeMainActivity : ComponentActivity() {
         ))
     }
 
+    // Repeatable bench-only light test. Do not inherit Show Modes colors,
+    // brightness, palette, effect selection or an unsaved Output draft.
+    // This is a volatile command request, NOT proof of light output.
+    private fun testSavedOutputSolidRed(index: Int) {
+        val liveDraft = runCatching {
+            JSONObject(outputDrafts[index] ?: outputs[index]?.toString() ?: "{}")
+        }.getOrNull()
+        val hasLiveZone = liveDraft?.optJSONArray("zones")?.let { sections ->
+            (0 until sections.length()).any { z ->
+                (sections.optJSONObject(z)?.optInt("pixels",0) ?: 0)>0
+            }
+        } ?: false
+        val hasConfirmedZone = runCatching {
+            ble.lastConfirmedPanelSnapshot(index)?.let { PanelPreviewProtocol.MapIdentity.parse(it) }
+                ?.zones?.any { it.ranges.any { r -> r.count>0 } } ?: false
+        }.getOrDefault(false)
+        val liveGeometryActive = ble.panelGeometryManager(index)?.state() ==
+            GeometryTransactionManager.State.ACTIVE &&
+            panelGeometryActiveLane==index &&
+            panelGeometryAppliedMapping?.lane(index)?.zones?.any { it.count>0 }==true &&
+            panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
+            panelGeometryDraftValid && !panelGeometryCommitRequested
+        if(index !in 0..1 || !ble.canControl() ||
+            !(hasConfirmedZone || (liveGeometryActive && hasLiveZone))) {
+            outputMessage.value =
+                "Solid Red needs a controller-accepted, nonempty live or saved zone. Trigger roles and Save are not required."
+            return
+        }
+        if (0 !in supportedIds.value || !ble.canContinuousFx()) {
+            outputMessage.value = "Red test unavailable: controller Solid/continuous capability not confirmed"
+            return
+        }
+        invalidateCoreFrame()
+        offlinePreview.value = false // explicit bench Test exits offline preview
+        liveChainMask.intValue = 1 shl index
+        liveZoneMask.intValue = 255
+        if (!livePreview.isArmed() && !livePreview.arm()) {
+            outputMessage.value = "Red test unavailable: controller playback could not be armed"
+            return
+        }
+        liveArmed.value = true
+        livePreview.update(LiveBlePreview.Frame(
+            effectId = 0, chainMask = 1 shl index, zoneMask = 255,
+            foreground = 0xffff0000.toInt(), background = 0xff000000.toInt(),
+            brightness = 24, speed = 128, intensity = 128, paletteId = 0
+        ))
+        val panelKnown = ble.lastConfirmedPanelSnapshot(index) != null
+        outputMessage.value = "Solid Red requested on O" + (index + 1) +
+            " (24/255 bench cap). Check BLE FX reply; " +
+            (if (panelKnown) "confirm active Panel/Zone routing."
+             else "Panel v4 geometry not read back; Output v1 alone cannot prove playback.")
+    }
+
     private val importer = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -243,12 +408,38 @@ class ComposeMainActivity : ComponentActivity() {
             bleMessage.value = status
             if (status.contains("OK AUTH") && ble.canControl())
                 ble.readFxCapabilitiesAfterAuth()
-            if (!ble.isConnected()) firmwareVersion.value = null
+            if (!ble.isConnected()) {
+                firmwareVersion.value = null
+                // A preview session cannot survive a lost GATT connection.
+                // Keep local Layout edits, but discard all pending shadow-map
+                // batches; only fresh CORE readback can start the next preview.
+                val hadPreview = anyLanePreviewActive()
+                val wasLoading = panelGeometryLoadInProgress
+                panelGeometryLoadInProgress = false
+                panelGeometryLoadLane = -1
+                if(hadPreview) {
+                    for(lane in 0..1) {
+                        activateLaneState(lane)
+                        clearPanelGeometryPreview("CORE disconnected; both unsaved drafts remain local. Reconnect for authoritative readback.")
+                    }
+                }
+                else if (wasLoading) {
+                    panelGeometryMessage.value = "CORE disconnected during readback; reconnect to refresh output status."
+                    panelGeometryRevision.intValue++
+                }
+            }
             if (!ble.canControl()) {
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 coreTriggerMapping.value = null // never reuse another controller's physical input mapping
-                outputs.clear() // readback from a disconnected/unauthorized controller is not current
+                outputs.clear() // controller readback is no longer trusted; keep unsaved outputDrafts
+                if (savingOutput.intValue >= 0)
+                    outputMessage.value = "Controller disconnected during Save. Result unknown; reconnect and Reload before retrying."
+                savingOutput.intValue = -1
+                panelSaveQueuedLane = -1 // uncertain BLE state: no automatic Save replay
+                panelSaveQueuedDraft = null
+                panelSaveQueuedChecks = 0
+                panelSaveSubmittedDrafts.clear()
                 paletteV3Supported.value = false
                 paletteLoadedSlot.intValue = -1
                 paletteLoadedRevision.longValue = -1L
@@ -262,6 +453,45 @@ class ComposeMainActivity : ComponentActivity() {
         } }
         ble.setInfoListener { version ->
             runOnUiThread { firmwareVersion.value = version }
+        }
+        ble.setPanelStatusListener({ status ->
+            runOnUiThread {
+                panelStatusSummary.value = if(status==null) "Panel telemetry disconnected" else
+                    status.diagnosticSummary()
+                panelGeometryRevision.intValue++
+                pumpEveryLaneGeometry()
+            }
+        }, { decision ->
+            runOnUiThread {
+                panelSyncWarning.value = if(decision.warning) decision.message else null
+                if(decision.warning) {
+                    panelGeometryMessage.value="CORE geometry warning: "+decision.message
+                    panelGeometryRevision.intValue++
+                }
+            }
+        })
+        ble.setPanelSnapshotListener { snapshot ->
+            runOnUiThread {
+                if(snapshot!=null) {
+                    // v4 is the only source of saved Layout values.
+                    runCatching { PanelV4DraftCodec.fromSnapshot(snapshot) }
+                        .onSuccess { confirmed ->
+                            val lane=snapshot.lane
+                            outputs[lane]=JSONObject(confirmed.toString())
+                            outputLoadStatus[lane]="ready"
+                            if(outputDirty[lane]!=true) {
+                                outputDrafts[lane]=confirmed.toString()
+                                outputReadbackEpoch[lane]=(outputReadbackEpoch[lane]?:0)+1
+                            }
+                            layoutDraftZoneCounts[lane]=confirmed.optJSONArray("zones")?.length()?:0
+                        }
+                        .onFailure {
+                            outputLoadStatus[snapshot.lane]="error"
+                            outputMessage.value="Panel v4 readback rejected: "+it.message
+                        }
+                    onPanelGeometrySnapshot(snapshot)
+                }
+            }
         }
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
@@ -324,14 +554,49 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
         }
+        ble.setPixelProbeListener { result ->
+            runOnUiThread { outputMessage.value=result }
+        }
         ble.setConfigListener { raw ->
             try {
                 val response = JSONObject(raw)
                 outputMessage.value = response.optString("message", "CORE output result")
                 val index = response.optInt("index", -1)
+                val completedSave = index == savingOutput.intValue
+                val submittedDraft = panelSaveSubmittedDrafts[index]
+                val ownerEditedAfterSave = submittedDraft!=null &&
+                    outputDrafts[index]!=submittedDraft
+                if(index in 0..1)
+                    outputLoadStatus[index] = if(response.optBoolean("ok")) "ready" else "error"
+                if (completedSave) {
+                    // Only byte-identical readback is durable confirmation.
+                    savingOutput.intValue = -1
+                    panelSaveSubmittedDrafts.remove(index)
+                }
                 if (response.optBoolean("ok") && index in 0..1)
                     response.optJSONObject("output")?.let {
-                        outputs[index] = JSONObject(it.toString())
+                        val confirmed = JSONObject(it.toString())
+                        outputs[index] = confirmed
+                        // Initial/reconnect reads must not erase an edited draft.
+                        if ((!ownerEditedAfterSave && completedSave) ||
+                            outputDirty[index] != true) {
+                            outputDrafts[index] = confirmed.toString()
+                            outputDirty[index] = false
+                            outputReadbackEpoch[index] = (outputReadbackEpoch[index] ?: 0) + 1
+                        }
+                        layoutDraftZoneCounts[index] = confirmed.optJSONArray("zones")?.length() ?: 0
+                        // The firmware retired this lane's volatile lease
+                        // atomically after durable readback. Retire only the
+                        // Android session bookkeeping; do NOT send CANCEL,
+                        // STOP or another COMMIT to the physical output.
+                        if(completedSave)activateLaneState(index)
+                        if(completedSave && panelGeometryMapping!=null &&
+                            panelGeometryActiveLane==index) {
+                            clearPanelGeometryPreview("Panel v4 saved and confirmed. Playback continues from the committed mapping.")
+                            if(captureOutput.intValue!=index &&
+                                outputDirty[captureOutput.intValue]==true)
+                                layoutLiveEditPending.value=true
+                        }
                         invalidateCoreFrame() // the saved/readback output may have changed
                     }
             } catch (_: Exception) { outputMessage.value = "Invalid output reply" }
@@ -356,6 +621,7 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     override fun onStop() {
+        if(panelGeometryMapping!=null&&!panelGeometryCommitRequested)cancelPanelGeometryPreview()
         localMicrophone.stop()
         foregroundActivity.value = false
         ble.cancelPaletteTransfer() // no further NVS mutation after backgrounding
@@ -395,6 +661,31 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun OpenTailShell() {
         val changed = revision.intValue // observe authoritative model revisions
+        val geometryEpoch = panelGeometryEpoch.intValue
+        LaunchedEffect(geometryEpoch) {
+            if(geometryEpoch>0) {
+                var lastHeartbeat=0L
+                while(isActive) {
+                    if(!anyLanePreviewActive()&&panelSaveQueuedLane<0)break
+                    pumpEveryLaneGeometry()
+                    if(panelSaveQueuedLane in 0..1) {
+                        val editingLane=captureOutput.intValue.coerceIn(0,1)
+                        activateLaneState(panelSaveQueuedLane)
+                        pumpPanelQueuedSave()
+                        activateLaneState(editingLane)
+                    }
+                    val now=System.currentTimeMillis()
+                    if(now-lastHeartbeat>=1500L) {
+                        for(lane in 0..1) {
+                            if(ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE)
+                                ble.heartbeatPanelPreview(lane)
+                        }
+                        lastHeartbeat=now
+                    }
+                    delay(100)
+                }
+            }
+        }
         var page by rememberSaveable { mutableIntStateOf(0) }
         var backStack by remember { mutableStateOf(listOf<Int>()) }
         fun navigate(destination: Int) {
@@ -858,26 +1149,13 @@ class ComposeMainActivity : ComponentActivity() {
                 UiIcon("shield",t.muted)
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Authorization", color = t.fg, fontSize = 14.sp)
-                    Caption(if (ble.canControl()) "Authorized" else "Not authorized", t)
+                    Text("Controller access", color = t.fg, fontSize = 14.sp)
+                    Caption(if (ble.canControl()) "Owner connected" else "Securing connection automatically", t)
                 }
-                Pill("Authorize", t, enabled=ble.isConnected() && !ble.canControl()) { ble.authorizeOrPair() }
+                Pill("Set PIN", t, enabled=ble.canControl()) { ble.promptOwnerPin() }
             }
         }
         EffectsPreview(t, selectedEffect.intValue, animateOffline=true)
-        Panel(t) {
-            Text("Controller Status", color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            listOf("Connection" to connectionPhase,
-                "Authorization" to if (ble.canControl()) "Authorized" else "Not authorized",
-                "Firmware" to (firmwareVersion.value ?: "Unavailable")).forEachIndexed { index, (label, value) ->
-                if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(label, color = t.muted, fontSize = 13.sp)
-                    Text(value, color = t.fg, fontSize = 13.sp)
-                }
-            }
-        }
     }
     private fun capturePreviewFrame() {
         if(!foregroundActivity.value || offlinePreview.value || previewPaused.value || !ble.canCaptureFrame()) return
@@ -1522,9 +1800,124 @@ class ComposeMainActivity : ComponentActivity() {
         }
     }
     @Composable
+    private fun LightingDirectory(t: Tone) {
+        val version=revision.intValue
+        val count=remember(version) { project.zoneCount() }
+        var query by remember { mutableStateOf("") }
+        var expanded by remember { mutableStateOf<String?>(null) }
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+            horizontalArrangement=Arrangement.SpaceBetween) {
+            Text("Your lighting",color=t.fg,fontWeight=FontWeight.SemiBold)
+            Pill("+ Add light",t) {
+                val place=project.zoneCount()
+                if(project.addZoneAt("New light",0,place)) {
+                    expanded=project.zone(place)?.optString("id")
+                    refresh()
+                }
+            }
+        }
+        Caption("Any light, any vehicle. Empty lights stay unassigned at 0 LEDs.",t)
+        Field(query,"Search lights or locations",t) { query=it }
+        val indices=(0 until count).filter { i ->
+            val z=project.zone(i)
+            z!=null && listOf("name","assembly","location","lightingType").any { key ->
+                z.optString(key,"").contains(query,true)
+            }
+        }.sortedWith(compareBy({ i:Int -> project.zone(i)?.optString("location","")?.lowercase().orEmpty() },
+                               { i:Int -> project.zone(i)?.optString("assembly","")?.lowercase().orEmpty() },
+                               { i:Int -> project.zone(i)?.optString("name","")?.lowercase().orEmpty() }))
+        var previousLocation:String?=null
+        for(i in indices) {
+            val z=project.zone(i) ?: continue
+            val id=z.optString("id")
+            val location=z.optString("location","").ifBlank { "Not yet located" }
+            if(previousLocation!=location) {
+                Caption(location,t)
+                previousLocation=location
+            }
+            val output=z.optInt("physicalOutput",-1)
+            val section=z.optInt("physicalSection",-1)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                .background(t.raised).padding(10.dp),
+                verticalArrangement=Arrangement.spacedBy(7.dp)) {
+                Row(Modifier.fillMaxWidth().clickable { expanded=if(expanded==id) null else id },
+                    verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(z.optString("name"),color=t.fg,fontWeight=FontWeight.SemiBold)
+                        Caption(listOf(z.optString("assembly",""),z.optString("lightingType",""))
+                            .filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Uncategorized" }+
+                            " · "+z.optInt("length",0)+" LEDs"+
+                            (if(output in 0..1) " · O"+(output+1) else " · Unassigned"),t)
+                    }
+                    UiIcon(if(expanded==id)"up" else "down",t.muted)
+                }
+                if(expanded==id) {
+                    Field(z.optString("name"),"Light / zone name",t) { value ->
+                        if(value.trim().isNotEmpty() &&
+                            project.editZone(id,value,z.optInt("length",0),
+                                z.optBoolean("reverse",false)))refresh()
+                    }
+                    Field(z.optString("location",""),"Location (any vehicle area)",t) {
+                        if(project.updateZoneOrganization(id,"location",it))refresh()
+                    }
+                    Field(z.optString("assembly",""),"Assembly (headlight, mirror, HVAC...)",t) {
+                        if(project.updateZoneOrganization(id,"assembly",it))refresh()
+                    }
+                    Field(z.optString("lightingType",""),"Function (halo, strobe, backlight...)",t) {
+                        if(project.updateZoneOrganization(id,"lightingType",it))refresh()
+                    }
+                    if(output in 0..1) Pill("Open O"+(output+1)+
+                        (if(section>=0) " · Zone "+(section+1) else ""),t) {
+                        captureOutput.intValue=output
+                        expanded=null
+                    }
+                    else Caption("Not wired or assigned. Configure its output and zone when installed.",t)
+                }
+            }
+        }
+        if(count==0) Caption("No lights yet. Add a light to start with 0 LEDs.",t)
+    }
+
+    @Composable
     private fun LayoutPage(t: Tone) {
         val modelRevision = revision.intValue
         val zoneCount = remember(modelRevision) { project.zoneCount() }
+        val geometryEpoch = panelGeometryEpoch.intValue
+        LaunchedEffect(modelRevision,geometryEpoch,panelGeometryRevision.intValue,
+            layoutLiveEditPending.value,captureOutput.intValue) {
+            activateLaneState(captureOutput.intValue)
+            if(layoutLiveEditPending.value && panelGeometryMapping==null &&
+                !panelGeometryCommitRequested && !panelGeometryCancelRequested &&
+                ble.canReadPanelPreview()) {
+                delay(180)
+                if(ble.panelGeometryReady(captureOutput.intValue)) {
+                    // Only one BEGIN for each prepared edit; status updates
+                    // must not continuously restart a default read/preview.
+                    layoutLiveEditPending.value=false
+                    startPanelGeometryPreview()
+                } else if(!panelGeometryLoadInProgress &&
+                    lastAutoGeometryRefresh.intValue!=modelRevision) {
+                    lastAutoGeometryRefresh.intValue=modelRevision
+                    refreshPanelGeometry()
+                }
+            } else if(panelGeometryMapping!=null &&
+                !panelGeometryCommitRequested && !panelGeometryCancelRequested) {
+                if(captureOutput.intValue==panelGeometryActiveLane) {
+                    // Never end another lane's preview as a side effect of
+                    // selecting an output or navigating into Show Modes.
+                    if(layoutLiveEditPending.value) {
+                        delay(180)
+                        queuePanelGeometryDraftUpdate()
+                        layoutLiveEditPending.value=false
+                    }
+                } else if(layoutLiveEditPending.value) {
+                    panelGeometryMessage.value="Selected output is reconciling its own live Panel v4 mapping."
+                }
+            }
+        }
+        // Do not cancel a confirmed volatile Panel mapping on navigation.
+        // The top-level shell owns heartbeat/STOP, so Show Modes can play
+        // on unsaved live geometry until the user saves or explicitly stops.
         Title("Layout", t)
         EffectsPreview(t, selectedEffect.intValue)
         var name by remember(projectLoadRevision.intValue) { mutableStateOf(project.name()) }
@@ -1533,10 +1926,18 @@ class ComposeMainActivity : ComponentActivity() {
         }
         var deleteId by remember { mutableStateOf<String?>(null) }
         var choosingDelete by remember { mutableStateOf(false) }
+        var showingUnlinked by remember { mutableStateOf(false) }
         var layoutMessage by remember { mutableStateOf("") }
+        val advancedOpen=layoutAdvancedOpen.value
         Panel(t) {
+            HardwareOutputEditor(t)
+            Pill(if(advancedOpen) "Less" else "More",t,advancedOpen) {
+                layoutAdvancedOpen.value=!advancedOpen
+            }
+            if(advancedOpen) {
+            LightingDirectory(t)
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                Text("Project Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
+                Text("Controller / Layout",Modifier.weight(1f),color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
                 Caption(project.pixelCount().toString()+" LEDs",t)
             }
             Field(name,"Project name",t) {
@@ -1547,8 +1948,38 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if(layoutMessage.isNotEmpty()) Caption(layoutMessage,t)
-            for(i in 0 until zoneCount) {
+            // Live mapping/readback starts automatically. An owner can cancel
+            // only an active selected output lease, not an unrelated lane.
+            if(panelGeometryMapping!=null && panelGeometryActiveLane==captureOutput.intValue) {
+                Pill("Cancel live preview",t) { cancelPanelGeometryPreview() }
+                Caption(panelGeometryMessage.value,t)
+            }
+            // One Output → Panel → Zone editor. Reload replaces authoritative
+            // values in these cards, without creating a second editor.
+            // Keep the original local authoring controls only for unmatched
+            // design zones; linked zones are edited inside the cards above.
+            // A draft with a new zone is already represented above. The saved
+            // v1 readback is not the editing model for duplicate-card checks.
+            val draftZoneCount = layoutDraftZoneCounts[captureOutput.intValue]
+                ?: (outputs[captureOutput.intValue]?.optJSONArray("zones")?.length() ?: 0)
+            val unmatchedCount=(0 until zoneCount).count { localIndex ->
+                val z=project.zone(localIndex)
+                z!=null && (z.optInt("physicalOutput",-1)<0 ||
+                    (z.optInt("physicalOutput",-1)==captureOutput.intValue &&
+                     z.optInt("physicalSection",-1) !in 0 until draftZoneCount))
+            }
+            if(unmatchedCount>0) {
+                Pill("Unlinked design zones ($unmatchedCount) " +
+                    (if(showingUnlinked) "▲" else "▼"),t,showingUnlinked) {
+                    showingUnlinked=!showingUnlinked
+                }
+            }
+            if(showingUnlinked) for(i in 0 until zoneCount) {
                 val z=project.zone(i) ?: continue
+                if(z.optInt("physicalOutput",-1)>=0 &&
+                   z.optInt("physicalOutput",-1)!=captureOutput.intValue) continue
+                if(z.optInt("physicalOutput",-1)==captureOutput.intValue &&
+                   z.optInt("physicalSection",-1) in 0 until draftZoneCount) continue
                 val id=z.optString("id")
                 val linkedOutput=z.optInt("physicalOutput",-1)
                 val linkedSection=z.optInt("physicalSection",-1)
@@ -1576,7 +2007,7 @@ class ComposeMainActivity : ComponentActivity() {
                         var selectedPixel by remember(id) { mutableIntStateOf(0) }
                         fun applyLiveZone(): Boolean {
                             val n=count.toIntOrNull() ?: return false
-                            if(n !in 1..10000 || label.trim().isEmpty()) return false
+                            if(n !in 0..10000 || label.trim().isEmpty()) return false
                             if(!project.editZone(id,label,n,reverse)) {
                                 layoutMessage="Could not save zone";return false
                             }
@@ -1609,16 +2040,16 @@ class ComposeMainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        val n=count.toIntOrNull() ?: 1
+                        val n=count.toIntOrNull() ?: 0
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                             Text("Pixel count",color=t.fg,fontSize=13.sp);Text(n.toString(),color=t.fg,fontSize=13.sp)
                         }
-                        CapsuleSlider(n, 1, 10000, t,
+                        CapsuleSlider(n, 0, 10000, t,
                             change={ count=it.toString();applyLiveZone() },
                             finished={ applyLiveZone() })
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
                             horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            PixelStepPill("−",t) { count=(n-1).coerceAtLeast(1).toString();applyLiveZone() }
+                            PixelStepPill("−",t) { count=(n-1).coerceAtLeast(0).toString();applyLiveZone() }
                             PixelStepPill("+",t) { count=(n+1).coerceAtMost(10000).toString();applyLiveZone() }
                             Spacer(Modifier.weight(1f))
                             Row(Modifier.clickable { reverse=!reverse;applyLiveZone() },
@@ -1643,30 +2074,28 @@ class ComposeMainActivity : ComponentActivity() {
                         if(advanced) {
                             Caption(project.previewZoneOffsets(id, n),t)
                             ZoneDotPreview(t,n,reverse)
-                            val pixelLimit=n.coerceAtLeast(1)-1
-                            val activePixel=selectedPixel.coerceIn(0,pixelLimit)
-                            ValueSlider("Pixel",activePixel,pixelLimit.coerceAtLeast(1),t) { selectedPixel=it.coerceIn(0,pixelLimit) }
-                            PaletteEditor("Pixel "+activePixel,android.graphics.Color.parseColor(project.pixelColor(id,activePixel)),t) { color ->
-                                val hex=String.format("#%06X",color and 0xffffff)
-                                if(project.setPixelColor(id,activePixel,hex)) refresh()
+                            val activePixel=selectedPixel.coerceIn(0,(n-1).coerceAtLeast(0))
+                            if(n==0) Caption("Empty zone · add LEDs to edit individual pixels",t)
+                            else {
+                                val pixelLimit=n-1
+                                ValueSlider("Pixel",activePixel,pixelLimit.coerceAtLeast(1),t) { selectedPixel=it.coerceIn(0,pixelLimit) }
+                                PaletteEditor("Pixel "+activePixel,android.graphics.Color.parseColor(project.pixelColor(id,activePixel)),t) { color ->
+                                    val hex=String.format("#%06X",color and 0xffffff)
+                                    if(project.setPixelColor(id,activePixel,hex)) refresh()
+                                }
                             }
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                                 Pill("Move ↑",t) { if(project.moveZone(i,i-1)) refresh() }
                                 Pill("Move ↓",t) { if(project.moveZone(i,i+1)) refresh() }
-                                Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
+                                if(n>0) Pill("Clear pixel",t) { if(project.clearPixelColor(id,activePixel)) refresh() }
                             }
                         }
                     }
                 }
             }
-            if(zoneCount==0) Pill("+ Add",t) {
-                val created=addZoneAfter(-1)
-                if (created!=null) { editingId=created; layoutMessage="" }
-                else layoutMessage="Could not add zone"
+            // Empty projects use the single "+ Add zone" control in the
+            // Output editor above. No duplicate Add or hardware cards.
             }
-            // Saved controller output editing is inline in the same Layout card.
-            // Saving still requires explicit authenticated confirmation/readback.
-            HardwareOutputEditor(t)
         }
         if (choosingDelete) AlertDialog(containerColor=t.surface, 
             onDismissRequest = { choosingDelete = false },
@@ -1696,9 +2125,472 @@ class ComposeMainActivity : ComponentActivity() {
                 } }, dismissButton = { Pill("Cancel", t) { deleteId = null } })
         }
     }
+    private fun refreshPanelGeometry() {
+        if(panelGeometryMapping!=null) {
+            panelGeometryMessage.value="Finish or cancel the active CORE preview before refreshing snapshots"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.canReadPanelPreview()) {
+            panelGeometryMessage.value="Connect and authenticate to a CORE controller with Panel Preview v2"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(panelGeometryLoadInProgress)return
+        panelGeometryLoadInProgress=true
+        panelGeometryLoadLane=0
+        panelGeometryMessage.value="Reading authoritative CORE geometry for output 1..."
+        if(!ble.readPanelLaneSnapshot(0)) {
+            panelGeometryLoadInProgress=false
+            panelGeometryLoadLane=-1
+            panelGeometryMessage.value="CORE output 1 read is busy; retry when connected"
+        }
+        panelGeometryRevision.intValue++
+    }
+
+    private fun onPanelGeometrySnapshot(snapshot: PanelPreviewProtocol.LaneSnapshot) {
+        panelGeometryRevision.intValue++
+        if(panelGeometryLoadInProgress) {
+            if(snapshot.lane==0&&panelGeometryLoadLane==0) {
+                panelGeometryLoadLane=1
+                panelGeometryMessage.value="Output 1 read; reading authoritative CORE geometry for output 2..."
+                if(!ble.readPanelLaneSnapshot(1)) {
+                    panelGeometryLoadInProgress=false
+                    panelGeometryLoadLane=-1
+                    panelGeometryMessage.value="CORE output 2 read is busy; retry when connected"
+                }
+            } else if(snapshot.lane==1&&panelGeometryLoadLane==1) {
+                panelGeometryLoadInProgress=false
+                panelGeometryLoadLane=-1
+                panelGeometryMessage.value="Both snapshots received; waiting for fresh status-v2 confirmation..."
+            }
+        }
+        pumpEveryLaneGeometry()
+    }
+
+    /**
+     * A saved Panel v4 draft is the one physical editor for this lane.
+     * Translate its exact Save bytes to the preview map so role changes,
+     * stable full IDs and ranges cannot diverge from accepted live playback.
+     * Never use the other output's unsaved draft as this lane's source.
+     */
+    private fun withCurrentEditorDraft(
+        base: GeometryTransactionManager.LayoutMapping,lane:Int
+    ): GeometryTransactionManager.LayoutMapping {
+        if(outputDirty[lane]!=true)return base
+        val raw=outputDrafts[lane] ?: return base
+        val confirmed=ble.lastConfirmedPanelSnapshot(lane)
+            ?: throw IllegalStateException("A fresh Panel v4 lane snapshot is required")
+        val bytes=PanelV4DraftCodec.encode(lane,JSONObject(raw),confirmed)
+        return base.withLane(lane,GeometryTransactionManager.fromV4SaveCandidate(lane,bytes))
+    }
+
+    private fun startPanelGeometryPreview() {
+        val lane=captureOutput.intValue
+        activateLaneState(lane)
+        if(panelGeometryMapping!=null) {
+            panelGeometryMessage.value="A CORE shadow preview is already active; continue editing or Commit/Cancel it"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.canReadPanelPreview()) {
+            panelGeometryMessage.value="Connect and authenticate before starting a CORE preview"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(!ble.panelGeometryReady(lane)) {
+            panelGeometryMessage.value="Selected output needs a fresh idle v4 status; other output playback remains active."
+            refreshPanelGeometry()
+            return
+        }
+        try {
+            val left=ble.lastConfirmedPanelSnapshot(0)
+            val right=ble.lastConfirmedPanelSnapshot(1)
+            if(left==null||right==null)throw IllegalStateException("Both confirmed CORE snapshots are required")
+            val snapshots=arrayOf(left,right)
+            // The controller's verified Panel v4 maps are the baseline for
+            // physical editing. An unsaved imported multi-range layout must
+            // never be projected through the contiguous NativeProject model.
+            val savedMapping=GeometryTransactionManager.LayoutMapping(arrayOf(
+                GeometryTransactionManager.fromV4SaveCandidate(0,left.wire),
+                GeometryTransactionManager.fromV4SaveCandidate(1,right.wire)))
+            val advancedSaved=PanelV4DraftCodec.fromSnapshot(snapshots[lane])
+                .optBoolean("v4_advanced",false)
+            val projected=if(outputDirty[lane]==true||advancedSaved) savedMapping
+                else GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
+            val mapping=withCurrentEditorDraft(projected,lane)
+            val mtu=ble.panelUpdateMtu()
+            val batches=arrayOf(
+                mapping.lane(0).descriptorBatches(left,mtu),
+                mapping.lane(1).descriptorBatches(right,mtu)
+            )
+            panelGeometryMapping=mapping
+            panelGeometryActiveLane=lane
+            panelGeometryAppliedMapping=null
+            panelGeometryPlanTarget=mapping
+            panelGeometryQueuedTarget=null
+            panelGeometryBatches=batches
+            panelGeometryNextBatch=intArrayOf(0,0)
+            panelGeometryBeginRequested=booleanArrayOf(false,false)
+            panelGeometryChanged=booleanArrayOf(
+                mapping.lane(0).activePixels!=PanelPreviewProtocol.MapIdentity.parse(left).activePixels,
+                mapping.lane(1).activePixels!=PanelPreviewProtocol.MapIdentity.parse(right).activePixels)
+            panelGeometryActionStarted=booleanArrayOf(false,false)
+            panelGeometryActionCommit=booleanArrayOf(false,false)
+            panelGeometryActionDone=booleanArrayOf(false,false)
+            panelGeometryBaseRevisions=intArrayOf(left.activeRevision,right.activeRevision)
+            panelGeometryCommitRequested=false
+            panelGeometryCancelRequested=false
+            panelGeometryDraftValid=true
+            panelGeometryEpoch.intValue++
+            panelGeometryMessage.value="Opening live preview on selected output "+(panelGeometryActiveLane+1)+"..."
+            panelGeometryRevision.intValue++
+            pumpPanelGeometry()
+        } catch(error:Exception) {
+            panelGeometryMessage.value="CORE preview not started: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    private fun queuePanelGeometryDraftUpdate() {
+        if(panelGeometryMapping==null||panelGeometryCommitRequested||panelGeometryCancelRequested)return
+        try {
+            val roleBase=panelGeometryQueuedTarget?:panelGeometryPlanTarget?:
+                panelGeometryAppliedMapping?:panelGeometryMapping!!
+            val confirmed=ble.lastConfirmedPanelSnapshot(panelGeometryActiveLane)
+            val advancedSaved=confirmed?.let {
+                PanelV4DraftCodec.fromSnapshot(it).optBoolean("v4_advanced",false)
+            } ?: false
+            val projected=if(outputDirty[panelGeometryActiveLane]==true||advancedSaved) roleBase
+                else GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
+            val target=withCurrentEditorDraft(projected,panelGeometryActiveLane)
+            panelGeometryDraftValid=true
+            if(panelGeometryPlanTarget!=null||panelGeometryAppliedMapping==null) {
+                panelGeometryQueuedTarget=target
+                panelGeometryRevision.intValue++
+                return
+            }
+            beginNextPanelGeometryPlan(target)
+            pumpPanelGeometry()
+        } catch(error:Exception) {
+            panelGeometryDraftValid=false
+            panelGeometryQueuedTarget=null
+            panelGeometryMessage.value="Draft not sent to CORE: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    private fun beginNextPanelGeometryPlan(targetDraft: GeometryTransactionManager.LayoutMapping) {
+        val base=panelGeometryAppliedMapping?:return
+        val target=withCurrentEditorDraft(targetDraft.withRolesFrom(base),panelGeometryActiveLane)
+        try {
+            val mtu=ble.panelUpdateMtu()
+            val batches=arrayOf(
+                target.lane(0).descriptorBatches(base.lane(0),mtu),
+                target.lane(1).descriptorBatches(base.lane(1),mtu)
+            )
+            if(batches.all { it.isEmpty() }) {
+                panelGeometryAppliedMapping=target
+                panelGeometryPlanTarget=null
+                panelGeometryMessage.value="CORE pixel ranges are unchanged; local labels and editor metadata remain app-local"
+                panelGeometryRevision.intValue++
+                return
+            }
+            panelGeometryPlanTarget=target
+            panelGeometryBatches=batches
+            panelGeometryNextBatch=intArrayOf(0,0)
+            panelGeometryMessage.value="Sending live Layout changes to the CORE shadow maps..."
+            panelGeometryRevision.intValue++
+        } catch(error:Exception) {
+            panelGeometryDraftValid=false
+            panelGeometryMessage.value="CORE rejected the draft transition plan: "+(error.message?:error.javaClass.simpleName)
+            panelGeometryRevision.intValue++
+        }
+    }
+
+    /**
+     * Owner Save is a single durable Panel v4 upload. Firmware #127's live
+     * candidate stays rendered while the journal promotes that SAME lane.
+     * Never issue a preview COMMIT first: a partial persistent geometry
+     * would violate the owner's single-action Save contract.
+     */
+    private fun pumpPanelQueuedSave() {
+        val lane=panelSaveQueuedLane
+        if(lane !in 0..1)return
+        val requested=panelSaveQueuedDraft
+        if(requested==null||savingOutput.intValue!=lane||!ble.canConfigure()) {
+            panelSaveQueuedLane=-1
+            panelSaveQueuedDraft=null
+            savingOutput.intValue=-1
+            outputMessage.value="Save cancelled: controller or requested layout is unavailable"
+            return
+        }
+        if(panelGeometryMapping!=null) {
+            if(panelGeometryActiveLane!=lane || panelGeometryCommitRequested ||
+               panelGeometryCancelRequested || !panelGeometryDraftValid) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save rejected: selected output's live mapping is not stable"
+                return
+            }
+            val manager=ble.panelGeometryManager(lane)
+            if(manager?.syncUncertain()==true) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save withheld: live mapping is uncertain; reconnect for authoritative verification"
+                return
+            }
+            if(panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null||
+               manager?.state()!=GeometryTransactionManager.State.ACTIVE) {
+                if(++panelSaveQueuedChecks>100) {
+                    panelSaveQueuedLane=-1
+                    panelSaveQueuedDraft=null
+                    savingOutput.intValue=-1
+                    outputMessage.value="Save not started: live updates did not receive controller confirmation"
+                }
+                return
+            }
+        }
+        // Firmware rejection 10 means the Save's *physical* geometry was
+        // never accepted by live UPDATE (or the saved snapshot). Compare the
+        // exact full v4 candidate with the last acknowledged lane image BEFORE
+        // sending any durable write. Names, color order and calibration remain
+        // metadata-only changes and do not require a new UPDATE.
+        val verified=runCatching {
+            val snapshot=ble.lastConfirmedPanelSnapshot(lane)
+                ?: throw IllegalStateException("No verified Panel v4 lane snapshot")
+            val upload=GeometryTransactionManager.fromV4SaveCandidate(
+                lane,PanelV4DraftCodec.encode(lane,JSONObject(requested),snapshot))
+            val accepted=if(panelGeometryMapping!=null) {
+                if(ble.panelGeometryManager(lane)?.state()!=GeometryTransactionManager.State.ACTIVE)
+                    throw IllegalStateException("Awaiting live preview acknowledgement")
+                panelGeometryAppliedMapping?.lane(lane)
+                    ?: throw IllegalStateException("Awaiting first live geometry acknowledgement")
+            } else GeometryTransactionManager.fromV4SaveCandidate(lane,snapshot.wire)
+            GeometryTransactionManager.sameLiveGeometry(accepted,upload)
+        }.getOrElse {
+            outputMessage.value="Save waiting for verified live geometry: "+(it.message?:it.javaClass.simpleName)
+            false
+        }
+        if(!verified) {
+            // Only the selected output is eligible for a new UPDATE. The frozen
+            // owner Save request is never uploaded until the exact mapping ACKs.
+            if(panelGeometryMapping!=null &&
+                panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
+                panelGeometryDraftValid &&
+                ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE &&
+                outputDrafts[lane]==requested) {
+                queuePanelGeometryDraftUpdate()
+            } else if(panelGeometryMapping==null && ble.panelGeometryReady(lane) &&
+                       outputDrafts[lane]==requested) {
+                layoutLiveEditPending.value=true
+                startPanelGeometryPreview()
+            }
+            if(++panelSaveQueuedChecks>100) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save not sent: controller has not accepted the requested live geometry"
+            }
+            return
+        }
+        if(!ble.savePanelV4(lane,requested)) {
+            // No command was accepted. Do not retry *after* a GATT write;
+            // BleDiscovery owns all in-flight/uncertain outcome handling.
+            if(++panelSaveQueuedChecks>100) {
+                panelSaveQueuedLane=-1
+                panelSaveQueuedDraft=null
+                savingOutput.intValue=-1
+                outputMessage.value="Save could not start; live configuration remains unsaved"
+            }
+            return
+        }
+        panelSaveSubmittedDrafts[lane]=requested
+        panelSaveQueuedLane=-1
+        panelSaveQueuedDraft=null
+        panelSaveQueuedChecks=0
+        outputMessage.value="One Panel v4 Save submitted · verifying durable controller readback"
+    }
+
+    private fun pumpPanelGeometry() {
+        val mapping=panelGeometryMapping?:return
+        if(panelGeometryCommitRequested||panelGeometryCancelRequested) {
+            pumpPanelGeometryActions()
+            return
+        }
+        val lane=panelGeometryActiveLane
+        if(lane !in 0..1)return
+        if(!panelGeometryBeginRequested[lane]) {
+            if(ble.beginPanelPreview(lane,mapping)) {
+                panelGeometryBeginRequested[lane]=true
+                panelGeometryMessage.value="Output "+(lane+1)+" live mapping requested; checking controller status..."
+                panelGeometryRevision.intValue++
+            }
+            return
+        }
+        val manager=ble.panelGeometryManager(lane)?:return
+        if(manager.syncUncertain()) {
+            panelGeometryMessage.value="Output "+(lane+1)+" synchronization uncertain; no further live writes"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+        val plan=panelGeometryPlanTarget
+        if(plan!=null) {
+            if(panelGeometryNextBatch[lane]<panelGeometryBatches[lane].size) {
+                val batch=panelGeometryBatches[lane][panelGeometryNextBatch[lane]]
+                if(ble.updatePanelPreview(lane,plan.lane(lane).candidateWire(),batch)) {
+                    panelGeometryNextBatch[lane]++
+                    panelGeometryChanged[lane]=true
+                    panelGeometryMessage.value="Output "+(lane+1)+" live UPDATE sent; awaiting controller acceptance..."
+                    panelGeometryRevision.intValue++
+                }
+                return
+            }
+            if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+            panelGeometryAppliedMapping=plan
+            panelGeometryPlanTarget=null
+            val queued=panelGeometryQueuedTarget
+            if(queued!=null) {
+                panelGeometryQueuedTarget=null
+                beginNextPanelGeometryPlan(queued)
+                return
+            }
+            panelGeometryMessage.value="Live mapping active on output "+(lane+1)+"; no Save required for playback."
+            panelGeometryRevision.intValue++
+        } else {
+            val queued=panelGeometryQueuedTarget
+            if(queued!=null) {
+                panelGeometryQueuedTarget=null
+                beginNextPanelGeometryPlan(queued)
+            }
+        }
+    }
+
+    private fun commitPanelGeometryPreview() {
+        if(panelGeometryMapping==null) {
+            panelGeometryMessage.value="Start a CORE preview before committing"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null||!panelGeometryDraftValid) {
+            panelGeometryMessage.value="Wait for all draft updates to be acknowledged before Commit"
+            panelGeometryRevision.intValue++
+            return
+        }
+        if(panelGeometryActiveLane !in 0..1 ||
+            ble.panelGeometryManager(panelGeometryActiveLane)?.state()!=GeometryTransactionManager.State.ACTIVE) {
+            panelGeometryMessage.value="Selected output live transaction is not yet active"
+            panelGeometryRevision.intValue++
+            return
+        }
+        panelGeometryCommitRequested=true
+        panelGeometryCancelRequested=false
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryMessage.value="Commit requested; CORE must confirm COMMITTED and return fresh authoritative snapshots before success is shown..."
+        panelGeometryRevision.intValue++
+        pumpPanelGeometry()
+    }
+
+    private fun cancelPanelGeometryPreview() {
+        if(panelGeometryMapping==null)return
+        if(panelGeometryCommitRequested) {
+            panelGeometryMessage.value="CORE commit is already in progress; waiting for authoritative reconciliation"
+            panelGeometryRevision.intValue++
+            return
+        }
+        panelGeometryCancelRequested=true
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryMessage.value="Cancel requested; waiting for CORE to discard both shadow maps..."
+        panelGeometryRevision.intValue++
+        pumpPanelGeometry()
+    }
+
+    private fun pumpPanelGeometryActions() {
+        for(lane in 0..1) {
+            if(!panelGeometryBeginRequested[lane]) {
+                panelGeometryActionDone[lane]=true
+                continue
+            }
+            val manager=ble.panelGeometryManager(lane)?:return
+            if(panelGeometryActionStarted[lane]) {
+                val confirmedRevision=manager.lastConfirmed()?.revision?:-1
+                val expectedCommit=panelGeometryActionCommit[lane]
+                val revisionMatches=if(expectedCommit)confirmedRevision!=panelGeometryBaseRevisions[lane]
+                    else confirmedRevision==panelGeometryBaseRevisions[lane]
+                val reconciled=manager.state()==GeometryTransactionManager.State.READY&&revisionMatches
+                if(reconciled) {
+                    panelGeometryActionDone[lane]=true
+                    continue
+                }
+                if(manager.state()==GeometryTransactionManager.State.READY) {
+                    panelGeometryMessage.value="CORE output "+(lane+1)+" did not confirm the expected geometry revision; no success reported"
+                    panelGeometryRevision.intValue++
+                    return
+                }
+                return
+            }
+            if(manager.state()==GeometryTransactionManager.State.READY) {
+                if(panelGeometryCommitRequested&&panelGeometryChanged[lane]) {
+                    panelGeometryMessage.value="CORE output "+(lane+1)+" preview ended before its required commit"
+                    panelGeometryRevision.intValue++
+                    return
+                }
+                panelGeometryActionDone[lane]=true
+                continue
+            }
+            if(manager.state()!=GeometryTransactionManager.State.ACTIVE)return
+            val shouldCommit=panelGeometryCommitRequested&&panelGeometryChanged[lane]
+            val sent=if(shouldCommit)ble.commitPanelPreview(lane) else ble.cancelPanelPreview(lane)
+            if(sent) {
+                panelGeometryActionStarted[lane]=true
+                panelGeometryActionCommit[lane]=shouldCommit
+                panelGeometryMessage.value=(if(shouldCommit)"Committing" else "Cancelling")+
+                    " CORE output "+(lane+1)+"; waiting for authoritative readback..."
+                panelGeometryRevision.intValue++
+            }
+            return
+        }
+        if(panelGeometryActionDone.all { it }) {
+            val result=if(!panelGeometryCommitRequested)
+                "Preview cancelled only by explicit owner action"
+            else "Preview transaction verified by authoritative readback"
+            clearPanelGeometryPreview(result)
+        }
+    }
+
+    private fun clearPanelGeometryPreview(message:String) {
+        val lane=panelGeometryActiveLane
+        panelGeometryMapping=null
+        panelGeometryAppliedMapping=null
+        panelGeometryPlanTarget=null
+        panelGeometryQueuedTarget=null
+        panelGeometryBatches=arrayOf(emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>(),emptyList<Array<PanelPreviewProtocol.UpdateDescriptor>>())
+        panelGeometryNextBatch=intArrayOf(0,0)
+        panelGeometryBeginRequested=booleanArrayOf(false,false)
+        panelGeometryChanged=booleanArrayOf(false,false)
+        panelGeometryActionStarted=booleanArrayOf(false,false)
+        panelGeometryActionCommit=booleanArrayOf(false,false)
+        panelGeometryActionDone=booleanArrayOf(false,false)
+        panelGeometryBaseRevisions=intArrayOf(-1,-1)
+        panelGeometryCommitRequested=false
+        panelGeometryCancelRequested=false
+        panelGeometryDraftValid=true
+        if(lane in 0..1)lanePreviewStates[lane]=LanePreviewState()
+        panelGeometryEpoch.intValue++
+        panelGeometryMessage.value=message
+        panelGeometryRevision.intValue++
+    }
+
     private fun addZoneAfter(index: Int): String? {
         val position = index + 1
-        if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 30, position))
+        if (!project.addZoneAt("Zone " + (project.zoneCount() + 1), 0, position))
             return null
         val id=project.zone(position)?.optString("id")?.takeIf { it.isNotEmpty() }
         refresh()
@@ -1759,20 +2651,9 @@ class ComposeMainActivity : ComponentActivity() {
                     Caption(profile.optString("pattern", "Solid") +
                         if(assigned > 0) " · $assigned zones" else "", t)
                 }
-                IconAction("Edit " + name, "edit", t) {
-                    selections = setOf(name); editing = true
-                }
                 // Only user-created triggers may be deleted.
                 if (profile.optString("kind") == "trigger-custom")
                     IconAction("Delete " + name, "delete", t) { triggerToDelete = name }
-                // The current protocol has no universal profile-test command.
-                // Preserve a disabled play target rather than target wrong zones.
-                Box(Modifier.size(width=44.dp,height=28.dp)
-                    .clip(RoundedCornerShape(99.dp)).background(t.raised)
-                    .semantics { contentDescription = "Test " + name + " unavailable"; disabled() },
-                    contentAlignment=Alignment.Center) {
-                    UiIcon("play",t.muted)
-                }
             }
         }
         Pill("Edit Selected", t, selections.isNotEmpty(), enabled=selections.isNotEmpty()) {
@@ -1883,8 +2764,7 @@ class ComposeMainActivity : ComponentActivity() {
                     }
                 }
             },
-            confirmButton = { Pill("Done",t,true) { editing=false } },
-            dismissButton = { Pill("Close",t) { editing=false } })
+            confirmButton = { Pill("Done",t,true) { editing=false } })
     }
     @Composable
     private fun CoreTriggerMappingPage(t: Tone) {
@@ -1987,14 +2867,6 @@ class ComposeMainActivity : ComponentActivity() {
                         Text(key, color = t.fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Caption(event.optString("eventFx", "Solid"), t)
                     }
-                    IconAction("Edit " + key, "edit", t) {
-                        if(selectedEvent!=key) {
-                            autoEventPreviewEffect.intValue=-1
-                            if (offlinePreview.value || !ble.canControl()) offlineReplay.intValue++
-                        }
-                        selectedEvent=key
-                        eventEditing = if (eventEditing == key) null else key
-                    }
                     Pill(if (enabled) "On" else "Off", t, enabled) {
                         applyAutoEvent(key, "eventUiEnabled", !enabled)
                     }
@@ -2038,14 +2910,6 @@ class ComposeMainActivity : ComponentActivity() {
                     },
                     onPalette={ _,id -> applyAutoEvent(key,"paletteId",id) }
                 )
-                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Pill("Smooth Fade",t,event.optInt("eventUiFadeMs",0)>0) {
-                        applyAutoEvent(key,"eventUiFadeMs",1200)
-                    }
-                    Pill("Instant Snap",t,event.optInt("eventUiFadeMs",0)==0) {
-                        applyAutoEvent(key,"eventUiFadeMs",0)
-                    }
-                }
                 val fade = event.optInt("eventUiFadeMs", 0).coerceIn(0, 5000)
                 ValueSlider("Transition fade (ms)", fade, 5000, t) {
                     applyAutoEvent(key, "eventUiFadeMs", it)
@@ -2252,24 +3116,9 @@ class ComposeMainActivity : ComponentActivity() {
     @Composable
     private fun SettingsPage(t: Tone, changePage: (Int) -> Unit,
                              light: Boolean, toggleAppearance: () -> Unit) {
-        val connectionPhase = remember(bleMessage.value) { ble.connectionPhase().replaceFirstChar { it.uppercase() } }
         Title("Settings", t)
-        var controllers by remember { mutableStateOf(false) }
         var appearance by remember { mutableStateOf(false) }
         var diagnostics by remember { mutableStateOf(false) }
-        Panel(t) {
-            Text("Connection", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
-            SettingsRow("Controller", connectionPhase, t, "Connect") {
-                foundDevices.clear(); ble.scanHeadless(); controllers = true
-            }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-            SettingsRow("Active Controller", if(ble.canControl()) "Connected controller" else "No controller selected", t) {
-                controllers = !controllers
-            }
-            if(controllers) foundDevices.forEach { (address,label) ->
-                Pill(label, t) { ble.connectFoundDevice(address); controllers=false }
-            }
-        }
         Panel(t) {
             Text("App Preferences", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
             SettingsRow("Appearance", if(light) "Light mode" else "Dark mode", t, rowHeight=52) { appearance = !appearance }
@@ -2278,48 +3127,25 @@ class ComposeMainActivity : ComponentActivity() {
         Panel(t) {
             Text("System", color=t.fg, fontSize=16.sp, fontWeight=FontWeight.Bold)
             SettingsRow("Firmware", firmwareVersion.value ?: "Version unavailable", t, rowHeight=46) { diagnostics = !diagnostics }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.raised))
-            // No reset command exists in the pinned CORE interface. Do not
-            // present a local document clear as a successful controller reset.
-            SettingsRow("Reset Configuration", "Restore controller defaults", t, rowHeight=46) {
-                outputMessage.value = "Controller reset is unavailable in the current CORE protocol"
-                diagnostics = true
+            panelSyncWarning.value?.let { warning ->
+                Caption("Synchronization warning · " + warning, t)
+                Caption(panelStatusSummary.value, t)
             }
+        }
+        Panel(t) {
+            Title("Projects", t)
+            Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
+            Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
         }
         if(diagnostics) SettingsDiagnostics(t, changePage)
     }
     @Composable
     private fun SettingsDiagnostics(t: Tone, changePage: (Int) -> Unit) {
         Title("Firmware", t)
-        // Developer testing is deliberately isolated from universal trigger
-        // authoring. This is a local UI test; it does not assert GPIO or write NVS.
-        var simulatedTriggers by remember { mutableStateOf(setOf<String>()) }
-        Panel(t) {
-            Title("Developer · Trigger Testing", t)
-            Caption("Local simulation only · physical trigger inputs remain CORE-authoritative.", t)
-            val defaults = listOf("Park","Brake","Left Turn","Right Turn","Hazards","Reverse")
-            defaults.chunked(2).forEach { pair ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    pair.forEach { name ->
-                        Box(Modifier.weight(1f)) {
-                            Pill((if(name in simulatedTriggers) "■ Stop " else "▷ Test ") + name,
-                                t,name in simulatedTriggers) {
-                                simulatedTriggers=if(name in simulatedTriggers)
-                                    simulatedTriggers-name else simulatedTriggers+name
-                            }
-                        }
-                    }
-                }
-            }
-            Caption(simulatedTriggers.size.toString() + " simulated triggers active", t)
-            if(simulatedTriggers.isNotEmpty())
-                Pill("Clear test states",t) { simulatedTriggers=emptySet() }
-        }
-
         Panel(t) {
             Text("Bluetooth · " + ble.connectionPhase(), color = t.fg)
             Caption(bleMessage.value, t)
-            Caption("Authorize only on a physically present CORE bench controller.", t)
+            Caption("Owner access reconnects automatically. Set an optional PIN from Home.", t)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ConnectPill {
@@ -2372,118 +3198,379 @@ class ComposeMainActivity : ComponentActivity() {
         Pill("Input mapping",t) { mappingExpanded=!mappingExpanded }
         if(mappingExpanded) CoreTriggerMappingPage(t)
         CorePaletteTransferPanel(t)
-        var runConfirmed by remember { mutableStateOf(false) }
-        Panel(t) {
-            Text("Developer · Controller playback",color=t.fg,fontWeight=FontWeight.Bold)
-            Caption("Uses current effect settings. Runs on CORE until changed or stopped from Home.",t)
-            Pill("Run on CORE",t) { runConfirmed=true }
-        }
-        if(runConfirmed) AlertDialog(containerColor=t.surface,onDismissRequest={runConfirmed=false},
-            title={Text("Run current effect on CORE?")},
-            text={Text("Continuous playback on saved zones. STOP is on Home. Physical inputs retain priority.")},
-            confirmButton={Pill("Run",t,true) {
-                offlinePreview.value=false
-                previewCurrentEffect()
-                runConfirmed=false
-            }},
-            dismissButton={Pill("Cancel",t) {runConfirmed=false}})
-
-        Panel(t) {
-            Title("Projects", t)
-            Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
-            Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
-            Caption(outputMessage.value, t)
-        }
     }
     @Composable
     private fun HardwareOutputEditor(t: Tone) {
-        val outputLimit = BleConfigCodec.MAX_LEDS_PER_OUTPUT
-        var index by rememberSaveable { mutableIntStateOf(0) }
+        val outputLimit = PanelV4DraftCodec.MAX_LEDS
+        val index = captureOutput.intValue
+        val outputToolsOpen=layoutAdvancedOpen.value
+        var autoReadStarted by remember(index) { mutableStateOf(false) }
+        var choosingOutput by remember { mutableStateOf(false) }
+        // Read the selected output automatically after BLE authorization.
+        // Never overwrite an unsaved draft or start a second ATT transaction.
+        LaunchedEffect(index, bleMessage.value, outputs[index]) {
+            if(!ble.canConfigure()) {
+                autoReadStarted=false
+                return@LaunchedEffect
+            }
+            if(outputs[index]==null && !autoReadStarted) {
+                repeat(12) {
+                    if(!ble.canConfigure()) return@LaunchedEffect
+                    if(ble.readPanelLaneSnapshot(index)) {
+                        autoReadStarted=true
+                        outputLoadStatus[index]="loading"
+                        return@LaunchedEffect
+                    }
+                    delay(300)
+                }
+                outputLoadStatus[index]="busy"
+            }
+        }
+        fun outputTab(which:Int):String {
+            // Selection identifies the SAVED controller lane. An unsaved local
+            // draft can be 522 LEDs while the actual saved O2 remains zero.
+            // Never borrow a hardware RMT buffer budget or an editor value.
+            val savedPixels=PanelV4DraftCodec.savedSelectorPixels(outputs[which])
+            return "O"+(which+1)+" · "+savedPixels+" LEDs"
+        }
         // String snapshots make edits observable without mutating the last
         // confirmed hardware readback. A failed save cannot masquerade as NVS.
-        var draftText by remember(index, outputs[index]) {
-            mutableStateOf(outputs[index]?.toString().orEmpty())
+        var draftText by remember(index, outputReadbackEpoch[index]) {
+            // Do not discard unsaved edits when BLE resets or the screen changes.
+            // A verified output reply advances the epoch and replaces the draft.
+            mutableStateOf(outputDrafts[index] ?: outputs[index]?.toString() ?: JSONObject()
+                .put("name","Pixel OUT "+(index+1)).put("pixels",0)
+                .put("color_order","GRB").put("zones",JSONArray()).toString())
         }
-        var confirm by remember { mutableStateOf(false) }
-        var structureVersion by remember(index, outputs[index]) { mutableIntStateOf(0) }
+        var structureVersion by remember(index, outputReadbackEpoch[index]) { mutableIntStateOf(0) }
         val draft = runCatching { JSONObject(draftText) }.getOrNull()
         fun edit(change: (JSONObject) -> Unit) {
             runCatching {
                 val updated = JSONObject(draftText)
                 change(updated)
                 draftText = updated.toString()
+                outputDrafts[index] = draftText
+                outputDirty[index] = true
             }.onFailure { outputMessage.value = "Invalid draft: " + (it.message ?: "input") }
+        }
+        // An imported v4 range map is authoritative geometry. Validate the
+        // full candidate before publishing a local edit, so overlap errors
+        // cannot silently replace an accepted multi-panel configuration.
+        fun applyPhysicalRanges(next: JSONObject): Boolean {
+            val confirmed=ble.lastConfirmedPanelSnapshot(index)
+            if(confirmed==null) {
+                outputMessage.value="Read this output's Panel v4 configuration before changing physical ranges"
+                return false
+            }
+            val error=runCatching {
+                val wire=PanelV4DraftCodec.encode(index,next,confirmed)
+                val desired=GeometryTransactionManager.fromV4SaveCandidate(index,wire)
+                val accepted=if(panelGeometryActiveLane==index)
+                    panelGeometryAppliedMapping?.lane(index) else null
+                val base=accepted ?: GeometryTransactionManager.fromV4SaveCandidate(
+                    index,confirmed.wire)
+                // Validate the actual firmware v2 transition, not just the
+                // durable map. Invalid reorder/alias moves stay out of RAM
+                // and never partially change a controller.
+                desired.descriptorBatches(base,ble.panelUpdateMtu())
+            }.exceptionOrNull()
+            if(error!=null) {
+                outputMessage.value="Physical range unchanged: "+(error.message ?: "invalid geometry")
+                return false
+            }
+            if(next.toString()==draftText)return true
+            draftText=next.toString()
+            outputDrafts[index]=draftText
+            outputDirty[index]=true
+            layoutLiveEditPending.value=true
+            structureVersion++
+            refresh() // volatile preview; persistence still uses the one Save
+            return true
         }
         // Generic live zone cursor logic. Updating any zone recomputes the
         // output's active allocation and every downstream start automatically.
         // This changes draft RAM only; NVS still requires confirmed Save.
         fun adjustZone(zoneIndex: Int, newLength: Int) {
-            if (newLength !in 0..outputLimit) return
+            if (newLength !in 0..outputLimit) {
+                outputMessage.value = "Zone pixel count must be 0–$outputLimit"
+                return
+            }
+            val current=runCatching { JSONObject(draftText) }.getOrNull() ?: return
+            if(current.optBoolean("v4_advanced",false)) {
+                val next=JSONObject(current.toString())
+                val part=next.optJSONArray("zones")?.optJSONObject(zoneIndex)
+                var ranges=part?.optJSONArray("ranges")
+                if(part==null) {
+                    outputMessage.value="Unknown advanced physical section"
+                    return
+                }
+                if(ranges==null||ranges.length()==0) {
+                    if(newLength==0)return
+                    // Newly added sections start locally at zero LEDs. v2
+                    // cannot create an empty Zone, so allocate a real range
+                    // only after the owner explicitly enters its LED count.
+                    val occupied=mutableListOf<Pair<Int,Int>>()
+                    val all=next.getJSONArray("zones")
+                    for(z in 0 until all.length())if(z!=zoneIndex) {
+                        val rs=all.getJSONObject(z).optJSONArray("ranges") ?: continue
+                        for(r in 0 until rs.length()) {
+                            val one=rs.getJSONObject(r)
+                            occupied.add(one.getInt("start") to
+                                (one.getInt("start")+one.getInt("count")))
+                        }
+                    }
+                    var start=0
+                    while(start+newLength<=outputLimit) {
+                        val conflict=occupied.firstOrNull { (lo,hi) ->
+                            start<hi && lo<start+newLength
+                        } ?: break
+                        start=conflict.second
+                    }
+                    if(start+newLength>outputLimit) {
+                        outputMessage.value="No nonoverlapping physical space for this section"
+                        return
+                    }
+                    ranges=JSONArray().put(JSONObject()
+                        .put("start",start).put("count",newLength))
+                    part.put("ranges",ranges).put("flags",0).put("pixels",newLength)
+                    next.put("pixels",maxOf(next.optInt("pixels",0),start+newLength))
+                    applyPhysicalRanges(next)
+                    return
+                }
+                val old=part.optInt("pixels",0)
+                val last=ranges.getJSONObject(ranges.length()-1)
+                val count=last.getInt("count")+(newLength-old)
+                if(count<=0) {
+                    outputMessage.value="Use Remove zone or edit a nonempty range; no zero-length v4 range can be sent"
+                    return
+                }
+                val end=last.getInt("start")+count
+                if(end>outputLimit) {
+                    outputMessage.value="Physical range would exceed the 2000-pixel output limit"
+                    return
+                }
+                last.put("count",count)
+                part.put("pixels",newLength)
+                next.put("pixels",maxOf(current.getInt("pixels"),end))
+                applyPhysicalRanges(next) // preserve all other starts, gaps, Panels and IDs
+                return
+            }
+            val before=draftText
+            var changed=false
             edit { next ->
-                val arr = next.getJSONArray("zones")
-                if (zoneIndex !in 0 until arr.length()) return@edit
-                val others = (0 until arr.length())
+                val arr=next.getJSONArray("zones")
+                if(zoneIndex !in 0 until arr.length())return@edit
+                val others=(0 until arr.length())
                     .filter { it != zoneIndex }.sumOf { arr.getJSONObject(it).getInt("pixels") }
-                val total = others + newLength
-                if (total !in 1..outputLimit) return@edit
-                arr.getJSONObject(zoneIndex).put("pixels", newLength)
-                next.put("pixels", total)
+                val total=others+newLength
+                if(total !in 0..outputLimit) {
+                    outputMessage.value = "Total would exceed the $outputLimit LED output limit"
+                    return@edit
+                }
+                arr.getJSONObject(zoneIndex).put("pixels",newLength)
+                next.put("pixels",total)
+                changed=true
+            }
+            if(changed) {
+                val local=(0 until project.zoneCount()).mapNotNull { project.zone(it) }
+                    .firstOrNull { it.optInt("physicalOutput",-1)==index &&
+                        it.optInt("physicalSection",-1)==zoneIndex }
+                if(local!=null) {
+                    val ok=project.editZone(local.optString("id"),local.optString("name"),
+                        newLength,local.optBoolean("reverse",false))
+                    if(!ok) {
+                        draftText=before
+                        outputDrafts[index]=before
+                        outputMessage.value="Local design zone could not be saved; draft retained"
+                    } else {
+                        layoutLiveEditPending.value=true
+                        refresh() // coalesced volatile controller preview
+                    }
+                }
             }
         }
         fun adjustOutput(newTotal: Int) {
-            if (newTotal !in 1..outputLimit) return
-            edit { next ->
-                val arr = next.getJSONArray("zones")
-                if (arr.length() == 0) return@edit
-                val others = (0 until arr.length() - 1)
-                    .sumOf { arr.getJSONObject(it).getInt("pixels") }
-                if (newTotal < others) return@edit
-                arr.getJSONObject(arr.length() - 1).put("pixels", newTotal - others)
-                next.put("pixels", newTotal)
+            if(newTotal !in 0..outputLimit) {
+                outputMessage.value = "Output pixel count must be 0–$outputLimit"
+                return
             }
+            val existing=runCatching { JSONObject(draftText) }.getOrNull() ?: return
+            if(existing.optBoolean("v4_advanced",false)) {
+                val next=JSONObject(existing.toString()).put("pixels",newTotal)
+                applyPhysicalRanges(next) // capacity is NOT the sum of discontiguous ranges
+                return
+            }
+            val arr=runCatching { JSONObject(draftText).getJSONArray("zones") }.getOrNull()?:return
+            if(arr.length()==0) {
+                if(newTotal==0)return
+                // Explicitly entering an output length creates its first
+                // section, never a synthetic one-pixel default.
+                val label="Zone 1"
+                val position=project.zoneCount()
+                if(!project.addZoneAt(label,newTotal,position)) {
+                    outputMessage.value="Could not create the first local zone"
+                    return
+                }
+                val id=project.zone(position)?.optString("id").orEmpty()
+                if(id.isEmpty() || !project.mapZoneToOutputSlot(id,index,0)) {
+                    outputMessage.value="First section could not acquire a valid output and Panel identity; no live mapping sent"
+                    return
+                }
+                val mapped=runCatching { GeometryTransactionManager.mapLayout(project).lane(index) }
+                    .getOrElse {
+                        outputMessage.value="Controller geometry rejected first section: "+it.message
+                        return
+                    }
+                val first=mapped.zones.firstOrNull { it.section==0 }
+                val firstPanel=mapped.panels.firstOrNull { it.id==first?.panelId }
+                if(first==null||firstPanel==null) {
+                    outputMessage.value="First section has no stable Panel/Zone identity; no live update sent"
+                    return
+                }
+                edit {
+                    // Panel Preview v2 resolves local aliases into stable
+                    // full 16-bit identities before accepting live ranges.
+                    val panelFull=0x8000 or (firstPanel.id and 0xff)
+                    val zoneFull=0x4000 or (first.id and 0xff)
+                    it.put("panel_id",panelFull).put("panel_name",firstPanel.name)
+                    it.getJSONArray("zones").put(JSONObject()
+                        .put("id",zoneFull).put("panel_id",panelFull)
+                        .put("name",label).put("pixels",newTotal).put("role","unassigned"))
+                    it.put("pixels",newTotal)
+                }
+                structureVersion++
+                layoutLiveEditPending.value=true
+                refresh()
+                return
+            }
+            val others=(0 until arr.length()-1).sumOf { arr.getJSONObject(it).getInt("pixels") }
+            if(newTotal>=others)adjustZone(arr.length()-1,newTotal-others)
+            else outputMessage.value =
+                "Cannot set total below $others LEDs already assigned to other zones"
         }
 
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Controller output",color=t.fg,fontSize=16.sp,fontWeight=FontWeight.Bold)
-            Caption("Load the saved output, edit its zones, then Save to CORE to apply.", t)
-            Caption("Physical pixel capacity depends on the installed CORE firmware and board memory budget.", t)
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Pill("Output 1", t, index == 0) { index = 0; captureOutput.intValue = 0; invalidateCoreFrame() }
-                Pill("Output 2", t, index == 1) { index = 1; captureOutput.intValue = 1; invalidateCoreFrame() }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text("Output",color=t.fg,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
+                Pill(outputTab(index)+"  ▼",t,true) { choosingOutput=!choosingOutput }
             }
-            Pill("Reload output " + (index + 1) + " from CORE", t) {
-                if (ble.canConfigure()) ble.readOutput(index)
-                else outputMessage.value = "Connect and authorize BLE before loading hardware"
+            if(choosingOutput) Row(horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                Pill(outputTab(0),t,index==0) {
+                    captureOutput.intValue=0
+                    activateLaneState(0)
+                    choosingOutput=false
+                    liveChainMask.intValue=1
+                    lastAutoGeometryRefresh.intValue=-1
+                    if(outputDirty[0]==true)layoutLiveEditPending.value=true
+                    invalidateCoreFrame()
+                }
+                Pill(outputTab(1),t,index==1) {
+                    captureOutput.intValue=1
+                    activateLaneState(1)
+                    choosingOutput=false
+                    liveChainMask.intValue=2
+                    lastAutoGeometryRefresh.intValue=-1
+                    if(outputDirty[1]==true)layoutLiveEditPending.value=true
+                    invalidateCoreFrame()
+                }
             }
-            Caption(outputMessage.value, t)
-            if (draft == null) Caption("Nothing has been read from this output. No settings will be sent until you explicitly confirm Save.", t)
+            val currentName=runCatching { JSONObject(draftText).optString("name") }.getOrDefault("")
+            Caption("O"+(index+1)+" · "+currentName.ifBlank { "Unnamed output" },t)
+            if(outputs[index]==null && ble.canConfigure()) {
+                if(outputLoadStatus[index]=="loading")
+                    Caption("Reading saved output…",t)
+                else Caption("Saved output unavailable. Draft is retained; Save requires confirmed readback.",t)
+            } else if(outputs[index]==null) Caption("Not connected · local draft retained",t)
+            else Caption("Saved controller output · "+
+                outputs[index]!!.optInt("pixels",0)+" LEDs",t)
+            if(outputDirty[index]==true) {
+                val localCount=runCatching { JSONObject(draftText).optInt("pixels",0) }.getOrDefault(0)
+                Caption("Unsaved draft · "+localCount+" LEDs (not saved to controller)",t)
+                if(outputs[index]!=null) Pill("Discard O"+(index+1)+" local edits",t,
+                    enabled=savingOutput.intValue<0) {
+                    // Owner action only. Never write NVS, reset firmware or cancel
+                    // another lane's physical preview. A live lease must be
+                    // explicitly ended before its local draft can be discarded.
+                    activateLaneState(index)
+                    val manager=ble.panelGeometryManager(index)
+                    val active=panelGeometryMapping!=null ||
+                        (manager!=null && manager.state()!=GeometryTransactionManager.State.READY)
+                    if(active) {
+                        outputMessage.value="Finish or cancel O"+(index+1)+
+                            " live preview before discarding local edits."
+                    } else {
+                        val confirmed=outputs[index]
+                        if(confirmed==null) {
+                            outputMessage.value="Read this output from the controller before discarding."
+                        } else {
+                            outputDrafts[index]=confirmed.toString()
+                            outputDirty[index]=false
+                            outputReadbackEpoch[index]=(outputReadbackEpoch[index]?:0)+1
+                            if(captureOutput.intValue==index)layoutLiveEditPending.value=false
+                            outputMessage.value="Discarded O"+(index+1)+
+                                " local edits; saved controller output is unchanged."
+                        }
+                    }
+                }
+            }
+            if (savingOutput.intValue == index) Caption("Saving… verifying controller readback", t)
+            if(outputMessage.value.isNotBlank()) Caption(outputMessage.value.replace("CORE","controller"),t)
+            if(outputToolsOpen) Pill("Test Solid Red · O"+(index+1),t,
+                enabled=ble.canControl()) {
+                testSavedOutputSolidRed(index)
+            }
+            if(outputToolsOpen) Caption(
+                "Solid Red targets any configured section. A vehicle-trigger role and Save are not prerequisites; controller acceptance is required.",t)
+            // Firmware's existing authenticated 0xAA diagnostic drives just
+            // physical pixel zero for two seconds, even if the saved role is Off.
+            // It never saves, reboots or creates a zone.
+            if(outputToolsOpen) Pill("Check first LED · O"+(index+1),t,
+                enabled=ble.canProbeFirstPixel()) {
+                if(ble.probeFirstPixel(index))
+                    outputMessage.value="Checking first LED on O"+(index+1)+
+                        " (white, 2 seconds) · waiting for controller ATT result"
+            }
         }
         if (draft == null) return
         val zones = draft.optJSONArray("zones") ?: JSONArray()
         val pixelCount = draft.optInt("pixels", 0)
+        // The currently edited draft, not old controller readback, owns these cards.
+        SideEffect { layoutDraftZoneCounts[index] = zones.length() }
+        var selectedZone by remember(index) { mutableIntStateOf(0) }
+        var choosingZone by remember(index) { mutableStateOf(false) }
+        val authoritativeMap = runCatching {
+            ble.lastConfirmedPanelSnapshot(index)?.let { PanelPreviewProtocol.MapIdentity.parse(it) }
+        }.getOrNull()
+        var pendingRemoveSection by remember(index) { mutableIntStateOf(-1) }
+        var confirmingStartFresh by remember(index) { mutableStateOf(false) }
         val assigned = (0 until zones.length()).sumOf { zones.optJSONObject(it)?.optInt("pixels", 0) ?: 0 }
-        var outputCountText by remember(index, outputs[index]) {
-            mutableStateOf(outputs[index]?.optInt("pixels", 1)?.toString() ?: "1")
+        var outputCountText by remember(index, outputReadbackEpoch[index]) {
+            mutableStateOf(pixelCount.toString())
         }
+        LaunchedEffect(index,pixelCount) { outputCountText=pixelCount.toString() }
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Text("Output " + (index + 1), color = t.fg, fontWeight = FontWeight.Bold)
+            Text("LED count · O" + (index + 1), color=t.fg,fontWeight=FontWeight.SemiBold)
             Field(draft.optString("name"), "Output name", t) { value ->
                 edit { it.put("name", value) }
             }
-            Caption("Pixels (1–" + outputLimit + " BLE format limit; CORE validates hardware capacity)", t)
+            Caption("Pixels (0–" + outputLimit + "; a zero-LED draft stays local until configured)", t)
             Field(outputCountText, "Pixel count", t) { value ->
                 outputCountText = value.filter(Char::isDigit).take(5)
                 outputCountText.toIntOrNull()?.let(::adjustOutput)
             }
-            ValueSlider("Total output pixels", pixelCount.coerceIn(1, outputLimit), outputLimit, t) { newCount ->
-                adjustOutput(newCount.coerceAtLeast(1))
-                outputCountText = newCount.coerceAtLeast(1).toString()
+            if(outputCountText.toIntOrNull()!=null && outputCountText.toIntOrNull()!=pixelCount)
+                Caption("Typed total has not been applied; check the other zone allocations.",t)
+            if(outputToolsOpen) {
+                ValueSlider("Total output pixels", pixelCount.coerceIn(0, outputLimit), outputLimit, t) { newCount ->
+                    adjustOutput(newCount.coerceAtLeast(0))
+                    outputCountText = JSONObject(draftText).optInt("pixels",pixelCount).toString()
+                }
             }
             // Restore the approved pixel +/- controls beside the draft
             // slider. These change only RAM; Save still requires confirmation.
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 PixelStepPill("−",t) {
-                    val n=(pixelCount-1).coerceAtLeast(1)
+                    val n=(pixelCount-1).coerceAtLeast(0)
                     adjustOutput(n)
                     outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
@@ -2493,12 +3580,65 @@ class ComposeMainActivity : ComponentActivity() {
                     outputCountText=JSONObject(draftText).optInt("pixels",pixelCount).toString()
                 }
             }
-            Caption("Color order · set this for the actual connected LED strips", t)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                BleConfigCodec.ORDERS.forEach { order ->
-                    Pill(order, t, order == draft.optString("color_order")) {
-                        edit { it.put("color_order", order) }
+            // One Save, positioned with the LED count rather than below
+            // diagnostics and every zone editor. Never claim success pre-readback.
+            var validationError=""
+            val valid=try {
+                val authoritative=ble.lastConfirmedPanelSnapshot(index)
+                if(authoritative==null)false
+                else { PanelV4DraftCodec.encode(index,draft,authoritative);true }
+            } catch(ex:Exception) {
+                validationError=ex.message ?: "Invalid output configuration"
+                false
+            }
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+                horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                Pill(if (savingOutput.intValue == index) "Saving…" else "Save",t,true,
+                    enabled=valid && savingOutput.intValue<0 &&
+                        ble.canConfigure() && outputs[index]!=null) {
+                    try {
+                        val saved=ble.lastConfirmedPanelSnapshot(index)
+                            ?: throw IllegalStateException("Read authoritative Panel v4 before saving")
+                        PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)
+                        if(!ble.canConfigure()) outputMessage.value="Not authorized"
+                        else {
+                            // Freeze this owner's Save request. UPDATE ACKs
+                            // may still be in flight; queue once, never re-Save
+                            // after GATT 133 or an uncertain controller ACK.
+                            savingOutput.intValue=index
+                            panelSaveQueuedLane=index
+                            panelSaveQueuedDraft=draftText
+                            panelSaveQueuedChecks=0
+                            panelGeometryEpoch.intValue++ // keeps bounded Save admission checks alive
+                            outputMessage.value="Verifying current live mapping before one Panel v4 Save..."
+                            pumpPanelQueuedSave()
+                        }
+                    } catch(ex:Exception) {
+                        outputMessage.value="Save rejected: "+(ex.message ?: "invalid draft")
+                    }
+                }
+                Caption(if(!valid) {
+                    if(ble.lastConfirmedPanelSnapshot(index)==null)
+                        "Reading Panel v4; Save requires authoritative revision"
+                    else validationError
+                } else if(outputs[index]==null) "Loading controller…" else
+                    if(outputDirty[index]==true) "Unsaved" else "Controller confirmed",t)
+            }
+            // Detailed configuration and diagnostics share Layout's single More disclosure.
+        }
+        if(zones.length()>0) {
+            val current=selectedZone.coerceIn(0,zones.length()-1)
+            Pill("Zone: " + zones.optJSONObject(current)?.optString("name","Zone " + (current+1)) +
+                "  ▼",t,choosingZone) { choosingZone=!choosingZone }
+            if(choosingZone) Column(Modifier.fillMaxWidth().heightIn(max=280.dp)
+                .verticalScroll(rememberScrollState()),
+                verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                for(choice in 0 until zones.length()) {
+                    val part=zones.optJSONObject(choice) ?: continue
+                    Pill((if(choice==current) "✓  " else "") +
+                        part.optString("name","Zone " + (choice+1)) +
+                        " · " + part.optInt("pixels",0) + " LEDs",t,choice==current) {
+                        selectedZone=choice; choosingZone=false
                     }
                 }
             }
@@ -2509,15 +3649,37 @@ class ComposeMainActivity : ComponentActivity() {
             val from = cursor
             val count = zone.optInt("pixels", 0)
             cursor += count
-            var zoneCountText by remember(index, i, outputs[index], structureVersion) {
-                mutableStateOf(zone.optInt("pixels", 0).toString())
+            if(i != selectedZone.coerceIn(0,zones.length()-1)) continue
+            var zoneCountText by remember(index, i, outputReadbackEpoch[index], structureVersion) {
+                mutableStateOf(count.toString())
             }
+            LaunchedEffect(index,i,count) { zoneCountText=count.toString() }
             Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Text("Zone " + (i + 1), color = t.fg, fontWeight = FontWeight.SemiBold)
-                Caption("Start " + from + " · end " + (if (count > 0) cursor - 1 else "empty") +
-                    " · next " + cursor, t)
+                val coreZone=authoritativeMap?.zones?.getOrNull(i)
+                val corePanel=authoritativeMap?.panels?.firstOrNull { it.id==coreZone?.panelId }
+                Text("Zone "+(i+1)+" · "+zone.optString("name","Unnamed"),color=t.fg,fontWeight=FontWeight.SemiBold)
+                if(outputToolsOpen && coreZone!=null)
+                    Caption("Controller identities · Panel " + coreZone.panelId +
+                        " · Zone " + coreZone.id,t)
+                if(outputToolsOpen) Caption("Start " + from + " · end " +
+                    (if(count>0) cursor-1 else "empty") + " · next " + cursor,t)
+                val linkedId=(0 until project.zoneCount()).firstOrNull { localIndex ->
+                    val local=project.zone(localIndex)
+                    local?.optInt("physicalOutput",-1)==index &&
+                        local.optInt("physicalSection",-1)==i
+                }?.let { project.zone(it)?.optString("id") }
+                val linkedIndex=(0 until project.zoneCount()).firstOrNull {
+                    project.zone(it)?.optString("id")==linkedId
+                }
+                val linkedName=linkedIndex?.let { project.zone(it)?.optString("name") }
                 Field(zone.optString("name"), "Zone name", t) { value ->
                     edit { it.getJSONArray("zones").getJSONObject(i).put("name", value) }
+                    val local=linkedIndex?.let { project.zone(it) }
+                    if(local!=null && value.trim().isNotEmpty()) {
+                        if(project.editZone(local.optString("id"),value,
+                            local.optInt("length",0),local.optBoolean("reverse",false))) refresh()
+                        else outputMessage.value="Zone name was not saved to the local project"
+                    }
                 }
                 Field(zoneCountText, "Zone pixel count", t) { value ->
                     zoneCountText = value.filter(Char::isDigit).take(5)
@@ -2526,11 +3688,54 @@ class ComposeMainActivity : ComponentActivity() {
                         outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                     }
                 }
-                ValueSlider("Next start · zero-based", cursor.coerceIn(0, outputLimit), outputLimit, t) { nextStart ->
-                    val n = (nextStart - from).coerceAtLeast(0)
-                    adjustZone(i, n)
-                    zoneCountText = n.toString()
-                    outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
+                if(zoneCountText.toIntOrNull()!=null && zoneCountText.toIntOrNull()!=count)
+                    Caption("Typed zone length is not applied; check the output LED limit.",t)
+                if(outputToolsOpen) {
+                    // One precise offset control, not another zone editor.
+                    // For imported multi-range Zones, choose the existing slot
+                    // without creating, flattening or reordering the others.
+                    val storedRanges=zone.optJSONArray("ranges")
+                    val slots=storedRanges?.length()?.takeIf { it>0 } ?: 1
+                    var selectedRange by remember(index,i) { mutableIntStateOf(0) }
+                    if(slots>1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        for(slot in 0 until slots)
+                            Pill("Range "+(slot+1),t,slot==selectedRange) {
+                                selectedRange=slot
+                            }
+                    }
+                    val slot=selectedRange.coerceIn(0,slots-1)
+                    val rangeStart=storedRanges?.optJSONObject(slot)?.optInt("start",from) ?: from
+                    ValueSlider("Start pixel · zero-based",rangeStart.coerceIn(0,outputLimit),
+                        outputLimit,t) { nextStart ->
+                        val next=JSONObject(draftText)
+                        val all=next.getJSONArray("zones")
+                        if(!next.optBoolean("v4_advanced",false)) {
+                            var offset=0
+                            for(z in 0 until all.length()) {
+                                val section=all.getJSONObject(z)
+                                val length=section.optInt("pixels",0)
+                                if(length<=0) {
+                                    outputMessage.value="Configure each section's LED count before setting a manual offset"
+                                    return@ValueSlider
+                                }
+                                section.put("ranges",JSONArray().put(JSONObject()
+                                    .put("start",offset).put("count",length)))
+                                offset+=length
+                            }
+                            next.put("v4_advanced",true)
+                        }
+                        val item=all.getJSONObject(i).getJSONArray("ranges").getJSONObject(slot)
+                        val end=nextStart+item.getInt("count")
+                        if(end>outputLimit) {
+                            outputMessage.value="Physical range would exceed the 2000-pixel output limit"
+                            return@ValueSlider
+                        }
+                        item.put("start",nextStart)
+                        next.put("pixels",maxOf(next.optInt("pixels",0),end))
+                        if(applyPhysicalRanges(next))
+                            outputCountText=next.getInt("pixels").toString()
+                    }
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     PixelStepPill("−",t) {
@@ -2546,16 +3751,9 @@ class ComposeMainActivity : ComponentActivity() {
                         outputCountText=JSONObject(draftText).optInt("pixels",0).toString()
                     }
                 }
+                if(outputToolsOpen) {
                 // Bidirectional association: choose a design zone here, or
                 // choose its physical output/section from the expanded design card.
-                val linkedId=(0 until project.zoneCount()).firstOrNull { localIndex ->
-                    val local=project.zone(localIndex)
-                    local?.optInt("physicalOutput",-1)==index &&
-                        local.optInt("physicalSection",-1)==i
-                }?.let { project.zone(it)?.optString("id") }
-                val linkedName=(0 until project.zoneCount()).firstOrNull { localIndex ->
-                    project.zone(localIndex)?.optString("id")==linkedId
-                }?.let { project.zone(it)?.optString("name") }
                 var choosingDesign by remember(index,i) { mutableStateOf(false) }
                 Pill("Design zone: " + (linkedName ?: "Unassigned"),t) {
                     choosingDesign=!choosingDesign
@@ -2569,7 +3767,7 @@ class ComposeMainActivity : ComponentActivity() {
                             Pill(local.optString("name"),t,localId==linkedId) {
                                 val newPixels=local.optInt("length",0)
                                 val newTotal=pixelCount-count+newPixels
-                                if(newPixels !in 1..outputLimit || newTotal !in 1..outputLimit) {
+                                if(newPixels !in 0..outputLimit || newTotal !in 0..outputLimit) {
                                     outputMessage.value="Design zone does not fit this physical output"
                                 } else if(project.mapZoneToOutputSlot(localId,index,i)) {
                                     // Update only the editable BLE draft; physical
@@ -2590,105 +3788,228 @@ class ComposeMainActivity : ComponentActivity() {
                         }
                     }
                 }
-                Caption("Physical section link is local until CORE Save/readback.",t)
-                Caption("Lighting role (only CORE assigns trigger priority)", t)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BleConfigCodec.ROLES.forEach { role ->
-                        Pill(role.replace('_', ' '), t, zone.optString("role") == role) {
-                            edit { it.getJSONArray("zones").getJSONObject(i).put("role", role) }
+                if(linkedId!=null && linkedIndex!=null) {
+                    val local=project.zone(linkedIndex)
+                    if(local!=null) {
+                        val localCount=local.optInt("length",0)
+                        val reversed=local.optBoolean("reverse",false)
+                        var pixelTools by remember(linkedId) { mutableStateOf(false) }
+                        var selectedPixel by remember(linkedId) { mutableIntStateOf(0) }
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Pill(if(reversed) "Reverse ✓" else "Reverse",t,reversed) {
+                                if(project.editZone(linkedId,local.optString("name"),
+                                    localCount,!reversed))refresh()
+                                else outputMessage.value="Could not save reverse flag"
+                            }
+                            Pill(if(pixelTools) "Close pixel editor" else "Pixel editor",t) {
+                                pixelTools=!pixelTools
+                            }
+                        }
+                        if(pixelTools) {
+                            Caption(project.previewZoneOffsets(linkedId,localCount),t)
+                            ZoneDotPreview(t,localCount,reversed)
+                            if(localCount==0) Caption("Empty zone · add LEDs before editing pixels",t)
+                            else {
+                                val activePixel=selectedPixel.coerceIn(0,localCount-1)
+                                ValueSlider("Pixel",activePixel,(localCount-1).coerceAtLeast(1),t) {
+                                    selectedPixel=it.coerceIn(0,localCount-1)
+                                }
+                                PaletteEditor("Pixel "+activePixel,
+                                    android.graphics.Color.parseColor(project.pixelColor(linkedId,activePixel)),t) { color ->
+                                    val hex=String.format("#%06X",color and 0xffffff)
+                                    if(project.setPixelColor(linkedId,activePixel,hex)) refresh()
+                                }
+                                Pill("Clear pixel",t) {
+                                    if(project.clearPixelColor(linkedId,activePixel))refresh()
+                                }
+                            }
                         }
                     }
                 }
-                if (zones.length() > 1) Pill("Remove zone", t) {
-                    edit {
-                        val next = JSONArray()
-                        val original = it.getJSONArray("zones")
-                        for (j in 0 until original.length()) if (j != i) next.put(original.get(j))
-                        var remaining = (0 until next.length()).sumOf { j ->
-                            next.getJSONObject(j).getInt("pixels")
+                // Move the physical Zone record in the same validated v4
+                // draft; the old project-only arrows did not reorder CORE.
+                // Existing explicit ranges stay attached to their stable Zone
+                // identities, while simple contiguous drafts reflow on encode.
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    for(delta in intArrayOf(-1,1)) {
+                        val destination=i+delta
+                        Pill(if(delta<0) "Move ↑" else "Move ↓",t,
+                            enabled=destination in 0 until zones.length()) {
+                            val next=JSONObject(draftText)
+                            val source=next.getJSONArray("zones")
+                            val swapped=JSONArray()
+                            for(pos in 0 until source.length()) {
+                                val read=when(pos) {
+                                    i -> destination
+                                    destination -> i
+                                    else -> pos
+                                }
+                                swapped.put(source.getJSONObject(read))
+                            }
+                            next.put("zones",swapped)
+                            if(applyPhysicalRanges(next)) {
+                                selectedZone=destination
+                                choosingZone=false
+                            }
                         }
-                        if (remaining == 0 && next.length() > 0) {
-                            next.getJSONObject(0).put("pixels", 1)
-                            remaining = 1
-                        }
-                        it.put("zones", next)
-                        it.put("pixels", remaining)
                     }
-                    structureVersion++
-                    outputCountText = JSONObject(draftText).optInt("pixels", 0).toString()
                 }
+                Caption("Physical ranges preview live; Save persists the accepted layout.",t)
+                }
+                // Removal belongs beside Add Zone below, not in a hidden menu.
+                // Destructive action is confirmed once for the unified zone.
             }
         }
+        if(confirmingStartFresh) {
+            AlertDialog(containerColor=t.surface,
+                onDismissRequest={ confirmingStartFresh=false },
+                title={ Text("Start Fresh · O"+(index+1)+"?") },
+                text={ Text("Reset only this output's saved Panel v4 layout to 0 LEDs and no sections. Other outputs, trigger settings, pairing and system settings are preserved. Unsaved edits are cleared only after controller confirmation.") },
+                confirmButton={ Pill("Start Fresh",t,true) {
+                    confirmingStartFresh=false
+                    if(ble.startFreshPanelV4(index)) {
+                        savingOutput.intValue=index
+                        outputMessage.value="Start Fresh requested · verifying controller revision and empty layout"
+                    } else outputMessage.value="Start Fresh unavailable: finish the current operation and read Panel v4"
+                }},
+                dismissButton={ Pill("Cancel",t) { confirmingStartFresh=false } })
+        }
+        if(pendingRemoveSection in 0 until zones.length()) {
+            AlertDialog(containerColor=t.surface,
+                onDismissRequest={ pendingRemoveSection=-1 },
+                title={ Text("Remove this zone?") },
+                text={ Text("Remove this section? Valid changes preview live; Save is required only to persist them.") },
+                confirmButton={ Pill("Remove",t,true) {
+                    val removal=pendingRemoveSection
+                    val linked=(0 until project.zoneCount()).mapNotNull { project.zone(it) }
+                        .firstOrNull { it.optInt("physicalOutput",-1)==index &&
+                            it.optInt("physicalSection",-1)==removal }
+                    if(linked!=null && !project.removeZone(linked.optString("id"))) {
+                        outputMessage.value="Could not remove the local zone; physical draft retained"
+                    } else {
+                        edit {
+                            val next=JSONArray()
+                            val original=it.getJSONArray("zones")
+                            for(j in 0 until original.length())if(j!=removal)next.put(original.get(j))
+                            val remaining=(0 until next.length()).sumOf { j ->
+                                next.getJSONObject(j).getInt("pixels")
+                            }
+                            it.put("zones",next)
+                            if(!it.optBoolean("v4_advanced",false)||next.length()==0)
+                                it.put("pixels",remaining)
+                            // Advanced active capacity must not collapse to
+                            // the assigned range sum after deleting one Zone.
+                        }
+                        structureVersion++
+                        layoutLiveEditPending.value=true
+                        refresh()
+                    }
+                    selectedZone=removal.coerceAtMost((zones.length()-2).coerceAtLeast(0))
+                    pendingRemoveSection=-1
+                } },
+                dismissButton={ Pill("Cancel",t) { pendingRemoveSection=-1 } })
+        }
         Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Caption("Assigned " + assigned + " of " + pixelCount + " pixels · " +
-                (pixelCount - assigned) + " remaining. Zone offsets are zero-based and automatically contiguous.", t)
-            PixelStrip(t, (0 until zones.length()).map { j ->
-                val part = zones.optJSONObject(j)
-                (part?.optInt("pixels", 0) ?: 0) to rolePixelColor(part?.optString("role", "off") ?: "off")
-            })
-            Caption("Immediate draft preview. Physical boundaries change only after confirmed NVS Save.", t)
+            if(outputToolsOpen) Caption("Assigned " + assigned + " of " + pixelCount +
+                " pixels · " + (pixelCount - assigned) +
+                " remaining. Zero-based offsets are automatically contiguous.",t)
+            if(outputToolsOpen) Caption("Draft edits are local; an active live preview streams to the controller without flash writes.",t)
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             if (zones.length() < 8) Pill("+ Add zone", t) {
-                edit {
-                    it.getJSONArray("zones").put(JSONObject()
-                        .put("name", "Zone " + (zones.length() + 1))
-                        .put("pixels", 0).put("role", "off"))
-                }
-                structureVersion++
-            }
-            Pill("Fit last zone to remaining pixels", t) {
-                edit {
-                    val group = it.getJSONArray("zones")
-                    if (group.length() > 0) {
-                        val other = (0 until group.length() - 1)
-                            .sumOf { j -> group.getJSONObject(j).getInt("pixels") }
-                        val remainder = it.getInt("pixels") - other
-                        if (remainder in 0..outputLimit)
-                            group.getJSONObject(group.length() - 1).put("pixels", remainder)
+                val newSection=zones.length()
+                val label="Zone " + (newSection+1)
+                val position=project.zoneCount()
+                if(!project.addZoneAt(label,0,position)) {
+                    outputMessage.value="Could not add local zone; current live geometry is unchanged"
+                } else {
+                    val id=project.zone(position)?.optString("id").orEmpty()
+                    if(id.isEmpty() || !project.mapZoneToOutputSlot(id,index,newSection)) {
+                        outputMessage.value="New section not mapped: Panel identity assignment rejected; no physical change sent"
+                    } else {
+                        val assigned=project.zone(position)
+                        val panelId=assigned?.optInt("physicalPanelId",0) ?: 0
+                        val panelName=assigned?.optString("physicalPanelName","") ?: ""
+                        if(panelId !in 1..127 || panelName.isBlank()) {
+                            outputMessage.value="New section needs a stable Panel identity before live editing"
+                        } else {
+                            // Reuse a free stable alias after deletes; the
+                            // array position is not an identity. On an imported
+                            // multi-Panel map, add to the selected existing
+                            // Panel instead of manufacturing a new owner.
+                            val used=(0 until zones.length()).mapNotNull { j ->
+                                zones.optJSONObject(j)?.optInt("id",0)?.and(255)
+                            }.toSet()
+                            val alias=(129+index*8 until 137+index*8)
+                                .firstOrNull { it !in used }
+                            if(alias==null) {
+                                outputMessage.value="No free physical Zone identity on this output"
+                                return@Pill
+                            }
+                            val zoneId=0x4000 or alias
+                            val advanced=draft.optBoolean("v4_advanced",false)
+                            val parent=if(advanced) {
+                                zones.optJSONObject(selectedZone.coerceIn(0,(zones.length()-1).coerceAtLeast(0)))
+                                    ?.optInt("panel_id",0)?.takeIf { it>0 }
+                                    ?: draft.optJSONArray("panels")?.optJSONObject(0)?.optInt("id",0)
+                                        ?.takeIf { it>0 }
+                            } else null
+                            val panelFull=parent ?: (draft.optInt("panel_id",0)
+                                .takeIf { it>0 } ?: (0x8000 or panelId))
+                            edit {
+                                if(!advanced)
+                                    it.put("panel_id",panelFull).put("panel_name",panelName)
+                                it.getJSONArray("zones").put(JSONObject()
+                                    .put("id",zoneId).put("panel_id",panelFull)
+                                    .put("name",label).put("pixels",0).put("role","unassigned"))
+                            }
+                            structureVersion++
+                            // Firmware v2 cannot accept a zero-length Zone.
+                            // Enter a real LED count before requesting preview.
+                            layoutLiveEditPending.value=false
+                            outputMessage.value="Section added locally; enter its LED count for live preview"
+                            selectedZone=newSection
+                            choosingZone=false
+                            refresh()
+                        }
                     }
                 }
+            }
+            if(zones.length()>0) Pill("Remove zone",t) {
+                pendingRemoveSection=selectedZone.coerceIn(0,zones.length()-1)
+            }
             }
             val calibrated = draft.optJSONObject("calibration")
             val gamma = calibrated?.optBoolean("gamma_enabled", false) ?: false
-            Pill(if (gamma) "Gamma enabled ✓" else "Gamma disabled", t, gamma) {
+            if(outputToolsOpen) Pill(if (gamma) "Gamma enabled ✓" else "Gamma disabled", t, gamma) {
                 edit {
                     val cal = it.optJSONObject("calibration") ?: JSONObject()
                     cal.put("gamma_enabled", !gamma)
                     it.put("calibration", cal)
                 }
             }
-            var validationError = ""
-            val valid = try {
-                BleConfigCodec.encode(draft)
-                true
-            } catch (ex: Exception) {
-                validationError = ex.message ?: "Invalid output mapping"
-                false
-            }
-            Caption(if (valid) "Ready to save; no changes sent yet." else
-                "Cannot save: " + validationError, t)
-            if (valid) Pill("Save to CORE · verify readback", t, true) { confirm = true }
-        }
-        if (confirm) AlertDialog(containerColor=t.surface, 
-            onDismissRequest = { confirm = false },
-            title = { Text("Apply saved hardware output settings?") },
-            text = { Text("Stop all shows and release physical inputs before applying. Changes affect only output " +
-                (index + 1) + ". CORE must acknowledge flash persistence and return identical BLE readback.") },
-            confirmButton = { Pill("Save", t, true) {
-                try {
-                    BleConfigCodec.encode(JSONObject(draftText))
-                    if (ble.canConfigure()) {
-                        if (ble.saveOutput(index, draftText))
-                            outputMessage.value = "Save requested · verifying hardware readback"
-                        else
-                            outputMessage.value = "Save request rejected · see BLE status"
-                    } else outputMessage.value = "Not authorized — no settings sent"
-                } catch (ex: Exception) {
-                    outputMessage.value = "Save rejected: " + (ex.message ?: "invalid draft")
+            if(outputToolsOpen) {
+                Caption("Advanced output settings",t)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                    BleConfigCodec.ORDERS.forEach { order ->
+                        Pill(order,t,order==draft.optString("color_order")) {
+                            edit { it.put("color_order",order) }
+                        }
+                    }
                 }
-                confirm = false
-            } },
-            dismissButton = { Pill("Cancel", t) { confirm = false } }
-        )
+                Pill("Reload from controller",t) {
+                    if(ble.canReadPanelPreview()) ble.readPanelLaneSnapshot(index)
+                    else outputMessage.value="Connect and authorize before reading controller settings"
+                }
+                // Destructive management is intentionally behind More, never
+                // adjacent to the single everyday Save operation.
+                Pill("Start Fresh",t,enabled=savingOutput.intValue<0 &&
+                    ble.canReadPanelPreview() &&
+                    ble.lastConfirmedPanelSnapshot(index)!=null) {
+                    confirmingStartFresh=true
+                }
+            }
+        }
+
     }
 }
