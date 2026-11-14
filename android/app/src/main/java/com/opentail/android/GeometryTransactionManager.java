@@ -344,13 +344,14 @@ final class GeometryTransactionManager {
             return !appended.equals(expected);
         }
         private boolean requiresRangePlanner() {
+            // One physical range per Zone is already representable by the
+            // original overlap-aware UPDATE planner, including offsets/gaps
+            // and an atomic two-range swap. Use slot-planning only when the
+            // map actually needs it; do not demote MTU 23 swap diagnostics.
             if(panels.size()>1)return true;
-            int cursor=0;
-            for(MappedZone zone:zones) {
-                if(zone.flags!=0||zone.ranges.size()!=1||zone.start!=cursor)return true;
-                cursor+=zone.count;
-            }
-            return cursor!=activePixels;
+            for(MappedZone zone:zones)
+                if(zone.flags!=0||zone.ranges.size()!=1)return true;
+            return false;
         }
         /**
          * Firmware Panel Preview v2 is a range-slot protocol: preserve each
