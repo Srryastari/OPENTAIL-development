@@ -2021,7 +2021,8 @@ final class BleDiscovery {
                 connecting = false;
                 connected = false;
                 frameCapture.cancel();clearPreviewCommand();palette.reset();clearQueuedOutputRead();panelDisconnected();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
-                notifyStatus("BLE disconnected (GATT status " + status + ")");
+                notifyStatus("BLE disconnected (GATT status " + status + ")" +
+                    (status==133?" · Android GATT 133; pending transfers and Pixel Probe canceled":""));
                 connection.close();
                 if (gatt == connection) gatt = null;
                 scheduleReconnect(connectingAddress,fallback);
@@ -2179,7 +2180,12 @@ final class BleDiscovery {
                     "Pixel 0 white probe accepted by CORE on O"+(lane+1)+
                     "; 2-second lease, actual illumination still requires physical check":
                     "Pixel 0 probe rejected on O"+(lane+1)+" (GATT "+status+")");
-                pumpQueue();
+                if(status==133) {
+                    // Android GATT 133 means the ATT outcome is unknown.
+                    // Retire this connection instead of dispatching more
+                    // requests on a possibly wedged stack. Never replay probe.
+                    recoverStalledGatt(connection,"Pixel Probe GATT 133; request not retried");
+                } else pumpQueue();
                 return;
             }
             if (CFG_CMD_UUID.equals(characteristic.getUuid())) {cfgWritten(connection,status);return;}
