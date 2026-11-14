@@ -310,6 +310,7 @@ final class BleDiscovery {
         final BluetoothGatt owner=gatt;
         if(owner==null||!connected)return false;
         BluetoothDevice device=owner.getDevice();
+        try {
         if(device.getBondState()==BluetoothDevice.BOND_BONDED)return true;
         if(pairPending)return false;
         pairPending=true;
@@ -319,14 +320,17 @@ final class BleDiscovery {
         }
         notifyStatus("Securing controller connection…");
         waitForOwnerBond(owner,lease,0);
+        } catch(SecurityException ex) {pairPending=false;notifyStatus("Bluetooth permission is required to connect");}
         return false;
     }
     @SuppressWarnings("MissingPermission")
     private void waitForOwnerBond(BluetoothGatt owner,int lease,int attempts) {
         ui.postDelayed(()->{
             if(stopped||owner!=gatt||lease!=ownerBondLease)return;
-            int state=owner.getDevice().getBondState();
-            if(state==BluetoothDevice.BOND_BONDED){pairPending=false;authorizeOrPair();return;}
+            final int state;
+            try {state=owner.getDevice().getBondState();}
+            catch(SecurityException ex){pairPending=false;notifyStatus("Bluetooth permission is required to connect");return;}
+            if(state==BluetoothDevice.BOND_BONDED){pairPending=false;ownerAutoAuthQueued=true;pumpQueue();return;}
             if(attempts>=240||(attempts>4&&state==BluetoothDevice.BOND_NONE)){
                 pairPending=false;notifyStatus("Bluetooth pairing not completed; select controller to retry");pumpQueue();return;
             }
@@ -334,7 +338,7 @@ final class BleDiscovery {
         },250L);
     }
     void promptOwnerPin() {
-        if(!canControl()||!ownerBondingSupported){notifyStatus("Connect an owner-bond-v3 controller first");return;}
+        if(!canControl()||!ownerBondingSupported){notifyStatus("Connect a controller with updated firmware to set a PIN");return;}
         android.widget.EditText input=new android.widget.EditText(activity);
         input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});

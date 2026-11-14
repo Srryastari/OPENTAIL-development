@@ -1077,7 +1077,7 @@ const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/S
 assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
        nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
-       nativeManifest.core_identity_source_commit==='6fb147a8784f1653234ae19771229b2ae7de0bf6' &&
+       nativeManifest.core_identity_source_commit==='e3038ba63b54d22c9a2a3940db82b93f8a5b8723' &&
        JSON.stringify(nativeManifest.core_identity_files)===JSON.stringify(['effects_1d.c','effects_1d.h']) &&
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
        nativeManifest.integrated_android106_head==='db7bcdff187197c0493b5c38991870224f2c244a' &&
@@ -1085,7 +1085,7 @@ assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9'
        nativeManifest.tertiary_transport_admitted_modes===13 &&
        nativeManifest.tertiary_legacy_transport_modes===11 &&
        nativeManifest.tertiary_transport_capability==='fx-tertiary13-v1' &&
-       nativeManifest.firmware127_ble_contract_head==='6fb147a8784f1653234ae19771229b2ae7de0bf6',
+       nativeManifest.firmware127_ble_contract_head==='e3038ba63b54d22c9a2a3940db82b93f8a5b8723',
        'JNI needs reconciled reviewed firmware, source and explicitly limited transport IDs');
 for(const [file,expectedHash] of Object.entries(nativeManifest.files)){
     const bytes=fs.readFileSync(path.join('android/app/src/main/cpp/core',file));
