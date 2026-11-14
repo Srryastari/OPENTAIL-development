@@ -840,6 +840,9 @@ final class GeometryTransactionManager {
                 PanelPreviewProtocol.MapPanel prior=currentPanels.get(panel.id);
                 if(prior!=null&&panelLanes.get(panel.id)!=lane)
                     throw new IllegalArgumentException("Proposed Panel ID conflicts with authoritative Panel identity");
+                for(PanelPreviewProtocol.MapPanel existing:active.panels)
+                    if(existing.id!=panel.id&&(existing.id&255)==(panel.id&255))
+                        throw new IllegalArgumentException("Physical Panel low-byte alias conflicts with full saved identity");
             }
             Set<Integer> proposedZoneIds=new HashSet<>();
             for(MappedZone zone:proposed.zones)proposedZoneIds.add(zone.id);
@@ -849,6 +852,9 @@ final class GeometryTransactionManager {
                 PanelPreviewProtocol.MapZone prior=currentZones.get(zone.id);
                 if(prior!=null&&zoneLanes.get(zone.id)!=lane)
                     throw new IllegalArgumentException("Existing Zone ID belongs to another output");
+                for(PanelPreviewProtocol.MapZone existing:active.zones)
+                    if(existing.id!=zone.id&&(existing.id&255)==(zone.id&255))
+                        throw new IllegalArgumentException("Physical Zone low-byte alias conflicts with full saved identity");
                 if(zone.ranges.isEmpty()) {
                     if(prior==null||zone.flags!=1||!prior.ranges.isEmpty())
                         throw new IllegalArgumentException("Cannot create a new empty physical Zone over UPDATE");
