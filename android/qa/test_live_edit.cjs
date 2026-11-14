@@ -133,7 +133,7 @@ assert(compose.includes('if (liveArmed.value)') && compose.includes('livePreview
  'Live hardware preview must STOP on activity background/exit.');
 assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('fun adjustOutput(') &&
-       hardwareBlock.includes('ValueSlider("Next start · zero-based"') &&
+       hardwareBlock.includes('ValueSlider("Start pixel · zero-based"') &&
        hardwareBlock.includes('next.put("pixels",total)') &&
        hardwareBlock.includes('it.put("pixels", remaining)') &&
        hardwareBlock.includes('structureVersion++') &&
@@ -141,6 +141,10 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        !hardwareBlock.includes('623') &&
        !hardwareBlock.includes('PixelStrip(t,') &&
        hardwareBlock.includes('layoutLiveEditPending.value=true') &&
+       hardwareBlock.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
+       hardwareBlock.includes('next.put("v4_advanced",true)') &&
+       hardwareBlock.includes('item.put("start",nextStart)') &&
+       hardwareBlock.includes('next.put("pixels",maxOf(next.optInt("pixels",0),end))') &&
        hardwareBlock.includes('outputDrafts[index] = draftText') &&
        compose.includes('queuePanelGeometryDraftUpdate()'),
        'Live hardware draft cursor/total and shared volatile preview must recompute with each slider gesture without duplicate UI.');
