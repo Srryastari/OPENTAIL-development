@@ -3860,7 +3860,7 @@ class ComposeMainActivity : ComponentActivity() {
                                 next.getJSONObject(j).getInt("pixels")
                             }
                             it.put("zones",next)
-                            if(!it.optBoolean("v4_advanced",false))
+                            if(!it.optBoolean("v4_advanced",false)||next.length()==0)
                                 it.put("pixels",remaining)
                             // Advanced active capacity must not collapse to
                             // the assigned range sum after deleting one Zone.
@@ -3928,7 +3928,10 @@ class ComposeMainActivity : ComponentActivity() {
                                     .put("name",label).put("pixels",0).put("role","unassigned"))
                             }
                             structureVersion++
-                            layoutLiveEditPending.value=true
+                            // Firmware v2 cannot accept a zero-length Zone.
+                            // Enter a real LED count before requesting preview.
+                            layoutLiveEditPending.value=false
+                            outputMessage.value="Section added locally; enter its LED count for live preview"
                             selectedZone=newSection
                             choosingZone=false
                             refresh()
