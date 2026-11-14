@@ -138,6 +138,114 @@ public class GeometryTransactionManagerTest {
         }
     }
 
+
+    @Test public void multiPanelMultiRangeLiveUpdateMatchesDurableWireWithoutFlattening() throws Exception {
+        for(int lane=0;lane<2;lane++) {
+            byte[] empty=PanelV4LayoutProtocol.expectedFactoryMap(lane);
+            PanelPreviewProtocol.LaneSnapshot confirmed=fullSnapshot(empty,2);
+            JSONObject draft=PanelV4DraftCodec.fromSnapshot(confirmed);
+            draft.put("pixels",100).put("v4_advanced",true);
+            int a=0x4081+lane*8,b=a+1,pa=0x8001+lane,pb=0x8003+lane;
+            draft.put("panels",new org.json.JSONArray()
+                .put(new JSONObject().put("id",pa).put("name","Panel A").put("lane",lane))
+                .put(new JSONObject().put("id",pb).put("name","Panel B").put("lane",lane)));
+            draft.getJSONArray("zones")
+                .put(new JSONObject().put("id",a).put("panel_id",pa).put("name","Outer")
+                    .put("role","unassigned").put("pixels",20).put("flags",0)
+                    .put("ranges",new org.json.JSONArray()
+                        .put(new JSONObject().put("start",0).put("count",10))
+                        .put(new JSONObject().put("start",30).put("count",10))))
+                .put(new JSONObject().put("id",b).put("panel_id",pb).put("name","Inner")
+                    .put("role","brake").put("pixels",20).put("flags",0)
+                    .put("ranges",new org.json.JSONArray()
+                        .put(new JSONObject().put("start",60).put("count",20))));
+            byte[] wire=PanelV4DraftCodec.encode(lane,draft,confirmed);
+            PanelPreviewProtocol.LaneSnapshot stored=fullSnapshot(wire,3);
+            JSONObject readback=PanelV4DraftCodec.fromSnapshot(stored);
+            assertTrue(readback.getBoolean("v4_editable"));
+            assertTrue(readback.getBoolean("v4_advanced"));
+            assertArrayEquals(wire,PanelV4DraftCodec.encode(lane,readback,stored));
+            GeometryTransactionManager.MappedLane baseline=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,wire);
+            assertEquals(2,baseline.panels.size());
+            assertEquals(2,baseline.zones.get(0).ranges.size());
+            assertTrue(baseline.descriptorBatches(stored,247).isEmpty());
+
+            JSONObject moved=new JSONObject(readback.toString());
+            moved.getJSONArray("zones").getJSONObject(0).getJSONArray("ranges")
+                .getJSONObject(1).put("start",40);
+            byte[] movedWire=PanelV4DraftCodec.encode(lane,moved,stored);
+            GeometryTransactionManager.MappedLane shifted=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,movedWire);
+            java.util.List<PanelPreviewProtocol.UpdateDescriptor[]> shiftedBatches=
+                shifted.descriptorBatches(baseline,247);
+            assertEquals(1,shiftedBatches.size());
+            assertEquals(1,shiftedBatches.get(0).length);
+            assertEquals(1,shiftedBatches.get(0)[0].rangeSlot);
+            assertEquals(40,shiftedBatches.get(0)[0].start);
+            assertEquals(a,shiftedBatches.get(0)[0].zoneId);
+            assertFalse(GeometryTransactionManager.sameLiveGeometry(baseline,shifted));
+            assertTrue(GeometryTransactionManager.sameLiveGeometry(shifted,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,movedWire)));
+
+            JSONObject appended=new JSONObject(moved.toString());
+            JSONObject z=appended.getJSONArray("zones").getJSONObject(0);
+            z.getJSONArray("ranges").put(new JSONObject().put("start",85).put("count",5));
+            z.put("pixels",25);
+            byte[] appendedWire=PanelV4DraftCodec.encode(lane,appended,stored);
+            GeometryTransactionManager.MappedLane withThird=
+                GeometryTransactionManager.fromV4SaveCandidate(lane,appendedWire);
+            java.util.List<PanelPreviewProtocol.UpdateDescriptor[]> appends=
+                withThird.descriptorBatches(shifted,247);
+            assertEquals(1,appends.size());
+            assertEquals(2,appends.get(0)[0].rangeSlot);
+            assertEquals(85,appends.get(0)[0].start);
+            java.util.List<PanelPreviewProtocol.UpdateDescriptor[]> deletions=
+                shifted.descriptorBatches(withThird,247);
+            assertEquals(1,deletions.size());
+            assertEquals(0x10,deletions.get(0)[0].roleFlags);
+            assertEquals(2,deletions.get(0)[0].rangeSlot);
+
+            JSONObject metadata=new JSONObject(readback.toString()).put("name","Custom O"+(lane+1));
+            metadata.getJSONArray("zones").getJSONObject(0).put("name","Outer New");
+            assertTrue(GeometryTransactionManager.sameLiveGeometry(baseline,
+                GeometryTransactionManager.fromV4SaveCandidate(lane,
+                    PanelV4DraftCodec.encode(lane,metadata,stored))));
+        }
+    }
+
+    @Test public void physicalReorderThatV2CannotRepresentFailsBeforeWriting() throws Exception {
+        // Multi-panel maps must not be silently flattened or reordered by
+        // unrelated local project cards.
+        byte[] empty=PanelV4LayoutProtocol.expectedFactoryMap(0);
+        PanelPreviewProtocol.LaneSnapshot first=fullSnapshot(empty,1);
+        JSONObject draft=PanelV4DraftCodec.fromSnapshot(first)
+            .put("pixels",100).put("v4_advanced",true);
+        draft.getJSONArray("zones")
+            .put(new JSONObject().put("name","A").put("pixels",20).put("role","off")
+                .put("id",0x4081).put("panel_id",0x8001).put("ranges",
+                    new org.json.JSONArray().put(new JSONObject().put("start",0).put("count",20))))
+            .put(new JSONObject().put("name","B").put("pixels",20).put("role","off")
+                .put("id",0x4082).put("panel_id",0x8001).put("ranges",
+                    new org.json.JSONArray().put(new JSONObject().put("start",60).put("count",20))));
+        byte[] wire=PanelV4DraftCodec.encode(0,draft,first);
+        GeometryTransactionManager.MappedLane prior=
+            GeometryTransactionManager.fromV4SaveCandidate(0,wire);
+        JSONObject swapped=new JSONObject(draft.toString());
+        org.json.JSONArray zones=swapped.getJSONArray("zones");
+        JSONObject firstZone=zones.getJSONObject(0),secondZone=zones.getJSONObject(1);
+        swapped.put("zones",new org.json.JSONArray().put(secondZone).put(firstZone));
+        GeometryTransactionManager.MappedLane future=
+            GeometryTransactionManager.fromV4SaveCandidate(0,
+                PanelV4DraftCodec.encode(0,swapped,fullSnapshot(wire,2)));
+        try {
+            future.descriptorBatches(prior,247);
+            fail("v2 cannot reorder live full IDs without a distinct safe migration");
+        }catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("reordering"));
+        }
+    }
+
     @Test public void savedO2RemainsIndependentFromUnsavedO1LiveCandidate() throws Exception {
         PanelPreviewProtocol.LaneSnapshot o1=fullSnapshot(
             PanelV4LayoutProtocol.expectedFactoryMap(0),5);
