@@ -33,6 +33,42 @@ public class PanelV4DraftCodecTest {
             assertArrayEquals(before,PanelV4DraftCodec.encode(lane,draft,snapshot(before,1)));
         }
     }
+    @Test public void outputSelectorTracksOnlySavedPanelV4NotUnsavedDraftOrRmtBudget() throws Exception {
+        PanelPreviewProtocol.LaneSnapshot leftZero=snapshot(
+            PanelV4LayoutProtocol.expectedFactoryMap(0),1);
+        PanelPreviewProtocol.LaneSnapshot rightZero=snapshot(
+            PanelV4LayoutProtocol.expectedFactoryMap(1),1);
+        JSONObject savedLeft=PanelV4DraftCodec.fromSnapshot(leftZero);
+        JSONObject savedRight=PanelV4DraftCodec.fromSnapshot(rightZero);
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(null)); // not loaded
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(savedLeft));
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(savedRight));
+        assertEquals(0,savedRight.getJSONArray("zones").length());
+
+        // Editing O2 is independent from its saved count and O1.
+        JSONObject unsavedRight=new JSONObject(savedRight.toString());
+        unsavedRight.put("pixels",522);
+        assertEquals(522,unsavedRight.getInt("pixels"));
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(savedRight));
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(savedLeft));
+
+        JSONObject rightDraft=new JSONObject(savedRight.toString());
+        rightDraft.put("pixels",80);
+        rightDraft.getJSONArray("zones").put(new JSONObject()
+            .put("name","Right").put("pixels",80).put("role","unassigned"));
+        byte[] rightWire=PanelV4DraftCodec.encode(1,rightDraft,rightZero);
+        JSONObject confirmedRight=PanelV4DraftCodec.fromSnapshot(snapshot(rightWire,2));
+        assertEquals(80,PanelV4DraftCodec.savedSelectorPixels(confirmedRight));
+        assertEquals(0,PanelV4DraftCodec.savedSelectorPixels(savedLeft));
+
+        // When a verified O2 snapshot really stores 522, show 522. No reset.
+        rightDraft.put("pixels",522);
+        rightDraft.getJSONArray("zones").getJSONObject(0).put("pixels",522);
+        byte[] longWire=PanelV4DraftCodec.encode(1,rightDraft,rightZero);
+        JSONObject actuallySaved=PanelV4DraftCodec.fromSnapshot(snapshot(longWire,3));
+        assertEquals(522,PanelV4DraftCodec.savedSelectorPixels(actuallySaved));
+    }
+
     @Test public void firstRealZoneRetainsFull16BitIdentityAfterReadback() throws Exception {
         byte[] empty=PanelV4LayoutProtocol.expectedFactoryMap(0);
         PanelPreviewProtocol.LaneSnapshot first=snapshot(empty,4);
