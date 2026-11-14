@@ -31,6 +31,15 @@ typedef struct {
  uint16_t active_mask; /* bit output*8+zone: exact stored assignment */
  ot_ble_fx_packet_t effect[OT_OM_OUTPUTS][OT_OM_ZONES];
 } ot_fx_scene_record_t;
+typedef struct {
+ uint16_t panel_id,zone_id;
+} ot_fx_scene_zone_identity_t;
+typedef struct {
+ uint8_t zone_count;
+ ot_fx_scene_zone_identity_t zones[OT_OM_ZONES];
+} ot_fx_scene_output_identity_t;
 bool ot_fx_scene_pack(ot_fx_scene_record_t *record,
-                      const ot_fx_zone_bank_t *bank,uint32_t now_ms);
+                      const ot_fx_zone_bank_t *bank,
+                      const ot_fx_scene_output_identity_t identities[OT_OM_OUTPUTS],
+                      uint32_t now_ms);
 bool ot_fx_scene_valid(const ot_fx_scene_record_t *record);

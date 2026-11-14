@@ -19,6 +19,7 @@ permissions:
   contents: read
 jobs:
   exact-scope-and-safety:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +75,7 @@ jobs:
           python3 -m unittest -v scripts/tests/test_core_flash_package.py
           node android/qa/test_native_source.cjs
   all-140-core-and-trigger:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: exact-scope-and-safety
     runs-on: ubuntu-latest
     steps:
@@ -95,6 +97,7 @@ jobs:
       - name: Independent input, held-trigger and OEM safety source regression
         run: python3 core-firmware/tests/test_trigger_runtime_contract.py
   android-jni-junit-apk:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: exact-scope-and-safety
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -137,6 +140,7 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
   esp-idf-bench-package:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: [exact-scope-and-safety,all-140-core-and-trigger]
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -168,6 +172,7 @@ jobs:
             core-firmware/releases/opentail-13tertiary-*.zip.sha256
           if-no-files-found: error
   downloaded-package-integrity:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: esp-idf-bench-package
     runs-on: ubuntu-latest
     steps:

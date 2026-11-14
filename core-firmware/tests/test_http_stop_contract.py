@@ -16,20 +16,39 @@ def section(start, end):
     assert start in core and end in core, f"Missing endpoint: {start}"
     return core.split(start, 1)[1].split(end, 1)[0]
 
-stop = section("static esp_err_t stop_post(httpd_req_t *r) {", "extern const uint8_t ot_dev_console_start[]")
+stop_core = section("static void core_stop_all_sources(void){",
+                    "void ot_ble_stop_show(void){")
 for required in (
     "demo.mode=OT_DEMO_OFF",
-    "sim_mask=0",
+    "sim_mask=0u",
     "ble_owns_show=false",
     "ble_fx_enabled=false",
     "ot_fx_bank_stop_all(&fx_bank)",
     "native_show.mode=OT_SHOW_OFF",
     "stop_request_generation++",
     "ot_st_show_active(false)",
+    "request_render_refresh()",
 ):
-    assert required in stop, f"Global Stop must cancel all preview sources: {required}"
-assert stop.index("portENTER_CRITICAL(&state_lock)") < stop.index("ot_fx_bank_stop_all(&fx_bank)") < stop.index("portEXIT_CRITICAL(&state_lock)")
-
+    assert required in stop_core, f"Global STOP must cancel software effects: {required}"
+assert stop_core.index("portENTER_CRITICAL(&state_lock)") < stop_core.index(
+    "ot_fx_bank_stop_all(&fx_bank)") < stop_core.index("portEXIT_CRITICAL(&state_lock)")
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert stop_core.index("ot_fx_bank_stop_all(&fx_bank)") < stop_core.index(
+    "pz_preview_cancel_all_locked()")
+cancel_helper=section("static void pz_preview_cancel_pending_locked(void){",
+                      "void ot_ble_panel_preview_cancel_lane(")
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in cancel_helper
+assert "if(!pz_preview[i].committing)ot_pz_preview_cancel(&pz_preview[i]);" in core
+assert "live_input_mask=" not in stop_core
+assert "tm_gpio_input_mask" not in stop_core
+assert "gpio_set_level" not in stop_core
+http_stop = section("static esp_err_t stop_post(httpd_req_t *r) {",
+                    "extern const uint8_t ot_dev_console_start[]")
+assert "core_stop_all_sources();" in http_stop
+assert "physical inputs still take precedence" in http_stop
+ble_stop = section("void ot_ble_stop_show(void){", "static bool fx_slot_key(")
+assert "core_stop_all_sources();" in ble_stop
 # Diagnostic countdown is derived from each live CORE FX zone, not the
 # last temporary show deadline. Live parameter edits renew TTL without
 # resetting running animation phase. Standalone NVS scenes have no TTL.
@@ -51,11 +70,9 @@ assert "ble_fx_enabled=false" in show_stop and "ot_fx_bank_stop_all(&fx_bank)" i
 wake = section("static void request_render_refresh(void){", "static uint8_t live_input_mask")
 assert 'task=render_task_handle;' in wake
 assert wake.index("portEXIT_CRITICAL(&state_lock);") < wake.index("xTaskNotifyGive(task);")
-for body in (stop, show_stop):
+for body in (stop_core, show_stop):
     assert body.index("portEXIT_CRITICAL(&state_lock);") < body.index("request_render_refresh();")
-ble_stop = section("void ot_ble_stop_show(void){", "static bool fx_slot_key(")
-assert "if(refresh_requested)request_render_refresh();" in ble_stop
-assert "else if(native_show.mode==OT_SHOW_OFF || !show_window(now))" in ble_stop
+assert "core_stop_all_sources();" in ble_stop
 ble_disconnect = section("void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
 assert "if(owned_before)request_render_refresh();" in ble_disconnect
 assert ble_disconnect.index("portEXIT_CRITICAL(&state_lock);") < ble_disconnect.index("request_render_refresh();")
@@ -86,9 +103,19 @@ assert "ot_ble_apply_fx_internal(&legacy.fx,true,NULL,NULL,false,NULL)" in start
     "an explicit absent tertiary pointer")
 
 capabilities = section("static esp_err_t caps_get(httpd_req_t *r) {", "static esp_err_t status_led_get")
-literal = re.search(r'return send_json\(r,(".*")\);', capabilities)
-assert literal, "Capabilities must return valid static JSON"
-caps = json.loads(ast.literal_eval(literal.group(1)))
+assert "snprintf(buf,sizeof(buf)" in capabilities
+assert "OT_MAX_BRIGHTNESS_LIMIT" in capabilities
+assert 'return send_json(r,buf);' in capabilities
+literal = re.search(
+    r'snprintf\(buf,sizeof\(buf\),\s*("(?:\\.|[^"\\])*")\s*,\s*\(unsigned\)OT_MAX_BRIGHTNESS_LIMIT\)',
+    capabilities,
+    re.S,
+)
+assert literal, "Capabilities must format valid JSON with the active configurable ceiling"
+caps = json.loads(ast.literal_eval(literal.group(1)).replace("%u", "32"))
+assert caps["brightness_cap"] == 32
+assert caps["brightness_cap_is_measured_current_limit"] is False
+assert caps["brightness_ceiling_configurable"] is True
 assert "c->color_order=OT_OM_GRB;" in outputs
 assert caps["color_order"] == "GRB", "First-boot color-order claim must match Output Manager"
 assert caps["color_order_configurable"] is True

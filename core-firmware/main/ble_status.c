@@ -1,11 +1,12 @@
 /* OpenTail CORE BLE v2 bench enrollment and existing show/output commands.
- * A physical BOOT/GPIO0 press permits reading a device-specific enrollment key.
+ * First encrypted bonded phone claims a fresh controller; no BOOT enrollment.
  * Routine reconnects authenticate by HMAC of a fresh challenge; the key remains
  * in its own NVS namespace and does not ride along with routine BLE commands.
- * First enrollment is NOT authenticated against an active MITM. Bench ONLY.
+ * Skip uses Just Works and accepts a first-claim race. Optional PIN authenticates new-phone bonding.
  * Existing WPA2 Wi-Fi authorization stays available unchanged.
  */
 #include "sdkconfig.h"
+#include "board_config.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "driver/gpio.h"
@@ -18,11 +19,17 @@
 #include "effects_1d.h"
 #include "fx_preset_record.h"
 #include "ble_config.h"
+#include "panel_zone_api.h"
+#include "panel_zone_protocol.h"
+#include "input_telemetry.h"
+#include "panel_zone_diag.h"
 #include "trigger_manager.h"
 #include "ot_frame_snapshot.h"
 #include "palette_ble_v3.h"
 #include "palette_profile.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include <stdio.h>
 #include <string.h>
 extern bool ot_ble_apply_show(const ot_ble_show_packet_t *request);
@@ -55,6 +62,15 @@ void ot_ble_session_hex(char out[33]){
 }
 #if CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ENABLED
 #include "nimble/nimble_port.h"
+#include "host/ble_sm.h"
+#include "store/config/ble_store_config.h"
+/* ESP-IDF 5.5.5 bleprph declares this initializer explicitly; its header
+ * exposes store callbacks but omits the initializer prototype. */
+void ble_store_config_init(void);
+#include "ble_owner_policy.h"
+#include "config_journal.h"
+#include <stddef.h>
+#include "esp_bt.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
@@ -64,40 +80,158 @@ void ot_ble_session_hex(char out[33]){
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 static const char *TAG="OT_BLE";
+/* P0 N16R8 BLE HCI memory evidence. The hook cannot log or allocate:
+ * it may be invoked inside a heap allocator critical section. Snapshot
+ * best-effort failure details here and report only after nimble_port_init().
+ * This callback is NOT a replacement for inspecting controller-specific
+ * initialization errors in the new physical boot trace. */
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_count;
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_size;
+static DRAM_ATTR volatile uint32_t ble_alloc_fail_caps;
+static const char *volatile ble_alloc_fail_caller;
+static void IRAM_ATTR ble_alloc_failed(size_t size,uint32_t caps,const char *caller){
+    ble_alloc_fail_size=(uint32_t)size;
+    ble_alloc_fail_caps=caps;
+    ble_alloc_fail_caller=caller;
+    ble_alloc_fail_count++;
+}
+static void ble_hci_heap_snapshot(const char *stage){
+    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const uint32_t dma=MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA;
+    ESP_LOGI(TAG,"BLE HCI heap %s: internal free=%u largest=%u min_ever=%u; DMA free=%u largest=%u; PSRAM free=%u",
+        stage,
+        (unsigned)heap_caps_get_free_size(internal),
+        (unsigned)heap_caps_get_largest_free_block(internal),
+        (unsigned)heap_caps_get_minimum_free_size(internal),
+        (unsigned)heap_caps_get_free_size(dma),
+        (unsigned)heap_caps_get_largest_free_block(dma),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
 static uint8_t addr_type;
 static uint16_t active_conn=BLE_HS_CONN_HANDLE_NONE;
 static bool authorized=false;
+static bool panel_caps_seen=false;
+static uint8_t panel_response[OT_CFG_PACKET_BYTES]={0};
+static uint8_t panel_response_len=0;
+static uint8_t panel_snapshot[OT_PZ_MAX_WIRE_BYTES];
+static uint8_t panel_upload[OT_PZ_MAX_WIRE_BYTES];
+static bool panel_received[OT_PZ_MAX_WIRE_BYTES];
+static uint16_t panel_upload_crc=0,panel_upload_revision=0;
+static uint8_t panel_read_index=255,panel_upload_index=255;
+typedef enum {
+    OT_PZ_TX_IDLE=0,OT_PZ_TX_ACTIVE=1,OT_PZ_TX_COMMITTING=2,
+    OT_PZ_TX_COMMITTED=3,OT_PZ_TX_CANCELLED=4,OT_PZ_TX_EXPIRED=5,
+    OT_PZ_TX_ERROR=6
+} ot_pz_tx_status_t;
+typedef struct {
+    uint32_t session_id,last_sequence,last_packet_crc32;
+    uint32_t expires_ms,base_crc32,candidate_crc32;
+    uint32_t last_rejected_sequence,missing_sequence_count;
+    uint32_t out_of_order_count,duplicate_count,conflict_count;
+    uint32_t committing_reject_count;
+    uint16_t base_revision,pixel_capacity;
+    uint8_t lane,status,last_error,last_rejected_reason;
+    bool active,has_sequence,committing;
+    bool durable_save_in_progress; /* Geometry CRC may equal baseline on metadata Save. */
+    bool sequence_sync_warning,sequence_sync_fault;
+} ot_pz_tx_session_t;
+/* Per-output BLE sessions; callbacks are serialized on NimBLE host task. */
+static ot_pz_tx_session_t panel_preview_tx_lanes[OT_PZ_OUTPUTS];
+static uint8_t panel_preview_status_lane=0u;
+#define panel_preview_tx (panel_preview_tx_lanes[panel_preview_status_lane])
+static void panel_preview_reject_control(uint8_t reason);
+/* Save's GATT upload path calls lease checking before its definition. */
+static void panel_preview_expire_if_needed(uint32_t now_ms);
+extern void ot_ble_panel_preview_cancel_lane(uint8_t lane);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
-static bool boot_enrollment_ready=false;
+typedef struct {
+    uint32_t version;
+    uint8_t key[16],peer_type,peer[6],pin_enabled;
+    uint32_t pin,crc;
+} owner_record_t;
+static owner_record_t owner_record;
+static bool owner_peer_valid=false,owner_storage_fault=false;
+static void owner_security_config(void){
+    ble_hs_cfg.sm_bonding=1;ble_hs_cfg.sm_sc=1;
+    ble_hs_cfg.sm_mitm=owner_record.pin_enabled?1:0;
+    ble_hs_cfg.sm_io_cap=owner_record.pin_enabled?BLE_HS_IO_DISPLAY_ONLY:BLE_HS_IO_NO_INPUT_OUTPUT;
+    ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
+}
+static bool owner_link(struct ble_gap_conn_desc *desc){
+    return active_conn!=BLE_HS_CONN_HANDLE_NONE&&
+        ble_gap_conn_find(active_conn,desc)==0&&desc->sec_state.encrypted&&desc->sec_state.bonded;
+}
+static uint32_t owner_crc(const owner_record_t *r){
+    return ot_cfg_crc32_zeroed(r,sizeof(*r),offsetof(owner_record_t,crc),sizeof(r->crc));
+}
+static bool owner_commit(owner_record_t *next){
+    next->version=3;next->crc=owner_crc(next);
+    nvs_handle_t h;if(nvs_open("ot_blepair",NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,"owner_v3",next,sizeof(*next));
+    if(e==ESP_OK)e=nvs_commit(h);
+    owner_record_t readback={0};size_t n=sizeof(readback);
+    if(e==ESP_OK)e=nvs_get_blob(h,"owner_v3",&readback,&n);
+    nvs_close(h);
+    if(e!=ESP_OK||n!=sizeof(readback)||memcmp(next,&readback,n)!=0){
+        owner_storage_fault=true;return false;
+    }
+    owner_record=*next;memcpy(owner_key,next->key,sizeof(owner_key));
+    owner_valid=true;owner_peer_valid=true;return true;
+}
 static uint8_t pair_failures=0;
 static bool owner_load(void){
-    nvs_handle_t h;
-    if(nvs_open("ot_blepair",NVS_READONLY,&h)!=ESP_OK)return false;
-    size_t n=sizeof(owner_key);
-    esp_err_t e=nvs_get_blob(h,"owner",owner_key,&n);
-    nvs_close(h);
-    return e==ESP_OK && n==sizeof(owner_key);
-}
-static bool owner_create(void){
-    if(owner_valid)return true;
-    uint8_t candidate[16];esp_fill_random(candidate,sizeof(candidate));
-    nvs_handle_t h;
-    if(nvs_open("ot_blepair",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,"owner",candidate,sizeof(candidate));
-    if(e==ESP_OK)e=nvs_commit(h);
-    nvs_close(h);
-    if(e!=ESP_OK)return false;
-    memcpy(owner_key,candidate,sizeof(owner_key));owner_valid=true;
+    nvs_handle_t h;esp_err_t e=nvs_open("ot_blepair",NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return false;
+    if(e!=ESP_OK){owner_storage_fault=true;return false;}
+    size_t n=sizeof(owner_record);
+    e=nvs_get_blob(h,"owner_v3",&owner_record,&n);
+    if(e==ESP_OK){
+        nvs_close(h);
+        if(n!=sizeof(owner_record)||owner_record.version!=3||owner_record.pin_enabled>1||
+           !ot_owner_pin_valid(owner_record.pin_enabled,owner_record.pin)||
+           owner_record.crc!=owner_crc(&owner_record)){
+            owner_storage_fault=true;return false;
+        }
+        memcpy(owner_key,owner_record.key,sizeof(owner_key));owner_peer_valid=true;return true;
+    }
+    if(e!=ESP_ERR_NVS_NOT_FOUND){nvs_close(h);owner_storage_fault=true;return false;}
+    n=sizeof(owner_key);e=nvs_get_blob(h,"owner",owner_key,&n);nvs_close(h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return false;
+    if(e!=ESP_OK||n!=sizeof(owner_key)){owner_storage_fault=true;return false;}
+    /* Legacy owner must prove the existing key before its bonded peer is bound. */
     return true;
 }
-/* GPIO0 BOOT must be pressed AFTER power-up, never while resetting. */
 static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
+    struct ble_gap_conn_desc desc;
+    if(conn!=active_conn||!owner_link(&desc))return BLE_ATT_ERR_INSUFFICIENT_ENC;
+    if(ctx->op==BLE_GATT_ACCESS_OP_WRITE_CHR){
+        uint8_t p[6];uint16_t n=0;
+        if(!authorized||!owner_valid||!owner_peer_valid||owner_storage_fault)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+        if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0||n!=6||p[0]!=3||p[1]>1)
+            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        const uint32_t pin=(uint32_t)p[2]|((uint32_t)p[3]<<8)|((uint32_t)p[4]<<16)|((uint32_t)p[5]<<24);
+        if(!ot_owner_pin_valid(p[1]!=0,pin))return BLE_ATT_ERR_UNLIKELY;
+        owner_record_t next=owner_record;memcpy(next.key,owner_key,16);
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        next.pin_enabled=p[1];next.pin=p[1]?pin:0;
+        if(!owner_commit(&next))return BLE_ATT_ERR_UNLIKELY;
+        owner_security_config();return 0;
+    }
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    if(conn!=active_conn||!boot_enrollment_ready||gpio_get_level(GPIO_NUM_0)!=0)return BLE_ATT_ERR_READ_NOT_PERMITTED;
-    if(!owner_create())return BLE_ATT_ERR_UNLIKELY;
+    const bool same=owner_peer_valid&&owner_record.peer_type==desc.peer_id_addr.type&&
+        memcmp(owner_record.peer,desc.peer_id_addr.val,6)==0;
+    if(!ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same,
+        desc.sec_state.encrypted,desc.sec_state.bonded,
+        owner_record.pin_enabled,desc.sec_state.authenticated))return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if(!owner_valid){
+        owner_record_t next={0};esp_fill_random(next.key,sizeof(next.key));
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        if(!owner_commit(&next))return BLE_ATT_ERR_UNLIKELY;
+    }
     return os_mbuf_append(ctx->om,owner_key,sizeof(owner_key))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int owner_challenge_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -108,7 +242,8 @@ static int owner_challenge_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     return os_mbuf_append(ctx->om,owner_challenge,sizeof(owner_challenge))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static bool owner_verify(const uint8_t mac[16]){
-    if(!owner_valid||!challenge_ready||pair_failures>=5)return false;
+    struct ble_gap_conn_desc desc;
+    if(owner_storage_fault||!owner_link(&desc)||!owner_valid||!challenge_ready||pair_failures>=5)return false;
     challenge_ready=false; /* never permit challenge replay */
     static const uint8_t context[]="OpenTail-BLE-v2";
     uint8_t message[sizeof(context)-1+16],expected[32];
@@ -119,7 +254,13 @@ static bool owner_verify(const uint8_t mac[16]){
     uint8_t mismatch=0;
     for(int i=0;i<16;i++)mismatch|=(uint8_t)(expected[i]^mac[i]);
     if(mismatch)pair_failures++;
-    return mismatch==0;
+    if(mismatch)return false;
+    if(!owner_peer_valid){
+        owner_record_t next={0};memcpy(next.key,owner_key,16);
+        next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
+        if(!owner_commit(&next))return false;
+    }
+    return true;
 }
 
 static const ble_uuid128_t ot_service_uuid=BLE_UUID128_INIT(0x21,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
@@ -136,11 +277,19 @@ static const ble_uuid128_t ot_trigger_uuid=BLE_UUID128_INIT(0x2c,0xaf,0x2e,0x10,
 static const ble_uuid128_t ot_palette_cmd_uuid=BLE_UUID128_INIT(0x2d,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_palette_rsp_uuid=BLE_UUID128_INIT(0x2e,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_palette_caps_uuid=BLE_UUID128_INIT(0x2f,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_caps_uuid=BLE_UUID128_INIT(0x30,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_cfg_cmd_uuid=BLE_UUID128_INIT(0x31,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_cfg_rsp_uuid=BLE_UUID128_INIT(0x32,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_pixel_probe_uuid=BLE_UUID128_INIT(0x33,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_input_diag_uuid=BLE_UUID128_INIT(0x34,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_preview_control_uuid=BLE_UUID128_INIT(0x35,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_preview_update_uuid=BLE_UUID128_INIT(0x36,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
+static const ble_uuid128_t ot_panel_preview_status_uuid=BLE_UUID128_INIT(0x37,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static const ble_uuid128_t ot_reply_uuid=BLE_UUID128_INIT(0x24,0xaf,0x2e,0x10,0xb7,0xb8,0x44,0xcf,0x92,0x7a,0x15,0x49,0x22,0x60,0xa5,0x55);
 static int info_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)conn;(void)handle;(void)arg;
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const char *message="OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
+    const char *message="OpenTail CORE " OT_FW_VERSION " | owner-bond-v3" " | continuous-fx-v1" " | " OT_BLE_FX_TERTIARY_CAPABILITY " | " OT_BLE_FX_TERTIARY13_CAPABILITY;
     return os_mbuf_append(ctx->om,message,strlen(message))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static int reply_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -174,6 +323,7 @@ static int fx_capabilities_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
 }
 /* Revoked owner sessions discard cached output, frame and trigger replies. */
 static void cfg_reset(void);
+static void panel_session_reset(void);
 static void frame_reply_reset(void);
 static uint8_t trigger_last_status=0;
 static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
@@ -223,6 +373,7 @@ static int command_write(uint16_t conn,uint16_t handle,struct ble_gatt_access_ct
          * triggers, persistent scenes, or saved configuration profiles. */
         ot_ble_disconnect_show();
         cfg_reset();
+        panel_session_reset();
         frame_reply_reset();
         ot_palette_ble_session_reset();
         trigger_last_status=0;
@@ -250,6 +401,710 @@ static void cfg_ack(uint8_t opcode,uint8_t index,uint8_t code){
 static void cfg_reset(void){
     cfg_read_index=255;cfg_upload_index=255;
     memset(cfg_received,0,sizeof(cfg_received));cfg_ack(0x7f,0,5);
+}
+static void panel_session_reset(void){
+    panel_caps_seen=false;panel_response_len=0;
+    panel_read_index=255;panel_upload_index=255;
+    panel_upload_crc=0;panel_upload_revision=0;
+    memset(panel_preview_tx_lanes,0,sizeof(panel_preview_tx_lanes));
+    panel_preview_status_lane=0u;
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        panel_preview_tx_lanes[i].lane=(uint8_t)i;
+    memset(panel_response,0,sizeof(panel_response));
+    memset(panel_snapshot,0,sizeof(panel_snapshot));
+    memset(panel_upload,0,sizeof(panel_upload));
+    memset(panel_received,0,sizeof(panel_received));
+    ot_ble_diag_disconnect();
+}
+static void panel_ack(uint8_t opcode,uint8_t lane,uint8_t status){
+    panel_response[0]=OT_PZ_WIRE_VERSION;
+    panel_response[1]=(uint8_t)(0x80u|opcode);
+    panel_response[2]=lane;panel_response[3]=status;
+    panel_response_len=4u;
+}
+static int panel_caps_read(uint16_t conn,uint16_t handle,
+                           struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
+    if(conn!=active_conn||!authorized)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    /* [transport/schema,max panels,zones,ranges,active BLE features,
+     *  max payload LE16,chunk bytes,preview lease seconds,effective brightness cap.
+     *  Feature bits: bit 0 Pixel Probe, bit 1 live arrangement preview,
+     *  bit 2 dedicated 0xFE session/sequence protocol. Fill remains unadvertised. */
+    const uint8_t caps[11]={
+        OT_PZ_WIRE_VERSION,OT_PZ_SCHEMA_VERSION,
+        OT_PZ_MAX_PANELS_PER_OUTPUT,OT_PZ_MAX_ZONES_PER_OUTPUT,
+        OT_PZ_MAX_RANGES_PER_ZONE,0x1fu, /* bit4: volatile capacity provisioning */
+        (uint8_t)OT_PZ_MAX_WIRE_BYTES,(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8),
+        15u,(uint8_t)(OT_PZ_PREVIEW_LEASE_MS/1000u),(uint8_t)OT_MAX_BRIGHTNESS
+    };
+    if(os_mbuf_append(ctx->om,caps,sizeof(caps))!=0)
+        return BLE_ATT_ERR_INSUFFICIENT_RES;
+    panel_caps_seen=true;
+    return 0;
+}
+static int panel_cfg_read(uint16_t conn,uint16_t handle,
+                          struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
+    if(conn!=active_conn||!authorized||!panel_caps_seen||panel_response_len==0u)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    return os_mbuf_append(ctx->om,panel_response,panel_response_len)==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static uint8_t panel_save_status(int rc){
+    switch(rc){
+        case 0:return 0u;
+        case 1:return 7u; /* invalid model */
+        case 2:return 2u; /* busy / active trigger / promoter unavailable */
+        case 3:return 3u; /* stale revision / expired or conflicting live session */
+        case 5:return 10u; /* validated model but unaccepted live topology/IDs */
+        default:return 4u; /* durable NVS write failure */
+    }
+}
+static int panel_cfg_write(uint16_t conn,uint16_t handle,
+                           struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn)
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[OT_CFG_PACKET_BYTES];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||n<3u||
+       packet[0]!=OT_PZ_WIRE_VERSION){
+        panel_ack(0x7fu,0u,1u);return 0;
+    }
+    const uint8_t opcode=packet[1],lane=packet[2];
+    panel_ack(opcode,lane,0u);
+    if(!authorized||!panel_caps_seen){panel_ack(opcode,lane,5u);return 0;}
+    /* Legacy geometry upload/save/reset paths share the same protected commit
+     * boundary as 0xFE. Reads remain available; no competing write may proceed. */
+    if(panel_preview_tx.committing&&
+       (opcode==3u||opcode==4u||opcode==5u||opcode==6u||opcode==0xffu)){
+        panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        panel_ack(opcode,lane,OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        return 0;
+    }
+    /* Two-step destructive map reset. 0xFF/0xAA requests a revision-bound
+     * challenge; 0xFF/0xAB confirms it. This is separate from Pixel Probe AA. */
+    if(opcode==0xffu&&lane==0xaau){
+        if(n!=6u){panel_ack(opcode,packet[3],1u);return 0;}
+        const uint8_t reset_lane=packet[3];
+        const uint16_t revision=(uint16_t)(packet[4]|((uint16_t)packet[5]<<8));
+        uint32_t challenge=0u;
+        const int rc=ot_ble_panel_reset_challenge(reset_lane,revision,&challenge);
+        if(rc!=0){panel_ack(opcode,reset_lane,rc==2?2u:(rc==3?3u:1u));return 0;}
+        panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0xffu;
+        panel_response[2]=0xaau;panel_response[3]=reset_lane;
+        panel_response[4]=(uint8_t)challenge;panel_response[5]=(uint8_t)(challenge>>8);
+        panel_response[6]=(uint8_t)(challenge>>16);panel_response[7]=(uint8_t)(challenge>>24);
+        panel_response[8]=(uint8_t)revision;panel_response[9]=(uint8_t)(revision>>8);
+        panel_response[10]=(uint8_t)OT_PZ_RESET_CHALLENGE_TTL_MS;
+        panel_response[11]=(uint8_t)(OT_PZ_RESET_CHALLENGE_TTL_MS>>8);
+        panel_response_len=12u;return 0;
+    }
+    if(opcode==0xffu&&lane==0xabu){
+        if(n!=10u){panel_ack(opcode,packet[3],1u);return 0;}
+        const uint8_t reset_lane=packet[3];
+        const uint32_t challenge=(uint32_t)packet[4]|
+            ((uint32_t)packet[5]<<8)|((uint32_t)packet[6]<<16)|
+            ((uint32_t)packet[7]<<24);
+        const uint16_t revision=(uint16_t)(packet[8]|((uint16_t)packet[9]<<8));
+        const int rc=ot_ble_panel_reset_confirm(reset_lane,revision,challenge);
+        panel_ack(opcode,reset_lane,rc==0?0u:(rc==5?2u:(rc==3?3u:(rc==4?4u:1u))));
+        return 0;
+    }
+    if(lane>=OT_PZ_OUTPUTS){panel_ack(opcode,lane,1u);return 0;}
+    panel_preview_status_lane=lane;
+    switch(opcode){
+        case 1u:{ /* immutable active snapshot */
+            if(n!=3u){panel_ack(opcode,lane,1u);break;}
+            ot_pz_output_t output={0};uint16_t active_rev=0,staged_rev=0;
+            bool pending=false,persistent=false;
+            if(!ot_ble_panel_get(lane,&output,&active_rev,&staged_rev,
+                                 &pending,&persistent)||
+               !ot_pz_wire_encode(&output,lane,panel_snapshot)){
+                panel_ack(opcode,lane,7u);break;
+            }
+            panel_read_index=lane;
+            const uint16_t crc=ot_cfg_crc16(panel_snapshot,OT_PZ_MAX_WIRE_BYTES);
+            panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0x81u;
+            panel_response[2]=lane;panel_response[3]=0u;
+            panel_response[4]=(uint8_t)OT_PZ_MAX_WIRE_BYTES;
+            panel_response[5]=(uint8_t)(OT_PZ_MAX_WIRE_BYTES>>8);
+            panel_response[6]=(uint8_t)crc;panel_response[7]=(uint8_t)(crc>>8);
+            panel_response[8]=(uint8_t)active_rev;
+            panel_response[9]=(uint8_t)(active_rev>>8);
+            panel_response[10]=(uint8_t)staged_rev;
+            panel_response[11]=(uint8_t)(staged_rev>>8);
+            panel_response[12]=pending?1u:0u;
+            panel_response[13]=persistent?1u:0u;
+            panel_response_len=14u;break;
+        }
+        case 2u:{ /* read chunk: max 15 payload bytes */
+            if(n!=5u||panel_read_index!=lane){panel_ack(opcode,lane,1u);break;}
+            const uint16_t off=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            if(off>=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            unsigned count=OT_PZ_MAX_WIRE_BYTES-off;
+            if(count>15u)count=15u;
+            panel_response[0]=OT_PZ_WIRE_VERSION;panel_response[1]=0x82u;
+            panel_response[2]=lane;panel_response[3]=packet[3];panel_response[4]=packet[4];
+            memcpy(panel_response+5,panel_snapshot+off,count);
+            panel_response_len=(uint8_t)(5u+count);break;
+        }
+        case 3u:{ /* begin durable upload: version/op/lane/length/CRC/base revision */
+            if(n!=9u){panel_ack(opcode,lane,1u);break;}
+            panel_preview_expire_if_needed((uint32_t)(esp_timer_get_time()/1000LL));
+            const uint16_t length=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            const uint16_t revision=(uint16_t)(packet[7]|((uint16_t)packet[8]<<8));
+            const bool live_save=panel_preview_tx.active&&
+                !panel_preview_tx.committing&&!panel_preview_tx.sequence_sync_fault&&
+                panel_preview_tx.lane==lane&&panel_preview_tx.base_revision==revision;
+            if((panel_preview_tx.active&&!live_save)||
+               panel_preview_tx.committing||panel_upload_index!=255u){
+                panel_ack(opcode,lane,2u);break;
+            }
+            if(length!=OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            if(live_save){
+                /* Durable Save owns no new UX Commit control. Keep the active
+                 * volatile map alive during the acknowledged chunk upload. */
+                if(ot_ble_panel_preview_heartbeat(lane,revision)!=0){
+                    panel_ack(opcode,lane,3u);break;
+                }
+                panel_preview_tx.expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                                            OT_PZ_PREVIEW_LEASE_MS;
+            }
+            panel_upload_crc=(uint16_t)(packet[5]|((uint16_t)packet[6]<<8));
+            panel_upload_revision=revision;
+            panel_upload_index=lane;
+            memset(panel_upload,0,sizeof(panel_upload));
+            memset(panel_received,0,sizeof(panel_received));break;
+        }
+        case 4u:{ /* upload chunk, 1..15 bytes; duplicate bytes must match */
+            if(n<6u||panel_upload_index!=lane){panel_ack(opcode,lane,1u);break;}
+            const uint16_t off=(uint16_t)(packet[3]|((uint16_t)packet[4]<<8));
+            const unsigned count=n-5u;
+            if(count>15u||off>=OT_PZ_MAX_WIRE_BYTES||
+               (uint32_t)off+count>OT_PZ_MAX_WIRE_BYTES){panel_ack(opcode,lane,1u);break;}
+            bool conflict=false;
+            for(unsigned i=0;i<count;i++){
+                const unsigned pos=(unsigned)off+i;
+                if(panel_received[pos]&&panel_upload[pos]!=packet[5u+i]){
+                    conflict=true;break;
+                }
+            }
+            if(conflict){panel_ack(opcode,lane,1u);break;}
+            for(unsigned i=0;i<count;i++){
+                const unsigned pos=(unsigned)off+i;
+                panel_upload[pos]=packet[5u+i];panel_received[pos]=true;
+            }
+            if(panel_preview_tx.active&&panel_preview_tx.lane==lane){
+                if(ot_ble_panel_preview_heartbeat(lane,panel_upload_revision)!=0){
+                    panel_ack(opcode,lane,3u);panel_upload_index=255u;break;
+                }
+                panel_preview_tx.expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                                            OT_PZ_PREVIEW_LEASE_MS;
+            }
+            break;
+        }
+        case 5u:{ /* validate complete immutable upload, then stage CORE config */
+            if(n!=3u||panel_upload_index!=lane){panel_ack(opcode,lane,1u);break;}
+            for(unsigned i=0;i<OT_PZ_MAX_WIRE_BYTES;i++){
+                if(!panel_received[i]){panel_ack(opcode,lane,8u);panel_upload_index=255;return 0;}
+            }
+            if(ot_cfg_crc16(panel_upload,OT_PZ_MAX_WIRE_BYTES)!=panel_upload_crc){
+                panel_ack(opcode,lane,6u);panel_upload_index=255;break;
+            }
+            ot_pz_output_t output={0};
+            if(!ot_pz_wire_decode(panel_upload,lane,&output)){
+                panel_ack(opcode,lane,7u);panel_upload_index=255;break;
+            }
+            const int save_rc=ot_ble_panel_save(lane,&output,panel_upload_revision);
+            panel_ack(opcode,lane,panel_save_status(save_rc));
+            if(save_rc==0&&panel_preview_tx.active&&panel_preview_tx.lane==lane){
+                /* Exact no-op leaves the revision unchanged. A metadata-only
+                 * Save does NOT: wait for durable v4 pair promotion even if
+                 * preview geometry CRC equals the baseline CRC. Reuse the
+                 * existing output stack buffer for revision readback. */
+                uint16_t active_revision=0u,staged_revision=0u;
+                bool pending=false,persistent=false;
+                const bool known=ot_ble_panel_get(lane,&output,&active_revision,
+                                      &staged_revision,&pending,&persistent);
+                const bool noop=known&&!pending&&
+                    active_revision==panel_upload_revision&&
+                    staged_revision==panel_upload_revision;
+                if(noop){
+                    panel_preview_tx.active=false;
+                    panel_preview_tx.committing=false;
+                    panel_preview_tx.durable_save_in_progress=false;
+                    panel_preview_tx.status=OT_PZ_TX_COMMITTED;
+                }else{
+                    panel_preview_tx.durable_save_in_progress=true;
+                    panel_preview_tx.committing=true;
+                    panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+                }
+                panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+            }
+            panel_upload_index=255;break;
+        }
+        case 6u: /* cancel */
+            if(n!=3u){panel_ack(opcode,lane,1u);break;}
+            panel_upload_index=255;memset(panel_received,0,sizeof(panel_received));break;
+        case 0xabu: /* proposed Fill opcode intentionally not accepted */
+            panel_ack(opcode,lane,9u);break;
+        default:panel_ack(opcode,lane,1u);break;
+    }
+    return 0;
+}
+
+static void panel_preview_set_error(uint8_t status){
+    panel_preview_tx.last_error=status;
+    panel_preview_tx.status=OT_PZ_TX_ERROR;
+}
+static void panel_preview_sat_add(uint32_t *value,uint32_t amount){
+    if(!value)return;
+    *value=UINT32_MAX-*value<amount?UINT32_MAX:*value+amount;
+}
+static void panel_preview_reject_control(uint8_t reason){
+    panel_preview_tx.last_error=reason;
+    panel_preview_tx.last_rejected_reason=reason;
+    panel_preview_tx.sequence_sync_warning=true;
+    if(reason==OT_PZ_TX_ERROR_COMMITTING_LOCKED)
+        panel_preview_sat_add(&panel_preview_tx.committing_reject_count,1u);
+}
+static uint32_t panel_preview_missing_before(uint32_t sequence){
+    if(!panel_preview_tx.has_sequence)return sequence>1u?sequence-1u:0u;
+    const uint32_t distance=sequence>panel_preview_tx.last_sequence?
+        sequence-panel_preview_tx.last_sequence:
+        (UINT32_MAX-panel_preview_tx.last_sequence)+sequence;
+    return distance>1u?distance-1u:0u;
+}
+static void panel_preview_reject_update(uint32_t sequence,uint8_t reason,
+                                        uint32_t missing_count){
+    panel_preview_tx.last_rejected_sequence=sequence;
+    panel_preview_tx.last_rejected_reason=reason;
+    panel_preview_tx.last_error=reason;
+    switch(reason){
+        case OT_PZ_TX_ERROR_COMMITTING_LOCKED:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_sat_add(&panel_preview_tx.committing_reject_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_GAP:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.missing_sequence_count,missing_count);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_OUT_OF_ORDER:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.out_of_order_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_DUPLICATE:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_sat_add(&panel_preview_tx.duplicate_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SEQUENCE_CONFLICT:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            panel_preview_sat_add(&panel_preview_tx.conflict_count,1u);
+            break;
+        case OT_PZ_TX_ERROR_SYNC_REQUIRED:
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+            break;
+        default:
+            break;
+    }
+}
+static void panel_preview_reject_committing_update(
+        const ot_pz_tx_update_packet_t *update){
+    if(!update)return;
+    /* Classification is telemetry only. The COMMITTING guard still rejects
+     * every packet and never passes one to the shadow geometry mutator. */
+    const ot_pz_tx_sequence_result_t observed=ot_pz_tx_sequence_check(
+        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
+        panel_preview_tx.last_packet_crc32,update->sequence,update->packet_crc32);
+    switch(observed){
+        case OT_PZ_TX_SEQUENCE_DUPLICATE:
+            panel_preview_sat_add(&panel_preview_tx.duplicate_count,1u);break;
+        case OT_PZ_TX_SEQUENCE_GAP:
+            panel_preview_sat_add(&panel_preview_tx.missing_sequence_count,
+                panel_preview_missing_before(update->sequence));break;
+        case OT_PZ_TX_SEQUENCE_OUT_OF_ORDER:
+            panel_preview_sat_add(&panel_preview_tx.out_of_order_count,1u);break;
+        case OT_PZ_TX_SEQUENCE_CONFLICT:
+            panel_preview_sat_add(&panel_preview_tx.conflict_count,1u);break;
+        default:
+            break;
+    }
+    panel_preview_reject_update(update->sequence,
+        OT_PZ_TX_ERROR_COMMITTING_LOCKED,0u);
+}
+static bool panel_preview_session_matches(uint8_t lane,uint32_t session_id){
+    return panel_preview_tx.active&&panel_preview_tx.lane==lane&&
+        panel_preview_tx.session_id==session_id;
+}
+static void panel_preview_expire_if_needed(uint32_t now_ms){
+    if(panel_preview_tx.active&&!panel_preview_tx.committing&&
+       (int32_t)(now_ms-panel_preview_tx.expires_ms)>=0){
+        ot_ble_panel_preview_cancel_lane(panel_preview_tx.lane);
+        panel_preview_tx.active=false;
+        panel_preview_tx.status=OT_PZ_TX_EXPIRED;
+        panel_preview_tx.last_error=0u;
+    }
+}
+static void panel_preview_refresh_commit_state(void){
+    if(!panel_preview_tx.active||!panel_preview_tx.committing)return;
+    ot_pz_output_t output={0};
+    uint16_t active_revision=0u,staged_revision=0u;
+    bool pending=false,persistent=false;
+    if(!ot_ble_panel_get(panel_preview_tx.lane,&output,&active_revision,
+                         &staged_revision,&pending,&persistent)){
+        /* A transient read failure cannot demote or release a durable commit. */
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_INTERNAL;
+        return;
+    }
+    (void)persistent;
+    if(!panel_preview_tx.durable_save_in_progress&&
+       panel_preview_tx.candidate_crc32==panel_preview_tx.base_crc32){
+        /* Only a no-change preview COMMIT may finish without NVS revision. */
+        panel_preview_tx.committing=false;panel_preview_tx.active=false;
+        panel_preview_tx.status=OT_PZ_TX_COMMITTED;return;
+    }
+    const uint16_t target=(uint16_t)(panel_preview_tx.base_revision+1u);
+    if(pending&&staged_revision==target){
+        panel_preview_tx.status=OT_PZ_TX_COMMITTING;return;
+    }
+    if(!pending&&active_revision==target&&
+       ot_ble_panel_render_revision(panel_preview_tx.lane)==target){
+        panel_preview_tx.committing=false;panel_preview_tx.active=false;
+        panel_preview_tx.durable_save_in_progress=false;
+        panel_preview_tx.status=OT_PZ_TX_COMMITTED;return;
+    }
+    if(!pending&&active_revision==panel_preview_tx.base_revision&&
+       staged_revision==panel_preview_tx.base_revision){
+        if(ot_ble_panel_preview_commit_pending(panel_preview_tx.lane,
+                                               panel_preview_tx.base_revision)){
+            panel_preview_tx.status=OT_PZ_TX_COMMITTING;return;
+        }
+        panel_preview_tx.status=OT_PZ_TX_ERROR;
+        panel_preview_tx.last_error=4u;
+        panel_preview_tx.committing=false;
+        /* Keep the live shadow candidate available for an explicit retry. */
+    }
+}
+static int panel_preview_control_write(uint16_t conn,uint16_t handle,
+        struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
+       !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[12]={0};uint16_t n=0;
+    ot_pz_tx_control_packet_t command={0};
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
+       !ot_pz_tx_parse_control(packet,n,&command)){
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(command.lane<OT_PZ_OUTPUTS)panel_preview_status_lane=command.lane;
+    panel_preview_expire_if_needed(now_ms);
+    if(command.opcode==OT_PZ_TX_OP_BEGIN){
+        if(panel_preview_tx.committing){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+            return 0;
+        }
+        if(command.schema_version!=OT_PZ_SCHEMA_VERSION)
+            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        if(panel_preview_tx.active||panel_upload_index!=255u){
+            panel_preview_set_error(OT_PZ_TX_ERROR_BUSY);return 0;
+        }
+        const uint8_t lane=command.lane;
+        const uint16_t revision=command.base_revision;
+        const uint16_t capacity=command.pixel_capacity;
+        ot_pz_output_t output={0};uint16_t active=0u,staged=0u;
+        bool pending=false,persistent=false;
+        if(!ot_ble_panel_get(lane,&output,&active,&staged,&pending,&persistent)||
+           pending||revision!=active||revision!=staged||
+           capacity>OT_PZ_MAX_PIXELS||revision==UINT16_MAX){
+            panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
+        }
+        uint32_t session=esp_random();
+        if(session==0u)session=esp_random();
+        if(session==0u){panel_preview_set_error(OT_PZ_TX_ERROR_INTERNAL);return 0;}
+        const int rc=ot_ble_panel_preview_begin(lane,revision,capacity);
+        if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+            (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID));return 0;}
+        memset(&panel_preview_tx,0,sizeof(panel_preview_tx));
+        panel_preview_tx.session_id=session;
+        panel_preview_tx.base_revision=revision;
+        panel_preview_tx.pixel_capacity=capacity;
+        panel_preview_tx.lane=lane;
+        panel_preview_tx.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        panel_preview_tx.active=true;
+        panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+        /* Baseline CRC belongs to the durable map, candidate CRC to the
+         * unsaved preview capacity/geometry. Never mark a capacity-only
+         * change as a no-op COMMIT. */
+        if(!ot_ble_panel_active_crc32(lane,revision,&panel_preview_tx.base_crc32)||
+           !ot_ble_panel_preview_crc32(lane,revision,&panel_preview_tx.candidate_crc32)){
+            ot_ble_panel_preview_cancel();
+            panel_preview_tx.active=false;
+            panel_preview_set_error(OT_PZ_TX_ERROR_INTERNAL);return 0;
+        }
+        return 0;
+    }
+
+    const uint8_t lane=command.lane;
+    const uint32_t session=command.session_id;
+    if(panel_preview_tx.committing){
+        /* Only an exact duplicate COMMIT is idempotent. UPDATE, CANCEL,
+         * HEARTBEAT, BEGIN, wrong-session and conflicting COMMIT packets are
+         * rejected without changing COMMITTING or touching the durable journal. */
+        if(command.opcode==OT_PZ_TX_OP_COMMIT&&
+           lane==panel_preview_tx.lane&&session==panel_preview_tx.session_id&&
+           command.candidate_crc32==panel_preview_tx.candidate_crc32){
+            panel_preview_refresh_commit_state();return 0;
+        }
+        panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        return 0;
+    }
+    /* A delayed exact COMMIT after terminal success is read-only/idempotent. */
+    if(!panel_preview_tx.active&&panel_preview_tx.status==OT_PZ_TX_COMMITTED&&
+       lane==panel_preview_tx.lane&&session==panel_preview_tx.session_id){
+        if(command.opcode==OT_PZ_TX_OP_COMMIT&&
+           command.candidate_crc32==panel_preview_tx.candidate_crc32)return 0;
+        panel_preview_reject_control(OT_PZ_TX_ERROR_STALE);
+        return 0;
+    }
+    if(!panel_preview_session_matches(lane,session)){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
+    }
+    if(command.opcode==OT_PZ_TX_OP_COMMIT){
+        if(panel_upload_index!=255u){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_BUSY);return 0;
+        }
+        if(panel_preview_tx.sequence_sync_fault){
+            panel_preview_reject_control(OT_PZ_TX_ERROR_SYNC_REQUIRED);return 0;
+        }
+        const uint32_t expected=command.candidate_crc32;
+        const uint32_t previous_crc=panel_preview_tx.candidate_crc32;
+        /* Publish the protocol lock before entering CORE. A delayed/concurrent
+         * UPDATE can now only observe COMMITTING, never the old ACTIVE state. */
+        panel_preview_tx.candidate_crc32=expected;
+        panel_preview_tx.committing=true;
+        panel_preview_tx.status=OT_PZ_TX_COMMITTING;
+        const int rc=ot_ble_panel_preview_commit(lane,
+                    panel_preview_tx.base_revision,expected);
+        if(rc!=0){
+            panel_preview_tx.candidate_crc32=previous_crc;
+            panel_preview_tx.committing=false;
+            panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+            panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+                (rc==3?OT_PZ_TX_ERROR_STALE:(rc==4?OT_PZ_TX_ERROR_INTERNAL:
+                                              OT_PZ_TX_ERROR_INVALID)));
+            return 0;
+        }
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+        panel_preview_refresh_commit_state();
+        return 0;
+    }
+    if(command.opcode==OT_PZ_TX_OP_CANCEL){
+        ot_ble_panel_preview_cancel_lane(lane);
+        panel_preview_tx.active=false;
+        panel_preview_tx.status=OT_PZ_TX_CANCELLED;
+        panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+        return 0;
+    }
+    const int rc=ot_ble_panel_preview_heartbeat(lane,panel_preview_tx.base_revision);
+    if(rc!=0){panel_preview_set_error(rc==2?OT_PZ_TX_ERROR_BUSY:
+                                             OT_PZ_TX_ERROR_STALE);return 0;}
+    panel_preview_tx.expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+    panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+    panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+    return 0;
+}
+static int panel_preview_update_write(uint16_t conn,uint16_t handle,
+        struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
+       !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[43]={0};uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0){
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return 0;
+    }
+    ot_pz_tx_update_packet_t update={0};
+    const uint16_t mtu=ble_att_mtu(conn);
+    if(!ot_pz_tx_parse_update(packet,n,mtu,&update)){
+        if(panel_preview_tx.committing)
+            panel_preview_reject_control(OT_PZ_TX_ERROR_COMMITTING_LOCKED);
+        else panel_preview_set_error(OT_PZ_TX_ERROR_INVALID);
+        return 0;
+    }
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    if(update.lane<OT_PZ_OUTPUTS)panel_preview_status_lane=update.lane;
+    panel_preview_expire_if_needed(now_ms);
+
+    /* This guard intentionally precedes session/sequence checks. Any delayed
+     * Write Without Response packet arriving after COMMIT is rejected while
+     * the transaction remains COMMITTING; no shadow or NVS mutation occurs. */
+    if(panel_preview_tx.committing){
+        panel_preview_reject_committing_update(&update);
+        return 0;
+    }
+    if(!panel_preview_session_matches(update.lane,update.session_id)){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
+    }
+
+    const ot_pz_tx_update_admission_t admission=ot_pz_tx_update_admit(
+        panel_preview_tx.committing,panel_preview_tx.sequence_sync_fault,
+        panel_preview_tx.has_sequence,panel_preview_tx.last_sequence,
+        panel_preview_tx.last_packet_crc32,update.sequence,update.packet_crc32);
+    if(admission==OT_PZ_TX_UPDATE_REJECT_DUPLICATE){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_DUPLICATE,0u);
+        return 0; /* Exact replay is observed, never applied twice. */
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_GAP){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_GAP,
+            panel_preview_missing_before(update.sequence));
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_OUT_OF_ORDER){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_OUT_OF_ORDER,0u);
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_CONFLICT){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SEQUENCE_CONFLICT,0u);
+        return 0;
+    }
+    if(admission==OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED){
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_SYNC_REQUIRED,0u);
+        return 0;
+    }
+    if(admission!=OT_PZ_TX_UPDATE_ACCEPT){
+        panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
+    }
+
+    const int rc=ot_ble_panel_preview_update_ranges(update.lane,
+        panel_preview_tx.base_revision,update.descriptors,update.descriptor_count);
+    if(rc!=0){
+        const uint8_t error=rc==2?OT_PZ_TX_ERROR_BUSY:
+            (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID);
+        panel_preview_reject_update(update.sequence,error,0u);
+        if(rc==3){
+            panel_preview_tx.sequence_sync_warning=true;
+            panel_preview_tx.sequence_sync_fault=true;
+        }
+        return 0;
+    }
+    uint32_t candidate_crc=0u;
+    if(!ot_ble_panel_preview_crc32(update.lane,panel_preview_tx.base_revision,
+                                   &candidate_crc)){
+        /* The shadow may already contain this edit. Freeze the session so the
+         * client must reconcile/cancel rather than guess whether it was applied. */
+        panel_preview_reject_update(update.sequence,
+            OT_PZ_TX_ERROR_INTERNAL,0u);
+        panel_preview_tx.sequence_sync_warning=true;
+        panel_preview_tx.sequence_sync_fault=true;
+        return 0;
+    }
+    panel_preview_tx.last_sequence=update.sequence;
+    panel_preview_tx.last_packet_crc32=update.packet_crc32;
+    panel_preview_tx.has_sequence=true;
+    panel_preview_tx.candidate_crc32=candidate_crc;
+    panel_preview_tx.status=OT_PZ_TX_ACTIVE;
+    panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+    /* UPDATE deliberately does not renew the 5-second lease. HEARTBEAT owns it. */
+    return 0;
+}
+static int panel_preview_status_read(uint16_t conn,uint16_t handle,
+        struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR||conn!=active_conn||
+       !authorized||!panel_caps_seen)return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    panel_preview_expire_if_needed((uint32_t)(esp_timer_get_time()/1000LL));
+    panel_preview_refresh_commit_state();
+    uint8_t payload[OT_PZ_TX_STATUS_V2_BYTES]={0};
+    payload[0]=OT_PZ_TX_STATUS_V2_VERSION;payload[1]=panel_preview_tx.status;
+    payload[2]=panel_preview_tx.lane;payload[3]=OT_PZ_SCHEMA_VERSION;
+    payload[4]=(uint8_t)panel_preview_tx.session_id;
+    payload[5]=(uint8_t)(panel_preview_tx.session_id>>8);
+    payload[6]=(uint8_t)(panel_preview_tx.session_id>>16);
+    payload[7]=(uint8_t)(panel_preview_tx.session_id>>24);
+    payload[8]=(uint8_t)panel_preview_tx.base_revision;
+    payload[9]=(uint8_t)(panel_preview_tx.base_revision>>8);
+    payload[10]=(uint8_t)panel_preview_tx.pixel_capacity;
+    payload[11]=(uint8_t)(panel_preview_tx.pixel_capacity>>8);
+    payload[12]=(uint8_t)OT_PZ_PREVIEW_LEASE_MS;
+    payload[13]=(uint8_t)(OT_PZ_PREVIEW_LEASE_MS>>8);
+    payload[14]=(uint8_t)panel_preview_tx.last_sequence;
+    payload[15]=(uint8_t)(panel_preview_tx.last_sequence>>8);
+    payload[16]=(uint8_t)(panel_preview_tx.last_sequence>>16);
+    payload[17]=(uint8_t)(panel_preview_tx.last_sequence>>24);
+    payload[18]=(uint8_t)panel_preview_tx.candidate_crc32;
+    payload[19]=(uint8_t)(panel_preview_tx.candidate_crc32>>8);
+    payload[20]=(uint8_t)(panel_preview_tx.candidate_crc32>>16);
+    payload[21]=(uint8_t)(panel_preview_tx.candidate_crc32>>24);
+    uint16_t active=0u,staged=0u;
+    bool pending=false,persistent=false;
+    ot_pz_output_t output={0};
+    if(panel_preview_tx.lane<OT_PZ_OUTPUTS)
+        (void)ot_ble_panel_get(panel_preview_tx.lane,&output,&active,&staged,
+                               &pending,&persistent);
+    const uint16_t rendered=panel_preview_tx.lane<OT_PZ_OUTPUTS?
+        ot_ble_panel_render_revision(panel_preview_tx.lane):0u;
+    payload[22]=(uint8_t)active;payload[23]=(uint8_t)(active>>8);
+    payload[24]=(uint8_t)staged;payload[25]=(uint8_t)(staged>>8);
+    payload[26]=(uint8_t)rendered;payload[27]=(uint8_t)(rendered>>8);
+    payload[28]=pending?1u:0u;payload[29]=persistent?1u:0u;
+    payload[30]=panel_preview_tx.last_error;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    const uint32_t remaining=panel_preview_tx.active&&!panel_preview_tx.committing&&
+        (int32_t)(panel_preview_tx.expires_ms-now_ms)>0?
+        panel_preview_tx.expires_ms-now_ms:0u;
+    payload[31]=(uint8_t)remaining;payload[32]=(uint8_t)(remaining>>8);
+    payload[33]=(uint8_t)(remaining>>16);payload[34]=(uint8_t)(remaining>>24);
+    const uint32_t rejected=panel_preview_tx.last_rejected_sequence;
+    payload[35]=(uint8_t)rejected;payload[36]=(uint8_t)(rejected>>8);
+    payload[37]=(uint8_t)(rejected>>16);payload[38]=(uint8_t)(rejected>>24);
+    payload[39]=panel_preview_tx.last_rejected_reason;
+    const uint32_t counters[5]={
+        panel_preview_tx.missing_sequence_count,
+        panel_preview_tx.out_of_order_count,
+        panel_preview_tx.duplicate_count,
+        panel_preview_tx.conflict_count,
+        panel_preview_tx.committing_reject_count
+    };
+    for(unsigned i=0;i<5u;i++){
+        const unsigned offset=40u+i*4u;
+        payload[offset]=(uint8_t)counters[i];
+        payload[offset+1u]=(uint8_t)(counters[i]>>8);
+        payload[offset+2u]=(uint8_t)(counters[i]>>16);
+        payload[offset+3u]=(uint8_t)(counters[i]>>24);
+    }
+    payload[60]=(uint8_t)((panel_preview_tx.sequence_sync_warning?1u:0u)|
+                          (panel_preview_tx.sequence_sync_fault?2u:0u)|
+                          (panel_preview_tx.has_sequence?4u:0u));
+    return os_mbuf_append(ctx->om,payload,sizeof(payload))==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+static int pixel_probe_write(uint16_t conn,uint16_t handle,
+                             struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_WRITE_CHR||conn!=active_conn||
+       !authorized||!panel_caps_seen)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    uint8_t packet[OT_PZ_DIAG_PACKET_BYTES];uint16_t n=0;
+    if(ble_hs_mbuf_to_flat(ctx->om,packet,sizeof(packet),&n)!=0||
+       n!=OT_PZ_DIAG_PACKET_BYTES)return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    return ot_ble_pixel_probe(packet,n,true,panel_caps_seen)?
+           0:BLE_ATT_ERR_UNLIKELY;
 }
 static int cfg_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
@@ -401,6 +1256,43 @@ static int frame_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt 
     /* NimBLE performs ATT long-read offset and MTU slicing after callback. */
     return os_mbuf_append(ctx->om,p,size)==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
+
+static void input_diag_put_le32(uint8_t *dst,uint32_t value){
+    dst[0]=(uint8_t)value;dst[1]=(uint8_t)(value>>8);
+    dst[2]=(uint8_t)(value>>16);dst[3]=(uint8_t)(value>>24);
+}
+/* Authenticated, read-only telemetry on the existing OpenTail BLE service.
+ * Wire v1 is fixed 82 bytes; no public HTTP endpoint is added. */
+static int input_diag_access(uint16_t conn,uint16_t handle,
+                             struct ble_gatt_access_ctxt *ctx,void *arg){
+    (void)handle;(void)arg;
+    if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    if(conn!=active_conn||!authorized)
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    ot_input_diag_snapshot_t snap={0};
+    ot_input_diag_snapshot_get(&snap);
+    uint8_t payload[OT_INPUT_DIAG_WIRE_BYTES]={0};
+    payload[0]=OT_INPUT_DIAG_WIRE_VERSION;
+    payload[1]=snap.raw_asserted_mask;
+    payload[2]=snap.debounced_asserted_mask;
+    input_diag_put_le32(&payload[4],snap.edge_epoch);
+    size_t offset=8u;
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.raw_edges[i]);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.asserted_edges[i]);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.deasserted_edges[i]);
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_depth[i];
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_high_water[i];
+    for(unsigned i=0;i<2u;i++,offset+=4u)
+        input_diag_put_le32(&payload[offset],snap.turn_queue_overflow_count[i]);
+    for(unsigned i=0;i<2u;i++)payload[offset++]=snap.turn_queue_overflow_flag[i];
+    return os_mbuf_append(ctx->om,payload,sizeof(payload))==0?
+           0:BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
 static int trigger_access(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     if(conn!=active_conn||!authorized)
@@ -467,8 +1359,8 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_cmd_uuid.u,.access_cb=command_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_reply_uuid.u,.access_cb=reply_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_fx_caps_uuid.u,.access_cb=fx_capabilities_read,.flags=BLE_GATT_CHR_F_READ},
-  {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ},
-  {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_enroll_uuid.u,.access_cb=owner_enroll_read,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC|BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_ENC},
+  {.uuid=&ot_challenge_uuid.u,.access_cb=owner_challenge_read,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_READ_ENC},
   {.uuid=&ot_cfg_cmd_uuid.u,.access_cb=cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_cfg_rsp_uuid.u,.access_cb=cfg_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_trigger_uuid.u,.access_cb=trigger_access,.flags=BLE_GATT_CHR_F_READ|BLE_GATT_CHR_F_WRITE},
@@ -477,6 +1369,18 @@ static const struct ble_gatt_chr_def characteristics[]={
   {.uuid=&ot_palette_cmd_uuid.u,.access_cb=palette_write,.flags=BLE_GATT_CHR_F_WRITE},
   {.uuid=&ot_palette_rsp_uuid.u,.access_cb=palette_read,.flags=BLE_GATT_CHR_F_READ},
   {.uuid=&ot_palette_caps_uuid.u,.access_cb=palette_caps,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_panel_caps_uuid.u,.access_cb=panel_caps_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_panel_cfg_cmd_uuid.u,.access_cb=panel_cfg_write,.flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_panel_cfg_rsp_uuid.u,.access_cb=panel_cfg_read,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_pixel_probe_uuid.u,.access_cb=pixel_probe_write,
+   .flags=BLE_GATT_CHR_F_WRITE|BLE_GATT_CHR_F_WRITE_NO_RSP},
+  {.uuid=&ot_input_diag_uuid.u,.access_cb=input_diag_access,.flags=BLE_GATT_CHR_F_READ},
+  {.uuid=&ot_panel_preview_control_uuid.u,.access_cb=panel_preview_control_write,
+   .flags=BLE_GATT_CHR_F_WRITE},
+  {.uuid=&ot_panel_preview_update_uuid.u,.access_cb=panel_preview_update_write,
+   .flags=BLE_GATT_CHR_F_WRITE_NO_RSP},
+  {.uuid=&ot_panel_preview_status_uuid.u,.access_cb=panel_preview_status_read,
+   .flags=BLE_GATT_CHR_F_READ},
   {0}
 };
 static const struct ble_gatt_svc_def services[]={
@@ -497,10 +1401,20 @@ static void advertise(void){
     p.itvl_min=48;p.itvl_max=96; /* 30-60 ms */
     rc=ble_gap_adv_start(addr_type,NULL,BLE_HS_FOREVER,&p,gap_event,NULL);
     if(rc)ESP_LOGE(TAG,"Advertising failed: %d",rc);
-    else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
+    else{
+        __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);
+        ESP_LOGI(TAG,"BLE advertising ACTIVE: OpenTail CORE, owner authentication required");
+    }
 }
 static int gap_event(struct ble_gap_event *ev,void *arg){
     (void)arg;
+    if(ev->type==BLE_GAP_EVENT_PASSKEY_ACTION){
+        if(ev->passkey.conn_handle!=active_conn||!owner_record.pin_enabled)return 0;
+        struct ble_sm_io io={0};io.action=ev->passkey.params.action;
+        if(io.action==BLE_SM_IOACT_DISP){io.passkey=owner_record.pin;
+            (void)ble_sm_inject_io(active_conn,&io);}
+        return 0;
+    }
     if(ev->type==BLE_GAP_EVENT_CONNECT){
         if(ev->connect.status==0){
             if(active_conn!=BLE_HS_CONN_HANDLE_NONE){
@@ -510,7 +1424,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
             }
             active_conn=ev->connect.conn_handle;authorized=false;last_result=OT_BLE_ERR_AUTH;
             challenge_ready=false;pair_failures=0;ot_st_ble_connected(true);
-            cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+            cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
             /* Request responsive live controls; Android may choose other parameters.
              * A central rejection is never a reason to terminate this link. */
             const struct ble_gap_upd_params fast={
@@ -525,7 +1439,7 @@ static int gap_event(struct ble_gap_event *ev,void *arg){
         active_conn=BLE_HS_CONN_HANDLE_NONE;authorized=false;last_result=OT_BLE_ERR_AUTH;
         challenge_ready=false;pair_failures=0;
         ot_st_ble_connected(false);ot_ble_disconnect_show();
-        cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
+        cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;advertise();
     }else if(ev->type==BLE_GAP_EVENT_ADV_COMPLETE)advertise();
     else if(ev->type==BLE_GAP_EVENT_MTU && ev->mtu.conn_handle==active_conn)
         ESP_LOGI(TAG,"BLE negotiated ATT MTU: %u",(unsigned)ev->mtu.value);
@@ -547,25 +1461,40 @@ static void on_reset(int reason){
     authorized=false;last_result=OT_BLE_ERR_AUTH;
     challenge_ready=false;memset(owner_challenge,0,sizeof(owner_challenge));pair_failures=0;
     if(had_link){ot_st_ble_connected(false);ot_ble_disconnect_show();}
-    cfg_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
+    cfg_reset();panel_session_reset();frame_reply_reset();ot_palette_ble_session_reset();trigger_last_status=0;
     ESP_LOGW(TAG,"BLE host reset (%d); advertising resumes after sync",reason);
 }
 static void host_task(void *arg){(void)arg;nimble_port_run();nimble_port_freertos_deinit();}
 bool ot_ble_start(void){
     __atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);
     owner_valid=owner_load();
-    gpio_config_t boot={0};boot.pin_bit_mask=(1ULL<<0);boot.mode=GPIO_MODE_INPUT;boot.pull_up_en=GPIO_PULLUP_ENABLE;
-    const esp_err_t boot_err=gpio_config(&boot);
-    boot_enrollment_ready=boot_err==ESP_OK;
-    if(!boot_enrollment_ready){
-        ESP_LOGE(TAG,"BOOT button GPIO setup failed: %s",esp_err_to_name(boot_err));
-        ot_st_set_fault("BLE BOOT enrollment button unavailable");
-    }
     esp_fill_random(token,sizeof(token));
     token_ready=true;
+    ble_alloc_fail_count=0u;
+    ble_alloc_fail_size=0u;
+    ble_alloc_fail_caps=0u;
+    ble_alloc_fail_caller=NULL;
+    const esp_err_t hook_err=heap_caps_register_failed_alloc_callback(ble_alloc_failed);
+    if(hook_err!=ESP_OK)
+        ESP_LOGW(TAG,"BLE HCI allocation failure hook unavailable: %s",esp_err_to_name(hook_err));
+    ble_hci_heap_snapshot("before-nimble-port-init");
+    /* On IDF 5.5.5, nimble_port_init() brings up the BLE controller
+     * and esp_nimble_hci_init(). Its ESP_FAIL return can hide the original
+     * HCI failure. Record heap capability deficits and controller state. */
     esp_err_t err=nimble_port_init();
+    ble_hci_heap_snapshot(err==ESP_OK?"after-nimble-port-init":"nimble-port-init-failed");
     if(err==ESP_OK)ble_att_set_preferred_mtu(247);
-    if(err!=ESP_OK){token_ready=false;ESP_LOGE(TAG,"NimBLE init failed: %s",esp_err_to_name(err));return false;}
+    if(err!=ESP_OK){
+        token_ready=false;
+        ESP_LOGE(TAG,"NimBLE HCI/controller init failed: %s (0x%x); controller_status=%u; heap_alloc_fail_count=%u last_size=%u caps=0x%lx caller=%s",
+            esp_err_to_name(err),(unsigned)err,
+            (unsigned)esp_bt_controller_get_status(),
+            (unsigned)ble_alloc_fail_count,(unsigned)ble_alloc_fail_size,
+            (unsigned long)ble_alloc_fail_caps,
+            ble_alloc_fail_caller?ble_alloc_fail_caller:"none-observed");
+        return false;
+    }
+    owner_security_config();ble_store_config_init();
     ble_svc_gap_init();ble_svc_gatt_init();
     int rc=ble_svc_gap_device_name_set("OpenTail CORE");
     if(!rc)rc=ble_gatts_count_cfg(services);
@@ -574,8 +1503,7 @@ bool ot_ble_start(void){
     ble_hs_cfg.reset_cb=on_reset;
     ble_hs_cfg.sync_cb=on_sync;
     nimble_port_freertos_init(host_task);
-    ESP_LOGI(TAG,"BLE output manager started; BOOT enrollment %s; no production pairing security.",
-             boot_enrollment_ready?"available":"disabled");
+    ESP_LOGI(TAG,"BLE owner-bond-v3 started; encrypted owner enrollment, optional PIN");
     return true;
 }
 #else

@@ -33,13 +33,13 @@ assert 'studio_embedded\\":false' in core
 assert 'developer_console\\":true' in core
 assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL,false,NULL)' in core, "Auto preview must use transient spark accents"
 assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false,NULL)' in core, "Regular effects must retain default accents"
-assert 'fx_bank.zones[o][z].spark=*spark' in core
+assert 'ot_fx_bank_set_spark_identity(&fx_bank,fx_views,' in core
 # Old developer previews explicitly omit the optional third RGB slot.
 assert 'ot_ble_apply_fx_internal(&req,false,&spark,NULL,false,NULL)' in core
 assert 'ot_ble_apply_fx_internal(&req,false,NULL,&overlay,false,NULL)' in core, "Spark style must remain volatile, not saved NVS"
 for control in ("eventSparkStyle","eventSparkPeak","eventSparkColor"):
     assert control in page, f"Developer console sparkle control missing: {control}"
-assert 'ot_fx_bank_apply_configured(&fx_bank' in core
+assert 'ot_fx_bank_apply_configured_identity(&fx_bank' in core
 assert 'ot_fx_bank_stop_all(&fx_bank)' in core
 assert '"/studio"' in core and 'legacy_dev_redirect' in core
 for test in ["materialize_sparks","random_materialize",
@@ -71,7 +71,14 @@ demo = core.split("static esp_err_t demo_post(httpd_req_t *r) {",1)[1].split(
 assert 'bounded_int(obj,"ttl_ms",3000,100,OT_DEMO_MAX_MS)' in demo
 stop = core.split("static esp_err_t stop_post(httpd_req_t *r) {",1)[1].split(
     "extern const uint8_t ot_dev_console_start[]",1)[0]
-assert 'sim_mask=0' in stop and 'live_input_mask=0' not in stop
+stop_core = core.split("static void core_stop_all_sources(void){",1)[1].split(
+    "void ot_ble_stop_show(void){",1)[0]
+assert "core_stop_all_sources();" in stop
+assert 'sim_mask=0u' in stop_core and 'live_input_mask=0' not in stop_core
+assert 'gpio_set_level' not in stop_core
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in core
 disconnect = core.split("void ot_ble_disconnect_show(void){",1)[1].split(
     "static esp_err_t status_get(",1)[0]
 assert 'live_input_mask=0' not in disconnect
@@ -100,28 +107,42 @@ sampler = core.split("static void input_sampler_task(void *arg){",1)[1].split("s
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
 assert "input_quiet_samples" in sampler
-# Editing output zone roles during a pre-debounce asserted 12V input can
-# change which pixels will respond to that trigger. Both output-save APIs
-# must use the same instantaneous-pin admission gate as trigger mappings.
+# Editing legacy Output v1 roles during a pre-debounce asserted 12V input
+# can change which pixels respond to that trigger. Legacy HTTP/BLE Output saves
+# retain their instantaneous-pin admission gate. Panel v3 is separately allowed
+# to stage map changes during a trigger; only its activation is deferred.
 output_http = core.split("static esp_err_t om_post(",1)[1].split(
     "bool ot_ble_config_get(",1)[0]
 output_ble = core.split("int ot_ble_config_save(",1)[1].split(
     "/* Normalized instantaneous GPIO levels",1)[0]
 for save_path in (output_http, output_ble):
-    assert "const bool raw_active=tm_gpio_input_mask()!=0;" in save_path
-    assert "bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask ||" in save_path
+    assert "raw_active=tm_gpio_input_mask()!=0;" in save_path
+    assert "pz_deferred.pending" in save_path
+    assert "om_deferred.pending" in save_path
+    assert "tm_deferred.pending" in save_path
+    assert "pz_preview_any_active_locked()" in save_path
+    assert "raw_active" in save_path and "live_input_mask" in save_path
     assert save_path.index("tm_gpio_input_mask()") < save_path.index(
         "portENTER_CRITICAL(&state_lock)")
-    assert save_path.index("bool busy=om_deferred.pending") < save_path.index("om_save(")
-    assert save_path.index("om_save(") < save_path.index("om_deferred.pending=true;")
     assert "ot_om_saved_apply(" not in save_path
+assert "bool busy=pz_deferred.pending" in output_http
+assert output_http.index("bool busy=") < output_http.index("om_save(next_all)")
+assert "om_save(next_all)" in output_http
+om_save_impl = core.split("static bool om_save(",1)[1].split(
+    "#define OT_SHOW_MAX_MS",1)[0]
+assert "pz_save_controller_locked(candidate)" in om_save_impl
+assert "pz_preview_any_active_locked()" in om_save_impl
+assert "busy=pz_deferred.pending" in output_ble
+assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in output_ble
+assert output_ble.index("busy=pz_deferred.pending") < output_ble.index(
+    "pz_save_controller_locked(candidate)")
 # The original REST raw_input_mask remains the settled input mask; a new,
 # separately named field exposes pre-debounce normalized GPIO diagnostic bits.
 get = core.split("static esp_err_t tm_get(httpd_req_t *r){",1)[1].split(
     "static esp_err_t tm_post(",1)[0]
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in get
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
-assert "ot_om_apply_if_released(om_outputs,&om_deferred," in core
+assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert 'cJSON_AddNumberToObject(root,"raw_input_mask",physical)' in get
 assert 'cJSON_AddNumberToObject(root,"gpio_input_mask",tm_gpio_input_mask())' in get

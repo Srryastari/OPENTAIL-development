@@ -10,14 +10,21 @@ root = Path(__file__).resolve().parents[1] / "main"
 output = (root / "output_manager.h").read_text(encoding="utf-8")
 board = (root / "board_config.h").read_text(encoding="utf-8")
 output_impl = (root / "output_manager.c").read_text(encoding="utf-8")
-# One board-selected bench brightness limit controls the layout, triggers,
-# and optional gamma path; do not fork another magic 32-channel ceiling.
-assert '#include "board_config.h"' in output_impl
-assert '.brightness_cap=OT_MAX_BRIGHTNESS' in output_impl
-assert 'if(brightness>OT_MAX_BRIGHTNESS)' in output_impl
-assert 'if(n>OT_MAX_BRIGHTNESS)' in output_impl
 core = (root / "opentail_core.c").read_text(encoding="utf-8")
 kconfig = (root / "Kconfig.projbuild").read_text(encoding="utf-8")
+# One board-selected safe ceiling controls layout and final pixel output;
+# do not fork another magic 32-channel ceiling.
+assert '#include "board_config.h"' in output_impl
+assert '.brightness_cap=OT_MAX_BRIGHTNESS' in output_impl
+# Requests and trigger colors retain the full 8-bit range. The single
+# reported software ceiling is applied once, ratio-preservingly, at the final
+# CORE RGB boundary rather than silently pre-clamping individual color paths.
+assert "static inline ot_rgb_t ot_om_limit_brightness" in output
+assert "if(peak<=ceiling)return color;" in output
+assert "color.r=(uint8_t)(((uint32_t)color.r*ceiling+(uint32_t)peak/2u)/peak);" in output
+assert "ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS)" in core
+assert "if(brightness>OT_MAX_BRIGHTNESS)" not in output_impl
+assert "if(n>OT_MAX_BRIGHTNESS)" not in output_impl
 
 # Hardware/build allocation limits are independent of vehicle examples.
 assert "#define OT_OM_OUTPUTS OT_CHAIN_COUNT" in output
@@ -50,8 +57,10 @@ assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
 
 # Runtime driver length must follow each saved output, not a global max.
 assert ".max_leds=pixels" in core
-assert "strip_configure_channel(ch,om_outputs[ch].active_pixels)" in core
-assert "strip_configure_channel(ch,local_outputs[ch].active_pixels)" in core
+# Runtime RMT lengths now come from the active Panel/Zone lane snapshot,
+# not the legacy Output Manager compatibility projection.
+assert "strip_configure_channel(ch,pixels)" in core
+assert "frame_ready[ch]=strip_configure_channel(ch,render_pixels[ch]);" in core
 # Resize must not delete a live RMT output when blackout fails.
 resize = core.split("static bool strip_configure_channel(",1)[1].split("static bool strip_init(",1)[0]
 assert "(void)led_strip_clear(strip[ch]);" not in resize
@@ -60,7 +69,9 @@ assert 'ot_st_set_fault("external pixel RMT clear failed");return false;' in res
 assert resize.index('if(e!=ESP_OK){') < resize.index('e=led_strip_del(strip[ch]);')
 assert resize.index('e=led_strip_del(strip[ch]);') < resize.index('strip[ch]=NULL;strip_capacity[ch]=0;')
 
-assert "for(unsigned px=0;px<output->active_pixels;++px)" in core
+# Hierarchical Panel/Zone rendering iterates the per-frame physical lane
+# length derived from the active lane snapshot, not the legacy flat output.
+assert "for(unsigned px=0;px<render_pixels[ch];++px)" in core
 assert "if(!frame_submitted[ch])continue;" in core
 status = core.split("static esp_err_t status_get(httpd_req_t *r) {",1)[1].split("static esp_err_t caps_get(",1)[0]
 # A single RMT lane fault must not reboot the whole controller or be counted
@@ -118,9 +129,9 @@ success=render.split("esp_err_t e=led_strip_refresh_async_done(strip[ch]);",1)[1
     "const bool full_frame=ot_frame_all_submitted(",1
 )[0]
 assert success.index("if(e!=ESP_OK){") < success.index("continue;") < success.index(
-    "if(local_outputs[ch].active_pixels>longest_pixels)"
+    "if(render_pixels[ch]>longest_pixels)"
 )
-assert "longest_pixels=local_outputs[ch].active_pixels;" in success
+assert "longest_pixels=(uint16_t)render_pixels[ch];" in success
 assert "ot_fps_pacer_observe(&pacer,work_us,longest_pixels)" in render
 after_work=render.split("int64_t work_elapsed=esp_timer_get_time()-frame_started_us;",1)[1]
 assert "if(local_outputs[ch].active_pixels>longest_pixels)" not in after_work
@@ -141,7 +152,8 @@ assert "(unsigned long)measured_fps" not in status
 assert "outputs_ready=native_outputs_ready;" in status
 assert r'\"ble_ready\":%s' in status
 assert r'\"outputs_ready\":%s' in status
-assert 'OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
+assert 'OT_FW,(unsigned long)core_boot_id,elf_sha256,' in status
+assert 'ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
 # A semantic version repeats across alpha commits; physical evidence needs
 # the running ELF fingerprint to match the exact CI-generated firmware image.
 assert '#include "esp_app_desc.h"' in core
@@ -185,7 +197,13 @@ fx_presets = (root / "fx_preset_record.c").read_text(encoding="utf-8")
 for adapter in (ble_show, ble_fx, fx_presets):
     assert "#include \"board_config.h\"" in adapter
     assert "(1u<<OT_OM_OUTPUTS)-1u" in adapter
-    assert "OT_MAX_BRIGHTNESS" in adapter
+# The legacy Show adapter retains its explicit configured cap. FX requests
+# and saved scenes preserve the full 8-bit request; CORE applies the ceiling
+# once at the final RGB boundary instead of rejecting a preset on save.
+assert "OT_MAX_BRIGHTNESS" in ble_show
+assert "OT_MAX_BRIGHTNESS" not in ble_fx
+assert "OT_MAX_BRIGHTNESS" not in fx_presets
+assert "ot_om_limit_brightness" in core
 
 # BLE FX validation must follow the physical output count, not a vehicle or
 # two-lane mask literal. Actual 12-output hardware/protocol support is future work.
@@ -224,7 +242,7 @@ assert "legacy_example_zone_local" not in core
 
 # NVS load must recover the previously saved profile even when v2 exists
 # but is invalid. Boot migration must not write over either record.
-load = core.split("static void om_load(void){",1)[1].split("static bool om_save(",1)[0]
+load = core.split("static void om_load(void){",1)[1].split("static esp_err_t om_journal_read(",1)[0]
 assert 'const char *const keys[]={"profile_v2","profile"}' in load
 assert 'attempt<sizeof(keys)/sizeof(keys[0])&&!om_persistent' in load
 assert 'nvs_get_blob(h,key,NULL,&n)' in load
@@ -239,3 +257,8 @@ for production in (output, board, core):
         assert obsolete not in production, obsolete
 
 print("PASS: universal user-configured pixel counts; board budget only; dynamic per-output RMT lengths")
+
+# Empty REST writes must use the same validated zero/zero geometry as BLE.
+assert 'om_number(obj,"pixels",&pixels,0,OT_CHAIN_PIXELS)' in core
+assert "cJSON_GetArraySize(zones)>=1" not in core
+assert "ot_om_valid(&next)" in core

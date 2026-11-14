@@ -31,7 +31,7 @@ int main(void){
     ot_om_output_t configured[OT_OM_OUTPUTS];ot_om_defaults(configured);
     /* Blank universal units never auto-assign parking or brake roles. */
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-        assert(configured[o].zone_count==1 && configured[o].active_pixels==1);
+        assert(configured[o].zone_count==0 && configured[o].active_pixels==0);
         assert(configured[o].zones[0].role==OT_OM_OFF);
     }
     /* Historical GPIO16 bench configuration, supplied as a saved user profile.

@@ -18,7 +18,9 @@ static bool settings_ok(const ot_ble_fx_packet_t *fx){
  return fx&&ot_effects_1d_metadata(fx->effect_id,&info)&&
    fx->chain_mask!=0&&
    (fx->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))==0&&fx->zone_mask>=1&&
-   fx->brightness<=OT_MAX_BRIGHTNESS&&ot_palette_1d_supported(fx->effect_id,fx->palette_id)&&fx->ttl_sec>=1&&fx->ttl_sec<=60;
+   /* Request brightness is the full 8-bit value. CORE applies its safe
+    * configured ceiling later at the final RGB output boundary. */
+   ot_palette_1d_supported(fx->effect_id,fx->palette_id)&&fx->ttl_sec>=1&&fx->ttl_sec<=60;
 }
 bool ot_fx_preset_pack(ot_fx_preset_record_t *rec,const ot_ble_fx_packet_t *fx){
  if(!rec||!settings_ok(fx))return false;
@@ -55,18 +57,44 @@ static uint16_t scene_checksum(const ot_fx_scene_record_t *r){
  return crc;
 }
 bool ot_fx_scene_pack(ot_fx_scene_record_t *rec,
-                      const ot_fx_zone_bank_t *bank,uint32_t now_ms){
- if(!rec||!bank)return false;
+                      const ot_fx_zone_bank_t *bank,
+                      const ot_fx_scene_output_identity_t identities[OT_OM_OUTPUTS],
+                      uint32_t now_ms){
+ if(!rec||!bank||!identities)return false;
  memset(rec,0,sizeof(*rec));
  rec->magic=OT_FX_PRESET_MAGIC;rec->version=OT_FX_SCENE_VERSION;
- for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
-  const ot_fx_zone_slot_t *slot=&bank->zones[o][z];
-  if(!ot_fx_slot_active(slot,now_ms))continue;
-  ot_ble_fx_packet_t p=slot->request;
-  p.chain_mask=(uint8_t)(1u<<o);p.zone_mask=(uint8_t)(1u<<z);
-  if(!settings_ok(&p))return false;
-  rec->active_mask=(uint16_t)(rec->active_mask | (uint16_t)(1u<<(o*OT_OM_ZONES+z)));
-  rec->effect[o][z]=p;
+ for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+  const ot_fx_scene_output_identity_t *identity=&identities[o];
+  if(identity->zone_count>OT_OM_ZONES)return false;
+  bool assigned[OT_OM_ZONES]={false};
+  for(unsigned bank_z=0;bank_z<OT_OM_ZONES;bank_z++){
+   const ot_fx_zone_slot_t *slot=&bank->zones[o][bank_z];
+   if(!ot_fx_slot_active(slot,now_ms))continue;
+   unsigned zone_index=OT_OM_ZONES;
+   if(slot->owner_panel_id&&slot->owner_zone_id){
+    for(unsigned zone=0;zone<identity->zone_count;zone++)
+     if(identity->zones[zone].panel_id==slot->owner_panel_id&&
+        identity->zones[zone].zone_id==slot->owner_zone_id){
+      zone_index=zone;break;
+     }
+   }else if(!slot->owner_panel_id&&!slot->owner_zone_id&&
+            bank_z<identity->zone_count){
+    /* Legacy in-memory bank users without identity metadata retain their
+     * historical index mapping. Production BLE commands always bind IDs. */
+    zone_index=bank_z;
+   }
+   /* Never serialize an orphan, partial identity or duplicate owner as a
+    * different zone. A committed geometry change must prune it first. */
+   if(zone_index>=identity->zone_count||assigned[zone_index])return false;
+   ot_ble_fx_packet_t p=slot->request;
+   p.chain_mask=(uint8_t)(1u<<o);
+   p.zone_mask=(uint8_t)(1u<<zone_index);
+   if(!settings_ok(&p))return false;
+   assigned[zone_index]=true;
+   rec->active_mask=(uint16_t)(rec->active_mask |
+       (uint16_t)(1u<<(o*OT_OM_ZONES+zone_index)));
+   rec->effect[o][zone_index]=p;
+  }
  }
  if(!rec->active_mask)return false;
  rec->crc=scene_checksum(rec);

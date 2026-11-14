@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+cc -std=c11 -Wall -Wextra -Werror -pedantic -I main tests/test_ble_owner_policy.c -o /tmp/ot-owner-policy
+/tmp/ot-owner-policy
+python3 tests/test_ble_owner_storage.py
+python3 -m unittest discover -s ../scripts/tests -p test_factory_reset.py
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/core_logic.c main/arbitration_logic.c tests/test_core_logic.c -o /tmp/opentail-core-alpha-tests
 /tmp/opentail-core-alpha-tests
 # Issue121: turn-only 400ms release hold, fake monotonic clock and unchanged
@@ -13,6 +17,8 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/status_logic.c tests/te
 /tmp/opentail-status-led-tests
 python3 tests/test_status_led_first_frame_contract.py
 python3 tests/test_main_stack_boot_contract.py
+# Owner COM9 P0: BLE controller HCI must reserve internal memory before SoftAP.
+python3 tests/test_ble_hci_boot_contract.py
 # #113: deterministic single-ESP crash streak/stable boot and exact progress
 # gates. Actual WDT reset timing/GPIO/optics requires a powered-board test.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
@@ -39,10 +45,61 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
 python3 tests/test_failover_runtime_isolation.py
 python3 tests/test_failover_release_evidence.py
 python3 tests/test_ble_gap_recovery_contract.py
+# Issue126: hierarchical Panel/Zone map, multi-range logical zones, legacy
+# migration, lane-aware unassigned fallback, 1,246-pixel and 2,048/lane bounds.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone.c -o /tmp/ot-panel-zone-tests
+/tmp/ot-panel-zone-tests
+# V3 Panel/Zone journal: CRC, monotonic revisions, rollback/power-cut phases.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_journal.c \
+  -o /tmp/ot-panel-zone-journal && /tmp/ot-panel-zone-journal
+# V4 cross-namespace pair journal: lane-only ot_output_cfg + map-only
+# ot_zone_map, durable intent, mixed active/staged recovery and crash boundaries.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_pair_journal.c \
+  -o /tmp/ot-panel-zone-pair-journal && /tmp/ot-panel-zone-pair-journal
+# The same durable pair-store state machine used by CORE, with fake NVS commit
+# boundaries and simulated power loss after each of the nine individually committed and verified phases.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/config_journal.c main/panel_zone.c main/panel_zone_pair_store.c \
+  main/trigger_manager.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone_pair_store.c -o /tmp/ot-panel-zone-pair-store
+/tmp/ot-panel-zone-pair-store
+# Five-byte authenticated probe and cumulative fill primitive; no RMT calls here.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone_diag.c tests/test_panel_zone_diag.c -o /tmp/ot-panel-zone-diag
+/tmp/ot-panel-zone-diag
+# Volatile live arrangement preview and activation quiet-window regression.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/output_manager.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_panel_zone_preview.c -o /tmp/ot-panel-zone-preview
+/tmp/ot-panel-zone-preview
+# 0xFE live geometry UPDATE framing, MTU sizing, sequence replay and reorder rejection.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/panel_zone_protocol.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c tests/test_panel_zone_protocol.c \
+  -o /tmp/ot-panel-zone-protocol
+/tmp/ot-panel-zone-protocol
+python3 tests/test_panel_zone_runtime_contract.py
+# Request values are 0..255; CORE applies one reported safe ceiling at final RGB output.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/output_manager.c main/panel_zone.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_brightness_contract.c -o /tmp/ot-brightness-contract
+/tmp/ot-brightness-contract
+# Also compile the same contract with the maximum permitted 8-bit ceiling.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  -DCONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT=255 \
+  main/output_manager.c main/panel_zone.c main/core_logic.c main/arbitration_logic.c \
+  tests/test_brightness_contract.c -o /tmp/ot-brightness-contract-255
+/tmp/ot-brightness-contract-255
 # Durable active/staged NVS records: simulate interrupted commits and all 256
 # physical-input masks for both universal zone and trigger profiles.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
-  main/config_journal.c main/trigger_manager.c main/output_manager.c \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c tests/test_config_journal.c \
   -o /tmp/ot-config-journal-tests && /tmp/ot-config-journal-tests
 
@@ -125,7 +182,7 @@ python3 tests/test_effects_render_safety_contract.py
 # The same corrected NVS recovery journal must preserve independently
 # assigned FX zones and never auto-play a saved show after reboot.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
-  main/config_journal.c main/trigger_manager.c main/output_manager.c \
+  main/config_journal.c main/panel_zone.c main/trigger_manager.c main/output_manager.c \
   main/core_logic.c main/arbitration_logic.c main/fx_zone_bank.c \
   main/fx_overlay_engine.c tests/test_effects_nvs_recovery_isolation.c \
   -o /tmp/ot-effects-nvs-isolation && /tmp/ot-effects-nvs-isolation
@@ -144,6 +201,8 @@ python3 tests/test_wled_catalog.py
 # until all source-derived parity and physical evidence gates pass).
 python3 tests/check_effects_release.py --audit
 python3 tests/test_version_identity.py
+python3 tests/test_wifi_beacon_boot_contract.py
+python3 tests/test_physical_save_probe_contract.py
 python3 tests/test_http_stop_contract.py
 python3 tests/test_dev_console_contract.py
 python3 tests/test_nvs_finalization_contract.py
@@ -190,3 +249,15 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/output_manager.c main/co
 
 # Explicit continuous controller command semantics; no hardware certification.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain main/fx_zone_bank.c main/fx_overlay_engine.c main/output_manager.c main/core_logic.c main/arbitration_logic.c tests/test_continuous_fx.c -o /tmp/ot-continuous-fx-tests && /tmp/ot-continuous-fx-tests
+
+
+# FX-PZ-01..10: real Panel/Zone mapper + real per-zone effect renderer continuity.
+# Preview promotion is simulated; this does not claim ESP NVS, BLE, RMT or optics.
+cc -std=c11 -Wall -Wextra -Werror -pedantic -Imain \
+  main/panel_zone.c main/panel_zone_protocol.c main/output_manager.c \
+  main/core_logic.c main/arbitration_logic.c main/fx_zone_bank.c \
+  main/fx_overlay_engine.c main/effects_1d.c main/ot_auto_effects.c \
+  main/wled_fx_compat.c main/palette_1d.c main/particle_system_1d.c \
+  main/wled_1d.c tests/test_effects_panel_zone_continuity.c \
+  -o /tmp/ot-effects-panel-zone-continuity -lm
+/tmp/ot-effects-panel-zone-continuity

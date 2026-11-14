@@ -2,6 +2,27 @@
 #include <stdio.h>
 #include <string.h>
 #include "config_journal.h"
+static void tm_policy_case(void){
+    ot_tm_policy_record_t policy={0};
+    assert(ot_tm_policy_build(&policy,1u,4u,10u,
+                              OT_TM_TURN_RELEASE_INPUT_MASK,
+                              (uint32_t)OT_TURN_RELEASE_HOLD_US));
+    assert(ot_tm_policy_valid(&policy));
+    assert(policy.input_active_low==1u&&policy.assertion_samples==4u);
+    assert(policy.sample_period_ms==10u&&
+           policy.turn_release_hold_us==400000u);
+    assert(policy.turn_release_input_mask==0x0cu);
+    for(size_t i=0;i<sizeof(policy);i++){
+        ot_tm_policy_record_t corrupt=policy;
+        ((uint8_t*)&corrupt)[i]^=0x01u;
+        assert(!ot_tm_policy_valid(&corrupt));
+    }
+    assert(!ot_tm_policy_build(&policy,2u,4u,10u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,0u,10u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,0u,0x0cu,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,10u,0u,400000u));
+    assert(!ot_tm_policy_build(&policy,1u,4u,10u,0x80u,400000u));
+}
 static void tm_case(void){
     ot_tm_profile_t a={0},b={0};ot_tm_defaults(&a);b=a;
     b.function[0]=OT_TM_AUX3;b.function[1]=OT_TM_LEFT;
@@ -35,6 +56,7 @@ static void om_case(void){
     ot_om_output_t a[OT_OM_OUTPUTS]={0},b[OT_OM_OUTPUTS]={0},live[OT_OM_OUTPUTS];
     ot_om_defaults(a);memcpy(b,a,sizeof(b));
     for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+        b[i].zone_count=1u;strcpy(b[i].zones[0].name,"User zone");
         b[i].active_pixels=17u;
         b[i].zones[0].pixels=17u;
         b[i].color_order=OT_OM_GRB;
@@ -144,7 +166,7 @@ static void upgrade_case(void){
     assert(!ot_tm_journal_upgrade_v1(&v1,&v2));
 }
 int main(void){
-    tm_case();om_case();crash_matrix();revision_case();upgrade_case();
+    tm_policy_case();tm_case();om_case();crash_matrix();revision_case();upgrade_case();
     puts("PASS: durable journal CRC, monotonic revisions, crash boundaries and 256 input masks");
     return 0;
 }

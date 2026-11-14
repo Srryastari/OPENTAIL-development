@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_wifi_default.h"
 #include "nvs_flash.h"
 #include "cJSON.h"
 #include "led_strip.h"
@@ -37,10 +38,18 @@
 #include "palette_1d.h"
 #include "arbitration_logic.h"
 #include "output_manager.h"
+#include "panel_zone.h"
+#include "panel_zone_diag.h"
+#include "panel_zone_api.h"
+#include "input_telemetry.h"
 #include "config_journal.h"
+#include "panel_zone_pair_store.h"
 #include "trigger_manager.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "xt_utils.h"
+#include "esp_psram.h"
 #include "hal/gpio_ll.h"
 #include "esp_random.h"
 #include "esp_attr.h"
@@ -90,11 +99,11 @@ static void request_render_refresh(void){
 static bool input_sampler_ready=false;
 /* GPIO any-edge ISR records transitions even during a slow NVS write.
  * A quiet debounced window + unchanged epoch is required to promote. */
-static volatile uint32_t input_edge_epoch=0u;
+static DRAM_ATTR volatile uint32_t input_edge_epoch __attribute__((aligned(4)))=0u;
 /* GPIO ISR transition history. A sampler tick never has to infer whether
  * one or more turn edges happened between reads. Each lane is an SPSC ring:
  * ISR publishes head with release semantics; sampler consumes through tail. */
-#define OT_TURN_EDGE_QUEUE_CAPACITY 32u
+#define OT_TURN_EDGE_QUEUE_CAPACITY 64u
 #define OT_TURN_EDGE_QUEUE_MASK (OT_TURN_EDGE_QUEUE_CAPACITY-1u)
 typedef struct {
     uint64_t timestamp_us;
@@ -107,6 +116,27 @@ static DRAM_ATTR volatile uint32_t turn_edge_head[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_tail[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]={0u,0u};
 static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]={0u,0u};
+/* Telemetry is additive: keep the existing per-lane SPSC turn queues intact. */
+/* The ESP-IDF 5.5.5 S32C1I PSRAM workaround deliberately reports 32-bit
+ * atomics as not globally lock-free: external PSRAM is not S32C1I atomic.
+ * Our ISR variables stay in internal DRAM. Require 4-byte alignment here;
+ * the exact linked-ELF IRAM audit additionally rejects any out-of-IRAM
+ * atomic helper calls, rather than trusting a global compiler predicate. */
+#if CONFIG_STDATOMIC_S32C1I_SPIRAM_WORKAROUND
+_Static_assert(__alignof__(turn_edge_head[0])>=4 &&
+               __alignof__(turn_edge_tail[0])>=4 &&
+               __alignof__(turn_edge_writer_active[0])>=4,
+               "internal ISR atomic words must be 4-byte aligned");
+#else
+_Static_assert(__atomic_always_lock_free(sizeof(uint32_t),0),
+               "32-bit ISR telemetry atomics must be lock-free");
+#endif
+static DRAM_ATTR volatile uint32_t input_raw_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_asserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_deasserted_edges[OT_INPUT_DIAG_INPUTS] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t input_raw_level_mask __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t turn_edge_high_water[2] __attribute__((aligned(4)));
+static DRAM_ATTR volatile uint32_t turn_edge_overflow_count[2] __attribute__((aligned(4)));
 static uint64_t input_boot_snapshot_us=0u;
 static uint8_t input_quiet_samples=0u;
 static bool config_recovery_fault=false;
@@ -117,6 +147,8 @@ static TickType_t sim_deadline=0;
 static ot_demo_t demo={OT_DEMO_OFF,{0,0,0},0};
 static TickType_t demo_deadline=0;
 static uint32_t frame_index=0;
+/* Random per-boot diagnostic identity; never used as a security credential. */
+static uint32_t core_boot_id=0u;
 static uint32_t measured_fps=0;
 static uint16_t adaptive_target_fps=OT_FPS_PREFERRED_HIGH;
 static uint32_t frame_window_start_ms=0,frame_window_frames=0;
@@ -141,9 +173,89 @@ static bool ble_fx_enabled=false;
 static ot_fx_zone_bank_t fx_bank={0}; /* Independent CORE output/zone effect assignments */
 static ot_ble_fx_packet_t ble_fx_request={0};
 
-static ot_om_output_t om_outputs[OT_OM_OUTPUTS];
+static ot_om_output_t om_outputs[OT_OM_OUTPUTS]; /* Compatibility projection for unchanged FX/v1 code. */
+/* Protected by state_lock; only the selected preview lane differs from
+ * the saved FX view. No NVS mutation or additional controller stack copy. */
+static ot_om_output_t pz_live_fx_views[OT_OM_OUTPUTS];
+static ot_pz_controller_t pz_outputs; /* Authoritative hierarchical schema v4. */
+static ot_pz_pending_t pz_deferred;
+/* Per-output volatile sessions. Preview never writes another output's geometry. */
+static ot_pz_preview_t pz_preview[OT_PZ_OUTPUTS];
+static void pz_effective_panels_locked(ot_pz_output_t *outputs){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        outputs[i]=pz_preview[i].active?
+            pz_preview[i].candidate.outputs[i]:pz_outputs.outputs[i];
+}
+
+/* Single mutex-protected scratch avoids full controller copies on NimBLE stack. */
+static ot_pz_preview_t pz_preview_scratch;
+static ot_pz_output_t pz_effective_fx_panels[OT_PZ_OUTPUTS];
+static bool pz_preview_any_active_locked(void){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)if(pz_preview[i].active)return true;
+    return false;
+}
+static void pz_preview_cancel_all_locked(void){
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        if(!pz_preview[i].committing)ot_pz_preview_cancel(&pz_preview[i]);
+}
+
+static ot_pz_controller_t pz_preview_commit_candidate;
+static uint16_t pz_preview_commit_lane_revision=0u;
+static uint8_t pz_preview_commit_lane=0u;
+static bool pz_preview_commit_requested=false;
+static bool pz_preview_commit_worker_active=false;
+static ot_pz_diag_state_t pz_diag;
+/* Volatile first-pixel evidence. No NVS or BLE wire fields. */
+static uint32_t probe_generation[OT_CHAIN_COUNT]={0u};
+static uint32_t probe_rmt_first_frame_generation[OT_CHAIN_COUNT]={0u};
+static uint32_t probe_rmt_bright_frame_generation[OT_CHAIN_COUNT]={0u};
+#define OT_PZ_RESET_TOMBSTONE_MAGIC 0x4f54525au
+#define OT_PZ_RESET_TOMBSTONE_VERSION 1u
+#define OT_PZ_RESET_TOMBSTONE_KEY "reset_v3"
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint8_t reset_mask;
+    uint8_t reserved;
+    uint16_t revision[OT_PZ_OUTPUTS];
+    ot_pz_controller_t controller;
+    uint32_t crc32;
+} ot_pz_reset_tombstone_t;
+
+/* Pair-store and legacy-migration scratch is static BSS, not task stack.
+ * Every runtime user holds om_write_mutex; boot recovery runs before tasks. */
+static ot_pz_pair_store_workspace_t pz_pair_workspace;
+static ot_pz_journal_t pz_legacy_active_journal,pz_legacy_stage_journal;
+static ot_pz_reset_tombstone_t pz_legacy_tombstone;
+_Static_assert(sizeof(pz_pair_workspace)<=16u*1024u,
+               "v4 pair-store workspace exceeds its bounded DRAM budget");
+typedef struct {
+    bool active;
+    uint8_t lane;
+    uint16_t revision;
+    uint32_t value;
+    uint32_t expires_ms;
+    uint32_t input_epoch;
+    uint32_t stop_generation;
+} ot_pz_reset_challenge_t;
+static ot_pz_reset_challenge_t pz_reset_challenge;
+static uint8_t pz_reset_pending_mask;
+static bool pz_pair_commit_pending;
+static uint32_t pz_pair_transaction_id;
+static uint8_t pz_pair_commit_phase;
+static uint32_t pz_pair_commit_phase_txn;
+static void pz_promote(uint32_t epoch);
+static void pz_preview_cancel_pending_locked(void);
+static bool config_activation_idle(uint32_t epoch,bool allow_show);
+static bool pz_persistent=false;
+static uint16_t pz_revision[OT_PZ_OUTPUTS]={1u,1u};
+static uint16_t pz_active_revision[OT_PZ_OUTPUTS]={1u,1u};
+static uint16_t pz_render_revision[OT_PZ_OUTPUTS]={0u,0u};
 static ot_om_pending_t om_deferred; /* Persisted zones await release. */
 static bool om_persistent=false;
+/* The old combined Output Manager journal is migration input only. A bad
+ * legacy journal must not veto a valid authoritative v4 lane/map pair. */
+static bool om_legacy_journal_fault=false;
 static SemaphoreHandle_t om_write_mutex=NULL;
 static uint16_t om_revision[OT_OM_OUTPUTS]; /* latest durably staged edit token */
 static uint16_t om_active_revision[OT_OM_OUTPUTS]; /* currently rendered geometry */
@@ -170,6 +282,42 @@ static void tm_load(void){
     else ESP_LOGI(TAG,"No valid trigger profile; preserving original IN1..IN8 defaults");
     /* Pending always wins at boot, even if power failed AFTER writing the
      * future active key. Its previous image is the only safe old routing. */
+}
+/* Persist only the approved physical input policy values. Live debounce
+ * timers, edge timestamps and sampler state are deliberately never stored.
+ * Existing trigger profiles migrate by writing this independent versioned
+ * policy record with the exact defaults used by this firmware build. */
+static bool tm_policy_load(void){
+    ot_tm_policy_record_t expected={0},stored={0};
+    if(!ot_tm_policy_build(&expected,(uint8_t)(OT_INPUT_ACTIVE_LOW?1u:0u),
+        (uint8_t)OT_DEBOUNCE_TICKS,10u,OT_TM_TURN_RELEASE_INPUT_MASK,
+        (uint32_t)OT_TURN_RELEASE_HOLD_US))
+        return false;
+    nvs_handle_t h;
+    if(nvs_open("ot_trig_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
+    size_t size=0u;
+    esp_err_t e=nvs_get_blob(h,OT_TM_POLICY_KEY,NULL,&size);
+    bool migrated=false;
+    if(e==ESP_ERR_NVS_NOT_FOUND){
+        e=nvs_set_blob(h,OT_TM_POLICY_KEY,&expected,sizeof(expected));
+        if(e==ESP_OK)e=nvs_commit(h);
+        if(e==ESP_OK){
+            migrated=true;size=sizeof(stored);
+            e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
+        }
+    }else if(e==ESP_OK){
+        if(size!=sizeof(stored))e=ESP_ERR_INVALID_SIZE;
+        else e=nvs_get_blob(h,OT_TM_POLICY_KEY,&stored,&size);
+    }
+    nvs_close(h);
+    if(e!=ESP_OK||size!=sizeof(stored)||!ot_tm_policy_valid(&stored)||
+       memcmp(&stored,&expected,sizeof(stored))!=0)return false;
+    if(migrated)ESP_LOGI(TAG,
+        "Migrated trigger input policy: active_low=%u sampled_assert=%u x %ums turn_release_mask=%02x turn_release_us=%lu",
+        (unsigned)stored.input_active_low,(unsigned)stored.assertion_samples,
+        (unsigned)stored.sample_period_ms,(unsigned)stored.turn_release_input_mask,
+        (unsigned long)stored.turn_release_hold_us);
+    return true;
 }
 /* Size/version-aware reader preserves draft-v1 records and the older
  * profile_v1 key. A corrupt newer journal never falls back to legacy. */
@@ -325,18 +473,21 @@ static void om_journal_load(void){
     nvs_handle_t h;
     esp_err_t e=nvs_open("ot_output_cfg",NVS_READONLY,&h);
     if(e==ESP_ERR_NVS_NOT_FOUND)return;
-    if(e!=ESP_OK){config_recovery_fault=true;return;}
+    if(e!=ESP_OK){om_legacy_journal_fault=true;return;}
     ot_om_journal_t active={0},stage={0};
     const esp_err_t a=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&active);
     const esp_err_t b=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
     const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
     if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
-       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))config_recovery_fault=true;
+       (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND))om_legacy_journal_fault=true;
     nvs_close(h);
-    if(!config_recovery_fault&&!ot_om_journal_recover(
+    if(!om_legacy_journal_fault&&!ot_om_journal_recover(
         has_a?&active:NULL,has_b?&stage:NULL,om_outputs,&om_deferred))
-        config_recovery_fault=true;
-    if(config_recovery_fault){ot_om_defaults(om_outputs);om_persistent=false;return;}
+        om_legacy_journal_fault=true;
+    if(om_legacy_journal_fault){
+        ot_om_defaults(om_outputs);om_deferred.pending=false;
+        om_persistent=false;return;
+    }
     if(has_a||has_b){
         const ot_om_journal_t *r=has_b?&stage:&active;
         memcpy(om_active_revision,r->previous_revision,sizeof(om_active_revision));
@@ -346,31 +497,317 @@ static void om_journal_load(void){
         om_persistent=true;
     }
 }
-static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
-    ot_om_output_t old[OT_OM_OUTPUTS];
-    uint16_t old_rev[OT_OM_OUTPUTS],new_rev[OT_OM_OUTPUTS];
-    portENTER_CRITICAL(&state_lock);
-    memcpy(old,om_outputs,sizeof(old));
-    memcpy(old_rev,om_active_revision,sizeof(old_rev));
-    memcpy(new_rev,om_revision,sizeof(new_rev));
-    portEXIT_CRITICAL(&state_lock);
-    for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
-        if(memcmp(&old[i],&items[i],sizeof(old[i]))!=0){
-            if(new_rev[i]==UINT16_MAX)return false;
-            new_rev[i]++;
+static esp_err_t pz_journal_read(nvs_handle_t h,const char *key,ot_pz_journal_t *out){
+    size_t n=0;esp_err_t e=nvs_get_blob(h,key,NULL,&n);
+    if(e!=ESP_OK)return e;
+    if(n!=sizeof(*out))return ESP_ERR_INVALID_SIZE;
+    e=nvs_get_blob(h,key,out,&n);
+    return e==ESP_OK&&ot_pz_journal_valid(out)?ESP_OK:ESP_ERR_INVALID_CRC;
+}
+/* state_lock held: keep the old Output Manager view only as a compatibility
+ * projection for the unchanged effects bank and legacy v1 REST/BLE interfaces. */
+static void pz_refresh_legacy_projection_locked(void){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(!ot_pz_to_fx_view(&pz_outputs.outputs[lane],lane,&om_outputs[lane])){
+            ot_om_output_t defaults[OT_OM_OUTPUTS];ot_om_defaults(defaults);
+            om_outputs[lane]=defaults[lane];
         }
     }
-    ot_om_journal_t staged={0};
-    if(!ot_om_journal_build_revisions(&staged,old,items,old_rev,new_rev))
-        return false;
+    memcpy(om_revision,pz_revision,sizeof(om_revision));
+    memcpy(om_active_revision,pz_active_revision,sizeof(om_active_revision));
+    om_persistent=pz_persistent;
+}
+static bool pz_reset_tombstone_valid(const ot_pz_reset_tombstone_t *record){
+    if(!record||record->magic!=OT_PZ_RESET_TOMBSTONE_MAGIC||
+       record->version!=OT_PZ_RESET_TOMBSTONE_VERSION||
+       (record->reset_mask&~((1u<<OT_PZ_OUTPUTS)-1u))!=0u)return false;
+    return record->crc32==ot_cfg_crc32_zeroed(record,sizeof(*record),
+        offsetof(ot_pz_reset_tombstone_t,crc32),sizeof(record->crc32));
+}
+static ot_pz_pair_io_result_t pz_pair_nvs_read(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key,void *data,size_t *size){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
     nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return false;
-    esp_err_t e=nvs_set_blob(h,OT_CFG_JOURNAL_KEY_STAGED,&staged,sizeof(staged));
+    esp_err_t e=nvs_open(storage_namespace,NVS_READONLY,&h);
+    if(e==ESP_ERR_NVS_NOT_FOUND)return OT_PZ_PAIR_IO_NOT_FOUND;
+    if(e!=ESP_OK)return OT_PZ_PAIR_IO_ERROR;
+    e=nvs_get_blob(h,key,data,size);
+    nvs_close(h);
+    if(e==ESP_OK)return OT_PZ_PAIR_IO_OK;
+    if(e==ESP_ERR_NVS_NOT_FOUND)return OT_PZ_PAIR_IO_NOT_FOUND;
+    return OT_PZ_PAIR_IO_ERROR;
+}
+static bool pz_pair_nvs_write_commit(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key,
+        const void *data,size_t size){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
+    nvs_handle_t h;
+    if(nvs_open(storage_namespace,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_set_blob(h,key,data,size);
     if(e==ESP_OK)e=nvs_commit(h);
     nvs_close(h);
     return e==ESP_OK;
 }
+static bool pz_pair_nvs_erase_commit(void *context,
+        ot_pz_pair_namespace_t name_space,const char *key){
+    (void)context;
+    const char *storage_namespace=name_space==OT_PZ_PAIR_NS_OUTPUT_CFG?
+        "ot_output_cfg":"ot_zone_map";
+    nvs_handle_t h;
+    if(nvs_open(storage_namespace,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t e=nvs_erase_key(h,key);
+    if(e==ESP_ERR_NVS_NOT_FOUND){nvs_close(h);return true;}
+    if(e==ESP_OK)e=nvs_commit(h);
+    nvs_close(h);
+    return e==ESP_OK;
+}
+static const ot_pz_pair_store_io_t pz_pair_store_io={
+    .context=NULL,
+    .read=pz_pair_nvs_read,
+    .write_commit=pz_pair_nvs_write_commit,
+    .erase_commit=pz_pair_nvs_erase_commit
+};
+static bool pz_pair_phase_hook(void *context,uint8_t phase,uint32_t transaction_id){
+    (void)context;
+    __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+    __atomic_store_n(&pz_pair_commit_phase,phase,__ATOMIC_RELEASE);
+    ESP_LOGI(TAG,"PZ_PAIR_PHASE phase=%u transaction=%08lx",
+             (unsigned)phase,(unsigned long)transaction_id);
+    return true;
+}
+/* Read-only v3 combined journal/tombstone migration source. Once a v4 pair is
+ * authoritative, these legacy records are never consulted as a fallback. */
+static bool pz_load_legacy_snapshot(ot_pz_controller_t *previous,
+        ot_pz_controller_t *candidate,uint16_t previous_revision[OT_PZ_OUTPUTS],
+        uint16_t candidate_revision[OT_PZ_OUTPUTS],uint8_t *reset_mask){
+    if(!previous||!candidate||!previous_revision||!candidate_revision||!reset_mask)
+        return false;
+    ot_pz_defaults(previous);*candidate=*previous;*reset_mask=0u;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        previous_revision[lane]=candidate_revision[lane]=1u;
+    ot_pz_journal_t *active=&pz_legacy_active_journal;
+    ot_pz_journal_t *stage=&pz_legacy_stage_journal;
+    ot_pz_reset_tombstone_t *tombstone=&pz_legacy_tombstone;
+    ot_pz_pending_t *deferred=&pz_pair_workspace.pending;
+    memset(active,0,sizeof(*active));memset(stage,0,sizeof(*stage));
+    memset(tombstone,0,sizeof(*tombstone));memset(deferred,0,sizeof(*deferred));
+    nvs_handle_t h;
+    esp_err_t e=nvs_open("ot_zone_map",NVS_READONLY,&h);
+    if(e==ESP_OK){
+        size_t tombstone_size=sizeof(*tombstone);
+        const esp_err_t t=nvs_get_blob(h,OT_PZ_RESET_TOMBSTONE_KEY,
+                                       tombstone,&tombstone_size);
+        const bool has_tombstone=t==ESP_OK&&tombstone_size==sizeof(*tombstone)&&
+                                 pz_reset_tombstone_valid(tombstone);
+        const esp_err_t a=pz_journal_read(h,OT_PZ_JOURNAL_KEY_ACTIVE,active);
+        const esp_err_t b=pz_journal_read(h,OT_PZ_JOURNAL_KEY_STAGED,stage);
+        const bool has_a=a==ESP_OK,has_b=b==ESP_OK;
+        if((a!=ESP_OK&&a!=ESP_ERR_NVS_NOT_FOUND)||
+           (b!=ESP_OK&&b!=ESP_ERR_NVS_NOT_FOUND)||
+           (t!=ESP_OK&&t!=ESP_ERR_NVS_NOT_FOUND)||
+           (t==ESP_OK&&!has_tombstone)){
+            nvs_close(h);return false;
+        }
+        if(has_a||has_b){
+            if(!ot_pz_journal_recover(has_a?active:NULL,has_b?stage:NULL,
+                previous,deferred,previous_revision,candidate_revision)){
+                nvs_close(h);return false;
+            }
+            *candidate=deferred->pending?deferred->candidate:*previous;
+            if(has_tombstone&&
+               memcmp(candidate,&tombstone->controller,sizeof(*candidate))==0)
+                *reset_mask=tombstone->reset_mask;
+            nvs_close(h);return true;
+        }
+        if(has_tombstone){
+            *previous=tombstone->controller;*candidate=*previous;
+            memcpy(previous_revision,tombstone->revision,sizeof(tombstone->revision));
+            memcpy(candidate_revision,tombstone->revision,sizeof(tombstone->revision));
+            *reset_mask=tombstone->reset_mask;
+            nvs_close(h);return true;
+        }
+        nvs_close(h);
+    }else if(e!=ESP_ERR_NVS_NOT_FOUND){
+        return false;
+    }
+    /* Owner-locked fresh commissioning: do NOT import old Output v1/v2
+     * test records (including 'BLE TEST 1') into authoritative Panel v4.
+     * A valid older v3 panel journal/tombstone above remains recoverable.
+     * With NO v4 and NO valid v3 record, the zero-LED defaults initialized
+     * at entry are persisted as the initial v4 pair by pz_load().
+     * Never erase unrelated NVS or silently modify existing v4 layouts. */
+    ESP_LOGI(TAG,"Fresh Panel v4 defaults: O1/O2 0 LEDs, 0 panels/zones; legacy Output v1 test profiles ignored");
+    return true;
+}
+static void pz_load(void){
+    ot_pz_pair_store_workspace_t *workspace=&pz_pair_workspace;
+    ot_pz_defaults(&pz_outputs);
+    pz_deferred.pending=false;pz_persistent=false;
+    __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_transaction_id,0u,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_commit_phase,0u,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_commit_phase_txn,0u,__ATOMIC_RELAXED);
+    pz_reset_pending_mask=0u;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        pz_revision[lane]=pz_active_revision[lane]=1u;
+    if(config_recovery_fault)return;
 
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,workspace)){
+        config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+        ot_st_set_fault("v4 lane/map pair journal invalid");return;
+    }
+    const ot_pz_pair_store_snapshot_t *snapshot=&workspace->snapshot;
+    /* The durable marker is written in phase 6 after map-active. Its presence
+     * alone proves v4 ownership: if either active journal is missing, recovery
+     * must fail closed rather than resurrect stale v3 geometry. */
+    const bool v4_authoritative=snapshot->has_marker||snapshot->has_intent||
+        snapshot->has_map_active||snapshot->has_lane_active;
+    if(v4_authoritative){
+        bool intent_pending=false;uint32_t transaction_id=0u;uint8_t reset_mask=0u;
+        if(!ot_pz_pair_store_recover(&pz_pair_store_io,workspace,NULL,&pz_outputs,
+             &pz_deferred,pz_active_revision,pz_revision,&intent_pending,
+             &transaction_id,&reset_mask)){
+            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+            pz_deferred.pending=false;pz_persistent=false;
+            ot_st_set_fault("v4 lane/map pair recovery mismatch");return;
+        }
+        __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
+        __atomic_store_n(&pz_pair_commit_phase,intent_pending?0u:9u,__ATOMIC_RELEASE);
+        __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+        __atomic_store_n(&pz_pair_commit_pending,intent_pending,__ATOMIC_RELEASE);
+        pz_reset_pending_mask=reset_mask;
+        pz_persistent=true;
+    }else{
+        uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+        uint8_t reset_mask=0u;
+        if(!pz_load_legacy_snapshot(&workspace->previous,&workspace->candidate,
+             previous_revision,candidate_revision,&reset_mask)){
+            config_recovery_fault=true;ot_pz_defaults(&pz_outputs);
+            ot_st_set_fault("legacy configuration migration source invalid");return;
+        }
+        const bool changed=memcmp(&workspace->previous,&workspace->candidate,
+                                  sizeof(workspace->previous))!=0;
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+            const bool lane_changed=memcmp(&workspace->previous.outputs[lane],
+                &workspace->candidate.outputs[lane],
+                sizeof(workspace->previous.outputs[lane]))!=0;
+            if(lane_changed&&candidate_revision[lane]<=previous_revision[lane]){
+                if(previous_revision[lane]==UINT16_MAX){
+                    config_recovery_fault=true;
+                    ot_st_set_fault("legacy migration revision exhausted");return;
+                }
+                candidate_revision[lane]=(uint16_t)(previous_revision[lane]+1u);
+            }
+        }
+        /* A first-time v4 pair needs an intent even when the legacy profile is
+         * already stable. Advance one revision without changing its contents. */
+        if(!changed){
+            if(candidate_revision[0]==UINT16_MAX){
+                config_recovery_fault=true;
+                ot_st_set_fault("initial v4 pair revision exhausted");return;
+            }
+            candidate_revision[0]=(uint16_t)(candidate_revision[0]+1u);
+        }
+        uint32_t transaction_id=esp_random();
+        if(transaction_id==0u)transaction_id=esp_random();
+        if(transaction_id==0u||
+           !ot_pz_pair_store_begin(&pz_pair_store_io,workspace,
+                &workspace->previous,&workspace->candidate,previous_revision,
+                candidate_revision,transaction_id,reset_mask,true,
+                pz_pair_phase_hook,NULL)){
+            config_recovery_fault=true;
+            ot_st_set_fault("v4 legacy pair migration staging failed");return;
+        }
+        pz_outputs=workspace->previous;
+        pz_deferred.candidate=workspace->candidate;
+        pz_deferred.pending=changed;
+        memcpy(pz_active_revision,previous_revision,sizeof(pz_active_revision));
+        memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
+        __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
+        __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
+        pz_reset_pending_mask=reset_mask;pz_persistent=true;
+    }
+    /* All legacy output settings have been joined into the v4 pair. The old
+     * Output Manager pending journal must never race the authoritative pair. */
+    om_deferred.pending=false;
+    portENTER_CRITICAL(&state_lock);
+    pz_refresh_legacy_projection_locked();
+    portEXIT_CRITICAL(&state_lock);
+}
+static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
+    if(!candidate||!ot_pz_valid(candidate))return false;
+    ot_pz_controller_t *previous=&pz_pair_workspace.previous;
+    uint16_t previous_revision[OT_PZ_OUTPUTS],candidate_revision[OT_PZ_OUTPUTS];
+    uint8_t reset_mask=0u;
+    bool busy=false;
+    portENTER_CRITICAL(&state_lock);
+    busy=pz_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+         false; /* Pair-store access serialized by om_write_mutex. */
+    *previous=pz_outputs;
+    memcpy(previous_revision,pz_active_revision,sizeof(previous_revision));
+    memcpy(candidate_revision,pz_revision,sizeof(candidate_revision));
+    reset_mask=pz_reset_pending_mask;
+    portEXIT_CRITICAL(&state_lock);
+    if(busy)return false;
+    bool changed=false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(memcmp(&previous->outputs[lane],&candidate->outputs[lane],
+                  sizeof(previous->outputs[lane]))==0)continue;
+        if(candidate_revision[lane]==UINT16_MAX)return false;
+        candidate_revision[lane]++;changed=true;
+    }
+    if(!changed){
+        for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+            if(reset_mask&(1u<<lane))
+                if(!ot_pz_pair_store_mark_reset(&pz_pair_store_io,
+                    &pz_pair_workspace,(uint8_t)lane))return false;
+        return true;
+    }
+    uint32_t transaction_id=esp_random();
+    if(transaction_id==0u)transaction_id=esp_random();
+    if(transaction_id==0u)return false;
+    __atomic_store_n(&pz_pair_commit_phase,0u,__ATOMIC_RELEASE);
+    __atomic_store_n(&pz_pair_commit_phase_txn,transaction_id,__ATOMIC_RELEASE);
+    if(!ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,
+        previous,candidate,previous_revision,candidate_revision,
+        transaction_id,reset_mask,false,pz_pair_phase_hook,NULL)){
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map pair staging failed; reboot reconciliation required");
+        return false;
+    }
+    portENTER_CRITICAL(&state_lock);
+    pz_deferred.candidate=*candidate;pz_deferred.pending=true;
+    memcpy(pz_revision,candidate_revision,sizeof(pz_revision));
+    pz_persistent=true;
+    pz_refresh_legacy_projection_locked();
+    portEXIT_CRITICAL(&state_lock);
+    __atomic_store_n(&pz_pair_transaction_id,transaction_id,__ATOMIC_RELAXED);
+    __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
+    return true;
+}
+/* Legacy output writes are lossless only while the current lane is representable
+ * as one panel with contiguous zones. Complex hierarchy is never silently flattened. */
+static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
+    if(!items)return false;
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
+    portENTER_CRITICAL(&state_lock);
+    if(pz_preview_any_active_locked()){portEXIT_CRITICAL(&state_lock);return false;}
+    *candidate=pz_outputs;
+    portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        ot_om_output_t current={0};
+        if(!ot_pz_to_legacy(&candidate->outputs[lane],lane,&current))return false;
+        if(memcmp(&current,&items[lane],sizeof(current))==0)continue;
+        ot_pz_output_t replacement={0};
+        if(!ot_pz_from_legacy_output(&items[lane],lane,candidate,&replacement))return false;
+        candidate->outputs[lane]=replacement;
+    }
+    return pz_save_controller_locked(candidate);
+}
 #define OT_SHOW_MAX_MS 60000u
 /* Input simulation is limited to 15 seconds, independent of show TTL. */
 #define OT_SIM_MAX_MS 15000u
@@ -476,15 +913,16 @@ oom:
     return NULL;
 }
 static esp_err_t om_get(httpd_req_t *r){
-    ot_om_output_t copy[OT_OM_OUTPUTS];ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
+    ot_om_output_t copy[OT_OM_OUTPUTS];ot_pz_controller_t panel_copy;
+    ot_tm_profile_t tm;bool persistent,config_pending;uint8_t mask;
     uint16_t active_revisions[OT_OM_OUTPUTS],staged_revisions[OT_OM_OUTPUTS];
     uint8_t show_zones[OT_OM_OUTPUTS]={0};
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    memcpy(copy,om_outputs,sizeof(copy));config_pending=om_deferred.pending;
-    memcpy(active_revisions,om_active_revision,sizeof(active_revisions));
-    memcpy(staged_revisions,om_revision,sizeof(staged_revisions));
-    persistent=om_persistent&&!config_pending;tm=tm_profile;
+    panel_copy=pz_outputs;config_pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    memcpy(active_revisions,pz_active_revision,sizeof(active_revisions));
+    memcpy(staged_revisions,pz_revision,sizeof(staged_revisions));
+    persistent=pz_persistent&&!config_pending;tm=tm_profile;
     mask=ot_tm_resolve(&tm,live_input_mask)|(before_deadline(now,sim_deadline)?sim_mask:0);
     if(show_window(now)){
         if(ble_fx_enabled){
@@ -499,9 +937,13 @@ static esp_err_t om_get(httpd_req_t *r){
         }
     }
     portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(!ot_pz_to_legacy(&panel_copy.outputs[lane],lane,&copy[lane]))
+            return respond_err(r,409,"hierarchical Panel/Zone map cannot be represented by legacy Output v1");
     cJSON *obj=cJSON_CreateObject();
     if(!obj)return respond_err(r,500,"out of memory");
     if(!cJSON_AddNumberToObject(obj,"revision",OT_OM_VERSION) ||
+       !cJSON_AddNumberToObject(obj,"panel_zone_schema",OT_PZ_SCHEMA_VERSION) ||
        !cJSON_AddBoolToObject(obj,"saved_on_device",persistent) ||
        !cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending) ||
        !cJSON_AddBoolToObject(obj,"bench_only",true) ||
@@ -516,8 +958,8 @@ static esp_err_t om_get(httpd_req_t *r){
        !cJSON_AddNumberToObject(obj,"effective_mask",mask)){
         cJSON_Delete(obj);return respond_err(r,500,"out of memory");
     }
-    /* Schema revision stays 2; these arrays expose per-output durable edit
-     * revisions, with outputs[] reflecting ONLY the active geometry. */
+    /* Legacy outputs[] is emitted only when the active v3 model can be
+     * represented losslessly as one contiguous panel per physical output. */
     cJSON *rev_active=cJSON_AddArrayToObject(obj,"active_config_revisions");
     cJSON *rev_staged=cJSON_AddArrayToObject(obj,"config_revisions");
     if(!rev_active||!rev_staged){cJSON_Delete(obj);return respond_err(r,500,"out of memory");}
@@ -550,9 +992,9 @@ static esp_err_t om_post(httpd_req_t *r){
     cJSON *zones=cJSON_GetObjectItemCaseSensitive(obj,"zones");
     ot_om_output_t next={0};
     bool valid=om_number(obj,"index",&index,0,OT_OM_OUTPUTS-1)&&
-      om_number(obj,"pixels",&pixels,1,OT_CHAIN_PIXELS)&&
+      om_number(obj,"pixels",&pixels,0,OT_CHAIN_PIXELS)&&
       om_string(obj,"name",next.name)&&order_id>=0&&cJSON_IsArray(zones)&&
-      cJSON_GetArraySize(zones)>=1&&cJSON_GetArraySize(zones)<=OT_OM_ZONES;
+      cJSON_GetArraySize(zones)<=OT_OM_ZONES;
     if(valid){
         next.active_pixels=(uint16_t)pixels;next.color_order=(uint8_t)order_id;
         next.zone_count=(uint8_t)cJSON_GetArraySize(zones);
@@ -596,14 +1038,20 @@ static esp_err_t om_post(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     ot_om_output_t next_all[OT_OM_OUTPUTS];
     portENTER_CRITICAL(&state_lock);
-    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
+    bool busy=pz_deferred.pending || om_deferred.pending || tm_deferred.pending || __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE) || pz_preview_any_active_locked() || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    memcpy(next_all,om_outputs,sizeof(next_all));
+    const ot_pz_controller_t active_panel=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        if(!ot_pz_to_legacy(&active_panel.outputs[lane],lane,&next_all[lane])){
+            xSemaphoreGive(om_write_mutex);
+            return respond_err(r,409,"legacy Output v1 cannot modify a multi-panel or multi-range mapping");
+        }
+    }
     if(busy){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stop shows and release all 12V triggers before saving output mapping");}
     portENTER_CRITICAL(&state_lock);
-    const bool stale=om_revision[index]!=(uint16_t)expected_rev;
-    const bool exhausted=om_revision[index]==UINT16_MAX;
+    const bool stale=pz_revision[index]!=(uint16_t)expected_rev;
+    const bool exhausted=pz_revision[index]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return respond_err(r,409,"stale or exhausted output edit revision");}
     /* Idempotent REST save is a readback, not a new configuration revision. */
@@ -613,11 +1061,6 @@ static esp_err_t om_post(httpd_req_t *r){
     next_all[index]=next;
     /* No in-memory mutation if NVS commit fails. */
     if(!om_save(next_all)){xSemaphoreGive(om_write_mutex);return respond_err(r,500,"failed to save output mapping in flash");}
-    portENTER_CRITICAL(&state_lock);
-    memcpy(om_deferred.outputs,next_all,sizeof(next_all));
-    om_deferred.pending=true;
-    om_persistent=true;om_revision[index]++;
-    portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     return om_get(r);
 }
@@ -627,43 +1070,598 @@ static esp_err_t om_post(httpd_req_t *r){
  * Bench-only: STOP all shows and release physical inputs before saving.
  */
 bool ot_ble_config_get(uint8_t index,ot_om_output_t *out,uint16_t *revision){
-    if(index>=OT_OM_OUTPUTS||!out||!revision)return false;
+    if(index>=OT_PZ_OUTPUTS||!out||!revision)return false;
+    ot_pz_output_t active;uint16_t staged;
     portENTER_CRITICAL(&state_lock);
-    *out=om_outputs[index];*revision=om_revision[index];
+    active=pz_outputs.outputs[index];staged=pz_revision[index];
+    portEXIT_CRITICAL(&state_lock);
+    if(!ot_pz_to_legacy(&active,index,out))return false;
+    *revision=staged;return true;
+}
+int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
+    if(index>=OT_PZ_OUTPUTS||!next||!ot_om_valid(next))return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    const bool raw_active=tm_gpio_input_mask()!=0;
+    TickType_t now=xTaskGetTickCount();
+    /* BLE runs this callback on the NimBLE host stack. The former local
+     * full controller copy compounded nested v4 journal/NVS stack usage.
+     * Every writer, including the promoter, owns om_write_mutex before
+     * touching the pair-store scratch; keep the copy in bounded static BSS. */
+    ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;
+    ot_om_output_t current={0};bool busy,stale,exhausted;
+    portENTER_CRITICAL(&state_lock);
+    *candidate=pz_outputs;
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+        pz_preview_any_active_locked()||raw_active||live_input_mask||
+        (before_deadline(now,sim_deadline)&&sim_mask)||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF)||show_window(now);
+    stale=pz_revision[index]!=base_revision;
+    exhausted=pz_revision[index]==UINT16_MAX;
+    portEXIT_CRITICAL(&state_lock);
+    if(busy){xSemaphoreGive(om_write_mutex);return 2;}
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
+    /* V1 cannot express panel boundaries or multi-range zones. Refuse a
+     * destructive downgrade; simple one-panel contiguous profiles remain
+     * fully writable through the unchanged 261-byte v1 codec. */
+    if(!ot_pz_to_legacy(&candidate->outputs[index],index,&current)){
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    if(memcmp(&current,next,sizeof(current))==0){
+        xSemaphoreGive(om_write_mutex);return 0;
+    }
+    /* The conversion helper validates against the same locked controller.
+     * No active RAM or NVS state changes unless the journal starts safely. */
+    ot_pz_output_t replacement={0};
+    if(!ot_pz_from_legacy_output(next,index,candidate,&replacement)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    candidate->outputs[index]=replacement;
+    const int64_t save_started_us=esp_timer_get_time();
+    const UBaseType_t stack_floor=uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG,"BLE_OUTPUT_SAVE_BEGIN lane=%u base_revision=%u stack_hwm=%u internal_heap=%u",
+        (unsigned)(index+1u),(unsigned)base_revision,(unsigned)stack_floor,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    const bool saved=pz_save_controller_locked(candidate);
+    const uint32_t elapsed_ms=(uint32_t)((esp_timer_get_time()-save_started_us)/1000LL);
+    ESP_LOGI(TAG,"BLE_OUTPUT_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx stack_hwm=%u",
+        (unsigned)(index+1u),(unsigned)saved,(unsigned long)elapsed_ms,
+        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
+        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    xSemaphoreGive(om_write_mutex);
+    return saved?0:4;
+}
+/* Versioned authenticated hierarchical Panel/Zone configuration transport. */
+bool ot_ble_panel_get(uint8_t lane,ot_pz_output_t *out,uint16_t *active_revision,
+                      uint16_t *staged_revision,bool *pending,bool *persistent){
+    if(lane>=OT_PZ_OUTPUTS||!out||!active_revision||!staged_revision||
+       !pending||!persistent)return false;
+    portENTER_CRITICAL(&state_lock);
+    *out=pz_outputs.outputs[lane];
+    *active_revision=pz_active_revision[lane];
+    *staged_revision=pz_revision[lane];
+    *pending=pz_deferred.pending||om_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    *persistent=pz_persistent;
     portEXIT_CRITICAL(&state_lock);
     return true;
 }
-int ot_ble_config_save(uint8_t index,const ot_om_output_t *next,uint16_t base_revision){
-    if(index>=OT_OM_OUTPUTS||!next||!ot_om_valid(next))return 1; /* invalid */
-    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2; /* Cannot activate durable config. */
-    if(!om_write_mutex || xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2; /* busy */
-    /* Apply the same physical-input veto as HTTP and trigger-profile edits. */
-    const bool raw_active=tm_gpio_input_mask()!=0;
-    TickType_t now=xTaskGetTickCount();ot_om_output_t next_all[OT_OM_OUTPUTS];
+
+/* CRC scratch is mutex-owned static BSS, not several KB of nested NimBLE
+ * stack. Every caller must own om_write_mutex, including read-only BEGIN/UPDATE
+ * CRC reads. Never keep state_lock during wire encode or flash I/O. */
+static ot_pz_controller_t pz_crc_snapshot;
+static uint8_t pz_crc_wire[OT_PZ_OUTPUTS][OT_PZ_MAX_WIRE_BYTES];
+static bool pz_controller_wire_crc32(const ot_pz_controller_t *candidate,
+                                      uint32_t *crc32){
+    if(!candidate||!crc32||!ot_pz_valid(candidate))return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        if(!ot_pz_wire_encode(&candidate->outputs[lane],lane,pz_crc_wire[lane]))
+            return false;
+    *crc32=ot_cfg_crc32(pz_crc_wire,sizeof(pz_crc_wire));
+    return true;
+}
+bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32){
+    if(lane>=OT_PZ_OUTPUTS||!crc32||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
+    bool valid=false;
     portENTER_CRITICAL(&state_lock);
-    bool busy=om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask || (before_deadline(now,sim_deadline)&&sim_mask) ||
-        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) || show_window(now);
-    bool stale=om_revision[index]!=base_revision;
-    memcpy(next_all,om_outputs,sizeof(next_all));
+    valid=pz_persistent&&pz_active_revision[lane]==revision&&
+        pz_revision[lane]==revision&&!pz_deferred.pending&&
+        !__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    if(valid)pz_crc_snapshot=pz_outputs;
     portEXIT_CRITICAL(&state_lock);
-    int result=busy?2:(stale||om_revision[index]==UINT16_MAX)?3:0;
-    if(!result){
-        /* A no-op BLE write must not publish a revision absent from NVS. */
-        if(memcmp(&next_all[index],next,sizeof(*next))==0){
-            xSemaphoreGive(om_write_mutex);return 0;
-        }
-        next_all[index]=*next;
-        if(!om_save(next_all))result=4;
-        else{
-            portENTER_CRITICAL(&state_lock);
-            memcpy(om_deferred.outputs,next_all,sizeof(next_all));
-            om_deferred.pending=true;
-            om_persistent=true;om_revision[index]++;
-            portEXIT_CRITICAL(&state_lock);
+    const bool ok=valid&&pz_controller_wire_crc32(&pz_crc_snapshot,crc32);
+    xSemaphoreGive(om_write_mutex);
+    return ok;
+}
+int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
+                               uint16_t pixel_capacity){
+    if(lane>=OT_PZ_OUTPUTS||pixel_capacity>OT_PZ_MAX_PIXELS||
+       base_revision==UINT16_MAX)return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
+       !native_outputs_ready)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    /* Projection is computed outside the critical section, while the
+     * writer mutex protects the authoritative source from concurrent edits. */
+    ot_om_output_t projected={0};
+    if(!ot_pz_to_fx_view(&pz_outputs.outputs[lane],lane,&projected)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool accepted=false;
+    portENTER_CRITICAL(&state_lock);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    /* Requested capacity belongs to volatile preview, not saved NVS.
+     * Permit a fresh zero-LED lane to commission 100 LEDs without Save.
+     * Reject shrinking below any still-mapped endpoint; do not render an
+     * invalid intermediate geometry or mutate the committed records. */
+    const bool capacity_ok=pixel_capacity<=OT_PZ_MAX_PIXELS;
+    accepted=!pending&&!pz_preview[lane].active&&capacity_ok&&
+        pz_revision[lane]==base_revision&&pz_active_revision[lane]==base_revision&&
+        ot_pz_preview_begin(&pz_preview[lane],&pz_outputs,lane,
+                            pz_active_revision[lane],base_revision,pending,now_ms);
+    if(accepted){
+        pz_preview[lane].candidate.outputs[lane].active_pixels=pixel_capacity;
+        if(!ot_pz_valid(&pz_preview[lane].candidate)){
+            ot_pz_preview_cancel(&pz_preview[lane]);
+            accepted=false;
+        }else{
+            pz_live_fx_views[lane]=projected;
         }
     }
+    portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
-    return result;
+    if(accepted)request_render_refresh();
+    return accepted?0:(capacity_ok?3:1);
+}
+int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
+                               const ot_pz_range_update_t *updates,size_t count){
+    if(lane>=OT_PZ_OUTPUTS||!updates||count==0u||count>4u)return 1;
+    /* Slider traffic is deliberately non-blocking and never queues stale edits. */
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    ot_pz_preview_t *candidate=&pz_preview_scratch;
+    uint16_t active_revision=0u;
+    bool pending=false,valid=false;
+    uint16_t staged_revision=0u;
+    portENTER_CRITICAL(&state_lock);
+    *candidate=pz_preview[lane];
+    active_revision=pz_active_revision[lane];
+    staged_revision=pz_revision[lane];
+    pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    portEXIT_CRITICAL(&state_lock);
+    valid=!pending&&staged_revision==base_revision&&
+        active_revision==base_revision&&
+        ot_pz_preview_apply_updates(candidate,lane,updates,count,
+                                    base_revision,active_revision,pending,now_ms);
+    ot_om_output_t projected={0};
+    if(valid)valid=ot_pz_to_fx_view(&candidate->candidate.outputs[lane],lane,
+                                    &projected);
+    if(valid){
+        portENTER_CRITICAL(&state_lock);
+        valid=pz_preview[lane].active&&!pz_preview[lane].committing&&
+            pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+            pz_preview[lane].expires_ms==candidate->expires_ms&&
+            pz_active_revision[lane]==base_revision&&
+            pz_revision[lane]==base_revision&&
+            !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+        if(valid){
+            pz_preview[lane]=*candidate;
+            pz_live_fx_views[lane]=projected;
+        }
+        portEXIT_CRITICAL(&state_lock);
+    }
+    xSemaphoreGive(om_write_mutex);
+    if(valid)request_render_refresh();
+    return valid?0:3;
+}
+int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS)return 1;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool valid=false;
+    portENTER_CRITICAL(&state_lock);
+    /* O1's durable journal may be pending for an extended quiet-input window.
+     * O2's HEARTBEAT must still renew its independent volatile session. */
+    valid=pz_revision[lane]==base_revision&&
+        pz_active_revision[lane]==base_revision&&
+        ot_pz_preview_heartbeat(&pz_preview[lane],lane,base_revision,now_ms);
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreGive(om_write_mutex);
+    return valid?0:3;
+}
+bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *crc32){
+    if(lane>=OT_PZ_OUTPUTS||!crc32||!om_write_mutex||
+       xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return false;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    bool valid=false;
+    portENTER_CRITICAL(&state_lock);
+    valid=pz_preview[lane].active&&pz_preview[lane].lane==lane&&
+        pz_preview[lane].base_revision==base_revision&&
+        pz_active_revision[lane]==base_revision&&
+        (pz_preview[lane].committing||(int32_t)(now_ms-pz_preview[lane].expires_ms)<0);
+    if(valid)pz_crc_snapshot=pz_preview[lane].candidate;
+    portEXIT_CRITICAL(&state_lock);
+    const bool ok=valid&&pz_controller_wire_crc32(&pz_crc_snapshot,crc32);
+    xSemaphoreGive(om_write_mutex);
+    return ok;
+}
+bool ot_ble_panel_preview_commit_pending(uint8_t lane,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS)return false;
+    bool pending=false;
+    portENTER_CRITICAL(&state_lock);
+    pending=(pz_preview_commit_requested||pz_preview_commit_worker_active||
+             (pz_deferred.pending&&pz_preview[lane].committing))&&
+            pz_preview_commit_lane==lane&&
+            pz_preview_commit_lane_revision==base_revision;
+    portEXIT_CRITICAL(&state_lock);
+    return pending;
+}
+uint16_t ot_ble_panel_render_revision(uint8_t lane){
+    if(lane>=OT_PZ_OUTPUTS)return 0u;
+    uint16_t revision=0u;
+    portENTER_CRITICAL(&state_lock);
+    revision=pz_render_revision[lane];
+    portEXIT_CRITICAL(&state_lock);
+    return revision;
+}
+int ot_ble_panel_preview_commit(uint8_t lane,uint16_t base_revision,
+                                uint32_t expected_crc32){
+    if(lane>=OT_PZ_OUTPUTS)return 1;
+    /* Queue a validated immutable snapshot; the configuration worker owns NVS. */
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
+    ot_pz_preview_t *snapshot=&pz_preview_scratch;
+    bool accepted=false,no_change=false;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    portENTER_CRITICAL(&state_lock);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+        pz_preview_commit_requested||pz_preview_commit_worker_active;
+    accepted=!pending&&pz_preview[lane].active&&!pz_preview[lane].committing&&
+       pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+       pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
+       (int32_t)(now_ms-pz_preview[lane].expires_ms)<0;
+    if(accepted){
+        *snapshot=pz_preview[lane];
+        no_change=memcmp(&snapshot->candidate.outputs[lane],&pz_outputs.outputs[lane],sizeof(pz_outputs.outputs[lane]))==0;
+    }
+    portEXIT_CRITICAL(&state_lock);
+    uint32_t actual_crc32=0u;
+    if(!accepted||!pz_controller_wire_crc32(&snapshot->candidate,&actual_crc32)||
+       actual_crc32!=expected_crc32){
+        xSemaphoreGive(om_write_mutex);return accepted?1:3;
+    }
+    portENTER_CRITICAL(&state_lock);
+    accepted=pz_preview[lane].active&&!pz_preview[lane].committing&&
+       pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+       pz_active_revision[lane]==base_revision&&pz_revision[lane]==base_revision&&
+       pz_preview[lane].expires_ms==snapshot->expires_ms&&
+       !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)&&
+       !pz_preview_commit_requested&&!pz_preview_commit_worker_active;
+    if(accepted){
+        if(no_change)ot_pz_preview_cancel(&pz_preview[lane]);
+        else{
+            pz_preview[lane].committing=true;
+            pz_preview_commit_candidate=snapshot->candidate;
+            pz_preview_commit_lane=lane;
+            pz_preview_commit_lane_revision=base_revision;
+            pz_preview_commit_requested=true;
+        }
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if(!accepted){xSemaphoreGive(om_write_mutex);return 3;}
+    if(no_change)request_render_refresh();
+    xSemaphoreGive(om_write_mutex);
+    return 0;
+}
+static void pz_preview_cancel_pending_locked(void){
+    /* Once COMMITTING has been published, STOP/disconnect cannot discard the
+     * immutable snapshot. The worker alone consumes and finishes that save. */
+    if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;
+    memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
+}
+void ot_ble_panel_preview_cancel_lane(uint8_t lane){
+    if(lane>=OT_PZ_OUTPUTS)return;
+    bool active=false;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_preview[lane].active;
+    if(!pz_preview[lane].committing)ot_pz_preview_cancel(&pz_preview[lane]);
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
+}
+void ot_ble_panel_preview_cancel(void){
+    bool active=false;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_preview_any_active_locked();
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked(); /* Preserve COMMITTING, clear idle other lane. */
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
+}
+
+
+int ot_ble_panel_reset_challenge(uint8_t lane,uint16_t expected_revision,
+                                 uint32_t *challenge){
+    if(lane>=OT_PZ_OUTPUTS||!challenge)return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
+       !native_outputs_ready||ot_sw_idf_decorative_inhibited())return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    const uint32_t stop_generation=stop_request_generation;
+    bool safe=false;
+    portENTER_CRITICAL(&state_lock);
+    safe=!pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)&&
+        pz_revision[lane]==expected_revision&&
+        pz_active_revision[lane]==expected_revision&&
+        input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+        !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
+        !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
+        !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
+        !pz_preview_any_active_locked()&&stop_request_generation==stop_render_generation;
+    portEXIT_CRITICAL(&state_lock);
+    if(!safe||tm_gpio_input_mask()!=0u||
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch||
+       stop_request_generation!=stop_generation||ot_sw_idf_decorative_inhibited()){
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    uint32_t token=esp_random();
+    if(token==0u)token=esp_random();
+    if(token==0u){xSemaphoreGive(om_write_mutex);return 2;}
+    portENTER_CRITICAL(&state_lock);
+    pz_reset_challenge=(ot_pz_reset_challenge_t){
+        .active=true,.lane=lane,.revision=expected_revision,.value=token,
+        .expires_ms=now_ms+OT_PZ_RESET_CHALLENGE_TTL_MS,
+        .input_epoch=epoch,.stop_generation=stop_generation
+    };
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreGive(om_write_mutex);
+    *challenge=token;
+    return 0;
+}
+int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
+                               uint32_t challenge){
+    if(lane>=OT_PZ_OUTPUTS||challenge==0u)return 1;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
+        return 2;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    const uint32_t stop_generation=stop_request_generation;
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
+    bool safe=false;
+    portENTER_CRITICAL(&state_lock);
+    safe=pz_reset_challenge.active&&pz_reset_challenge.lane==lane&&
+        pz_reset_challenge.revision==expected_revision&&
+        pz_reset_challenge.value==challenge&&
+        (int32_t)(now_ms-pz_reset_challenge.expires_ms)<0&&
+        pz_reset_challenge.input_epoch==epoch&&
+        pz_reset_challenge.stop_generation==stop_generation&&
+        pz_revision[lane]==expected_revision&&
+        pz_active_revision[lane]==expected_revision&&
+        !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)&&
+        input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+        !(before_deadline(xTaskGetTickCount(),sim_deadline)&&sim_mask!=0u)&&
+        !(before_deadline(xTaskGetTickCount(),demo_deadline)&&demo.mode!=OT_DEMO_OFF)&&
+        !show_window(xTaskGetTickCount())&&pz_diag.mode==OT_PZ_DIAG_NONE&&
+        !pz_preview_any_active_locked()&&stop_request_generation==stop_render_generation;
+    if(safe){
+        *candidate=pz_outputs;
+        /* Owner-authorized Start Fresh means ACTUAL Panel v4 factory defaults,
+         * not the old 100-LED/BLE TEST 1 fixture or experimental calibration.
+         * Reset only this lane's entire authoritative output record. Preserve
+         * all other lanes and unrelated trigger/auth/system NVS namespaces.
+         * Never erase NVS partition 0x9000 or bypass the safe journal path. */
+        memset(&candidate->outputs[lane],0,sizeof(candidate->outputs[lane]));
+        (void)snprintf(candidate->outputs[lane].name,
+                       sizeof(candidate->outputs[lane].name),
+                       "Pixel OUT %u",(unsigned)(lane+1u));
+        candidate->outputs[lane].active_pixels=0u;
+        candidate->outputs[lane].color_order=OT_OM_GRB;
+        for(unsigned c=0;c<3u;c++)
+            candidate->outputs[lane].rgb_gain[c]=
+                candidate->outputs[lane].white_gain[c]=255u;
+        candidate->outputs[lane].gamma_enabled=false;
+        candidate->outputs[lane].panel_count=0u;
+        candidate->outputs[lane].zone_count=0u;
+        pz_reset_pending_mask|=(uint8_t)(1u<<lane);
+    }
+    pz_reset_challenge.active=false; /* single-use even if the confirm fails */
+    portEXIT_CRITICAL(&state_lock);
+    if(!safe||tm_gpio_input_mask()!=0u||
+       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch||
+       stop_request_generation!=stop_generation||ot_sw_idf_decorative_inhibited()){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 3;
+    }
+    if(!ot_pz_valid(candidate)){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    if(!pz_save_controller_locked(candidate)){
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        portEXIT_CRITICAL(&state_lock);
+        xSemaphoreGive(om_write_mutex);return 4;
+    }
+    if(pz_deferred.pending){
+        pz_promote(epoch);
+        portENTER_CRITICAL(&state_lock);
+        const bool still_pending=pz_deferred.pending;
+        portEXIT_CRITICAL(&state_lock);
+        if(still_pending){xSemaphoreGive(om_write_mutex);return 5;}
+    }else{
+        /* pz_save_controller_locked() already persisted the reset bit through
+         * mark_reset() when the lane was unchanged. Do not write the same
+         * map-active record a second time after the successful save. */
+        portENTER_CRITICAL(&state_lock);
+        pz_reset_pending_mask&=(uint8_t)~(1u<<lane);
+        pz_reset_challenge.active=false;
+        ot_pz_diag_clear(&pz_diag);
+        ot_pz_preview_cancel(&pz_preview[lane]);
+        portEXIT_CRITICAL(&state_lock);
+    }
+    /* Reset readback is the authoritative v4 pair: map-only geometry and
+     * hardware-only lane records must share the same transaction/revision. */
+    bool readback_ok=ot_pz_pair_store_snapshot(&pz_pair_store_io,&pz_pair_workspace);
+    const ot_pz_pair_store_snapshot_t *readback=&pz_pair_workspace.snapshot;
+    readback_ok=readback_ok&&readback->has_map_active&&readback->has_lane_active&&
+        readback->map_active.transaction_id==readback->lane_active.transaction_id&&
+        readback->map_active.candidate.outputs[lane].panel_count==0u&&
+        readback->map_active.candidate.outputs[lane].zone_count==0u&&
+        readback->map_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        readback->lane_active.candidate_revision[lane]==pz_active_revision[lane]&&
+        (readback->map_active.reset_mask&(1u<<lane))!=0u;
+    if(!readback_ok){xSemaphoreGive(om_write_mutex);return 5;}
+    ot_fx_bank_stop_all(&fx_bank);
+    request_render_refresh();
+    xSemaphoreGive(om_write_mutex);
+    return 0;
+}
+int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revision){
+    if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
+    if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
+    const TickType_t now=xTaskGetTickCount();
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
+    bool busy,stale,exhausted,live_match=false,structural_conflict=false;
+    portENTER_CRITICAL(&state_lock);
+    *candidate=pz_outputs;
+    /* Only the eight-byte UPDATE can accept a new physical topology.
+     * Save may carry metadata absent from UPDATE (names, RGB/white gain,
+     * gamma and channel order), but must match full stable Panel/Zone IDs,
+     * ordering, roles and every range of either the active preview or the
+     * already committed map. An expired/invalid live session cannot authorize
+     * a structural Save by falling back to the saved map. */
+    const bool live_active=pz_preview[lane].active;
+    const bool session_ok=!live_active||(
+        !pz_preview[lane].committing&&pz_preview[lane].lane==lane&&
+        pz_preview[lane].base_revision==base_revision&&
+        (int32_t)(now_ms-pz_preview[lane].expires_ms)<0);
+    const ot_pz_output_t *accepted_geometry=live_active?
+        &pz_preview[lane].candidate.outputs[lane]:&pz_outputs.outputs[lane];
+    structural_conflict=!ot_pz_live_geometry_matches(accepted_geometry,next,lane);
+    live_match=live_active&&session_ok&&!structural_conflict;
+    busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+        pz_preview[lane].committing||
+        (before_deadline(now,sim_deadline)&&sim_mask)||
+        (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
+    stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision||
+        !session_ok;
+    exhausted=pz_revision[lane]==UINT16_MAX;
+    portEXIT_CRITICAL(&state_lock);
+    if(busy){xSemaphoreGive(om_write_mutex);return 2;}
+    if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
+    if(structural_conflict){
+        ESP_LOGW(TAG,"BLE_PANEL_SAVE_REJECT lane=%u reason=live_geometry_mismatch base_revision=%u",
+            (unsigned)(lane+1u),(unsigned)base_revision);
+        xSemaphoreGive(om_write_mutex);return 5;
+    }
+    if(memcmp(&candidate->outputs[lane],next,sizeof(*next))==0){
+        portENTER_CRITICAL(&state_lock);
+        ot_pz_preview_cancel(&pz_preview[lane]);
+        portEXIT_CRITICAL(&state_lock);
+        request_render_refresh();
+        xSemaphoreGive(om_write_mutex);return 0;
+    }
+    candidate->outputs[lane]=*next;
+    if(!ot_pz_valid(candidate)){xSemaphoreGive(om_write_mutex);return 1;}
+    /* Freeze accepted live geometry during the journal transaction. A render
+     * frame continues to use the same shadow pixels until staged+active v4
+     * readback promotes that map; no black frame or FX phase reset. */
+    if(live_match){
+        portENTER_CRITICAL(&state_lock);
+        pz_preview[lane].committing=true;
+        portEXIT_CRITICAL(&state_lock);
+    }
+    /* The authoritative Panel v4 Save also originates in the NimBLE GATT
+     * callback. Record host-stack headroom and durable journal timing without
+     * introducing another controller copy or changing ACK ordering. A later
+     * COM9 log can correlate this interval with a reset reason / GATT 133. */
+    const int64_t save_started_us=esp_timer_get_time();
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_BEGIN lane=%u base_revision=%u pixels=%u panels=%u zones=%u stack_hwm=%u internal_heap=%u",
+        (unsigned)(lane+1u),(unsigned)base_revision,
+        (unsigned)next->active_pixels,(unsigned)next->panel_count,
+        (unsigned)next->zone_count,(unsigned)uxTaskGetStackHighWaterMark(NULL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    const bool saved=pz_save_controller_locked(candidate);
+    const uint32_t save_elapsed_ms=(uint32_t)((esp_timer_get_time()-save_started_us)/1000LL);
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx stack_hwm=%u",
+        (unsigned)(lane+1u),(unsigned)saved,(unsigned long)save_elapsed_ms,
+        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
+        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    if(live_match){
+        portENTER_CRITICAL(&state_lock);
+        if(!saved){
+            /* Failed/uncertain NVS outcome is never silently retried. Keep
+             * the previously accepted preview available for reconciliation. */
+            pz_preview[lane].committing=false;
+            pz_preview[lane].expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS;
+        }
+        /* On success keep the preview rendered until pz_promote() publishes
+         * the confirmed active revision and retires it atomically. */
+        portEXIT_CRITICAL(&state_lock);
+    }else if(saved){
+        request_render_refresh();
+    }
+    xSemaphoreGive(om_write_mutex);
+    return saved?0:4;
+}
+/* GATT callback supplies the live HMAC and capability-negotiation result.
+ * This function only updates a volatile CORE diagnostic snapshot; RMT/DMA
+ * remains exclusively owned by led_task. */
+bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
+                        bool authenticated,bool capability_seen){
+    uint16_t lengths[OT_PZ_OUTPUTS];bool accepted=false;
+    const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+    portENTER_CRITICAL(&state_lock);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        lengths[lane]=pz_outputs.outputs[lane].active_pixels?
+            pz_outputs.outputs[lane].active_pixels:OT_PZ_MAX_PIXELS;
+    const bool ready=native_outputs_ready&&!config_recovery_fault&&
+                     !ot_sw_idf_decorative_inhibited();
+    if(ready)
+        accepted=ot_pz_diag_probe(&pz_diag,packet,size,authenticated,
+                                  capability_seen,lengths,now_ms);
+    uint32_t generation=0u;
+    if(accepted){
+        const unsigned selected=(unsigned)packet[1]-1u;
+        generation=++probe_generation[selected];
+        if(generation==0u)generation=++probe_generation[selected];
+    }
+    const uint32_t fault_mask=output_runtime_fault_mask;
+    portEXIT_CRITICAL(&state_lock);
+    if(accepted){
+        ESP_LOGI(TAG,"PIXEL_PROBE_ACCEPT lane=%u gpio=%u pixel=%u color=%u lease_ms=%u generation=%lu; no RMT credit yet",
+            (unsigned)packet[1],(unsigned)out_pin[(unsigned)packet[1]-1u],
+            (unsigned)((((uint16_t)packet[2])<<8)|packet[3]),
+            (unsigned)packet[4],(unsigned)OT_PZ_DIAG_LEASE_MS,(unsigned long)generation);
+        request_render_refresh();
+    }else{
+        ESP_LOGW(TAG,"PIXEL_PROBE_REJECT ready=%u fault_mask=0x%lx authenticated=%u caps=%u packet_size=%u",
+            (unsigned)ready,(unsigned long)fault_mask,(unsigned)authenticated,
+            (unsigned)capability_seen,(unsigned)size);
+    }
+    return accepted;
+}
+void ot_ble_diag_disconnect(void){
+    bool active;
+    portENTER_CRITICAL(&state_lock);
+    active=pz_diag.mode!=OT_PZ_DIAG_NONE||pz_preview_any_active_locked();
+    ot_pz_diag_clear(&pz_diag);
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked();
+    pz_reset_challenge.active=false;
+    portEXIT_CRITICAL(&state_lock);
+    if(active)request_render_refresh();
 }
 
 /* Normalized instantaneous GPIO levels (NOT debounced). Used only for
@@ -897,7 +1895,7 @@ static esp_err_t show_start(httpd_req_t *r){
     }
     unsigned ttl=bounded_int(obj,"ttl_ms",15000,1000,OT_SHOW_MAX_MS);
     cfg.color=(ot_rgb_t){bounded_int(obj,"r",255,0,255),bounded_int(obj,"g",0,0,255),bounded_int(obj,"b",0,0,255)};
-    cfg.brightness=bounded_int(obj,"brightness",24,0,OT_MAX_BRIGHTNESS);
+    cfg.brightness=bounded_int(obj,"brightness",24,0,255);
     cfg.speed=bounded_int(obj,"speed",50,0,100);
     if(!ot_show_valid(&cfg,&layout)){cJSON_Delete(obj);return respond_err(r,400,"invalid show settings");}
     cJSON_Delete(obj);
@@ -916,6 +1914,9 @@ static esp_err_t show_stop(httpd_req_t *r){
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
     ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    ot_pz_diag_clear(&pz_diag);
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked();
     stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
     request_render_refresh();
@@ -968,42 +1969,54 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
        !ot_palette_1d_supported(req->effect_id,req->palette_id)||
        req->chain_mask==0||
        (req->chain_mask&~((1u<<OT_OM_OUTPUTS)-1u))!=0||req->zone_mask==0||
-       req->brightness>OT_MAX_BRIGHTNESS||req->ttl_sec<1||req->ttl_sec>60||
+       req->ttl_sec<1||req->ttl_sec>60||
        !palette_resolved(req->palette_id))
         return false;
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool ready;
+    /* These snapshots help distinguish a rejected Off/unassigned zone from
+     * an accepted nonblack FX request and a subsequent physical RMT failure.
+     * Diagnostic logging is OUTSIDE state_lock, never in the renderer loop. */
+    uint16_t fx_diag_pixels[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_zones[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_eligible[OT_OM_OUTPUTS]={0};
+    uint8_t fx_diag_roles[OT_OM_OUTPUTS]={0};
+    uint32_t fx_diag_faults=0u;
     portENTER_CRITICAL(&state_lock);
     ready=native_outputs_ready;
-    if(ready){
-        /* Apply only the requested output/zone slots. Other zones retain FX phase. */
-        ready=continuous?ot_fx_bank_apply_continuous_tertiary(&fx_bank,req,om_outputs,
-            tertiary,now_ms):
-            ot_fx_bank_apply_configured(&fx_bank,req,om_outputs,now_ms,standalone);
-        if(ready&&spark){
-            /* Optional sparkle tuning is transient per-zone state. Preserve
-             * legacy fixed-size BLE FX packets and saved NVS profile layout. */
-            for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-                if(!(req->chain_mask&(1u<<o)))continue;
-                for(unsigned z=0;z<om_outputs[o].zone_count;z++){
-                    if(!(req->zone_mask&(1u<<z))||
-                       om_outputs[o].zones[z].pixels==0||
-                       om_outputs[o].zones[z].role==OT_OM_OFF)continue;
-                    fx_bank.zones[o][z].spark=*spark;
-                }
-            }
+    fx_diag_faults=output_runtime_fault_mask;
+    /* Show commands target the same volatile Panel v4 geometry as led_task.
+     * Physical road roles never determine effect eligibility. */
+    pz_effective_panels_locked(pz_effective_fx_panels);
+    const ot_pz_output_t *fx_panels=pz_effective_fx_panels;
+    ot_om_output_t fx_views[OT_PZ_OUTPUTS];
+    for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+        fx_views[i]=pz_preview[i].active?pz_live_fx_views[i]:om_outputs[i];
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++){
+        fx_diag_pixels[lane]=fx_panels[lane].active_pixels;
+        fx_diag_zones[lane]=fx_panels[lane].zone_count;
+        for(unsigned z=0;z<fx_panels[lane].zone_count&&z<OT_OM_ZONES;z++){
+            const ot_pz_zone_t *zone=&fx_panels[lane].zones[z];
+            if(zone->role==OT_OM_OFF)fx_diag_roles[lane]|=(uint8_t)(1u<<z);
+            if((req->zone_mask&(1u<<z))&&
+               ot_pz_zone_pixel_count(zone)>0u)
+                fx_diag_eligible[lane]|=(uint8_t)(1u<<z);
         }
     }
-    if(ready&&overlay){
-        for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
-            if(!(req->chain_mask&(1u<<o)))continue;
-            for(unsigned z=0;z<om_outputs[o].zone_count;z++){
-                if(!(req->zone_mask&(1u<<z))||!om_outputs[o].zones[z].pixels||
-                   om_outputs[o].zones[z].role==OT_OM_OFF)continue;
-                fx_bank.zones[o][z].overlay=*overlay;
-            }
-        }
+    if(ready){
+        /* Apply only the requested output/zone slots. Other zones retain FX phase. */
+        ready=continuous?
+            ot_fx_bank_apply_continuous_tertiary_identity(&fx_bank,req,
+                fx_views,fx_panels,tertiary,now_ms):
+            ot_fx_bank_apply_configured_identity(&fx_bank,req,fx_views,
+                fx_panels,now_ms,standalone);
+        if(ready&&spark)
+            ready=ot_fx_bank_set_spark_identity(&fx_bank,fx_views,
+                fx_panels,req->chain_mask,req->zone_mask,now_ms,spark);
+        if(ready&&overlay)
+            ready=ot_fx_bank_set_overlay_identity(&fx_bank,fx_views,
+                fx_panels,req->chain_mask,req->zone_mask,now_ms,overlay);
     }
     if(ready){
         /* Existing show state gates arbitration, deadlines and trigger-independent status. */
@@ -1019,6 +2032,14 @@ static bool ot_ble_apply_fx_internal(const ot_ble_fx_packet_t *req,bool standalo
         native_show_deadline=now+pdMS_TO_TICKS((uint32_t)req->ttl_sec*1000u);
     }
     portEXIT_CRITICAL(&state_lock);
+    ESP_LOGI(TAG,"BLE_FX_DECISION effect=%u accepted=%u continuous=%u output_mask=0x%02x zone_mask=0x%02x output_faults=0x%08lx",
+        (unsigned)req->effect_id,(unsigned)ready,(unsigned)continuous,
+        (unsigned)req->chain_mask,(unsigned)req->zone_mask,(unsigned long)fx_diag_faults);
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++)if(req->chain_mask&(1u<<lane))
+        ESP_LOGI(TAG,"BLE_FX_LANE lane=%u gpio=%u configured=%u zones=%u off_mask=0x%02x eligible_mask=0x%02x",
+            (unsigned)(lane+1u),(unsigned)out_pin[lane],(unsigned)fx_diag_pixels[lane],
+            (unsigned)fx_diag_zones[lane],(unsigned)fx_diag_roles[lane],
+            (unsigned)fx_diag_eligible[lane]);
     if(ready)request_render_refresh();
     return ready;
 }
@@ -1108,7 +2129,7 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
     unsigned values[6]={0};
     bool valid=om_number(obj,"effect_id",&id,0,65535)&&
         om_number(obj,"zone_mask",&zone,1,255)&&
-        om_number(obj,"brightness",&bri,0,OT_MAX_BRIGHTNESS)&&
+        om_number(obj,"brightness",&bri,0,255)&&
         om_number(obj,"speed",&speed,0,255)&&
         om_number(obj,"intensity",&intensity,0,255)&&
         om_number(obj,"palette_id",&palette,0,255)&&
@@ -1163,8 +2184,8 @@ static esp_err_t fx_preview_post(httpd_req_t *r){
         bool changed=false;
         portENTER_CRITICAL(&state_lock);
         if(native_outputs_ready&&ble_fx_enabled&&show_window(now))
-            changed=ot_fx_bank_set_overlay(&fx_bank,om_outputs,
-                  req.chain_mask,req.zone_mask,ms,&overlay);
+            changed=ot_fx_bank_set_overlay_identity(&fx_bank,om_outputs,
+                  pz_outputs.outputs,req.chain_mask,req.zone_mask,ms,&overlay);
         portEXIT_CRITICAL(&state_lock);
         if(!changed)return respond_err(r,409,"no matching active effect zones");
         request_render_refresh();
@@ -1221,7 +2242,7 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
         .g=(uint8_t)bounded_int(obj,"g",31,0,255),
         .b=(uint8_t)bounded_int(obj,"b",20,0,255),
         .bg_r=0,.bg_g=0,.bg_b=0,
-        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,OT_MAX_BRIGHTNESS),
+        .brightness=(uint8_t)bounded_int(obj,"brightness",20,0,255),
         .speed=speed,
         .intensity=(uint8_t)bounded_int(obj,"intensity",220,0,255),
         .palette_id=0,.ttl_sec=6
@@ -1244,32 +2265,27 @@ static esp_err_t auto_preview_post(httpd_req_t *r){
        event_key,(unsigned long)ot_auto_fx_duration_ms(speed),(unsigned)OT_MAX_BRIGHTNESS);
     return send_json(r,payload);
 }
-void ot_ble_stop_show(void){
+/* One software STOP owner for both BLE and HTTP. It never writes GPIOs,
+ * clears physical input state, or suppresses Brake/Turn/Hazards/Reverse.
+ * An already-COMMITTING geometry transaction is deliberately preserved. */
+static void core_stop_all_sources(void){
     const TickType_t now=xTaskGetTickCount();
-    bool stopped=false,refresh_requested=false;
     portENTER_CRITICAL(&state_lock);
-    /* STOP cancels all active BLE-owned zones, including a scene whose
-     * ownership bit was cleared during a pending disconnect. A genuine
-     * unrelated HTTP show remains untouched. */
-    if(ble_owns_show || ble_fx_enabled){
-        ble_owns_show=false;
-        ble_fx_enabled=false;
-        ot_fx_bank_stop_all(&fx_bank);
-        native_show.mode=OT_SHOW_OFF;
-        native_show_deadline=now;
-        stop_request_generation++;
-        stopped=true;refresh_requested=true;
-    }else if(native_show.mode==OT_SHOW_OFF || !show_window(now)){
-        /* Stop may be pressed after the 60-second FX timeout. Record the
-         * requested post-stop refresh even when no show is still owned. */
-        stop_request_generation++;
-        refresh_requested=true;
-    }
+    demo.mode=OT_DEMO_OFF;demo_deadline=now;
+    sim_mask=0u;sim_deadline=now;
+    ble_owns_show=false;ble_fx_enabled=false;
+    ot_fx_bank_stop_all(&fx_bank);
+    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
+    if(pz_diag.mode!=OT_PZ_DIAG_NONE)ot_pz_diag_clear(&pz_diag);
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked(); /* STOP clears FX and idle drafts, not NVS commit. */
+    stop_request_generation++;
     portEXIT_CRITICAL(&state_lock);
-    if(refresh_requested)request_render_refresh();
-    /* Restore the previous status indication immediately, rather than
-     * leaving a stale rainbow until the next BLE preview TTL expires. */
-    if(stopped)ot_st_show_active(false);
+    request_render_refresh();
+    ot_st_show_active(false);
+}
+void ot_ble_stop_show(void){
+    core_stop_all_sources();
 }
 /* Eight opt-in named-by-slot effect snapshots in controller NVS. Flash records are
  * independently checksummed and versioned; they never alter road-lighting maps.
@@ -1281,15 +2297,28 @@ static bool fx_slot_key(uint8_t slot,char key[8]){
 }
 bool ot_ble_save_fx_preset(uint8_t slot){
  char key[8];if(!fx_slot_key(slot,key))return false;
- ot_fx_zone_bank_t snapshot={0};bool active;
+ ot_fx_zone_bank_t snapshot={0};
+ ot_fx_scene_output_identity_t identity_snapshot[OT_OM_OUTPUTS]={0};
+ bool active;
  const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
  TickType_t now=xTaskGetTickCount();
  portENTER_CRITICAL(&state_lock);
  active=native_outputs_ready&&ble_fx_enabled&&show_window(now);
- if(active)memcpy(&snapshot,&fx_bank,sizeof(snapshot));
+ if(active){
+  memcpy(&snapshot,&fx_bank,sizeof(snapshot));
+  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
+   const uint8_t count=pz_outputs.outputs[o].zone_count;
+   identity_snapshot[o].zone_count=count;
+   if(count>OT_OM_ZONES)continue;
+   for(unsigned z=0;z<count;z++){
+    identity_snapshot[o].zones[z].panel_id=pz_outputs.outputs[o].zones[z].panel_id;
+    identity_snapshot[o].zones[z].zone_id=pz_outputs.outputs[o].zones[z].id;
+   }
+  }
+ }
  portEXIT_CRITICAL(&state_lock);
  ot_fx_scene_record_t record;
- if(!active||!ot_fx_scene_pack(&record,&snapshot,now_ms))return false;
+ if(!active||!ot_fx_scene_pack(&record,&snapshot,identity_snapshot,now_ms))return false;
  nvs_handle_t h;
  if(nvs_open("ot_fx_presets",NVS_READWRITE,&h)!=ESP_OK)return false;
  esp_err_t e=nvs_set_blob(h,key,&record,sizeof(record));
@@ -1328,8 +2357,12 @@ bool ot_ble_play_fx_preset(uint8_t slot){
      for(unsigned o=0;o<OT_OM_OUTPUTS&&ready;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
          if(!(record.active_mask&(uint16_t)(1u<<(o*OT_OM_ZONES+z))))continue;
          const ot_ble_fx_packet_t *p=&record.effect[o][z];
+         ot_ble_fx_packet_t targeted=*p;
+         targeted.chain_mask=(uint8_t)(1u<<o);
+         targeted.zone_mask=(uint8_t)(1u<<z);
          if(!palette_resolved(p->palette_id) ||
-            !ot_fx_bank_apply_configured(&replacement,p,om_outputs,now_ms,true)){
+            !ot_fx_bank_apply_configured_identity(&replacement,&targeted,
+                om_outputs,pz_outputs.outputs,now_ms,true)){
              ready=false;break; /* layout changed: preserve original live scene */
          }
          out_mask=(uint8_t)(out_mask|(uint8_t)(1u<<o));
@@ -1340,7 +2373,7 @@ bool ot_ble_play_fx_preset(uint8_t slot){
          fx_bank=replacement;
          /* Diagnostic legacy show fields describe union of targeted zones. */
          native_show=(ot_show_t){.mode=OT_SHOW_SOLID,
-            .color={0,0,0},.brightness=OT_MAX_BRIGHTNESS,.speed=0,
+            .color={0,0,0},.brightness=255u,.speed=0,
             .chain_mask=out_mask,.section_mask=zone_mask};
          /* Only use last stored entry for legacy "current effect" reporting. */
          for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
@@ -1445,12 +2478,16 @@ static esp_err_t status_get(httpd_req_t *r) {
     outputs_ready=native_outputs_ready;
 
     refresh0=output_refreshes[0];refresh1=output_refreshes[1];
-    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)configured_pixels[ch]=om_outputs[ch].active_pixels;
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+        configured_pixels[ch]=pz_outputs.outputs[ch].active_pixels;
     stop_requested=stop_request_generation;stop_rendered=stop_render_generation;
     partial_frames=incomplete_frames;
     faulted_outputs=output_runtime_fault_mask;
     portEXIT_CRITICAL(&state_lock);
     const bool ble_radio_ready=ot_ble_radio_ever_ready();
+    const uint8_t commit_phase=__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE);
+    const uint32_t commit_transaction=__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE);
+    const bool commit_pending=__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     const uint8_t function_mask=ot_tm_resolve(&tm,physical);
     const uint8_t effective=(uint8_t)(function_mask|sim);
     const ot_arbitration_t arb=ot_arbitrate(effective,mode!=OT_DEMO_OFF,show_active);
@@ -1479,20 +2516,29 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used]=0;
     char elf_sha256[65]={0};
     (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
-    char buf[2500];char led_json[384],wd_json[420];
+    char buf[2700];char led_json[384],wd_json[420];
     ot_st_format_json(led_json,sizeof(led_json));
     ot_sw_idf_status_json(wd_json,sizeof(wd_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
-       OT_FW,elf_sha256,ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"config_commit_phase\":%u,\"config_commit_transaction_id\":%lu,\"config_commit_pending\":%s,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
+       OT_FW,(unsigned long)core_boot_id,elf_sha256,
+       ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
        (unsigned long)frames,(unsigned long)observed_fps,(unsigned)target_fps,active_pixels_json,(unsigned)configured_pixels[0],(unsigned)layout.brightness_cap,
        (unsigned long)refresh0,(unsigned long)refresh1,(unsigned long)partial_frames,
-       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,led_json,arb_json,wd_json);
+       (unsigned long)faulted_outputs,(unsigned long)stop_requested,(unsigned long)stop_rendered,
+        (unsigned)commit_phase,(unsigned long)commit_transaction,
+        commit_pending?"true":"false",led_json,arb_json,wd_json);
     return send_json(r,buf);
 }
 static esp_err_t caps_get(httpd_req_t *r) {
-    return send_json(r,"{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false}");
+    char buf[2048];
+    const int n=snprintf(buf,sizeof(buf),
+        "{\"protocol\":\"opentail-core-alpha-v1\",\"bench_only\":true,\"pixel_protocol\":\"WS2815-compatible RMT 800kHz\",\"color_order\":\"GRB\",\"color_order_configurable\":true,\"wled_renderer\":\"compatibility\",\"wled_pixel_parity_verified\":false,\"native_wled_firmware_unified\":false,\"outputs\":2,\"physical_inputs\":8,\"active_functions\":[\"park\",\"brake\",\"left\",\"right\",\"reverse\",\"aux1\",\"aux2\",\"aux3\"],\"reserved_inputs\":[],\"wifi\":\"WPA2 Access Point\",\"bluetooth\":true,\"ble_status_only\":false,\"ble_studio_controls\":false,\"ble_bench_show_v1\":true,\"ble_output_config_v1\":true,\"ble_session_requires_wifi\":true,\"firmware_sequences\":false,\"native_show_engine\":true,\"native_effects\":[\"solid\",\"chase\",\"breathe\",\"wipe\",\"rainbow\"],\"wled_1d_effect_count\":120,\"ble_effect_id_count\":140,\"target_fps\":120,\"fps_policy\":\"adaptive_load_53_to_120\",\"preferred_fps_min\":53,\"preferred_fps_max\":120,\"studio_embedded\":false,\"developer_console\":true,\"studio_wled_api_compatible\":false,\"hardware_failover\":false,\"trigger_arbitration_v1\":true,\"trigger_manager_v1\":true,\"output_manager_v1\":true,\"output_manager_nvs\":true,\"status_led\":true,\"status_led_control\":false,\"panel_zone_schema\":3,\"live_arrangement_preview\":true,\"pixel_probe\":true,\"brightness_contract\":\"8-bit RGB channel values; one effective CORE ceiling applied at final pixel output\",\"brightness_cap\":%u,\"brightness_cap_is_measured_current_limit\":false,\"brightness_ceiling_configurable\":true}",
+        (unsigned)OT_MAX_BRIGHTNESS_LIMIT);
+    if(n<0||(size_t)n>=sizeof(buf))
+        return respond_err(r,500,"capabilities formatting overflow");
+    return send_json(r,buf);
 }
 static esp_err_t status_led_get(httpd_req_t *r){
     char buf[384];ot_st_format_json(buf,sizeof(buf));return send_json(r,buf);
@@ -1532,7 +2578,7 @@ static esp_err_t demo_post(httpd_req_t *r) {
     else if(!strcmp(str,"chase")) mode=OT_DEMO_CHASE;
     else if(strcmp(str,"off")){cJSON_Delete(obj);return respond_err(r,400,"mode must be solid, chase or off");}
     unsigned rcol=bounded_int(obj,"r",0,0,255),gcol=bounded_int(obj,"g",0,0,255),bcol=bounded_int(obj,"b",0,0,255);
-    unsigned brightness=bounded_int(obj,"brightness",32,0,OT_MAX_BRIGHTNESS);
+    unsigned brightness=bounded_int(obj,"brightness",32,0,255);
     unsigned ttl=bounded_int(obj,"ttl_ms",3000,100,OT_DEMO_MAX_MS);
     TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
@@ -1568,16 +2614,7 @@ static esp_err_t simulate_post(httpd_req_t *r) {
     return send_json(r,"{\"ok\":true,\"message\":\"temporary isolated bench input simulation scheduled\"}");
 }
 static esp_err_t stop_post(httpd_req_t *r) {
-    TickType_t now=xTaskGetTickCount();
-    portENTER_CRITICAL(&state_lock);
-    demo.mode=OT_DEMO_OFF;demo_deadline=now;
-    sim_mask=0;sim_deadline=now;
-    ble_owns_show=false;ble_fx_enabled=false;ot_fx_bank_stop_all(&fx_bank);
-    native_show.mode=OT_SHOW_OFF;native_show_deadline=now;
-    stop_request_generation++;
-    portEXIT_CRITICAL(&state_lock);
-    request_render_refresh();
-    ot_st_show_active(false);
+    core_stop_all_sources();
     return send_json(r,"{\"ok\":true,\"message\":\"show, demo and simulation stopped; physical inputs still take precedence\"}");
 }
 /* CORE ships only its own developer console. The approved Studio is
@@ -1642,26 +2679,69 @@ static bool http_start(void) {
     }
     return true;
 }
+/* Wi-Fi initialization precedes the out-of-line boot heap definition. */
+static void ot_boot_heap_snapshot(const char *phase);
+/* On physical 9cc47fc1 Wi-Fi beacon allocation failed, then IDF 5.5.5
+ * ieee80211_hostap_attach dereferenced NULL. Do not start optional Wi-Fi
+ * when it would consume the internal DMA heap required by primary control.
+ * Memory thresholds are provisional and must pass physical coexistence. */
+static bool wifi_heap_start_preflight(void){
+    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    const uint32_t dma=MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA;
+    const size_t total=heap_caps_get_free_size(internal);
+    const size_t largest=heap_caps_get_largest_free_block(internal);
+    const size_t dma_total=heap_caps_get_free_size(dma);
+    const size_t dma_largest=heap_caps_get_largest_free_block(dma);
+    ESP_LOGI(TAG,"Wi-Fi AP pre-start internal free=%u largest=%u; DMA free=%u largest=%u; PSRAM free=%u",
+        (unsigned)total,(unsigned)largest,(unsigned)dma_total,
+        (unsigned)dma_largest,(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    if(total<24576u || largest<4096u || dma_total<12288u || dma_largest<2048u){
+        ESP_LOGE(TAG,"Wi-Fi AP preflight low-memory fault; BLE/RMT/physical triggers remain active");
+        return false;
+    }
+    return true;
+}
 static bool wifi_ap_init(void) {
     const char *psk=CONFIG_OPENTAIL_AP_PASSWORD;
     size_t n=strlen(psk);
     if(n<8||n>63){ESP_LOGE(TAG,"AP password must be 8-63 characters");return false;}
+    if(!wifi_heap_start_preflight())return false;
     esp_err_t e=esp_netif_init();
     if(e==ESP_OK)e=esp_event_loop_create_default();
     if(e!=ESP_OK){
         ESP_LOGE(TAG,"CORE Wi-Fi networking init failed: %s",esp_err_to_name(e));
         return false;
     }
-    if(!esp_netif_create_default_wifi_ap()){
-        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed");
+    /* The ESP-IDF default AP helper contains assert/ESP_ERROR_CHECK paths,
+     * which would panic on an OPTIONAL network allocation/handler failure.
+     * Perform its public steps with checked return values instead. */
+    const esp_netif_config_t ap_cfg=ESP_NETIF_DEFAULT_WIFI_AP();
+    esp_netif_t *const wifi_netif=esp_netif_new(&ap_cfg);
+    if(!wifi_netif){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP interface allocation failed (no netif)");
+        return false;
+    }
+    e=esp_netif_attach_wifi_ap(wifi_netif);
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP driver attach failed: %s",esp_err_to_name(e));
+        esp_netif_destroy(wifi_netif);
+        return false;
+    }
+    e=esp_wifi_set_default_wifi_ap_handlers();
+    if(e!=ESP_OK){
+        ESP_LOGE(TAG,"CORE Wi-Fi AP event handlers failed: %s",esp_err_to_name(e));
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
+    init.mgmt_sbuf_num=8; /* IDF 5.5.5 permits 6..32; secondary AP has two clients. */
     e=esp_wifi_init(&init);
     if(e!=ESP_OK){
         ESP_LOGE(TAG,"CORE Wi-Fi driver init failed: %s",esp_err_to_name(e));
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
+    ot_boot_heap_snapshot("wifi-driver-initialized");
     wifi_config_t conf={0};
     strncpy((char*)conf.ap.ssid,OT_AP_SSID,sizeof(conf.ap.ssid)-1);
     conf.ap.ssid_len=strlen(OT_AP_SSID);
@@ -1671,9 +2751,12 @@ static bool wifi_ap_init(void) {
     conf.ap.authmode=WIFI_AUTH_WPA2_PSK;
     e=esp_wifi_set_mode(WIFI_MODE_AP);
     if(e==ESP_OK)e=esp_wifi_set_config(WIFI_IF_AP,&conf);
+    if(e==ESP_OK && !wifi_heap_start_preflight())e=ESP_ERR_NO_MEM;
     if(e==ESP_OK)e=esp_wifi_start();
     if(e!=ESP_OK){
-        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s",esp_err_to_name(e));
+        ESP_LOGE(TAG,"CORE Wi-Fi AP startup failed: %s; BLE remains primary",esp_err_to_name(e));
+        (void)esp_wifi_deinit();
+        esp_netif_destroy_default_wifi(wifi_netif);
         return false;
     }
     ot_st_wifi_ready();
@@ -1682,35 +2765,138 @@ static bool wifi_ap_init(void) {
 }
 /* ESP-IDF 5.5.x esp_timer_get_time is ISR-safe/IRAM-backed; capture only the
  * two turn channels so the task can classify edge time despite wake jitter. */
+/* ESP-IDF 5.5.5 selects STDATOMIC_S32C1I_SPIRAM_WORKAROUND when
+ * N16R8 octal PSRAM is enabled. The general-purpose __atomic_* fallback
+ * may then enter a non-IRAM critical section and is NOT ISR-safe.
+ *
+ * This deliberately narrow path uses Xtensa S32C1I only on internal
+ * DRAM_ATTR, naturally-aligned queue/telemetry words; external PSRAM must
+ * never be passed here. The exact ELF disassembly/section audit enforces
+ * this no-helper-call contract and rejects any non-IRAM dependencies.
+ * Every helper is force-inlined into input_edge_isr. */
+static inline __attribute__((always_inline)) void ot_isr_dram_fence(void){
+    __asm__ __volatile__("memw" ::: "memory");
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_load_acquire(const volatile uint32_t *word){
+    const uint32_t value=*word;
+    ot_isr_dram_fence();
+    return value;
+}
+static inline __attribute__((always_inline)) void
+ot_isr_dram_store_release(volatile uint32_t *word,uint32_t value){
+    ot_isr_dram_fence();
+    *word=value;
+    ot_isr_dram_fence();
+}
+static inline __attribute__((always_inline)) bool
+ot_isr_dram_cas(volatile uint32_t *word,uint32_t previous,uint32_t next){
+    ot_isr_dram_fence();
+    const bool changed=xt_utils_compare_and_set(word,previous,next);
+    ot_isr_dram_fence();
+    return changed;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_add(volatile uint32_t *word,uint32_t delta){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old+delta));
+    return old;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_or(volatile uint32_t *word,uint32_t mask){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old|mask));
+    return old;
+}
+static inline __attribute__((always_inline)) uint32_t
+ot_isr_dram_fetch_and(volatile uint32_t *word,uint32_t mask){
+    uint32_t old;
+    do{old=ot_isr_dram_load_acquire(word);}
+    while(!ot_isr_dram_cas(word,old,old&mask));
+    return old;
+}
 static void IRAM_ATTR input_edge_isr(void *arg){
     const unsigned input_index=(unsigned)(uintptr_t)arg-1u;
-    if(input_index==2u || input_index==3u){
-        const unsigned slot=input_index-2u;
-        /* Mark the producer active before timestamp capture. The dual-core
-         * sampler defers deadline expiry if this edge is not yet published. */
-        __atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE);
-        const uint64_t edge_time_us=(uint64_t)esp_timer_get_time();
-        /* Use the ESP32-S3 LL register read: gpio_get_level() is not guaranteed
-         * IRAM-safe when this ISR service is installed with ESP_INTR_FLAG_IRAM. */
-        const int level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
-        const bool asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
-        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_RELAXED);
-        const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
+    /* Reject an invalid callback index before any pin/counter/queue lookup. */
+    if(input_index>=OT_IN_COUNT)return;
+    const bool is_turn=input_index==2u || input_index==3u;
+    const unsigned slot=is_turn?input_index-2u:0u;
+    /* Acquire the publication guard before sampling either the clock or the
+     * GPIO. A sampler on the other core must not expire a hold while the
+     * corresponding edge is in flight. */
+    if(is_turn)
+        ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u);
+    const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;
+    int level=1;
+    bool asserted=false;
+    if(input_index<OT_INPUT_DIAG_INPUTS){
+        /* LL read is IRAM-safe; normalized asserted=1 honors active-low wiring. */
+        level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index]);
+        asserted=OT_INPUT_ACTIVE_LOW?(level==0):(level!=0);
+        ot_isr_dram_fetch_add(&input_raw_edges[input_index],1u);
+        if(asserted)
+            ot_isr_dram_fetch_add(&input_asserted_edges[input_index],1u);
+        else
+            ot_isr_dram_fetch_add(&input_deasserted_edges[input_index],1u);
+        const uint32_t bit=1u<<input_index;
+        if(asserted)ot_isr_dram_fetch_or(&input_raw_level_mask,bit);
+        else ot_isr_dram_fetch_and(&input_raw_level_mask,~bit);
+    }
+    if(is_turn){
+        const uint32_t head=ot_isr_dram_load_acquire(&turn_edge_head[slot]);
+        const uint32_t tail=ot_isr_dram_load_acquire(&turn_edge_tail[slot]);
         if((uint32_t)(head-tail)>=OT_TURN_EDGE_QUEUE_CAPACITY){
-            /* Never overwrite unread history. The sampler detects overflow,
-             * flushes the ambiguous history and requalifies from live GPIO. */
-            __atomic_store_n(&turn_edge_overflow[slot],1u,__ATOMIC_RELEASE);
+            /* Preserve the existing SPSC queue; telemetry counts each full-ring edge. */
+            ot_isr_dram_store_release(&turn_edge_overflow[slot],1u);
+            ot_isr_dram_fetch_add(&turn_edge_overflow_count[slot],1u);
         }else{
             ot_turn_edge_event_t *event=
                 &turn_edge_events[slot][head&OT_TURN_EDGE_QUEUE_MASK];
             event->timestamp_us=edge_time_us;
             event->asserted=asserted;
-            __atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE);
+            ot_isr_dram_store_release(&turn_edge_head[slot],head+1u);
+            const uint32_t depth=(uint32_t)(head+1u-tail);
+            uint32_t high=ot_isr_dram_load_acquire(&turn_edge_high_water[slot]);
+            /* One bounded best-effort high-water update; the existing ISR is
+             * the sole producer for this lane. A racing update may under-report
+             * the diagnostic maximum, but it can never extend ISR latency. */
+            if(depth>high)(void)ot_isr_dram_cas(
+                &turn_edge_high_water[slot],high,depth);
         }
-        __atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE);
+        ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u);
     }
-    (void)__atomic_add_fetch(&input_edge_epoch,1u,__ATOMIC_RELAXED);
+    (void)ot_isr_dram_fetch_add(&input_edge_epoch,1u);
 }
+
+void ot_input_diag_snapshot_get(ot_input_diag_snapshot_t *out){
+    if(!out)return;
+    memset(out,0,sizeof(*out));
+    out->raw_asserted_mask=(uint8_t)__atomic_load_n(&input_raw_level_mask,__ATOMIC_ACQUIRE);
+    portENTER_CRITICAL(&state_lock);
+    out->debounced_asserted_mask=(uint8_t)(live_input_mask&((1u<<OT_INPUT_DIAG_INPUTS)-1u));
+    portEXIT_CRITICAL(&state_lock);
+    out->edge_epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    for(unsigned i=0;i<OT_INPUT_DIAG_INPUTS;i++){
+        out->raw_edges[i]=__atomic_load_n(&input_raw_edges[i],__ATOMIC_RELAXED);
+        out->asserted_edges[i]=__atomic_load_n(&input_asserted_edges[i],__ATOMIC_RELAXED);
+        out->deasserted_edges[i]=__atomic_load_n(&input_deasserted_edges[i],__ATOMIC_RELAXED);
+    }
+    for(unsigned slot=0;slot<2u;slot++){
+        const uint32_t head=__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE);
+        const uint32_t tail=__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE);
+        const uint32_t depth=(uint32_t)(head-tail);
+        out->turn_queue_depth[slot]=(uint8_t)(depth>UINT8_MAX?UINT8_MAX:depth);
+        const uint32_t high=__atomic_load_n(&turn_edge_high_water[slot],__ATOMIC_RELAXED);
+        out->turn_queue_high_water[slot]=(uint8_t)(high>UINT8_MAX?UINT8_MAX:high);
+        out->turn_queue_overflow_count[slot]=
+            __atomic_load_n(&turn_edge_overflow_count[slot],__ATOMIC_RELAXED);
+        out->turn_queue_overflow_flag[slot]=
+            (uint8_t)(__atomic_load_n(&turn_edge_overflow[slot],__ATOMIC_ACQUIRE)!=0u);
+    }
+}
+
 static bool input_init(void) {
     for(int i=0;i<OT_IN_COUNT;++i){
         input_pin_isr[i]=input_pin[i];
@@ -1861,26 +3047,39 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
         ot_st_set_fault("external pixel RMT initialization failed");return false;
     }
     strip[ch]=next;strip_capacity[ch]=(uint16_t)pixels;
+    /* One-time/resize-only driver evidence: successful RMT allocation and
+     * clear are not proof of voltage at the shifter or an optical LED. */
+    ESP_LOGI(TAG,"RMT_OUTPUT_READY lane=%u gpio=%u pixels=%u dma=%u symbols=%u (driver only, not optical proof)",
+        (unsigned)(ch+1u),(unsigned)out_pin[ch],pixels,
+        (unsigned)rmt.flags.with_dma,(unsigned)rmt.mem_block_symbols);
     return true;
 }
 static bool strip_init(void){
-    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
-        if(!strip_configure_channel(ch,om_outputs[ch].active_pixels))return false;
+    for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+        /* Fresh/unconfigured output uses the bounded raw-array fallback extent.
+         * This is a runtime buffer budget, never a persisted strip-length claim. */
+        const unsigned pixels=pz_outputs.outputs[ch].active_pixels?
+            pz_outputs.outputs[ch].active_pixels:OT_PZ_MAX_PIXELS;
+        if(!strip_configure_channel(ch,pixels))return false;
+    }
     return true;
 }
 /* Low-priority durable promoter. The independent input sampler never waits
  * for NVS. While staged exists, boot always restores its previous configuration
  * even when active_v3 has been written and power is cut during promotion. */
-static bool config_activation_idle(uint32_t epoch){
-    if(tm_gpio_input_mask()!=0u ||
-       __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)!=epoch)return false;
+static bool config_activation_idle(uint32_t epoch,bool allow_show){
+    const uint8_t instantaneous=tm_gpio_input_mask();
+    const uint32_t observed_epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
+    if(instantaneous!=0u||observed_epoch!=epoch)return false;
     const TickType_t now=xTaskGetTickCount();
     portENTER_CRITICAL(&state_lock);
-    const bool idle=input_quiet_samples>=OT_DEBOUNCE_TICKS &&
-        live_input_mask==0u &&
+    const bool quiet=ot_pz_activation_inputs_quiet(
+        instantaneous,live_input_mask,input_quiet_samples,OT_DEBOUNCE_TICKS,
+        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE),epoch);
+    const bool idle=quiet &&
         !(before_deadline(now,sim_deadline)&&sim_mask!=0u) &&
         !(before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF) &&
-        !show_window(now);
+        (allow_show||!show_window(now));
     portEXIT_CRITICAL(&state_lock);
     return idle&&tm_gpio_input_mask()==0u &&
         __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch;
@@ -1926,10 +3125,10 @@ static void tm_promote(uint32_t epoch){
         nvs_close(h);config_recovery_fault=true;
         ot_st_set_fault("trigger staging revision mismatch");return;
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     if(staged){
         if(!config_write_active(h,&stage,sizeof(stage))||
-           !config_activation_idle(epoch)){nvs_close(h);return;}
+           !config_activation_idle(epoch,false)){nvs_close(h);return;}
         /* CRITICAL ORDER: erase staged recovery marker BEFORE publishing
          * to active RAM, never after; active_v3 itself keeps prior recovery. */
         if(!config_clear_stage(h)){
@@ -1939,7 +3138,7 @@ static void tm_promote(uint32_t epoch){
     }
     /* GPIO can change during NVS erase; no RAM swap occurs unless the
      * complete durable boundary and the original edge epoch remain quiet. */
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
+    if(!config_activation_idle(epoch,false)){nvs_close(h);return;}
     bool applied=false;
     portENTER_CRITICAL(&state_lock);
     if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
@@ -1952,67 +3151,135 @@ static void tm_promote(uint32_t epoch){
     if(applied)request_render_refresh();
     nvs_close(h);
 }
-static void om_promote(uint32_t epoch){
-    nvs_handle_t h;
-    if(nvs_open("ot_output_cfg",NVS_READWRITE,&h)!=ESP_OK)return;
-    ot_om_journal_t stage={0};
-    esp_err_t read=om_journal_read(h,OT_CFG_JOURNAL_KEY_STAGED,&stage);
-    const bool staged=read==ESP_OK;
-    if(read==ESP_ERR_NVS_NOT_FOUND)
-        read=om_journal_read(h,OT_CFG_JOURNAL_KEY_ACTIVE,&stage);
-    if(read!=ESP_OK){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("output journal invalid during promotion");return;
+static void pz_promote(uint32_t epoch){
+    ot_pz_pair_store_workspace_t *workspace=&pz_pair_workspace;
+    if(!config_activation_idle(epoch,true))return;
+    if(__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)){
+        const uint32_t transaction_id=__atomic_load_n(
+            &pz_pair_transaction_id,__ATOMIC_RELAXED);
+        if(!ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id,
+                                    pz_pair_phase_hook,NULL)){
+            config_recovery_fault=true;
+            ot_st_set_fault("v4 lane/map pair promotion failed; reboot recovery required");
+            return;
+        }
+        __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);
+    }
+    uint16_t active_revision[OT_PZ_OUTPUTS]={0},staged_revision[OT_PZ_OUTPUTS]={0};
+    bool intent_pending=false;uint32_t recovered_transaction=0u;uint8_t reset_mask=0u;
+    if(!ot_pz_pair_store_snapshot(&pz_pair_store_io,workspace)||
+       !workspace->snapshot.has_map_active||!workspace->snapshot.has_lane_active||
+       workspace->snapshot.map_active.transaction_id!=
+           workspace->snapshot.lane_active.transaction_id||
+       !ot_pz_join(&workspace->snapshot.lane_active.candidate,
+                   &workspace->snapshot.map_active.candidate,&workspace->candidate)||
+       !ot_pz_pair_store_recover(&pz_pair_store_io,workspace,NULL,
+            &workspace->previous,&workspace->pending,active_revision,
+            staged_revision,&intent_pending,&recovered_transaction,&reset_mask)||
+       intent_pending||recovered_transaction!=workspace->snapshot.map_active.transaction_id){
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map active pair readback mismatch");return;
     }
     bool matches=false;
     portENTER_CRITICAL(&state_lock);
-    matches=om_deferred.pending&&
-        memcmp(om_revision,stage.candidate_revision,sizeof(om_revision))==0&&
-        memcmp(om_active_revision,stage.previous_revision,sizeof(om_active_revision))==0&&
-        memcmp(om_outputs,stage.previous,sizeof(om_outputs))==0&&
-        memcmp(om_deferred.outputs,stage.candidate,sizeof(om_deferred.outputs))==0;
+    if(pz_deferred.pending){
+        matches=workspace->pending.pending&&
+            memcmp(&pz_outputs,&workspace->previous,sizeof(pz_outputs))==0&&
+            memcmp(&pz_deferred.candidate,&workspace->pending.candidate,
+                   sizeof(pz_deferred.candidate))==0&&
+            memcmp(pz_active_revision,active_revision,sizeof(active_revision))==0&&
+            memcmp(pz_revision,staged_revision,sizeof(staged_revision))==0;
+    }else{
+        matches=memcmp(&pz_outputs,&workspace->candidate,sizeof(pz_outputs))==0;
+    }
     portEXIT_CRITICAL(&state_lock);
     if(!matches){
-        nvs_close(h);config_recovery_fault=true;
-        ot_st_set_fault("output staging revision mismatch");return;
+        config_recovery_fault=true;
+        ot_st_set_fault("v4 lane/map RAM-to-journal generation mismatch");return;
     }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    if(staged){
-        if(!config_write_active(h,&stage,sizeof(stage))||
-           !config_activation_idle(epoch)){nvs_close(h);return;}
-        if(!config_clear_stage(h)){
-            nvs_close(h);config_recovery_fault=true;
-            ot_st_set_fault("output journal finalization failed");return;
-        }
-    }
-    if(!config_activation_idle(epoch)){nvs_close(h);return;}
-    bool applied=false;
+    if(!config_activation_idle(epoch,true))return;
+    bool applied=false,reset_cleanup=false;
+    const uint8_t effective_reset_mask=(uint8_t)(reset_mask|pz_reset_pending_mask);
     portENTER_CRITICAL(&state_lock);
-    if(input_quiet_samples>=OT_DEBOUNCE_TICKS && live_input_mask==0u &&
-       tm_gpio_input_mask()==0u &&
+    if(input_quiet_samples>=OT_DEBOUNCE_TICKS&&live_input_mask==0u&&
+       tm_gpio_input_mask()==0u&&
        __atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch){
-        applied=ot_om_apply_if_released(om_outputs,&om_deferred,0u,0u);
-        if(applied)memcpy(om_active_revision,stage.candidate_revision,
-                          sizeof(om_active_revision));
+        if(pz_deferred.pending){
+            uint8_t changed=0u;
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(memcmp(&pz_outputs.outputs[i],&workspace->pending.candidate.outputs[i],
+                          sizeof(pz_outputs.outputs[i]))!=0)changed|=(uint8_t)(1u<<i);
+            pz_outputs=workspace->pending.candidate;
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(changed&(1u<<i))ot_pz_preview_cancel(&pz_preview[i]);
+            /* An unsaved O2 zone is not an orphan when O1 is promoted. */
+            pz_effective_panels_locked(pz_effective_fx_panels);
+            ot_fx_bank_prune_orphans(&fx_bank,pz_effective_fx_panels);
+            pz_deferred.pending=false;
+            applied=true;
+        }
+        memcpy(pz_active_revision,workspace->snapshot.map_active.candidate_revision,
+               sizeof(pz_active_revision));
+        memcpy(pz_revision,workspace->snapshot.map_active.candidate_revision,
+               sizeof(pz_revision));
+        __atomic_store_n(&pz_pair_commit_pending,false,__ATOMIC_RELEASE);pz_persistent=true;
+        if(effective_reset_mask){
+            pz_reset_pending_mask&=(uint8_t)~effective_reset_mask;
+            pz_reset_challenge.active=false;
+            ot_pz_diag_clear(&pz_diag);
+            for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+                if(effective_reset_mask&(1u<<i))ot_pz_preview_cancel(&pz_preview[i]);
+            reset_cleanup=true;
+        }
+        pz_refresh_legacy_projection_locked();
     }
     portEXIT_CRITICAL(&state_lock);
-    if(applied)request_render_refresh();
-    nvs_close(h);
+    if(reset_cleanup)ot_fx_bank_stop_all(&fx_bank);
+    if(applied||reset_cleanup)request_render_refresh();
 }
 static void config_activation_task(void *unused){
     (void)unused;
     for(;;){
         if(input_sampler_ready&&!config_recovery_fault&&om_write_mutex &&
            xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(1))==pdTRUE){
-            bool trigger_pending,output_pending;
+            bool trigger_pending,panel_pending;
             portENTER_CRITICAL(&state_lock);
             trigger_pending=tm_deferred.pending;
-            output_pending=om_deferred.pending;
+            panel_pending=pz_deferred.pending||pz_reset_pending_mask!=0u;
             portEXIT_CRITICAL(&state_lock);
+            panel_pending=panel_pending||
+                __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+            bool preview_commit=false;
+            portENTER_CRITICAL(&state_lock);
+            if(pz_preview_commit_requested){
+                pz_pair_workspace.candidate=pz_outputs;
+                pz_pair_workspace.candidate.outputs[pz_preview_commit_lane]=
+                    pz_preview_commit_candidate.outputs[pz_preview_commit_lane];
+                pz_preview_commit_requested=false;
+                pz_preview_commit_worker_active=true;
+                preview_commit=true;
+            }
+            portEXIT_CRITICAL(&state_lock);
+            if(preview_commit){
+                const bool saved=pz_save_controller_locked(&pz_pair_workspace.candidate);
+                portENTER_CRITICAL(&state_lock);
+                pz_preview_commit_worker_active=false;
+                if(!saved&&pz_preview[pz_preview_commit_lane].active&&pz_preview[pz_preview_commit_lane].committing&&
+                   pz_preview[pz_preview_commit_lane].lane==pz_preview_commit_lane&&
+                   pz_preview[pz_preview_commit_lane].base_revision==pz_preview_commit_lane_revision){
+                    pz_preview[pz_preview_commit_lane].committing=false;
+                    pz_preview[pz_preview_commit_lane].expires_ms=(uint32_t)(esp_timer_get_time()/1000LL)+
+                                           OT_PZ_PREVIEW_LEASE_MS;
+                }
+                memset(&pz_preview_commit_candidate,0,sizeof(pz_preview_commit_candidate));
+                memset(&pz_pair_workspace.candidate,0,sizeof(pz_pair_workspace.candidate));
+                portEXIT_CRITICAL(&state_lock);
+            }
             const uint32_t epoch=__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE);
-            if(config_activation_idle(epoch)){
-                if(trigger_pending)tm_promote(epoch);
-                else if(output_pending)om_promote(epoch);
+            if(trigger_pending){
+                if(config_activation_idle(epoch,false))tm_promote(epoch);
+            }else if(panel_pending){
+                if(config_activation_idle(epoch,true))pz_promote(epoch);
             }
             xSemaphoreGive(om_write_mutex);
         }
@@ -2113,6 +3380,9 @@ static void output_runtime_fault(unsigned ch,const char *step,esp_err_t error){
     portENTER_CRITICAL(&state_lock);
     native_outputs_ready=false;
     output_runtime_fault_mask|=(1u<<ch);
+    ot_pz_diag_clear(&pz_diag);
+    pz_preview_cancel_pending_locked();
+    pz_preview_cancel_all_locked();
     ot_fx_bank_stop_continuous(&fx_bank); /* do not restart decorative playback after a fault */
     portEXIT_CRITICAL(&state_lock);
 }
@@ -2121,14 +3391,20 @@ static void led_task(void *p) {
     bool output_failed[OT_CHAIN_COUNT]={false};
     /* Allocation-free, per-output/per-zone states. One render invocation per zone/frame. */
     static ot_effects_1d_state_t fx_state[OT_CHAIN_COUNT][OT_OM_ZONES];
+    /* Reused per-output snapshot prevents in-place overwrite during zone reorder. */
+    static ot_effects_1d_state_t prior_fx_state[OT_OM_ZONES];
+    /* Current logical zones resolve to stable identity-owned FX bank slots. */
+    static uint8_t resolved_fx_bank_index[OT_CHAIN_COUNT][OT_OM_ZONES];
     static ot_wled_rgb_t fx_frame[OT_CHAIN_COUNT][OT_CHAIN_PIXELS];
     static uint32_t prior_fx_generation[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    /* Retain effect pixels only while the same universal zone is active.
-     * Stateful source effects (scanners/trails/particles) need their last frame.
-     * Never reuse stale pixels after a zone move, resize or effect replacement. */
-    static unsigned prior_fx_offset[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
-    static unsigned prior_fx_length[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint16_t prior_fx_zone_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint16_t prior_fx_panel_id[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
     static bool prior_fx_active[OT_CHAIN_COUNT][OT_OM_ZONES]={0};
+    static uint8_t prior_pixel_zone_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    static uint8_t pixel_zone_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    static uint16_t pixel_logical_map[OT_CHAIN_COUNT][OT_PZ_MAX_PIXELS];
+    /* One reusable compact logical-zone frame. */
+    static ot_wled_rgb_t fx_zone_scratch[OT_PZ_MAX_PIXELS];
     ot_fps_pacer_t pacer;
     ot_fps_pacer_init(&pacer);
     /* One source-owned random palette for ALL outputs and zones. */
@@ -2162,6 +3438,7 @@ static void led_task(void *p) {
     render_task_handle=self;
     native_outputs_ready=true; /* RMT, frame timer and WDT initialized. */
     portEXIT_CRITICAL(&state_lock);
+    ESP_LOGI(TAG,"Renderer task READY: frame timer and single-ESP render watchdog registered");
     while(1){
        const int64_t frame_started_us=esp_timer_get_time();
        TickType_t now=xTaskGetTickCount();
@@ -2169,7 +3446,9 @@ static void led_task(void *p) {
        ot_demo_t local_demo={0};ot_show_t local_show={0};uint32_t show_started=0;uint8_t combined=0;
        uint32_t local_stop_generation=0;
        bool local_fx_enabled=false;ot_fx_zone_bank_t local_fx_bank={0};
-       ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_tm_profile_t local_tm;
+       ot_om_output_t local_outputs[OT_OM_OUTPUTS];ot_pz_output_t local_panel[OT_PZ_OUTPUTS];
+       ot_pz_diag_state_t local_diag={0};ot_tm_profile_t local_tm;
+       uint32_t local_probe_generation[OT_CHAIN_COUNT]={0u};
        portENTER_CRITICAL(&state_lock);
        /* Repeated reset: no decorative effect replay during recovery.
         * OEM physical GPIO trigger overlays remain authoritative. */
@@ -2177,14 +3456,28 @@ static void led_task(void *p) {
            demo.mode=OT_DEMO_OFF;demo_deadline=0;
            native_show.mode=OT_SHOW_OFF;
            ble_fx_enabled=false;ble_owns_show=false;
+           ot_pz_diag_clear(&pz_diag);
+           pz_preview_cancel_pending_locked();
+           pz_preview_cancel_all_locked();
            ot_fx_bank_stop_all(&fx_bank);
        }
+       const uint32_t render_now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
+       for(unsigned i=0;i<OT_PZ_OUTPUTS;i++)
+            (void)ot_pz_preview_expire(&pz_preview[i],render_now_ms);
        physical=live_input_mask;
-       memcpy(local_outputs,om_outputs,sizeof(local_outputs));
+       pz_effective_panels_locked(local_panel);
+       uint16_t local_active_revision[OT_PZ_OUTPUTS];
+       memcpy(local_active_revision,pz_active_revision,sizeof(local_active_revision));
        local_tm=tm_profile;
        local_stop_generation=stop_request_generation;
        combined=ot_tm_resolve(&local_tm,physical);
-       if(before_deadline(now,sim_deadline)) combined|=sim_mask;
+       if(before_deadline(now,sim_deadline)){
+           combined|=sim_mask;
+       }
+       (void)ot_pz_diag_expire(&pz_diag,(uint32_t)(esp_timer_get_time()/1000LL));
+       local_diag=pz_diag;
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+           local_probe_generation[ch]=probe_generation[ch];
        if(before_deadline(now,demo_deadline)) local_demo=demo;
        if(show_window(now)){
            local_show=native_show;show_started=native_show_started_ms;
@@ -2192,12 +3485,28 @@ static void led_task(void *p) {
            if(local_fx_enabled)memcpy(&local_fx_bank,&fx_bank,sizeof(local_fx_bank));
        } else {native_show.mode=OT_SHOW_OFF;ble_fx_enabled=false;}
        portEXIT_CRITICAL(&state_lock);
+       ot_om_output_t default_outputs[OT_OM_OUTPUTS];
+       ot_om_defaults(default_outputs);
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++)
+           if(!ot_pz_to_fx_view(&local_panel[ch],ch,&local_outputs[ch]))
+               local_outputs[ch]=default_outputs[ch];
+       for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+           memset(resolved_fx_bank_index[ch],0xff,sizeof(resolved_fx_bank_index[ch]));
+           if(local_fx_enabled&&
+              !ot_fx_bank_resolve_zone_identity(&local_panel[ch],
+                  &local_fx_bank,ch,render_now_ms,resolved_fx_bank_index[ch])){
+               ot_st_set_fault("invalid FX Panel/Zone identity map");
+               local_fx_enabled=false;
+           }
+       }
        /* One immutable snapshot of every requested custom palette per frame.
         * No locks or NVS access occur in the per-pixel/FX draw loops. */
        uint8_t palette_ids[OT_OM_OUTPUTS*OT_OM_ZONES];
        ot_palette_entry_t frame_palettes[OT_OM_OUTPUTS*OT_OM_ZONES];
        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)for(unsigned z=0;z<OT_OM_ZONES;z++){
-           const uint8_t id=local_fx_bank.zones[o][z].request.palette_id;
+           const uint8_t bank_z=resolved_fx_bank_index[o][z];
+           const uint8_t id=bank_z<OT_OM_ZONES?
+               local_fx_bank.zones[o][bank_z].request.palette_id:255u;
            palette_ids[o*OT_OM_ZONES+z]=(id>=73u&&id<=200u)?
                                         (uint8_t)(200u-id):255u;
        }
@@ -2213,12 +3522,17 @@ static void led_task(void *p) {
            bool frame_ready[OT_CHAIN_COUNT]={false};
            bool frame_submitted[OT_CHAIN_COUNT]={false};
            bool frame_captured[OT_CHAIN_COUNT]={false};
+           bool probe_nonblack[OT_CHAIN_COUNT]={false};
            bool any_output_completed=false;
            /* Reconfigure only after the preceding frame's async RMT transfers
             * have completed, and before starting ANY new lane transfer. */
+           unsigned render_pixels[OT_CHAIN_COUNT]={0};
            for(unsigned ch=0;ch<OT_CHAIN_COUNT;ch++){
+               render_pixels[ch]=local_panel[ch].active_pixels?
+                   local_panel[ch].active_pixels:OT_PZ_MAX_PIXELS;
+               ot_pz_build_pixel_map(&local_panel[ch],pixel_zone_map[ch],pixel_logical_map[ch]);
                if(!output_failed[ch]){
-                   frame_ready[ch]=strip_configure_channel(ch,local_outputs[ch].active_pixels);
+                   frame_ready[ch]=strip_configure_channel(ch,render_pixels[ch]);
                    if(!frame_ready[ch]){
                        /* A failed resize may leave an old handle or no handle.
                         * Never retry teardown/allocation on every render frame. */
@@ -2255,34 +3569,61 @@ static void led_task(void *p) {
                    ot_frame_snapshot_unavailable((uint8_t)ch);
                    continue; /* No async transfer was submitted. */
                }
-               /* Render each selected zone once, even if the native frame is indexed by
-                * individual pixels below. No BLE stream and no WLED/Wi-Fi dependency. */
-               if(native_rendering && local_fx_enabled){
-                   /* Do not clear the entire frame: source-pinned WLED fade_out()
-                    * and overlay modes must see the preceding zone frame.
-                    * Inactive/replaced/moved zones are cleared individually. */
-                   unsigned offset=0;
-                   for(int z=0;z<output->zone_count;z++){
-                       unsigned len=output->zones[z].pixels;
-                       const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][z];
-                       if(len && ot_fx_slot_active(slot,frame_ms) &&
-                          output->zones[z].role!=OT_OM_OFF &&
-                          offset+len<=OT_CHAIN_PIXELS){
-                           /* Reset ONLY this zone on replacement. Unrelated zone
-                            * particle motion and effect phase are preserved. */
-                           if(!prior_fx_active[ch][z] ||
-                              prior_fx_generation[ch][z]!=slot->generation ||
-                              prior_fx_offset[ch][z]!=offset ||
-                              prior_fx_length[ch][z]!=len){
-                               memset(&fx_frame[ch][offset],0,
-                                      (size_t)len*sizeof(fx_frame[ch][0]));
+               /* Render one compact logical frame per zone. Physical ranges are
+                * gathered/scattered through the authoritative map; strip order
+                * and RMT ownership remain exclusively physical and CORE-owned. */
+               unsigned zone_global_start[OT_OM_ZONES]={0};
+               unsigned logical_total=0u;
+               for(unsigned z=0;z<output->zone_count;z++){
+                   zone_global_start[z]=logical_total;
+                   logical_total+=output->zones[z].pixels;
+               }
+               if(native_rendering&&local_fx_enabled){
+                   uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
+                   uint32_t old_generation[OT_OM_ZONES];
+                   bool old_active[OT_OM_ZONES];
+                   memcpy(old_zone_id,prior_fx_zone_id[ch],sizeof(old_zone_id));
+                   memcpy(old_panel_id,prior_fx_panel_id[ch],sizeof(old_panel_id));
+                   memcpy(old_generation,prior_fx_generation[ch],sizeof(old_generation));
+                   memcpy(old_active,prior_fx_active[ch],sizeof(old_active));
+                   /* Renderer states may own WLED scratch allocations. Transfer
+                    * ownership into the snapshot, clear the old bank, then move
+                    * each retained state exactly once into its new zone index. */
+                   memcpy(prior_fx_state,fx_state[ch],sizeof(prior_fx_state));
+                   memset(fx_state[ch],0,sizeof(fx_state[ch]));
+                   for(unsigned z=0;z<output->zone_count;z++){
+                       const unsigned len=output->zones[z].pixels;
+                       const ot_pz_zone_t *zone_cfg=&local_panel[ch].zones[z];
+                       const uint8_t bank_z=resolved_fx_bank_index[ch][z];
+                       const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
+                           &local_fx_bank.zones[ch][bank_z]:NULL;
+                       const bool active=len>0u&&slot&&
+                           ot_fx_slot_active(slot,frame_ms);
+                       const int prior_index=active?
+                           ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
+                               zone_cfg->id,slot->generation,old_panel_id,
+                               old_zone_id,old_generation,old_active,OT_OM_ZONES):-1;
+                       const bool same_identity=prior_index>=0;
+                       if(active&&len<=OT_PZ_MAX_PIXELS){
+                           if(same_identity){
+                               ot_effects_1d_move_state(&fx_state[ch][z],
+                                   &prior_fx_state[prior_index]);
+                           }else{
                                ot_effects_1d_reset(&fx_state[ch][z],
-                                   0x1234u+ch*97u+(unsigned)z*19u+slot->generation);
-                               prior_fx_generation[ch][z]=slot->generation;
-                               prior_fx_offset[ch][z]=offset;
-                               prior_fx_length[ch][z]=len;
+                                   0x1234u+ch*97u+z*19u+slot->generation);
                            }
-                           prior_fx_active[ch][z]=true;
+                           memset(fx_zone_scratch,0,(size_t)len*sizeof(fx_zone_scratch[0]));
+                           for(unsigned px=0;px<render_pixels[ch];px++){
+                               if(pixel_zone_map[ch][px]!=(uint8_t)z)continue;
+                               const unsigned logical=pixel_logical_map[ch][px];
+                               if(logical>=len)continue;
+                               const uint8_t old_z=prior_pixel_zone_map[ch][px];
+                               if(same_identity&&old_z<OT_OM_ZONES&&old_active[old_z]&&
+                                  old_z==(uint8_t)prior_index&&
+                                  old_zone_id[old_z]==zone_cfg->id&&
+                                  old_panel_id[old_z]==zone_cfg->panel_id)
+                                   fx_zone_scratch[logical]=fx_frame[ch][px];
+                           }
                            const ot_ble_fx_packet_t *fx=&slot->request;
                            ot_wled_fx_config_t cfg={
                                .effect_id=fx->effect_id,
@@ -2302,79 +3643,112 @@ static void led_task(void *p) {
                                     frame_palettes[ch*OT_OM_ZONES+z].present)?
                                    &frame_palettes[ch*OT_OM_ZONES+z].palette:NULL
                            };
-                           uint32_t zone_elapsed=frame_ms-slot->started_ms;
+                           const uint32_t zone_elapsed=frame_ms-slot->started_ms;
                            if(((fx->palette_id>=73u&&fx->palette_id<=200u)&&
-                                 !frame_palettes[ch*OT_OM_ZONES+z].present) ||
+                                 !frame_palettes[ch*OT_OM_ZONES+z].present)||
                               !ot_effects_1d_render(&cfg,&fx_state[ch][z],zone_elapsed,
-                                                &fx_frame[ch][offset],len)){
-                               memset(&fx_frame[ch][offset],0,
-                                      (size_t)len*sizeof(fx_frame[ch][0]));
+                                                    fx_zone_scratch,len)){
+                               memset(fx_zone_scratch,0,(size_t)len*sizeof(fx_zone_scratch[0]));
                                ot_st_set_fault("invalid BLE effect frame");
                                stop_continuous_on_fault();
-                           } else if(slot->overlay.style &&
-                                     !ot_fx_overlay_apply(&slot->overlay,
-                                         slot->generation ^ ((uint32_t)ch<<16) ^ ((uint32_t)z<<8),
-                                         zone_elapsed,&fx_frame[ch][offset],len,cfg.brightness)){
+                           }else if(slot->overlay.style&&
+                                    !ot_fx_overlay_apply(&slot->overlay,
+                                        slot->generation^((uint32_t)ch<<16)^((uint32_t)z<<8),
+                                        zone_elapsed,fx_zone_scratch,len,cfg.brightness)){
                                ot_st_set_fault("invalid effect overlay");
                                stop_continuous_on_fault();
                            }
-                       } else {
+                           for(unsigned px=0;px<render_pixels[ch];px++){
+                               if(pixel_zone_map[ch][px]!=(uint8_t)z)continue;
+                               const unsigned logical=pixel_logical_map[ch][px];
+                               if(logical<len)fx_frame[ch][px]=fx_zone_scratch[logical];
+                           }
+                           prior_fx_active[ch][z]=true;
+                           prior_fx_generation[ch][z]=slot->generation;
+                       }else{
                            prior_fx_active[ch][z]=false;
                        }
-                       offset+=len;
+                       prior_fx_zone_id[ch][z]=zone_cfg->id;
+                       prior_fx_panel_id[ch][z]=zone_cfg->panel_id;
                    }
-               } else {
-                   /* Stop, shutdown and show disable invalidate all historical
-                    * effect pixels without displaying stale retained frames. */
-                   for(int z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
+                   for(unsigned z=output->zone_count;z<OT_OM_ZONES;z++)
+                       prior_fx_active[ch][z]=false;
+                   /* Deleted/inactive zones did not transfer their state.
+                    * Release any source-owned scratch exactly once. */
+                   for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)
+                       ot_effects_1d_reset(&prior_fx_state[old_z],0u);
+               }else{
+                   for(unsigned z=0;z<OT_OM_ZONES;z++)prior_fx_active[ch][z]=false;
                }
-               /* ot_om_layout() above validated zone totals and ordering.
-                * Visit each contiguous zone only once rather than performing
-                * a full ot_om_valid() plus name checks for every LED.
-                * This keeps the mapping universal and reduces render latency. */
-               ot_om_zone_cursor_t zone_cursor={0};
-               /* Capture one requested output, after CORE overlays/calibration,
-                * before driver color-order packing. No work in normal frames. */
+               /* Physical trigger overlays outrank diagnostics, which outrank
+                * show/demo pixels only in explicitly assigned zones. Gaps and
+                * UNASSIGNED zones have no implicit road-light function. */
                frame_captured[ch]=ot_frame_snapshot_begin((uint8_t)ch,
-                                        output->active_pixels,frame_index+1u);
+                                        render_pixels[ch],frame_index+1u);
                bool pixel_write_failed=false;
-               for(unsigned px=0;px<output->active_pixels;++px){
+               for(unsigned px=0;px<render_pixels[ch];++px){
                    ot_rgb_t c={0,0,0};
-                   int zone=ot_om_section_next(output,&zone_cursor,px);
-                   if(zone>=0 && output->zones[zone].role!=OT_OM_OFF){
-                       const uint8_t role=output->zones[zone].role;
-                       const bool fx_here=native_rendering&&local_fx_enabled&&
-                           ot_fx_slot_active(&local_fx_bank.zones[ch][zone],frame_ms);
-                       const bool legacy_here=native_rendering&&!local_fx_enabled&&
-                           (local_show.chain_mask&(1u<<ch))&&
-                           (local_show.section_mask&(1u<<zone));
-                       const bool demo_here=!fx_here&&!legacy_here&&
-                           local_demo.mode!=OT_DEMO_OFF;
-                       const bool decorated=fx_here||legacy_here||demo_here;
-                       /* Parking remains a baseline underneath show playback.
-                        * Brake/turn/hazard/reverse/AUX win only in their role-owned zones. */
-                       bool trigger_here=ot_om_trigger_overlay(role,combined,
-                                                 decorated,OT_MAX_BRIGHTNESS,&c);
-                       if(!trigger_here){
-                           if(fx_here){
-                               ot_wled_rgb_t fx=fx_frame[ch][px];
-                               const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][zone];
-                               const uint16_t progress=ot_transition_progress(
-                                   (uint32_t)(frame_ms-slot->started_ms),
-                                   OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
-                               const ot_transition_rgb_t black={0,0,0};
-                               const ot_transition_rgb_t target={fx.r,fx.g,fx.b};
-                               const ot_transition_rgb_t blended=ot_transition_blend(
-                                   black,target,progress);
-                               c=(ot_rgb_t){blended.r,blended.g,blended.b};
-                           }else if(legacy_here){
-                               c=ot_show_pixel(&local_show,&zone_layout,ch,px,elapsed);
-                           }else if(demo_here){
-                               c=ot_pixel_color(&zone_layout,ch,px,0,&local_demo,frame_index);
-                           }
-                           if(decorated)c=ot_om_calibrate(c,output);
+                   const int zone=pixel_zone_map[ch][px]<output->zone_count?
+                                  (int)pixel_zone_map[ch][px]:-1;
+                   const uint8_t role=zone>=0?local_panel[ch].zones[zone].role:
+                                               OT_PZ_ROLE_UNASSIGNED;
+                   const uint8_t bank_z=zone>=0?
+                       resolved_fx_bank_index[ch][(unsigned)zone]:0xffu;
+                   const bool fx_here=zone>=0&&native_rendering&&
+                       local_fx_enabled&&bank_z<OT_OM_ZONES&&
+                       ot_fx_slot_active(&local_fx_bank.zones[ch][bank_z],frame_ms);
+                   const bool legacy_here=zone>=0&&native_rendering&&
+                       !local_fx_enabled&&(local_show.chain_mask&(1u<<ch))&&
+                       (local_show.section_mask&(1u<<zone));
+                   const bool demo_here=zone>=0&&!fx_here&&
+                       !legacy_here&&local_demo.mode!=OT_DEMO_OFF;
+                   const bool decorated=fx_here||legacy_here||demo_here;
+                   bool trigger_here=false;
+                   /* Physical inputs own only explicitly assigned roles.
+                    * Gaps and unassigned zones never infer a vehicle function. */
+                   if(zone>=0&&role!=OT_PZ_ROLE_UNASSIGNED&&role!=OT_OM_OFF){
+                       trigger_here=ot_om_trigger_overlay(role,combined,decorated,
+                                             255u,&c);
+                   }
+                   bool diagnostic_here=false;
+                   if(!trigger_here){
+                       bool diagnostic_owned=false;ot_rgb_t diagnostic={0,0,0};
+                       if(ot_pz_diag_render(&local_diag,(unsigned)ch,(uint16_t)px,
+                                            frame_ms,&diagnostic_owned,&diagnostic)&&
+                          diagnostic_owned){
+                           c=diagnostic;
+                           diagnostic_here=true;
                        }
                    }
+                   if(!trigger_here&&!diagnostic_here&&zone>=0){
+                       const unsigned logical_px=zone_global_start[zone]+
+                                                 pixel_logical_map[ch][px];
+                       if(fx_here){
+                           const ot_wled_rgb_t fx=fx_frame[ch][px];
+                           const uint8_t bank_z=resolved_fx_bank_index[ch][(unsigned)zone];
+                           const ot_fx_zone_slot_t *slot=&local_fx_bank.zones[ch][bank_z];
+                           const uint16_t progress=ot_transition_progress(
+                               (uint32_t)(frame_ms-slot->started_ms),
+                               OT_FX_ENTRY_FADE_MS,OT_TRANSITION_SMOOTH);
+                           const ot_transition_rgb_t black={0,0,0};
+                           const ot_transition_rgb_t target={fx.r,fx.g,fx.b};
+                           const ot_transition_rgb_t blended=ot_transition_blend(
+                               black,target,progress);
+                           c=(ot_rgb_t){blended.r,blended.g,blended.b};
+                       }else if(legacy_here){
+                           c=ot_show_pixel(&local_show,&zone_layout,ch,logical_px,elapsed);
+                       }else if(demo_here){
+                           c=ot_pixel_color(&zone_layout,ch,logical_px,0,&local_demo,frame_index);
+                       }
+                       if(decorated)c=ot_om_calibrate(c,output);
+                   }
+                   /* One final ratio-preserving ceiling covers solid/show,
+                    * Startup/Shutdown, effects, trigger and diagnostics. */
+                   c=ot_om_limit_brightness(c,(uint8_t)OT_MAX_BRIGHTNESS);
+                   if(diagnostic_here&&local_diag.mode==OT_PZ_DIAG_PROBE&&
+                      local_diag.lane==(uint8_t)ch&&local_diag.endpoint==px&&
+                      (c.r!=0u||c.g!=0u||c.b!=0u))
+                       probe_nonblack[ch]=true;
                    if(frame_captured[ch])
                        ot_frame_snapshot_pixel((uint16_t)px,c.r,c.g,c.b);
                    c=ot_om_swizzle(c,output->color_order);
@@ -2413,13 +3787,38 @@ static void led_task(void *p) {
                    continue;
                }
                if(frame_captured[ch])ot_frame_snapshot_complete(true);
+               memcpy(prior_pixel_zone_map[ch],pixel_zone_map[ch],
+                      OT_PZ_MAX_PIXELS*sizeof(prior_pixel_zone_map[ch][0]));
                any_output_completed=true; /* completed RMT, not queued transfer */
                /* A failed lane must not throttle the surviving vehicle lights. */
-               if(local_outputs[ch].active_pixels>longest_pixels)
-                   longest_pixels=local_outputs[ch].active_pixels;
+               if(render_pixels[ch]>longest_pixels)
+                   longest_pixels=(uint16_t)render_pixels[ch];
+               bool probe_first_frame=false,probe_first_bright=false;
                portENTER_CRITICAL(&state_lock);
                output_refreshes[ch]++;
+               pz_render_revision[ch]=local_active_revision[ch];
+               if(local_diag.mode==OT_PZ_DIAG_PROBE&&local_diag.lane==(uint8_t)ch&&
+                  local_probe_generation[ch]!=0u&&
+                  (int32_t)(frame_ms-local_diag.expires_ms)<0){
+                   if(probe_rmt_first_frame_generation[ch]!=local_probe_generation[ch]){
+                       probe_rmt_first_frame_generation[ch]=local_probe_generation[ch];
+                       probe_first_frame=true;
+                   }
+                   if(probe_nonblack[ch]&&
+                      probe_rmt_bright_frame_generation[ch]!=local_probe_generation[ch]){
+                       probe_rmt_bright_frame_generation[ch]=local_probe_generation[ch];
+                       probe_first_bright=true;
+                   }
+               }
                portEXIT_CRITICAL(&state_lock);
+               if(probe_first_frame)
+                   ESP_LOGI(TAG,"PIXEL_PROBE_RMT_DONE lane=%u gpio=%u generation=%lu nonblack=%u (driver only, not optical proof)",
+                     (unsigned)(ch+1u),(unsigned)out_pin[ch],
+                     (unsigned long)local_probe_generation[ch],(unsigned)probe_nonblack[ch]);
+               if(probe_first_bright)
+                   ESP_LOGI(TAG,"PIXEL_PROBE_NONBLACK_FRAME lane=%u gpio=%u generation=%lu pixel=%u (driver only, not optical proof)",
+                     (unsigned)(ch+1u),(unsigned)out_pin[ch],
+                     (unsigned long)local_probe_generation[ch],(unsigned)local_diag.endpoint);
            }
            /* Acknowledged Stop and FPS must represent complete multi-output
             * refreshes, not only whichever lane happened to succeed. */
@@ -2486,16 +3885,58 @@ static void led_task(void *p) {
 #if CONFIG_ESP_MAIN_TASK_STACK_SIZE < 8192
 #error "OpenTail app_main requires at least 8192 bytes of main-task stack"
 #endif
+#if !defined(CONFIG_SPIRAM) || !defined(CONFIG_SPIRAM_MODE_OCT) || !defined(CONFIG_SPIRAM_USE_MALLOC)
+#error "OpenTail N16R8 requires initialized octal PSRAM in the malloc capability heap"
+#endif
+#if defined(CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM) && CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM
+#error "OpenTail FreeRTOS stacks must stay in internal RAM for flash/NVS safety"
+#endif
+#define OT_N16R8_PSRAM_BYTES (8u * 1024u * 1024u)
+#define OT_RENDER_TASK_STACK_BYTES 8192u
+/* These heap capability measurements are essential to distinguish internal
+ * allocation failure from PSRAM initialization and post-radio fragmentation.
+ * A successful PSRAM total is NOT evidence of enough internal stack memory. */
+static void ot_boot_heap_snapshot(const char *phase){
+    const uint32_t internal_caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG,"BOOT heap %s internal free=%u largest=%u min_ever=%u; PSRAM free=%u largest=%u min_ever=%u",
+        phase,
+        (unsigned)heap_caps_get_free_size(internal_caps),
+        (unsigned)heap_caps_get_largest_free_block(internal_caps),
+        (unsigned)heap_caps_get_minimum_free_size(internal_caps),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+}
+static bool ot_boot_psram_ready(void){
+    const bool initialized=esp_psram_is_initialized();
+    const size_t capacity=initialized?esp_psram_get_size():0u;
+    const bool ready=initialized && capacity>=OT_N16R8_PSRAM_BYTES;
+    ESP_LOGI(TAG,"N16R8 octal PSRAM initialized=%u capacity=%u required=%u",
+        (unsigned)initialized,(unsigned)capacity,(unsigned)OT_N16R8_PSRAM_BYTES);
+    if(!ready)
+        ESP_LOGE(TAG,"N16R8 PSRAM missing or undersized; physical output stays inhibited");
+    return ready;
+}
 void app_main(void) {
+    core_boot_id=esp_random();
+    if(core_boot_id==0u)core_boot_id=1u;
+    ESP_LOGI(TAG,"CORE boot identity: %08lx",(unsigned long)core_boot_id);
     ot_sw_idf_boot_record();
     ESP_LOGW(TAG,"CORE %s BENCH ONLY: one ESP watchdog, NO redundant lights.",OT_FW);
+    const bool psram_ready=ot_boot_psram_ready();
+    ot_boot_heap_snapshot("early-boot");
     ESP_ERROR_CHECK(nvs_flash_init());
     ot_palette_runtime_load();
     for(unsigned o=0;o<OT_OM_OUTPUTS;o++)om_revision[o]=om_active_revision[o]=1u;
     om_load();
     tm_load();
+    if(!tm_policy_load()){
+        config_recovery_fault=true;
+        ESP_LOGE(TAG,"Trigger input policy NVS record invalid or mismatched");
+    }
     om_journal_load();
     tm_journal_load();
+    pz_load(); /* v4 split lane/map pair authoritative; v3 and v1/v2 are read-only migration inputs */
     if(!ot_layout_valid(&layout)){ESP_LOGE(TAG,"Invalid LED layout");abort();}
     ot_st_init();
     const bool watchdog_ready=ot_sw_idf_configure();
@@ -2508,6 +3949,7 @@ void app_main(void) {
     ESP_LOGI(TAG,"Startup main-task stack high-water after status SPI: %u bytes",
         (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(config_recovery_fault)ot_st_set_fault("corrupt configuration recovery journal");
+    if(!psram_ready)ot_st_set_fault("N16R8 PSRAM unavailable; renderer inhibited");
     const bool inputs_ready=watchdog_ready&&input_init();
     if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");
     /* Capture held inputs before RMT can emit its first frame; debounce
@@ -2526,27 +3968,68 @@ void app_main(void) {
     if(input_watched&&!sampler_ready)ot_sw_idf_cancel_inputs();
     if(input_watched&&!sampler_ready)ot_st_set_fault("physical input sampler could not start");
     input_sampler_ready=sampler_ready; /* Set once before any BLE/HTTP service starts. */
-    bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();
-    /* Do not advertise renderer readiness until led_task initializes its timer. */
-    const bool wifi_started=wifi_ap_init();
-    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
+    const bool outputs_ready=sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init();
+    /* Critical hardware path gets its original 8192-byte INTERNAL stack
+     * before Wi-Fi, BLE, HTTP and config-worker heap allocations. This task
+     * does not depend on those services. Do not move it behind radio startup. */
+    ot_boot_heap_snapshot("pre-render-task");
+    if(outputs_ready){
+        const BaseType_t created=xTaskCreate(
+            led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL);
+        if(created!=pdPASS){
+            ot_boot_heap_snapshot("render-create-failed");
+            portENTER_CRITICAL(&state_lock);
+            native_outputs_ready=false;
+            portEXIT_CRITICAL(&state_lock);
+            ESP_LOGE(TAG,"Renderer internal stack/TCB allocation failed (stack=%u bytes); inspect pre-render internal largest block",
+                (unsigned)OT_RENDER_TASK_STACK_BYTES);
+            ot_st_set_fault("render task could not start");
+        }else{
+            ESP_LOGI(TAG,"Renderer task created with %u-byte internal stack; waiting for timer/WDT and first frame",
+                (unsigned)OT_RENDER_TASK_STACK_BYTES);
+            ot_boot_heap_snapshot("post-render-task");
+        }
+        /* OTA validation remains deferred until led_task finishes its first full frame. */
+    }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
+    /* BLE is the primary owner/control channel. Hardware observations
+     * showed Wi-Fi SoftAP consumed ~87 kB internal RAM before NimBLE HCI
+     * initialization and the internal low-water fell to 272 bytes. Reserve
+     * controller/HCI resources BEFORE Wi-Fi, while keeping both transports.
+     * The small mutex must exist before any BLE GATT callback can save config;
+     * the 5120-byte configuration worker may start after BLE registration. */
     om_write_mutex=xSemaphoreCreateMutex();
-    /* Configuration writes already reject a missing mutex. Keep local
-     * trigger-driven rendering alive rather than rebooting on this fault. */
     if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");
-    else{
+    ot_boot_heap_snapshot("pre-ble");
+    ble_startup_ready=ot_ble_start();
+    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
+    ot_boot_heap_snapshot("post-ble");
+    /* NimBLE radio advertising is asynchronous to nimble_port_init().
+     * Give the BLE-primary host a bounded opportunity to establish its
+     * advertising buffers BEFORE the secondary Wi-Fi AP consumes RAM.
+     * Non-blocking for safety: input sampler/render tasks run independently.
+     * Timeout does not disable Wi-Fi diagnostics; OTA still requires a
+     * real successful BLE advertisement and completed RMT frame. */
+    if(ble_startup_ready){
+        const int64_t ble_adv_deadline_us=esp_timer_get_time()+2000000LL;
+        while(!ot_ble_radio_ever_ready() &&
+              esp_timer_get_time()<ble_adv_deadline_us)
+            vTaskDelay(pdMS_TO_TICKS(10));
+        if(ot_ble_radio_ever_ready())
+            ESP_LOGI(TAG,"BLE-primary advertising confirmed before Wi-Fi allocation");
+        else
+            ESP_LOGW(TAG,"BLE HCI started but advertising not confirmed in 2000ms; Wi-Fi diagnostics still starting");
+    }
+    if(om_write_mutex){
         config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
             5120,NULL,5,NULL)==pdPASS;
         if(!config_promotion_ready)
             ot_st_set_fault("durable configuration promoter failed to start");
     }
-    ble_startup_ready=ot_ble_start();
-    if(!ble_startup_ready)ot_st_set_fault("BLE GATT startup failed");
+    ot_boot_heap_snapshot("pre-wifi");
+    const bool wifi_started=wifi_ap_init();
+    if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
+    ot_boot_heap_snapshot("post-wifi");
     http_startup_ready=wifi_started&&http_start();
     if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
-    if(outputs_ready){
-        BaseType_t created=xTaskCreate(led_task,"ot_led",8192,NULL,8,NULL);
-        if(created!=pdPASS){portENTER_CRITICAL(&state_lock);native_outputs_ready=false;portEXIT_CRITICAL(&state_lock);ot_st_set_fault("render task could not start");}
-        /* OTA validation is deferred until led_task finishes its first full frame. */
-    }else ESP_LOGE(TAG,"Pixel task intentionally disabled; CORE is in BENCH FAULT state");
+    ot_boot_heap_snapshot("post-http");
 }

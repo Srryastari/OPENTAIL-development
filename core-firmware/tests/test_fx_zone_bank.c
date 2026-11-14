@@ -35,7 +35,7 @@ int main(void){
  ot_fx_bank_stop_all(&bank);
  assert(!ot_fx_bank_any_active(&bank,600000));
  /* Different physical outputs may have entirely different active layouts.
-  * Broad ALL must skip disabled/nonexistent zones, and a phantom-only mask
+  * Broad ALL may include roles without trigger overrides, but must skip nonexistent zones, and a phantom-only mask
   * must return an error without changing any live slot. */
  ot_om_output_t outputs[OT_OM_OUTPUTS]={0};
  outputs[0].zone_count=2;
@@ -48,9 +48,9 @@ int main(void){
  ot_ble_fx_packet_t all=make(12,3,255,60);
  assert(ot_fx_bank_apply_configured(&bank,&all,outputs,500,false));
  assert(ot_fx_slot_active(&bank.zones[0][0],501));
- assert(!ot_fx_slot_active(&bank.zones[0][1],501));
+ assert(ot_fx_slot_active(&bank.zones[0][1],501));
  assert(ot_fx_slot_active(&bank.zones[1][0],501));
- assert(!ot_fx_slot_active(&bank.zones[1][1],501));
+ assert(ot_fx_slot_active(&bank.zones[1][1],501));
  assert(ot_fx_slot_active(&bank.zones[1][2],501));
  uint32_t old=bank.zones[1][2].generation;
  ot_ble_fx_packet_t phantom=make(23,2,128,10);
@@ -79,12 +79,13 @@ int main(void){
         bank.zones[0][0].started_ms==z0_start);
  assert(bank.zones[1][2].generation==z2_gen&&
         bank.zones[1][2].started_ms==z2_start);
- /* Invalid configs and masks are atomic; disabled/phantom zones never apply. */
+ /* Invalid configs and phantom masks are atomic; Off is a road role, not Show exclusion. */
  glow.style=4;
  assert(!ot_fx_bank_set_overlay(&bank,outputs,3u,5u,701u,&glow));
  assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_SPARKS_FLARES);
  glow.style=OT_FX_OVERLAY_FLARES;
- assert(!ot_fx_bank_set_overlay(&bank,outputs,2u,2u,701u,&glow));
+ assert(ot_fx_bank_set_overlay(&bank,outputs,2u,2u,701u,&glow));
+ assert(bank.zones[1][1].overlay.style==OT_FX_OVERLAY_FLARES);
  assert(!ot_fx_bank_set_overlay(&bank,outputs,0u,4u,701u,&glow));
  assert(ot_fx_bank_set_overlay(&bank,outputs,2u,4u,701u,&glow));
  assert(bank.zones[1][2].overlay.style==OT_FX_OVERLAY_FLARES);

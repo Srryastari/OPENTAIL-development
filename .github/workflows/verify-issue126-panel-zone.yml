@@ -1,0 +1,229 @@
+name: Issue126 Panel/Zone exact-head CORE verification
+on:
+  push:
+    branches:
+      - firmware/issue126-panel-zone-core-20261108
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - triggers/issue121-turn-release-debounce-20261108
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-head-and-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin exact tested HEAD and sequential parent
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor 66c2d9c843a0b434f9399811110e42d7e26c4692 HEAD
+      - name: Verify firmware-only scope and exact Panel/Zone source contract
+        run: |
+          cd core-firmware
+          python3 tests/test_panel_zone_runtime_contract.py
+          cd ..
+          python3 - <<'PY'
+          import subprocess
+          paths=subprocess.check_output(
+              ["git","diff","--name-only",
+               "66c2d9c843a0b434f9399811110e42d7e26c4692","HEAD"],
+              text=True).splitlines()
+          # Approved split-source renderer integration only. Keep all other
+          # Android/UI paths forbidden and prove byte identity to the vetted
+          # Effects #110 + Android #111 Git blobs, not just file names.
+          approved={
+              "android/app/src/main/cpp/core/effects_1d.c":
+                  "3985028279ec7ef6d765415b6e54f4fa027647d0",
+              "android/app/src/main/cpp/core/effects_1d.h":
+                  "a1e9c4b7601704f725c4c9221f606bc11a213bf7",
+              "android/app/src/main/cpp/core/wled_fx_compat.c":
+                  "85f0cc22bdcff6cdb43a408d6b338fbfd2454671",
+              "android/app/src/main/cpp/core/SOURCE.json":
+                  "7eeca0e24a0801cb3bad0d77f5f64873824a215d",
+              "android/qa/test_full_offline_preview.py":
+                  "8bc501e86a06ddaf84f9acd149118e8da3c1a78f",
+              "android/qa/test_native_source.cjs":
+                  "03ec977e93b3620a9dd9809a1ea1d296c2434a99",
+          }
+          forbidden=[p for p in paths if p.startswith(("android/","web-studio/","studio/"))
+                     and p not in approved]
+          assert not forbidden, forbidden
+          for path,expected in approved.items():
+              actual=subprocess.check_output(["git","hash-object",path],text=True).strip()
+              assert actual==expected,(path,actual,expected)
+          print("PASS: approved JNI/manifest blobs only; no other Android or UI source changes")
+          PY
+      - name: Full CORE host regressions — Panel, Trigger, Effects, BLE, STOP and NVS
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  esp-idf-5-5-5:
+    needs: exact-head-and-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert immutable exact HEAD
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$PIN"
+      - name: Compile CORE for ESP32-S3 with ESP-IDF v5.5.5 — NO FLASH
+        uses: espressif/esp-idf-ci-action@v1
+        env:
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
+      - name: Verify application and flash manifest
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test -s core-firmware/build/opentail_core_alpha.bin
+          test -s core-firmware/build/opentail_core_alpha.elf
+          test -s core-firmware/build/opentail_core_alpha.map
+          test -s core-firmware/build/bootloader/bootloader.bin
+          test -s core-firmware/build/partition_table/partition-table.bin
+          test -s core-firmware/build/flasher_args.json
+          test -s core-firmware/build/ota_data_initial.bin
+          test -s core-firmware/build/isr-evidence/input_edge_isr.symbols.txt
+          test -s core-firmware/build/isr-evidence/input_edge_isr.dis
+          test -s core-firmware/build/isr-evidence/input_edge_isr.audit.txt
+          # The ESP-IDF container emits root-owned build artifacts; restore
+          # runner ownership before writing the exact-head evidence manifest.
+          sudo chown -R "$(id -u):$(id -g)" core-firmware/build
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import hashlib, json, os
+          build=Path("core-firmware/build")
+          refs=json.loads((build/"flasher_args.json").read_text())["flash_files"]
+          assert len(refs)>=3
+          # Verify the ACTUAL ESP-IDF generated config, not only defaults.
+          cfg=(Path("core-firmware")/"sdkconfig").read_text().splitlines()
+          actual=set(cfg)
+          required_config={
+              "CONFIG_SPIRAM=y", "CONFIG_SPIRAM_MODE_OCT=y",
+              "CONFIG_SPIRAM_SPEED_80M=y", "CONFIG_SPIRAM_BOOT_INIT=y",
+              "CONFIG_SPIRAM_MEMTEST=y", "CONFIG_SPIRAM_USE_MALLOC=y",
+              "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y",
+              "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024",
+              "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6",
+              "CONFIG_ESP_WIFI_RX_BA_WIN=6",
+              "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6",
+              "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16",
+              "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768",
+              "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
+              "CONFIG_ESP_TASK_WDT_EN=y", "CONFIG_ESP_TASK_WDT_PANIC=y",
+              "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+              "CONFIG_BT_NIMBLE_NVS_PERSIST=y",
+              "CONFIG_BT_NIMBLE_SECURITY_ENABLE=y",
+              "CONFIG_BT_NIMBLE_SM_SC=y",
+          }
+          assert required_config.issubset(actual),(
+              "N16R8 generated sdkconfig is inconsistent: ",
+              sorted(required_config-actual))
+          assert "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM=y" not in actual
+          disabled={"CONFIG_ESP_WIFI_IRAM_OPT","CONFIG_ESP_WIFI_RX_IRAM_OPT","CONFIG_LWIP_IRAM_OPTIMIZATION"}
+          assert all(f"# {key} is not set" in actual for key in disabled), sorted(disabled)
+          offsets={int(k,0):v for k,v in refs.items()}
+          # These are image offsets, not a request to erase NVS at 0x9000.
+          expected_offsets={
+              0x0000:"bootloader.bin",
+              0x8000:"partition-table.bin",
+              0xf000:"ota_data_initial.bin",
+              0x20000:"opentail_core_alpha.bin",
+          }
+          for offset,name in expected_offsets.items():
+              assert offset in offsets,(hex(offset),"missing from flash manifest")
+              assert Path(offsets[offset]).name==name,(
+                  hex(offset),offsets[offset],name)
+          assert 0x9000 not in offsets,"MUST NOT overwrite live NVS at 0x9000"
+          print("PASS: generated ESP-IDF config enables 8MB octal PSRAM, BLE-primary secondary Wi-Fi budget, internal task stacks, 16MB flash, unchanged WDT")
+          print("PASS: actual flasher_args image offsets (NVS untouched): ",
+                {hex(offset):offsets[offset] for offset in sorted(offsets)})
+          required=set(refs.values()) | {
+              "opentail_core_alpha.elf","opentail_core_alpha.map",
+              "isr-evidence/input_edge_isr.symbols.txt",
+              "isr-evidence/input_edge_isr.dis",
+              "isr-evidence/input_edge_isr.audit.txt",
+          }
+          assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in required)
+          evidence={
+              "commit":os.environ["PIN"],
+              "target":"esp32s3",
+              "esp_idf_version":"v5.5.5",
+              "files":{name:hashlib.sha256((build/name).read_bytes()).hexdigest()
+                       for name in sorted(required)},
+          }
+          evidence["n16r8_psram_build"]={
+              "mode":"octal","expected_bytes":8388608,
+              "generated_sdkconfig_checks":sorted(required_config),
+              "task_stacks":"internal",
+              "runtime_heap_snapshot":"requires owner serial measurement",
+          }
+          evidence["flasher_offsets"]={
+              hex(offset):offsets[offset] for offset in sorted(offsets)}
+          (build/"CORE_BUILD_EVIDENCE.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          print("PASS: exact-head ESP32-S3 image, complete flash manifest, linker map and retained ISR disassembly; no device flashed")
+          PY
+      - name: Package verified COM9 EasyFlash root (NO FLASH)
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$PIN" --version 0.1.32-alpha
+          (cd core-firmware/build/EasyFlash && python3 verify_sha256.py)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          path: core-firmware/build/EasyFlash/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentail-issue126-bench-build-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/build/opentail_core_alpha.bin
+            core-firmware/build/opentail_core_alpha.elf
+            core-firmware/build/opentail_core_alpha.map
+            core-firmware/build/bootloader/bootloader.bin
+            core-firmware/build/partition_table/partition-table.bin
+            core-firmware/build/ota_data_initial.bin
+            core-firmware/build/flasher_args.json
+            core-firmware/build/CORE_BUILD_EVIDENCE.json
+            core-firmware/build/isr-evidence/
+          if-no-files-found: error
+          retention-days: 14
+# Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
+# thermal behavior, vehicle optics, STOP hardware, or road safety.
+
+  easyflash-windows-check:
+    needs: esp-idf-5-5-5
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          path: EasyFlash
+      - name: Validate downloaded ZIP-root scripts and checksums (NO FLASH)
+        shell: pwsh
+        run: |
+          foreach ($file in @('01_FLASH_COM9.bat','02_CAPTURE_BOOT_LOG_COM9.bat','INSTALL_ESPTOOL.bat','START_HERE.txt','flasher_args.json','release_manifest.json','factory_reset.py','03_FACTORY_RESET_COM9.bat')) {
+            if (!(Test-Path "EasyFlash/$file")) { throw "Missing root file: $file" }
+          }
+          python EasyFlash/verify_sha256.py
+          if ($LASTEXITCODE -ne 0) { throw 'EasyFlash SHA-256 failure' }
+          $m = Get-Content EasyFlash/release_manifest.json -Raw | ConvertFrom-Json
+          if ($m.erase_nvs -or $m.road_safe -or $m.version -ne '0.1.32-alpha') { throw 'Unsafe manifest' }
+          python EasyFlash/factory_reset.py --package EasyFlash --sha $m.git_sha
+          if ($LASTEXITCODE -ne 0) { throw 'Factory-reset package validation failure' }

@@ -1,10 +1,10 @@
 {
-  "source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "files": {
-    "wled_fx_compat.c": "b0a0f2e6f89aac5e6c3cdb94e0332ca6016fe70e4ee2abb334608cd631d3b009",
+    "wled_fx_compat.c": "cc50006aac5b9677d3e8ce911eb4d744e46d5ab4576f19111ed2e7a2cd3f001d",
     "wled_fx_compat.h": "cd1f8176be2ad867dceffabc3425e86404a884241b1517cf59c4a0835cc614f0",
-    "effects_1d.c": "e7d8d1f95f84f828f5c5b8d139e6328ce02fefbd6357a8c026f0cfe4bc0fc0b6",
-    "effects_1d.h": "6e7a45b1d433e56cd7c11d7597fbc09790ff76aa4230230a4587c0961b41aa90",
+    "effects_1d.c": "8be306b43e581fa1ce4264e432ea451ba9cb61ea1f5e9f116287f0a310b7d7fc",
+    "effects_1d.h": "996421582fa06d14d1e5d5c90699d5497b700292bf834e91054daea0ac4b2fec",
     "wled_1d.c": "44116fbc03f467bf61b511f097f4edcbf093251e71818ca71b3525aab47542ab",
     "wled_1d.h": "ffa77e0da8f2f9efee32f20bc8c083beb0831440b39f7bcf3977e571147a3c55",
     "palette_1d.c": "c7b5d24b79d5e0a014eb892d45692a8e22c40996d0e4169786d291d1fad00afa",
@@ -15,23 +15,29 @@
     "ot_auto_effects.h": "3116eb326df2a06c863e86cdf89b15702a2eb9c0ad7daa3617b9fa6f6b73a395",
     "core_logic.h": "ee9c173fe24da57e4e2b4c52ad218f06de77bb789ceb6aa1eca9e7413379ad5e"
   },
-  "seamless_loop_source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "seamless_loop_source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "seamless_loop_files": [
-    "effects_1d.c",
-    "effects_1d.h",
     "ot_auto_effects.c",
     "ot_auto_effects.h"
   ],
-  "color_slot_source_commit": "6180e2a5ccbfbf8567513504669c6840b68c045b",
+  "color_slot_source_commit": "601155a196a692792e60fd399505fdc676dc57d9",
   "color_slot_files": [
     "wled_fx_compat.c",
-    "wled_fx_compat.h",
-    "effects_1d.c",
-    "effects_1d.h"
+    "wled_fx_compat.h"
   ],
   "integrated_effects_pr": 110,
   "integrated_firmware96_head": "df27209b9876630b2b10f3a189f36817a2764009",
   "integrated_android106_head": "db7bcdff187197c0493b5c38991870224f2c244a",
   "tertiary_source_proven_modes": 13,
-  "tertiary_transport_admitted_modes": 13
+  "tertiary_transport_admitted_modes": 13,
+  "tertiary_transport_capability": "fx-tertiary13-v1",
+  "tertiary_legacy_capability": "fx-tertiary-v1",
+  "tertiary_legacy_transport_modes": 11,
+  "tertiary_aurora_palette_id": 4,
+  "firmware127_ble_contract_head": "97f4e2fd29df5aa9249292cee2649404fc98ed48",
+  "core_identity_source_commit": "97f4e2fd29df5aa9249292cee2649404fc98ed48",
+  "core_identity_files": [
+    "effects_1d.c",
+    "effects_1d.h"
+  ]
 }

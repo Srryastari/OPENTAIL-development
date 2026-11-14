@@ -3,6 +3,19 @@
 #include <stdbool.h>
 #include "core_logic.h"
 
+/* Preserve RGB ratios while applying the controller's reported software
+ * ceiling once, at the final CORE pixel boundary. */
+static inline ot_rgb_t ot_om_limit_brightness(ot_rgb_t color,uint8_t ceiling){
+    const uint8_t peak=color.r>color.g?(color.r>color.b?color.r:color.b):
+                                      (color.g>color.b?color.g:color.b);
+    if(peak<=ceiling)return color;
+    if(ceiling==0u)return (ot_rgb_t){0,0,0};
+    color.r=(uint8_t)(((uint32_t)color.r*ceiling+(uint32_t)peak/2u)/peak);
+    color.g=(uint8_t)(((uint32_t)color.g*ceiling+(uint32_t)peak/2u)/peak);
+    color.b=(uint8_t)(((uint32_t)color.b*ceiling+(uint32_t)peak/2u)/peak);
+    return color;
+}
+
 /* Physical channels are defined by the board driver, never by a vehicle profile.
  * The board build selects a resource-budgeted, changeable buffer capacity.
  * This is a memory allocation limit, NOT a preset pixel count or FPS promise. */

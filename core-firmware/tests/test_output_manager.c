@@ -10,11 +10,11 @@ int main(void){
  assert(!strcmp(out[0].name,"Pixel OUT 1"));
  assert(!strcmp(out[1].name,"Pixel OUT 2"));
  for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
-   assert(out[i].active_pixels==1);
-   assert(out[i].zone_count==1);
-   assert(!strcmp(out[i].zones[0].name,"Zone 1"));
-   assert(out[i].zones[0].pixels==1 && out[i].zones[0].role==OT_OM_OFF);
-   assert(ot_om_section(&out[i],0)==0 && ot_om_section(&out[i],1)==-1);
+   assert(out[i].active_pixels==0);
+   assert(out[i].zone_count==0);
+   assert(out[i].zones[0].name[0]==0);
+   assert(out[i].zones[0].pixels==0 && out[i].zones[0].role==OT_OM_OFF);
+   assert(ot_om_section(&out[i],0)==-1 && ot_om_section(&out[i],1)==-1);
    ot_rgb_t inactive={1,1,1};
    assert(!ot_om_trigger_overlay(out[i].zones[0].role,0xff,false,32,&inactive));
  }
@@ -23,6 +23,7 @@ int main(void){
  assert(ot_om_role_from_name("reverse")==OT_OM_REVERSE);
  assert(ot_om_order_from_name("BRG")==OT_OM_BRG);
  assert(ot_om_role_from_name("bad")==-1);
+ out[0].zone_count=1;strcpy(out[0].zones[0].name,"User zone");
  out[0].zones[0].pixels=7;assert(!ot_om_valid(&out[0]));
  out[0].active_pixels=7;assert(ot_om_valid(&out[0]));
  out[0].active_pixels=1;out[0].zones[0].pixels=1;assert(ot_om_valid(&out[0]));
