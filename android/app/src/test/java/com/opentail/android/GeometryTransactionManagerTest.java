@@ -226,7 +226,7 @@ public class GeometryTransactionManagerTest {
         }
     }
 
-    @Test public void physicalReorderThatV2CannotRepresentFailsBeforeWriting() throws Exception {
+    @Test public void physicalReorderRebuildsAffectedSuffixWithStableIds() throws Exception {
         // Multi-panel maps must not be silently flattened or reordered by
         // unrelated local project cards.
         byte[] empty=PanelV4LayoutProtocol.expectedFactoryMap(0);
@@ -250,12 +250,19 @@ public class GeometryTransactionManagerTest {
         GeometryTransactionManager.MappedLane future=
             GeometryTransactionManager.fromV4SaveCandidate(0,
                 PanelV4DraftCodec.encode(0,swapped,fullSnapshot(wire,2)));
-        try {
+        java.util.List<PanelPreviewProtocol.UpdateDescriptor[]> batches=
             future.descriptorBatches(prior,247);
-            fail("v2 cannot reorder live full IDs without a distinct safe migration");
-        }catch(IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("reordering"));
-        }
+        // v2 has no reorder opcode, so only the affected suffix is deleted
+        // then recreated with the exact same unambiguous full stable IDs.
+        assertEquals(4,batches.size());
+        assertEquals(0x20,batches.get(0)[0].roleFlags);
+        assertEquals(0x20,batches.get(1)[0].roleFlags);
+        assertEquals(0x4082,batches.get(2)[0].zoneId);
+        assertEquals(0x4081,batches.get(3)[0].zoneId);
+        assertEquals(0,batches.get(2)[0].roleFlags);
+        assertTrue(GeometryTransactionManager.sameLiveGeometry(future,
+            GeometryTransactionManager.fromV4SaveCandidate(0,
+                PanelV4DraftCodec.encode(0,swapped,fullSnapshot(wire,2)))));
     }
 
     @Test public void savedO2RemainsIndependentFromUnsavedO1LiveCandidate() throws Exception {
