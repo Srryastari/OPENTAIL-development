@@ -69,6 +69,20 @@ public class PanelV4LayoutProtocolTest {
         catch(IllegalArgumentException expected) {}
     }
 
+    @Test public void distinctFirmwareSaveNacksGiveActionableFailClosedReasons() {
+        assertTrue(PanelV4LayoutProtocol.saveRejectionMessage(2).contains("busy"));
+        assertTrue(PanelV4LayoutProtocol.saveRejectionMessage(3).contains("stale") ||
+                   PanelV4LayoutProtocol.saveRejectionMessage(3).contains("expired"));
+        assertTrue(PanelV4LayoutProtocol.saveRejectionMessage(7).contains("Invalid"));
+        assertTrue(PanelV4LayoutProtocol.saveRejectionMessage(10).contains("unaccepted"));
+        assertTrue(PanelV4LayoutProtocol.saveRejectionMessage(4).contains("Flash"));
+        for(int code=1;code<=10;code++) {
+            assertFalse(PanelV4LayoutProtocol.saveRejectionMessage(code).isEmpty());
+            assertEquals(code,PanelV4LayoutProtocol.parseSaveAck(1,5,
+                new byte[]{3,(byte)0x85,1,(byte)code}));
+        }
+    }
+
     @Test public void resetRejectsInvalidLaneRevisionAndChallenge() {
         try {PanelV4LayoutProtocol.startFreshChallenge(2,1);fail("lane");}
         catch(IllegalArgumentException expected) {}
