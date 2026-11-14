@@ -298,6 +298,9 @@ assert(!settings.includes('Developer · Trigger Testing') &&
        !settings.includes('Developer · Controller playback') &&
        !settings.includes('Reset Configuration') &&
        !settings.includes('SettingsRow("Controller"') &&
+       settings.includes('Title("Projects", t)') &&
+       settings.includes('exporter.launch("opentail-project.json")') &&
+       settings.includes('importer.launch(arrayOf("application/json", "text/plain"))') &&
        settings.includes('ble.readFxCapabilities()') &&
        settings.includes('CorePaletteTransferPanel(t)') &&
        !settings.includes('ble.simulate'),
@@ -1264,7 +1267,7 @@ assert(disconnectBlock.includes('panelGeometryManagers[lane]=null;') &&
        bleSource.includes('panelSnapshotHeader.verify(panelSnapshotWire,panelSnapshotLane)') &&
        disconnectedStatusBlock.includes('clearPanelGeometryPreview(') &&
        disconnectedStatusBlock.includes('panelGeometryLoadInProgress = false') &&
-       disconnectedStatusBlock.includes('Refresh CORE') &&
+       disconnectedStatusBlock.includes('reconnect to refresh output status') &&
        compose.includes('private fun queuePanelGeometryDraftUpdate()') &&
        compose.includes('panelGeometryQueuedTarget=target') &&
        compose.includes('Wait for all draft updates to be acknowledged before Commit'),
@@ -1503,6 +1506,7 @@ assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
   simpleOutput.includes('Pill("Start Fresh"') &&
   simpleOutput.indexOf('Pill("Start Fresh"') > simpleOutput.indexOf('Pill("Reload from controller"') &&
   simpleOutput.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
+  !simpleOutput.includes('Fit last zone to remaining pixels') &&
   !simpleEvents.includes('IconAction("Edit " + key, "edit"') &&
   !simpleEvents.includes('Pill("Instant Snap"') &&
   !simpleEvents.includes('Pill("Smooth Fade"') &&
