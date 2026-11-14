@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/** BLE discovery, physical BOOT bench enrollment, and configuration. Trigger inputs remain Wi-Fi only. */
+/** BLE discovery, encrypted bonded owner enrollment, and configuration. */
 final class BleDiscovery {
     interface StatusListener { void onStatus(String message); }
     // ESP-IDF NimBLE BLE_UUID128_INIT uses little-endian byte order.
@@ -1518,7 +1518,7 @@ final class BleDiscovery {
         if(deferBehindFrame(this::pairWithBoot))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
-        notifyStatus("Hold CORE BOOT button while the owner key is read…");
+        notifyStatus("Reading controller owner key over encrypted Bluetooth…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}
             else watchOwnerTransaction(gatt);}
         catch(SecurityException e){pairPending=false;notifyStatus("Bluetooth permission missing");}
@@ -1586,7 +1586,7 @@ final class BleDiscovery {
 
     /** Only native bench effects. TTL is 1..60 seconds; trigger priority remains in CORE. */
     void show(int effect,int chainMask,int zoneMask,int r,int g,int b,int brightness,int speed,int ttl) {
-        if (!canControl()){notifyStatus("Authorize BLE using BOOT pairing or legacy Wi-Fi");return;}
+        if (!canControl()){notifyStatus("Authorize encrypted BLE owner access before playing effects");return;}
         if (effect<1||effect>5||chainMask<1||chainMask>3||zoneMask<1||zoneMask>255||
                 brightness<0||brightness>32||speed<0||speed>100||ttl<1||ttl>60) {
             notifyStatus("Invalid BLE show settings");return;
