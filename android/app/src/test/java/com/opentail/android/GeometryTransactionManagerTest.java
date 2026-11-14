@@ -854,7 +854,7 @@ public class GeometryTransactionManagerTest {
             validateSnapshots(mapping,occupied,empty);
             fail("existing range overlap must block preview");
         } catch(IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("overlaps an existing CORE Zone"));
+            assertTrue(expected.getMessage().contains("overlaps an unrelated saved Zone"));
         }
     }
 
@@ -1081,14 +1081,16 @@ public class GeometryTransactionManagerTest {
         assertEquals(0x8002,resolved.panels.get(1).id);
         assertEquals(0x4001,resolved.zones.get(0).id);
         assertEquals(0x8002,resolved.zones.get(0).panelId);
-        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=resolved.descriptorBatches(migrated,23);
-        assertEquals(2,batches.size());
-        byte[] delete=PanelPreviewProtocol.update(0,77,1,batches.get(0),23);
-        byte[] upsert=PanelPreviewProtocol.update(0,77,2,batches.get(1),23);
-        assertEquals(1,delete[11]&255);assertEquals(1,delete[12]&255);
-        assertEquals(0x20,delete[18]&255);
-        assertEquals(2,upsert[11]&255);assertEquals(1,upsert[12]&255);
-        assertEquals(0,upsert[18]&255);
+        // The old source Panel would be left empty, but v2 auto-removes
+        // empty Panels and has no separate create-empty-Panel descriptor.
+        // Reject that draft rather than pretending stable owner metadata can
+        // survive a destructive DELETE + guessed recreation.
+        try {
+            resolved.descriptorBatches(migrated,23);
+            fail("Cannot preserve a now-empty original Panel over v2 UPDATE");
+        } catch(IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("panel order"));
+        }
     }
 
     @Test public void rapidZoneEditsRemainSerializedAndCannotCommitUnacknowledgedGeometry() {
