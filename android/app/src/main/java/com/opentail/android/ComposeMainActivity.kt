@@ -3124,7 +3124,6 @@ class ComposeMainActivity : ComponentActivity() {
             Title("Projects", t)
             Pill("Export design JSON", t) { exporter.launch("opentail-project.json") }
             Pill("Import design JSON", t) { importer.launch(arrayOf("application/json", "text/plain")) }
-            Caption(outputMessage.value, t)
         }
         if(diagnostics) SettingsDiagnostics(t, changePage)
     }
