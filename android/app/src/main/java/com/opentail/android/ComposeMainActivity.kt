@@ -3276,9 +3276,42 @@ class ComposeMainActivity : ComponentActivity() {
             if(current.optBoolean("v4_advanced",false)) {
                 val next=JSONObject(current.toString())
                 val part=next.optJSONArray("zones")?.optJSONObject(zoneIndex)
-                val ranges=part?.optJSONArray("ranges")
-                if(part==null||ranges==null||ranges.length()==0) {
-                    outputMessage.value="This imported zone has no editable physical ranges"
+                var ranges=part?.optJSONArray("ranges")
+                if(part==null) {
+                    outputMessage.value="Unknown advanced physical section"
+                    return
+                }
+                if(ranges==null||ranges.length()==0) {
+                    if(newLength==0)return
+                    // Newly added sections start locally at zero LEDs. v2
+                    // cannot create an empty Zone, so allocate a real range
+                    // only after the owner explicitly enters its LED count.
+                    val occupied=mutableListOf<Pair<Int,Int>>()
+                    val all=next.getJSONArray("zones")
+                    for(z in 0 until all.length())if(z!=zoneIndex) {
+                        val rs=all.getJSONObject(z).optJSONArray("ranges") ?: continue
+                        for(r in 0 until rs.length()) {
+                            val one=rs.getJSONObject(r)
+                            occupied.add(one.getInt("start") to
+                                (one.getInt("start")+one.getInt("count")))
+                        }
+                    }
+                    var start=0
+                    while(start+newLength<=outputLimit) {
+                        val conflict=occupied.firstOrNull { (lo,hi) ->
+                            start<hi && lo<start+newLength
+                        } ?: break
+                        start=conflict.second
+                    }
+                    if(start+newLength>outputLimit) {
+                        outputMessage.value="No nonoverlapping physical space for this section"
+                        return
+                    }
+                    ranges=JSONArray().put(JSONObject()
+                        .put("start",start).put("count",newLength))
+                    part.put("ranges",ranges).put("flags",0).put("pixels",newLength)
+                    next.put("pixels",maxOf(next.optInt("pixels",0),start+newLength))
+                    applyPhysicalRanges(next)
                     return
                 }
                 val old=part.optInt("pixels",0)
