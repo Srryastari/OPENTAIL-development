@@ -1458,3 +1458,25 @@ assert(finalOutput.includes('PanelV4DraftCodec.savedSelectorPixels(outputs[which
   finalOutput.includes('Finish or cancel O') &&
   !finalOutput.includes('outputDrafts[which] ?: outputs[which]?.toString()'),
   'O2 0/522 saved-versus-local display and safe lane-only discard regressed');
+
+
+// Owner scope lock: Layout authors physical geometry only. Vehicle trigger
+// overrides are assigned in Triggers and share the same Panel v4 draft.
+// Role edits never secretly persist NVS or reset another lane.
+const layoutOnlyOutput=compose.split('private fun HardwareOutputEditor(t: Tone) {')[1];
+const triggerOnlyPage=compose.split('private fun TriggersPage(t: Tone) {')[1]
+  ?.split('private fun CoreTriggerMappingPage(t: Tone) {')[0];
+const physicalTriggerEditor=compose.split('private fun assignPhysicalTriggerRole(')[1]
+  ?.split('private fun refreshLoadedProject()')[0];
+assert(layoutOnlyOutput && triggerOnlyPage && physicalTriggerEditor &&
+  !layoutOnlyOutput.includes('Text("Lighting role"') &&
+  !layoutOnlyOutput.includes('var choosingRole by remember') &&
+  triggerOnlyPage.includes('Controller zone overrides') &&
+  triggerOnlyPage.includes('assignPhysicalTriggerRole(lane,i,role)') &&
+  physicalTriggerEditor.includes('outputDrafts[lane]=next.toString()') &&
+  physicalTriggerEditor.includes('outputDirty[lane]=true') &&
+  physicalTriggerEditor.includes('queuePanelGeometryDraftUpdate()') &&
+  physicalTriggerEditor.includes('startPanelGeometryPreview(lane)') &&
+  !physicalTriggerEditor.includes('ble.savePanelV4(') &&
+  !physicalTriggerEditor.includes('startFreshPanelV4('),
+  'Trigger zone ownership must stay in Triggers and remain lane-local/live without Save');
