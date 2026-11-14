@@ -202,7 +202,7 @@ assert(previewSrc &&
        !previewSrc.includes('SIMULATED') &&
        hardwareOutput &&
        hardwareOutput.includes('ValueSlider("Total output pixels"') &&
-       hardwareOutput.includes('ValueSlider("Next start · zero-based"') &&
+       hardwareOutput.includes('ValueSlider("Start pixel · zero-based"') &&
        (hardwareOutput.match(/PixelStepPill\("−",t\)/g)||[]).length >= 2 &&
        (hardwareOutput.match(/PixelStepPill\("\+",t\)/g)||[]).length >= 2 &&
        compose.includes('Modifier.size(width=56.dp,height=48.dp)') &&
@@ -1581,3 +1581,15 @@ assert(!/623|1,246/.test(legacyOutputUi),'Historical output UI must not advertis
 assert(codec.includes('((pixelCount==0)!=(zones.length()==0))') &&
        codec.includes('((pixels==0)!=(count==0))'),
        'Empty v1 outputs must remain empty in both directions; reject mismatched count/zone pairs');
+
+// Physical range offsets never inherit the old cursor-resize behavior.
+// Imported multi-panel/range geometry stays explicit; only validated
+// candidates flow to the live Panel v2 geometry update engine.
+assert(compose.includes('fun applyPhysicalRanges(next: JSONObject): Boolean') &&
+  compose.includes('PanelV4DraftCodec.encode(index,next,confirmed)') &&
+  compose.includes('val storedRanges=zone.optJSONArray("ranges")') &&
+  compose.includes('item.put("start",nextStart)') &&
+  compose.includes('next.put("v4_advanced",true)') &&
+  compose.includes('if(!it.optBoolean("v4_advanced",false))') &&
+  compose.includes('fun adjustZone(zoneIndex: Int, newLength: Int)'),
+  'Manual zero-based physical offsets must retain explicit v4 range slots and active capacity');
