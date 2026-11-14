@@ -71,14 +71,21 @@ assert "show_window(now)" not in panel_save
 assert "raw_active" not in panel_save
 assert "pz_preview[lane].active" in panel_save
 assert "is_show_mode_active" not in panel_save
-# A simple Save persists the exact accepted live candidate, no exposed Commit
-# required; keep the current effect/geometry rendered until journal promotion.
+# Single authoritative v4 Save stores the full owner draft in one pair journal.
+# It accepts only topology already live-previewed (or already committed),
+# but may update labels, color order, RGB/white gains and gamma. No UI Commit.
 # Live UPDATE cannot carry names, RGB gains, white gain, gamma or strip
 # order: the one durable v4 Save must permit those, but never changed geometry.
-assert "live_match=live_active&&!pz_preview[lane].committing" in panel_save
-assert "ot_pz_live_geometry_matches(&pz_preview[lane].candidate.outputs[lane]," in panel_save
+assert "live_match=live_active&&session_ok&&!structural_conflict" in panel_save
+assert "ot_pz_live_geometry_matches(accepted_geometry,next,lane)" in panel_save
+assert "accepted_geometry=live_active?" in panel_save
+assert "structural_conflict=!ot_pz_live_geometry_matches" in panel_save
+assert "if(structural_conflict)" in panel_save and "return 5;" in panel_save
+assert "if(stale||exhausted)" in panel_save and "return 3;" in panel_save
 assert "memcmp(&pz_preview[lane].candidate.outputs[lane],next,sizeof(*next))" not in panel_save
-assert "(live_active&&!live_match)" in panel_save
+assert "case 5:return 10u;" in ble
+assert "case 3:return 3u;" in ble
+assert "case 1:return 7u;" in ble
 assert "stale=pz_revision[lane]!=base_revision" in panel_save
 assert "candidate->outputs[lane]=*next;" in panel_save
 assert "pz_save_controller_locked(candidate)" in panel_save
