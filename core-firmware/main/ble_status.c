@@ -384,7 +384,8 @@ static uint8_t panel_save_status(int rc){
         case 0:return 0u;
         case 1:return 7u; /* invalid model */
         case 2:return 2u; /* busy / active trigger / promoter unavailable */
-        case 3:return 3u; /* stale revision or legacy downgrade unsupported */
+        case 3:return 3u; /* stale revision / expired or conflicting live session */
+        case 5:return 10u; /* validated model but unaccepted live topology/IDs */
         default:return 4u; /* durable NVS write failure */
     }
 }
