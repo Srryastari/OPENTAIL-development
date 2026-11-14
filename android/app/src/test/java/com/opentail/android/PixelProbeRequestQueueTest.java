@@ -35,4 +35,12 @@ public class PixelProbeRequestQueueTest {
         queue.clear();               // GATT disconnect never replays the old probe
         assertEquals(-1,queue.take());
     }
+    @Test public void safetyStopCancelsQueuedProbeInsteadOfReplayingAfterAck() {
+        PixelProbeRequestQueue queue=new PixelProbeRequestQueue();
+        assertTrue(queue.offer(0));
+        // BleDiscovery.enqueueWrite(STOP) clears this before any ATT START.
+        queue.clear();
+        assertEquals(-1,queue.take());
+        assertFalse(queue.pending());
+    }
 }
