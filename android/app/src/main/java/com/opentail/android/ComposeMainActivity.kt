@@ -3260,9 +3260,11 @@ class ComposeMainActivity : ComponentActivity() {
             }
         }
         fun outputTab(which:Int):String {
-            val text=outputDrafts[which] ?: outputs[which]?.toString()
-            val candidate=runCatching { JSONObject(text ?: "{}") }.getOrNull()
-            return "O"+(which+1)+" · "+(candidate?.optInt("pixels",0) ?: 0)+" LEDs"
+            // Selection identifies the SAVED controller lane. An unsaved local
+            // draft can be 522 LEDs while the actual saved O2 remains zero.
+            // Never borrow a hardware RMT buffer budget or an editor value.
+            val savedPixels=PanelV4DraftCodec.savedSelectorPixels(outputs[which])
+            return "O"+(which+1)+" · "+savedPixels+" LEDs"
         }
         // String snapshots make edits observable without mutating the last
         // confirmed hardware readback. A failed save cannot masquerade as NVS.
