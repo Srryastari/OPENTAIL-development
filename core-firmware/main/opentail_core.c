@@ -1530,31 +1530,40 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;
-    bool busy,stale,exhausted,live_match=false;
+    bool busy,stale,exhausted,live_match=false,structural_conflict=false;
     portENTER_CRITICAL(&state_lock);
     *candidate=pz_outputs;
-    /* The eight-byte live UPDATE owns topology, roles and stable full IDs.
-     * The one authoritative v4 Save also carries user-edited names and
-     * output calibration/color order not expressible through UPDATE. Reject
-     * any different geometry, expired session or stale revision, but permit
-     * valid metadata to travel with the same durable lane/map pair. */
+    /* Only the eight-byte UPDATE can accept a new physical topology.
+     * Save may carry metadata absent from UPDATE (names, RGB/white gain,
+     * gamma and channel order), but must match full stable Panel/Zone IDs,
+     * ordering, roles and every range of either the active preview or the
+     * already committed map. An expired/invalid live session cannot authorize
+     * a structural Save by falling back to the saved map. */
     const bool live_active=pz_preview[lane].active;
-    live_match=live_active&&!pz_preview[lane].committing&&
-        pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
-        (int32_t)(now_ms-pz_preview[lane].expires_ms)<0&&
-        ot_pz_live_geometry_matches(&pz_preview[lane].candidate.outputs[lane],
-                                    next,lane);
+    const bool session_ok=!live_active||(
+        !pz_preview[lane].committing&&pz_preview[lane].lane==lane&&
+        pz_preview[lane].base_revision==base_revision&&
+        (int32_t)(now_ms-pz_preview[lane].expires_ms)<0);
+    const ot_pz_output_t *accepted_geometry=live_active?
+        &pz_preview[lane].candidate.outputs[lane]:&pz_outputs.outputs[lane];
+    structural_conflict=!ot_pz_live_geometry_matches(accepted_geometry,next,lane);
+    live_match=live_active&&session_ok&&!structural_conflict;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
         __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
         pz_preview[lane].committing||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
     stale=pz_revision[lane]!=base_revision||pz_active_revision[lane]!=base_revision||
-        (live_active&&!live_match);
+        !session_ok;
     exhausted=pz_revision[lane]==UINT16_MAX;
     portEXIT_CRITICAL(&state_lock);
     if(busy){xSemaphoreGive(om_write_mutex);return 2;}
     if(stale||exhausted){xSemaphoreGive(om_write_mutex);return 3;}
+    if(structural_conflict){
+        ESP_LOGW(TAG,"BLE_PANEL_SAVE_REJECT lane=%u reason=live_geometry_mismatch base_revision=%u",
+            (unsigned)(lane+1u),(unsigned)base_revision);
+        xSemaphoreGive(om_write_mutex);return 5;
+    }
     if(memcmp(&candidate->outputs[lane],next,sizeof(*next))==0){
         portENTER_CRITICAL(&state_lock);
         ot_pz_preview_cancel(&pz_preview[lane]);
