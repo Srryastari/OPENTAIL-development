@@ -199,6 +199,47 @@ static void durable_boundary_matrix(void){
         assert(workspace.snapshot.marker.transaction_id==workspace.snapshot.map_active.transaction_id);
     }
 }
+/* Actual split-namespace journal: saving only metadata on O1 must stage
+ * the complete owner draft once, retain O2 byte-identical, and survive
+ * restart readback through the normal v4 lane/map pair recovery path. */
+static void metadata_only_one_save_pair_recovery(void){
+    fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
+    ot_pz_controller_t base,selected;
+    make_runtime(&base,100u,OT_OM_GRB,100u);
+    selected=base;
+    ot_pz_output_t *o=&selected.outputs[0];
+    (void)snprintf(o->name,sizeof(o->name),"Selected output");
+    (void)snprintf(o->panels[0].name,sizeof(o->panels[0].name),"Left panel");
+    (void)snprintf(o->zones[0].name,sizeof(o->zones[0].name),"Left accent");
+    o->color_order=OT_OM_RGB;
+    o->rgb_gain[0]=117u;
+    o->white_gain[2]=204u;
+    o->gamma_enabled=true;
+    assert(ot_pz_valid(&selected));
+    assert(ot_pz_live_geometry_matches(&base.outputs[0],o,0u));
+    assert(memcmp(&base.outputs[0],o,sizeof(*o))!=0);
+    assert(memcmp(&base.outputs[1],&selected.outputs[1],
+                  sizeof(base.outputs[1]))==0);
+    const uint16_t from[OT_PZ_OUTPUTS]={1u,1u};
+    const uint16_t to[OT_PZ_OUTPUTS]={2u,1u};
+    assert(ot_pz_pair_store_begin(&io,&workspace,&base,&selected,
+        from,to,0x4d455441u,0u,true,NULL,NULL));
+    assert(ot_pz_pair_store_finish(&io,&workspace,0x4d455441u,NULL,NULL));
+    assert(store.durable_writes==9u);
+    recover_expect(&io,&base,&base,&selected,true,false,0x4d455441u,0u);
+    assert(ot_pz_pair_store_snapshot(&io,&workspace));
+    assert(workspace.snapshot.has_lane_active&&workspace.snapshot.has_map_active);
+    assert(workspace.snapshot.lane_active.candidate.lanes[0].rgb_gain[0]==117u);
+    assert(workspace.snapshot.lane_active.candidate.lanes[0].white_gain[2]==204u);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].zones[0].id==
+           base.outputs[0].zones[0].id);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].zones[0].role==
+           base.outputs[0].zones[0].role);
+    assert(workspace.snapshot.map_active.candidate.outputs[0].zones[0].ranges[0].count==100u);
+    assert(memcmp(&workspace.snapshot.map_active.candidate.outputs[1],
+                  &workspace.snapshot.map_active.previous.outputs[1],
+                  sizeof(workspace.snapshot.map_active.candidate.outputs[1]))==0);
+}
 static void reset_marker_rejects_pending_intent(void){
     fake_store_t store={0};ot_pz_pair_store_io_t io=make_io(&store);
     ot_pz_controller_t base,candidate1,candidate2;
@@ -299,9 +340,10 @@ int main(void){
     initial_migration_cut_matrix();
     marker_read_error_fails_closed();
     durable_boundary_matrix();
+    metadata_only_one_save_pair_recovery();
     reset_marker_rejects_pending_intent();
     reset_marker_first_write_and_idempotence();
     reset_marker_and_fail_closed();
-    puts("PASS Issue126 v4 runtime pair store: all nine durable boundaries, restart reconciliation, readback, reset isolation and fail-closed corruption");
+    puts("PASS Issue126 v4 runtime pair store: all nine durable boundaries, metadata-only single Save, restart readback, reset isolation and fail-closed corruption");
     return 0;
 }
