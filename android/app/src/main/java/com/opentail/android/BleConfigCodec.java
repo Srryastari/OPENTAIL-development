@@ -54,7 +54,7 @@ final class BleConfigCodec {
         int pixelCount=pixelCount(json);
         int order=index(ORDERS,json.getString("color_order"));
         JSONArray zones=json.getJSONArray("zones");
-        if(pixelCount<1||pixelCount>MAX_LEDS_PER_OUTPUT||order<0||zones.length()<1||zones.length()>8)
+        if(pixelCount<0||pixelCount>MAX_LEDS_PER_OUTPUT||order<0||((pixelCount==0)!=(zones.length()==0))||zones.length()>8)
             throw new IllegalArgumentException("Invalid output pixel count / color order / zone count");
         bytes[0]=1;bytes[1]=(byte)pixelCount;bytes[2]=(byte)(pixelCount>>8);
         bytes[3]=(byte)order;bytes[4]=(byte)zones.length();
@@ -85,7 +85,7 @@ final class BleConfigCodec {
     static JSONObject decode(byte[] bytes,int index) throws Exception {
         if(bytes.length!=LENGTH||bytes[0]!=1)throw new Exception("Unsupported BLE output format");
         int pixels=(bytes[1]&255)|((bytes[2]&255)<<8),order=bytes[3]&255,count=bytes[4]&255;
-        if(pixels<1||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
+        if(pixels<0||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||((pixels==0)!=(count==0))||count>8)throw new Exception("Invalid BLE output configuration");
         JSONObject result=new JSONObject();
         result.put("index",index); // Physical pin is board-owned, not encoded in v1.
         result.put("pixels",pixels);result.put("name",readName(bytes,5));

@@ -504,19 +504,19 @@
     "status": "Partial: state switching, true black, Chase3 editor; remaining issue93 open"
   },
   "integrated_renderer_pin": {
-    "firmware127_sha": "1dfe28ca50ad54fd92c6a0b5fb1c919cd7687d08",
+    "firmware127_sha": "e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44",
     "base_effects_commit": "601155a196a692792e60fd399505fdc676dc57d9",
     "android_core_logic_blob": "98a93e64b22ba5a858d1ddff673681e04431c59a",
     "firmware_core_logic_blob": "1675a7bd497c01c3189dc759af9560ede04a6f13",
     "status": "12 runtime effect/source files byte-identical to build-passing Firmware #127; Android core_logic header pinned to Effects #110"
   },
   "integrated_workflow_pin": {
-    "blob_sha": "c6d4920c7649254383a942c8ca7431788837c6cf",
-    "firmware127_sha": "1dfe28ca50ad54fd92c6a0b5fb1c919cd7687d08",
+    "blob_sha": "4895a807860ae7b950fa67b53a5a379dc866e88e",
+    "firmware127_sha": "e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44",
     "status": "source-integrity only; physical acceptance remains blocked"
   },
   "integrated_trees": {
-    "android": "7601905c238a13901859fd8cae27d123799c17c1",
+    "android": "ab20a6859da8d4b5cfe85e9b36093dff9a4bca68",
     "core-firmware": "b64cd8bb7c14638ec37becdb97d43a02b96f282b"
   },
   "owner_mandated_p0_addendum": {
@@ -555,7 +555,8 @@
       "core-firmware/main/ble_status.c",
       "core-firmware/main/wled_fx_compat.c",
       "core-firmware/tests/test_ble_fx_command.c",
-      "core-firmware/tests/test_issue102_third_roles.c"
+      "core-firmware/tests/test_issue102_third_roles.c",
+      "android/app/src/main/java/com/opentail/android/NativeOutputManager.java"
     ],
     "firmware_contract_sha": "1628e993a76bae0b34d7cae0c2dd203ae977d898",
     "protocol": {

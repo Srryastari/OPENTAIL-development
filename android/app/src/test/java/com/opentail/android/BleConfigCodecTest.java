@@ -51,4 +51,12 @@ public class BleConfigCodecTest {
             catch (Exception expected) { }
         }
     }
+    @Test public void emptyOutputRoundTripsWithoutInventingOneLedOrZone() throws Exception {
+        JSONObject empty=BleConfigCodec.decode(BleConfigCodec.encode(output(0)),0);
+        assertEquals(0,empty.getInt("pixels"));
+        assertEquals(0,empty.getJSONArray("zones").length());
+        rejected(output(0,0));
+        rejected(output(1));
+        assertEquals(1,BleConfigCodec.decode(BleConfigCodec.encode(output(1,1)),0).getInt("pixels"));
+    }
 }
