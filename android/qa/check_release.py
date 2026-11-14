@@ -117,7 +117,7 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
       and 'android:name=".MainActivity"' not in manifest_xml)
 check("Compose has independent drafts with automatic live preview and no premature NVS Save",
       all(word in compose for word in (
-          "project.assignMany(", "BleConfigCodec.ORDERS", "Fit last zone",
+          "project.assignMany(", "BleConfigCodec.ORDERS", "layoutLiveEditPending.value=true", "queuePanelGeometryDraftUpdate()",
           "Assigned ", "if(outputToolsOpen)", "Remove zone", "+ Add zone",
           "val draft = runCatching { JSONObject(draftText) }",
           "outputMessage.value=\"Verifying current live mapping before one Panel v4 Save...\"",
