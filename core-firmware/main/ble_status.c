@@ -207,7 +207,7 @@ static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_acces
     if(conn!=active_conn||!owner_link(&desc))return BLE_ATT_ERR_INSUFFICIENT_ENC;
     if(ctx->op==BLE_GATT_ACCESS_OP_WRITE_CHR){
         uint8_t p[6];uint16_t n=0;
-        if(!authorized||owner_storage_fault)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+        if(!authorized||!owner_valid||!owner_peer_valid||owner_storage_fault)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
         if(ble_hs_mbuf_to_flat(ctx->om,p,sizeof(p),&n)!=0||n!=6||p[0]!=3||p[1]>1)
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         const uint32_t pin=(uint32_t)p[2]|((uint32_t)p[3]<<8)|((uint32_t)p[4]<<16)|((uint32_t)p[5]<<24);

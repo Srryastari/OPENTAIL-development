@@ -126,6 +126,9 @@ jobs:
               "CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288",
               "CONFIG_ESP_TASK_WDT_EN=y", "CONFIG_ESP_TASK_WDT_PANIC=y",
               "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+              "CONFIG_BT_NIMBLE_NVS_PERSIST=y",
+              "CONFIG_BT_NIMBLE_SECURITY_ENABLE=y",
+              "CONFIG_BT_NIMBLE_SM_SC=y",
           }
           assert required_config.issubset(actual),(
               "N16R8 generated sdkconfig is inconsistent: ",
@@ -215,10 +218,12 @@ jobs:
       - name: Validate downloaded ZIP-root scripts and checksums (NO FLASH)
         shell: pwsh
         run: |
-          foreach ($file in @('01_FLASH_COM9.bat','02_CAPTURE_BOOT_LOG_COM9.bat','INSTALL_ESPTOOL.bat','START_HERE.txt','flasher_args.json','release_manifest.json')) {
+          foreach ($file in @('01_FLASH_COM9.bat','02_CAPTURE_BOOT_LOG_COM9.bat','INSTALL_ESPTOOL.bat','START_HERE.txt','flasher_args.json','release_manifest.json','factory_reset.py','03_FACTORY_RESET_COM9.bat')) {
             if (!(Test-Path "EasyFlash/$file")) { throw "Missing root file: $file" }
           }
           python EasyFlash/verify_sha256.py
           if ($LASTEXITCODE -ne 0) { throw 'EasyFlash SHA-256 failure' }
           $m = Get-Content EasyFlash/release_manifest.json -Raw | ConvertFrom-Json
           if ($m.erase_nvs -or $m.road_safe -or $m.version -ne '0.1.32-alpha') { throw 'Unsafe manifest' }
+          python EasyFlash/factory_reset.py --package EasyFlash --sha $m.git_sha
+          if ($LASTEXITCODE -ne 0) { throw 'Factory-reset package validation failure' }

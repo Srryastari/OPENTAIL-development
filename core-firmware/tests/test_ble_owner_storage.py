@@ -69,7 +69,12 @@ static void reboot(void){memset(&owner_record,0,sizeof(owner_record));owner_stor
 static int enroll(void){ctx.op=BLE_GATT_ACCESS_OP_READ_CHR;buf.len=0;return owner_enroll_read(1,0,&ctx,0);}
 int main(void){
  link.sec_state.encrypted=true;link.sec_state.bonded=true;link.peer_id_addr.val[0]=1;
- reboot();assert(!owner_valid);assert(enroll()==0&&buf.len==16&&owner_valid);
+ reboot();assert(!owner_valid);
+ /* A legacy Wi-Fi token session cannot create a predictable zero owner key. */
+ authorized=true;ctx.op=BLE_GATT_ACCESS_OP_WRITE_CHR;
+ buf=(struct os_mbuf){{3,1,0x40,0xe2,1,0},6};
+ assert(owner_enroll_read(1,0,&ctx,0)!=0&&!owner_valid);authorized=false;
+ assert(enroll()==0&&buf.len==16&&owner_valid);
  uint8_t first[16];memcpy(first,buf.bytes,16);
  reboot();assert(owner_valid&&enroll()==0&&!memcmp(first,buf.bytes,16));
  link.peer_id_addr.val[0]=2;assert(enroll()!=0&&buf.len==0);

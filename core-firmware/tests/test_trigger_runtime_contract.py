@@ -197,7 +197,8 @@ completion = renderer.index("if(frame_captured[ch])ot_frame_snapshot_complete(tr
 assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) > completion
 assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) < renderer.index("ot_fps_pacer_observe(&pacer,work_us,longest_pixels)")
 assert "static bool input_init(void)" in core
-assert "boot_enrollment_ready" in ble
+assert "owner_link(&desc)" in ble
+assert "ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same," in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 # An authenticated owner's session must survive rejected or stale
 # secondary central events. Both owner session resets must clear only the
