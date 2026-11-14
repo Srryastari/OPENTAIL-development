@@ -2208,9 +2208,15 @@ class ComposeMainActivity : ComponentActivity() {
             val right=ble.lastConfirmedPanelSnapshot(1)
             if(left==null||right==null)throw IllegalStateException("Both confirmed CORE snapshots are required")
             val snapshots=arrayOf(left,right)
-            val mapping=withCurrentEditorDraft(
-                GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots),
-                lane)
+            // The controller's verified Panel v4 maps are the baseline for
+            // physical editing. An unsaved imported multi-range layout must
+            // never be projected through the contiguous NativeProject model.
+            val savedMapping=GeometryTransactionManager.LayoutMapping(arrayOf(
+                GeometryTransactionManager.fromV4SaveCandidate(0,left.wire),
+                GeometryTransactionManager.fromV4SaveCandidate(1,right.wire)))
+            val projected=if(outputDirty[lane]==true) savedMapping
+                else GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
+            val mapping=withCurrentEditorDraft(projected,lane)
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
                 mapping.lane(0).descriptorBatches(left,mtu),
@@ -2249,9 +2255,9 @@ class ComposeMainActivity : ComponentActivity() {
         try {
             val roleBase=panelGeometryQueuedTarget?:panelGeometryPlanTarget?:
                 panelGeometryAppliedMapping?:panelGeometryMapping!!
-            val target=withCurrentEditorDraft(
-                GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase),
-                panelGeometryActiveLane)
+            val projected=if(outputDirty[panelGeometryActiveLane]==true) roleBase
+                else GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
+            val target=withCurrentEditorDraft(projected,panelGeometryActiveLane)
             panelGeometryDraftValid=true
             if(panelGeometryPlanTarget!=null||panelGeometryAppliedMapping==null) {
                 panelGeometryQueuedTarget=target
