@@ -2217,7 +2217,9 @@ class ComposeMainActivity : ComponentActivity() {
             val advancedSaved=PanelV4DraftCodec.fromSnapshot(snapshots[lane])
                 .optBoolean("v4_advanced",false)
             val projected=if(outputDirty[lane]==true||advancedSaved) savedMapping
-                else GeometryTransactionManager.mapLayout(project).withRolesFromSnapshots(snapshots)
+                else savedMapping.withLane(lane,
+                    GeometryTransactionManager.mapLayout(project)
+                        .withRolesFromSnapshots(snapshots).lane(lane))
             val mapping=withCurrentEditorDraft(projected,lane)
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
@@ -2262,7 +2264,9 @@ class ComposeMainActivity : ComponentActivity() {
                 PanelV4DraftCodec.fromSnapshot(it).optBoolean("v4_advanced",false)
             } ?: false
             val projected=if(outputDirty[panelGeometryActiveLane]==true||advancedSaved) roleBase
-                else GeometryTransactionManager.mapLayout(project).withRolesFrom(roleBase)
+                else roleBase.withLane(panelGeometryActiveLane,
+                    GeometryTransactionManager.mapLayout(project)
+                        .withRolesFrom(roleBase).lane(panelGeometryActiveLane))
             val target=withCurrentEditorDraft(projected,panelGeometryActiveLane)
             panelGeometryDraftValid=true
             if(panelGeometryPlanTarget!=null||panelGeometryAppliedMapping==null) {
