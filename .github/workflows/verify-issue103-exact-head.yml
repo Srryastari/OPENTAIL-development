@@ -30,7 +30,7 @@ jobs:
       - name: Checkout exact Firmware #127 geometry and BLE contract
         uses: actions/checkout@v4
         with:
-          ref: e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44
+          ref: 7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3
           path: pinned-firmware127
           persist-credentials: false
       - name: Exact HEAD, frozen 106 lineage, immutable renderer and firmware ZIP provenance
@@ -47,7 +47,7 @@ jobs:
               return subprocess.check_output(['git','-C',path,*args],text=True).strip()
           fx='601155a196a692792e60fd399505fdc676dc57d9'
           fw='df27209b9876630b2b10f3a189f36817a2764009'
-          fw127='e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44'
+          fw127='7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3'
           assert pin_git('pinned-effects110','rev-parse','HEAD')==fx
           assert pin_git('pinned-firmware127','rev-parse','HEAD')==fw127
           for p in ('ot_auto_effects.c','ot_auto_effects.h','wled_fx_compat.c','wled_fx_compat.h'):
@@ -132,7 +132,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44
+          ref: 7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3
           path: pinned-firmware127
           persist-credentials: false
       - uses: actions/setup-java@v4

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-PIN = "e6ee3e95b7d7d09c9312e0b4e4771b7c445bed44"
+PIN = "7a6739dc949bcf3ffffb3e8e6e46d47f7ff9c1a3"
 SOURCE = ROOT / "pinned-firmware127"
 
 def read(name):
