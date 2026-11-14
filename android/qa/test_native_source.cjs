@@ -218,8 +218,8 @@ assert(compose.includes('effectSettings.put(key,prefs.getInt(key,fallback))') &&
        compose.includes('rememberSaveable(projectLoadRevision.intValue)') &&
        compose.includes('offlinePreview.value -> "Offline design preview"') &&
        compose.includes('val fill = if (selected) (if(t.bg == Color.Black)') &&
-       compose.includes('firmwareVersion.value ?: "Unavailable"') &&
-       compose.includes('firmwareVersion.value ?: "Version unavailable"') &&
+       !homeSection.includes('Text("Controller Status"') &&
+       settingsSection.includes('firmwareVersion.value ?: "Version unavailable"') &&
        compose.includes('mutableStateOf<String?>(null) // collapse cards on Layout page entry') &&
        compose.includes('effectOptions = NativeEffectCatalog.generalEffects()') &&
        approved.includes('it.name.contains(effectSearch.trim(),true)') &&
@@ -1516,3 +1516,40 @@ assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
   triggers.includes('Pill("Edit Selected"') &&
   triggers.includes('confirmButton = { Pill("Done",t,true) { editing=false } })'),
   'UI de-clutter regression: unique controls must remain, duplicate/dead UI must not reappear');
+
+
+// P0 owner physical finding: Pixel Probe was rejected merely because ordinary
+// readback/status telemetry was queued. Reconnect must clear an old request;
+// the one new owner tap must enter the shared ATT queue, behind STOP and live
+// UPDATE/CANCEL but ahead of optional background snapshot/status polling.
+const probeQueue=fs.readFileSync(
+  'android/app/src/main/java/com/opentail/android/PixelProbeRequestQueue.java','utf8');
+const probeQueueTests=fs.readFileSync(
+  'android/app/src/test/java/com/opentail/android/PixelProbeRequestQueueTest.java','utf8');
+const pump=bleSource.split('private void pumpQueue(){')[1]
+  ?.split('private String preferredPending')[0];
+const ownerProbe=bleSource.split('boolean probeFirstPixel(int lane) {')[1]
+  ?.split('boolean canReadPanelPreview()')[0];
+const disconnectProbe=bleSource.split('private void panelDisconnected()')[1]
+  ?.split('boolean canMapTriggers()')[0];
+assert(probeQueue.includes('synchronized boolean offer(int lane)') &&
+  probeQueue.includes('synchronized int take()') &&
+  probeQueue.includes('synchronized void clear()') &&
+  probeQueueTests.includes('reconnectThenIdleOffersOneRealProbeOnO1') &&
+  probeQueueTests.includes('onlyOneLaneAndNoFabricatedOrRepeatedProbe') &&
+  ownerProbe.includes('pixelProbeRequests.offer(lane)') &&
+  ownerProbe.includes('pixelProbeBlockingOperation()') &&
+  ownerProbe.includes('Pixel probe queued behind') &&
+  ownerProbe.includes('pixelProbeWritePending=true;') &&
+  !ownerProbe.includes('Pixel probe busy: finish the current BLE transfer and retry') &&
+  ownerProbe.includes('recoverStalledGatt(owner,"Pixel probe ATT write timeout")') &&
+  pump.includes('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(nextPacket!=null){') < pump.indexOf('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(panelUpdateQueued)') < pump.indexOf('if(pixelProbeRequests.pending())') &&
+  pump.indexOf('if(pixelProbeRequests.pending())') < pump.indexOf('if(panelSnapshotQueuedLane>=0)') &&
+  pump.indexOf('if(pixelProbeRequests.pending())') < pump.indexOf('if(panelReadQueued!=0)') &&
+  disconnectProbe.includes('pixelProbeRequests.clear();pixelProbeQueuedOwner=null;pixelProbeRequestLease++;') &&
+  bleSource.includes('if (PIXEL_PROBE_UUID.equals(characteristic.getUuid()))') &&
+  !ownerProbe.includes('savePanelV4(') &&
+  !ownerProbe.includes('cfgSend('),
+  'Pixel Probe reconnect/idle admission must be single-shot, serialized, diagnostic and STOP-safe');
