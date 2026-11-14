@@ -746,7 +746,8 @@ final class BleDiscovery {
             return;
         }
         if(result!=0) {
-            panelSaveFinish(false,"Controller rejected Panel v4 command ("+result+")",null);
+            panelSaveFinish(false,"Controller rejected Panel v4 Save: "+
+                PanelV4LayoutProtocol.saveRejectionMessage(result),null);
             return;
         }
         if(panelSavePhase==3) {
