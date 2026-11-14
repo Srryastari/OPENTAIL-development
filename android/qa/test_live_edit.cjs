@@ -139,8 +139,11 @@ assert(hardwareBlock.includes('fun adjustZone(') &&
        hardwareBlock.includes('structureVersion++') &&
        hardwareBlock.includes('PanelV4DraftCodec.MAX_LEDS') &&
        !hardwareBlock.includes('623') &&
-       hardwareBlock.includes('PixelStrip(t,'),
-       'Live hardware draft cursor/total/visual preview must recompute with each slider gesture.');
+       !hardwareBlock.includes('PixelStrip(t,') &&
+       hardwareBlock.includes('layoutLiveEditPending.value=true') &&
+       hardwareBlock.includes('outputDrafts[index] = draftText') &&
+       compose.includes('queuePanelGeometryDraftUpdate()'),
+       'Live hardware draft cursor/total and shared volatile preview must recompute with each slider gesture without duplicate UI.');
 assert(hardwareBlock.includes('panelSaveQueuedLane=index') &&
        compose.includes('ble.savePanelV4(lane,requested)') &&
        hardwareBlock.includes('PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)') &&
