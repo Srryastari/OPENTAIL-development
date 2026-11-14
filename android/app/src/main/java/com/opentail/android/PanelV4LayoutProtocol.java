@@ -66,6 +66,24 @@ final class PanelV4LayoutProtocol {
         return ack[3]&255;
     }
 
+    /** Firmware #127 validated-save responses. ATT ACK alone never means
+     * the journal was promoted. Do not auto-retry an uncertain Save. */
+    static String saveRejectionMessage(int code) {
+        switch(code) {
+            case 1:return "Invalid Panel v4 packet; check the selected output and reconnect.";
+            case 2:return "Controller busy or another save/override is active. Keep the live layout; retry only after a fresh status read.";
+            case 3:return "Saved revision is stale or the live session expired. Reconnect and reconcile the selected output.";
+            case 4:return "Flash journal did not confirm persistence. Reconnect and verify readback before retrying.";
+            case 5:return "Controller authorization is missing; authenticate before saving.";
+            case 6:return "Panel upload checksum mismatch. Refresh the connection and verify the draft.";
+            case 7:return "Invalid Panel v4 layout. Fix panel identities, ranges, counts or metadata.";
+            case 8:return "Panel upload incomplete; reconcile before starting another Save.";
+            case 9:return "Panel transaction rejected; refresh authoritative status before retry.";
+            case 10:return "Live mapping has unaccepted geometry or stable IDs. Finish the physical preview edits before Save; no changes were persisted.";
+            default:return "Unknown Panel v4 rejection ("+code+"); reconcile before retrying.";
+        }
+    }
+
     private static void validateWireLane(int lane,byte[] wire) {
         if(wire==null||wire.length!=MAP_BYTES||
            (wire[0]&255)!=WIRE_VERSION||(wire[1]&255)!=lane)
