@@ -3416,7 +3416,36 @@ class ComposeMainActivity : ComponentActivity() {
             } else if(outputs[index]==null) Caption("Not connected · local draft retained",t)
             else Caption("Saved controller output · "+
                 outputs[index]!!.optInt("pixels",0)+" LEDs",t)
-            if(outputDirty[index]==true) Caption("Unsaved changes",t)
+            if(outputDirty[index]==true) {
+                val localCount=runCatching { JSONObject(draftText).optInt("pixels",0) }.getOrDefault(0)
+                Caption("Unsaved draft · "+localCount+" LEDs (not saved to controller)",t)
+                if(outputs[index]!=null) Pill("Discard O"+(index+1)+" local edits",t,
+                    enabled=savingOutput.intValue<0) {
+                    // Owner action only. Never write NVS, reset firmware or cancel
+                    // another lane's physical preview. A live lease must be
+                    // explicitly ended before its local draft can be discarded.
+                    activateLaneState(index)
+                    val manager=ble.panelGeometryManager(index)
+                    val active=panelGeometryMapping!=null ||
+                        (manager!=null && manager.state()!=GeometryTransactionManager.State.READY)
+                    if(active) {
+                        outputMessage.value="Finish or cancel O"+(index+1)+
+                            " live preview before discarding local edits."
+                    } else {
+                        val confirmed=outputs[index]
+                        if(confirmed==null) {
+                            outputMessage.value="Read this output from the controller before discarding."
+                        } else {
+                            outputDrafts[index]=confirmed.toString()
+                            outputDirty[index]=false
+                            outputReadbackEpoch[index]=(outputReadbackEpoch[index]?:0)+1
+                            if(captureOutput.intValue==index)layoutLiveEditPending.value=false
+                            outputMessage.value="Discarded O"+(index+1)+
+                                " local edits; saved controller output is unchanged."
+                        }
+                    }
+                }
+            }
             if (savingOutput.intValue == index) Caption("Saving… verifying controller readback", t)
             if(outputMessage.value.isNotBlank()) Caption(outputMessage.value.replace("CORE","controller"),t)
             if(outputToolsOpen) Pill("Test Solid Red · O"+(index+1),t,
