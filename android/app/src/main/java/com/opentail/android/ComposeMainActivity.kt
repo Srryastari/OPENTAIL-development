@@ -3813,13 +3813,37 @@ class ComposeMainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Pill("Move ↑",t) { if(project.moveZone(linkedIndex,linkedIndex-1))refresh() }
-                            Pill("Move ↓",t) { if(project.moveZone(linkedIndex,linkedIndex+1))refresh() }
+                    }
+                }
+                // Move the physical Zone record in the same validated v4
+                // draft; the old project-only arrows did not reorder CORE.
+                // Existing explicit ranges stay attached to their stable Zone
+                // identities, while simple contiguous drafts reflow on encode.
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    for(delta in intArrayOf(-1,1)) {
+                        val destination=i+delta
+                        Pill(if(delta<0) "Move ↑" else "Move ↓",t,
+                            enabled=destination in 0 until zones.length()) {
+                            val next=JSONObject(draftText)
+                            val source=next.getJSONArray("zones")
+                            val swapped=JSONArray()
+                            for(pos in 0 until source.length()) {
+                                val read=when(pos) {
+                                    i -> destination
+                                    destination -> i
+                                    else -> pos
+                                }
+                                swapped.put(source.getJSONObject(read))
+                            }
+                            next.put("zones",swapped)
+                            if(applyPhysicalRanges(next)) {
+                                selectedZone=destination
+                                choosingZone=false
+                            }
                         }
                     }
                 }
-                Caption("Physical section link is local until controller Save/readback.",t)
+                Caption("Physical ranges preview live; Save persists the accepted layout.",t)
                 }
                 // Removal belongs beside Add Zone below, not in a hidden menu.
                 // Destructive action is confirmed once for the unified zone.
