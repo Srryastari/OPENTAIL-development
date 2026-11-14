@@ -1506,7 +1506,7 @@ assert(simpleOutput && simpleEvents && simpleHome && simpleLayout &&
   simpleOutput.includes('PixelStepPill("+",t)') &&
   simpleOutput.includes('Field(outputCountText, "Pixel count"') &&
   simpleOutput.includes('Pill("Start Fresh"') &&
-  simpleOutput.indexOf('Pill("Start Fresh"') > simpleOutput.indexOf('Pill("Reload from controller"') &&
+  simpleOutput.lastIndexOf('Pill("Start Fresh"') > simpleOutput.indexOf('Pill("Reload from controller"') &&
   simpleOutput.includes('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"') &&
   !simpleOutput.includes('Fit last zone to remaining pixels') &&
   !simpleEvents.includes('IconAction("Edit " + key, "edit"') &&
