@@ -10,8 +10,8 @@ core=(root/'main/opentail_core.c').read_text()
 init=core.split('static bool strip_configure_channel(',1)[1].split('static bool strip_init(',1)[0]
 assert '.led_model=LED_MODEL_CUSTOM' in init
 assert '.resolution_hz=10000000' in init
-assert '.mem_block_symbols=(ch==0?1024:64)' in init
-assert '.flags={.with_dma=(ch==0)}' in init
+assert '.mem_block_symbols=64' in init
+assert '.flags={.with_dma=false}' in init
 assert 'strip_probe_route_pending[ch]=true' in init
 render=core.split('static void led_task(',1)[1]
 probe=render.split('if(strip_probe_route_pending[ch]&&probe_nonblack[ch]&&',1)[1].split('esp_err_t e=led_strip_refresh_async(strip[ch]);',1)[0]
@@ -21,7 +21,7 @@ assert 'gpio_dump_io_configuration(stdout,(1ULL << 16) | (1ULL << 17))' in probe
 assert 'route.sig_out==strip_gpio_signal[ch]' in probe
 assert 'CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024' in (root/'sdkconfig.defaults').read_text()
 if len(sys.argv)==1:
-    print('PASS WS2815 CORE contract: custom timing, GPIO16 DMA/1024 + GPIO17 non-DMA/64, 10 MHz; one-shot authorized routing after each resize')
+    print('PASS WS2815 CORE contract: custom timing, GPIO16 non-DMA/64 + GPIO17 non-DMA/64, 10 MHz; one-shot authorized routing after each resize')
     sys.exit(0)
 dep=Path(sys.argv[1])
 expected={
@@ -133,8 +133,8 @@ int main(void){
   led_strip_config_t cfg=core_cfg(ch,2048);led_strip_rmt_config_t rmt=core_rmt(ch);
   assert(led_strip_new_rmt_device(&cfg,&rmt,&handles[ch])==0);
   led_strip_rmt_obj *obj=(void*)handles[ch];
-  assert(obj->rmt_chan->gpio==out_pin[ch]);assert(obj->rmt_chan->dma==(ch==0));
-  assert(obj->rmt_chan->symbols==(ch==0?1024:64));
+  assert(obj->rmt_chan->gpio==out_pin[ch]);assert(obj->rmt_chan->dma==false);
+  assert(obj->rmt_chan->symbols==64;
   assert(encoded_bits.bit0.duration0==3&&encoded_bits.bit0.duration1==9);
   assert(encoded_bits.bit1.duration0==9&&encoded_bits.bit1.duration1==3);
   assert(encoded_bits.bit0.level0==1&&encoded_bits.bit0.level1==0&&encoded_bits.flags.msb_first);
@@ -170,7 +170,7 @@ int main(void){
   assert(handles[ch]->refresh_async_done(handles[ch])==0);
   assert(handles[ch]->del(handles[ch])==0);
  }
- puts("PASS actual led_strip 3.1.1: bit0=3/9 bit1=9/3 reset=1600+1600 low; separate 6144-byte buffers, exact transmit pointer/length, nonzero white, busy/error paths and resize; GPIO16 DMA/1024 + GPIO17 non-DMA/64 at 10MHz (host only)");
+ puts("PASS actual led_strip 3.1.1: bit0=3/9 bit1=9/3 reset=1600+1600 low; separate 6144-byte buffers, exact transmit pointer/length, nonzero white, busy/error paths and resize; GPIO16 non-DMA/64 + GPIO17 non-DMA/64 at 10MHz (host only)");
 }
 '''
 if shim.exists():
