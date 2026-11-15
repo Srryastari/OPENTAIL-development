@@ -41,6 +41,9 @@ jobs:
           if($json.checks.'BLE runtime'.state -ne 'NOT RUN' -or $json.checks.'Pixel Probe'.state -ne 'NOT RUN') {
             throw "Hardware checks were falsely evaluated before a capture session"
           }
+          if($json.checks.'ADB device parser self-test'.state -ne 'PASS') {
+            throw "USB Android phone discovery regression failed"
+          }
           Write-Host "PASS offline report and physically honest RMT status"
       - name: Safety contract audit
         shell: powershell
@@ -68,6 +71,9 @@ jobs:
           }
           if($runner.Contains('/api/v1/') -or $runner.Contains('Invoke-RestMethod')){
             throw "Controller HTTP use forbidden; controller is BLE-only"
+          }
+          foreach($required in @('function ParseAdbList','function AssertAdbParserSelfTest','ADB USB setup incomplete','press ENTER to retry ADB','unauthorized','emulator-')) {
+            if(-not $runner.Contains($required)){throw "Missing ADB USB diagnostic and retry guard: $required"}
           }
           foreach($required in @('function EnsureGh','function FindGh','Install official GitHub CLI using WinGet now? Type INSTALL','Open GitHub CLI authorization now? Type LOGIN','auth status --hostname github.com','--accept-package-agreements','--accept-source-agreements','$script:sessionStarted=$true')) {
             if(-not $runner.Contains($required)){throw "GitHub CLI setup guard absent: $required"}
