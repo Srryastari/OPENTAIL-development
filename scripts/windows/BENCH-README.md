@@ -8,9 +8,15 @@ The controller is commanded **only over Bluetooth through the Android OpenTail a
 
 - Windows PowerShell 5.1 (included with Windows).
 - Android SDK Platform Tools ADB on PATH. Enable Developer Options / USB debugging on the phone; attach a data USB-C cable; approve USB debugging. The command 'adb devices -l' should show exactly one 'device'.
-- GitHub CLI gh on PATH, signed in with 'gh auth login' and access to the repository/Actions. Do not put tokens in the launcher.
+- GitHub CLI gh (for verified Actions artifacts). **The launcher now checks for it, including standard Windows installation folders.** If missing, it offers to run the official WinGet installer only after you type INSTALL; if not signed in, it offers GitHub's browser authorization only after you type LOGIN. Both are one-time setup steps. If WinGet is unavailable, install GitHub CLI from https://cli.github.com/ and rerun. No account tokens are copied into the launcher or logs.
 - ESP32-S3 N16R8 USB-C cable and USB serial/JTAG driver. Device Manager must show a COM port. The runner recognizes ESP32 VID_303A, USB-JTAG, CP210, CH340 and FTDI, and refuses to guess when multiple ports qualify.
 - Only for optional **explicit firmware flashing**: Python Windows launcher 'py -3' and 'py -3 -m pip install esptool'. Not needed for serial logging.
+
+## If you previously saw gh not installed or not on PATH
+
+That was a **preflight error**, not a Bluetooth, Pixel Probe, Save or RMT test. The old report's zeros mean **no capture ran**. Download a **fresh repository ZIP** or update the checkout, then run OpenTail-Bench.bat again. The new launcher guides GitHub CLI installation and login with approval, refreshes its own process PATH after WinGet finishes, and marks unexecuted hardware checks **NOT RUN**.
+
+You can also install GitHub CLI manually with 'winget install --id GitHub.cli --exact --source winget', open a fresh PowerShell window, and run 'gh auth login'.
 
 ## Normal one-click session
 
