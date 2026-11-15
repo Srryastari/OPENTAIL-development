@@ -183,25 +183,30 @@ function ParseAdbList([string[]]$lines) {
  }
  return @($result)
 }
-# Start-Process -PassThru can expose a null ExitCode in Windows PowerShell 5.1
-# after the short-lived adb client exits. Accept that case ONLY when the
-# canonical devices header is present; never accept nonzero exits or junk output.
+# ADB daemon startup may return a null ExitCode from Start-Process on PS5.1.
+# Require the canonical ADB header; explicitly reject any nonzero code.
 function AssertAdbDiscovery([object]$exitCode,[string[]]$lines) {
- $hasHeader=@($lines | Where-Object {$_ -match '^\\s*List of devices attached\\s*
+ $validHeader=@($lines | Where-Object {$_ -match '^\s*List of devices attached\s*$'}).Count -ge 1
+ Need $validHeader "ADB device list missing its expected header"
+ if($null -ne $exitCode) {
+  Need ([int]$exitCode -eq 0) ("ADB device discovery exit code: "+$exitCode)
+ }
+}
+function AssertAdbParserSelfTest {
  $none=@(ParseAdbList @("List of devices attached","* daemon started successfully"))
  $unauthorized=@(ParseAdbList @("List of devices attached","R5TEST001 unauthorized usb:1-1 transport_id:1"))
  $authorized=@(ParseAdbList @("List of devices attached","R5TEST001 device product:test model:Phone transport_id:2"))
  $mixed=@(ParseAdbList @("List of devices attached","emulator-5554 device product:sdk","192.168.1.5:5555 device product:wireless","R5TEST001 device usb:1-1"))
  $multiple=@(ParseAdbList @("List of devices attached","A1 device usb:1","B2 device usb:2"))
- # PS5.1 Start-Process may have a null exit code even with valid output.
+ # Real ADB output with null ExitCode must be accepted, but not other errors.
  AssertAdbDiscovery -exitCode $null -lines @("List of devices attached","R5TEST001 device product:test")
  AssertAdbDiscovery -exitCode 0 -lines @("List of devices attached")
- $invalid=$false
- try {AssertAdbDiscovery -exitCode $null -lines @("bad output")} catch {$invalid=$true}
- Need $invalid "ADB null exit code without canonical header must fail"
- $invalid=$false
- try {AssertAdbDiscovery -exitCode 1 -lines @("List of devices attached")} catch {$invalid=$true}
- Need $invalid "ADB nonzero exit code must fail"
+ $bad=$false
+ try {AssertAdbDiscovery -exitCode $null -lines @("unexpected output")} catch {$bad=$true}
+ Need $bad "ADB null exit code without header must fail"
+ $bad=$false
+ try {AssertAdbDiscovery -exitCode 1 -lines @("List of devices attached")} catch {$bad=$true}
+ Need $bad "ADB nonzero exit code must fail"
  Need ($none.Count -eq 0) "ADB parser no-device regression"
  Need ($unauthorized.Count -eq 1 -and $unauthorized[0].status -eq "unauthorized") "ADB parser authorization regression"
  Need ($authorized.Count -eq 1 -and $authorized[0].usb -and $authorized[0].status -eq "device") "ADB parser single USB phone regression"
@@ -235,295 +240,6 @@ function Phone([string]$specified) {
   } catch {
    throw ("ADB device discovery failed: "+$_.Exception.Message+"; stderr: "+($err -join " ")+"; stdout: "+($out -join " "))
   }
-  $found=@(ParseAdbList $out)
-  $ready=@($found | Where-Object {$_.usb -and $_.status -eq "device"})
-  $waiting=@($found | Where-Object {$_.usb -and $_.status -ne "device"})
-  if($specified) {
-   $chosen=@($ready | Where-Object {$_.serial -eq $specified})
-   if($chosen.Count -eq 1){return $specified}
-   $diagnosis=if(@($waiting | Where-Object {$_.serial -eq $specified}).Count -gt 0){"Device $specified is connected but USB debugging is not authorized/online"}else{"USB Android device $specified is not detected"}
-  } elseif($ready.Count -eq 1) {
-   Write-Host ("Authorized USB Android phone detected: "+$ready[0].serial)
-   return [string]$ready[0].serial
-  } elseif($ready.Count -gt 1) {
-   $diagnosis="Multiple authorized USB Android devices: "+(($ready | ForEach-Object {$_.serial}) -join ", ")
-  } elseif($waiting.Count -gt 0) {
-   $diagnosis="USB Android detected but not authorized/online: "+(($waiting | ForEach-Object {$_.serial+" ("+$_.status+")"}) -join ", ")
-  } else {
-   $diagnosis="No USB Android phone detected by ADB"
-  }
-  Write-Warning $diagnosis
-  Write-Host "On your PHONE: unlock it, enable Developer options > USB debugging, and approve 'Allow USB debugging?' (RSA fingerprint)."
-  Write-Host "Check that the USB-C cable supports DATA and try File transfer / Android Auto in USB preferences if the PC doesn't see it."
-  Write-Host "Do not change Bluetooth pairing, firmware, or NVS; these steps only enable USB diagnostics."
-  if($ready.Count -gt 1){Write-Host "Unplug extra phones or run PowerShell with -AndroidSerial SERIAL to select one."}
-  if($attempt -lt 3) {
-   $answer=Read-Host "After checking the phone, press ENTER to retry ADB (or Q to stop)"
-   if($answer -match '^(?i:q|quit|exit)$'){throw "ADB USB setup stopped by owner: $diagnosis"}
-  } else {
-   throw "ADB USB setup incomplete: $diagnosis. Run 'adb devices -l' in PowerShell to inspect the phone state."
-  }
- }
- throw "ADB USB device detection failed"
-}
-# Keep COM candidates in an array even when exactly one PnP device matches.
-# PowerShell 5.1 scalarizes "if" output; a PSCustomObject has no .Count with
-# Set-StrictMode -Version Latest. Selection is pure for no-hardware tests.
-function SelectEspPort([object[]]$candidates) {
- $found=@($candidates | Where-Object {$null -ne $_})
- $likely=@($found | Where-Object {($_.id+" "+$_.label) -match 'VID_303A|ESP32|USB.JTAG|CP210|CH340|FTDI|USB.Serial'})
- $espSpecific=@($likely | Where-Object {($_.id+" "+$_.label) -match 'VID_303A|ESP32|USB.JTAG'})
- $pick=@(if($espSpecific.Count -eq 1){$espSpecific}else{$likely})
- if($pick.Count -eq 0 -and $found.Count -eq 1){$pick=@($found)}
- Need ($pick.Count -eq 1) ("Ambiguous ESP serial port: "+(($found | ForEach-Object {$_.port+" "+$_.label}) -join "; ")+"; use -EspPort COM9")
- return [string]$pick[0].port
-}
-function AssertEspSelectorSelfTest {
- $native=[pscustomobject]@{port="COM9";label="USB JTAG Serial (COM9)";id="USB\\VID_303A&PID_1001"}
- $other=[pscustomobject]@{port="COM3";label="Communications Port (COM3)";id="ACPI\\PNP0501"}
- $generic=[pscustomobject]@{port="COM7";label="USB-SERIAL CH340 (COM7)";id="USB\\VID_1A86"}
- Need ((SelectEspPort -candidates @($native)) -eq "COM9") "Single ESP port must not scalarize"
- Need ((SelectEspPort -candidates @($native,$generic)) -eq "COM9") "Prefer the single native ESP32 port"
- Need ((SelectEspPort -candidates @($other)) -eq "COM3") "Single COM fallback regression"
- Need ((SelectEspPort -candidates @($generic)) -eq "COM7") "Single adapter COM regression"
- $ambiguous=$false
- try { $null=SelectEspPort -candidates @($native,[pscustomobject]@{port="COM10";label="ESP32 USB JTAG (COM10)";id="USB\\VID_303A"}) }
- catch { $ambiguous=$_.Exception.Message -match 'Ambiguous ESP serial port' }
- Need $ambiguous "Multiple ESP ports must fail closed"
- $missing=$false
- try { $null=SelectEspPort -candidates @() }
- catch { $missing=$_.Exception.Message -match 'Ambiguous ESP serial port' }
- Need $missing "No COM ports must fail closed"
-}
-function EspCom([string]$specified) {
- if($specified){
-  Need ($specified -match '^COM[0-9]{1,3}$') "ESP port must be COM-number"
-  return $specified.ToUpperInvariant()
- }
- $found=@(Get-CimInstance Win32_PnPEntity | Where-Object {[string]$_.Name -match '\(COM[0-9]+\)'} | ForEach-Object {
-  [pscustomobject]@{port=([regex]::Match([string]$_.Name,'\((COM[0-9]+)\)')).Groups[1].Value;
-    label=[string]$_.Name;id=[string]$_.PNPDeviceID}
- })
- return SelectEspPort -candidates $found
-}
-function FirmwarePackage([string]$folder,[string]$sha) {
- $mf=Get-ChildItem -Path $folder -Filter release_manifest.json -File -Recurse | Select-Object -First 1
- Need ($null -ne $mf) "Firmware artifact missing manifest"
- $m=Get-Content -Raw $mf.FullName | ConvertFrom-Json
- Need ($m.git_sha -eq $sha -and $m.chip -eq "ESP32-S3 N16R8") "Firmware SHA/board mismatch"
- Need ($m.erase_nvs -eq $false -and $m.nvs_partition -eq "0x9000") "Unsafe NVS manifest"
- $base=$mf.DirectoryName;$image=Join-Path $base "opentail_core_alpha.bin"
- Need (Test-Path $image) "Firmware app binary absent"
- $flashArgs=Get-Content -Raw (Join-Path $base "flasher_args.json") | ConvertFrom-Json
- Need ($flashArgs.flash_files.'0x20000' -eq "opentail_core_alpha.bin") "Unsafe app partition offset"
- $sums=Get-Content (Join-Path $base "SHA256SUMS.txt")
- foreach($file in @("release_manifest.json","flasher_args.json","opentail_core_alpha.bin")) {
-   $hits=@($sums | Where-Object {$_ -match ('\s+'+[regex]::Escape($file)+'$')})
-   Need ($hits.Count -eq 1) "Missing SHA256SUMS entry for $file"
-   $expected=([regex]::Match($hits[0],'^[a-fA-F0-9]{64}')).Value
-   $actual=(Get-FileHash -Algorithm SHA256 (Join-Path $base $file)).Hash
-   Need ($expected -eq $actual) "SHA256 mismatch for $file"
- }
- return [pscustomobject]@{image=$image;sha=(Get-FileHash -Algorithm SHA256 $image).Hash}
-}
-function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
- Write-Warning "Optional flash changes app partition 0x20000 ONLY; NVS never erased."
- Write-Host "Firmware $sha to ESP32-S3 $port"
- $answer=Read-Host "To confirm type exactly FLASH $port"
- Need ($answer -ceq "FLASH $port") "Flash cancelled without writing"
- Tool "py"
- $version=@(& py -3 -m esptool version 2>&1)
- Need ($LASTEXITCODE -eq 0) "Install esptool: py -3 -m pip install esptool"
- $esptoolArguments=@("-3","-m","esptool","--chip","esp32s3","--port",$port,"--baud","115200","write_flash","--flash_mode","dio","--flash_freq","80m","--flash_size","16MB","0x20000",$image)
- & py @esptoolArguments 2>&1 | Tee-Object -FilePath (Join-Path $session "flash.log")
- Need ($LASTEXITCODE -eq 0) "Flashing failed; no erase command was used"
-}
-function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
-function Evidence {
- if(-not $script:sessionStarted) {
-  Step "BLE runtime" "NOT RUN" "Session stopped during setup; no BLE log was captured"
-  Step "Pixel Probe" "NOT RUN" "No physical diagnostic was executed"
-  Step "Save runtime" "NOT RUN" "No Save test was executed"
-  Step "Playback runtime" "NOT RUN" "No playback test was executed"
-  Step "Independent RMT test" "UNAVAILABLE" "Firmware has no verified USB LED command"
-  return
- }
- $a=Raw $logcat;$b=Raw $serial
- $errors=[regex]::Matches($a,'(?i)gatt.{0,30}133|status[=: ]+133').Count
- $busy=[regex]::Matches($a,'(?i)pixel probe busy|pixel probe queued behind').Count
- $ok=[regex]::Matches($b,'PIXEL_PROBE_ACCEPT').Count
- $rmt=[regex]::Matches($b,'PIXEL_PROBE_RMT_DONE').Count
- $frame=[regex]::Matches($b,'PIXEL_PROBE_NONBLACK_FRAME').Count
- $save=[regex]::Matches(($a+[Environment]::NewLine+$b),'(?i)save.{0,50}(reject|code 10)|SAVE_REJECT').Count
- Step "BLE runtime" $(if($errors -gt 0){"FAIL"}else{"NOT VERIFIED"}) "GATT133=$errors; queued/busy=$busy"
- Step "Pixel Probe" "NOT OPTICALLY VERIFIED" "Controller ACCEPT=$ok; RMT_DONE=$rmt; NONBLACK_FRAME=$frame"
- Step "Save runtime" $(if($save -gt 0){"FAIL"}else{"NOT VERIFIED"}) "save rejection matches=$save; no automatic NVS write"
- Step "Playback runtime" "NOT OPTICALLY VERIFIED" "Human BLE app action required; no command issued by runner"
- Step "Independent RMT test" "UNAVAILABLE" "Existing firmware has no verified USB serial LED command; BLE Pixel Probe plus serial logs only"
-}
-function Report {
- Evidence
- $summary=[ordered]@{date=$stamp;android_sha=$androidSha;firmware_sha=$firmwareSha;phone_adb=$phone;esp_usb=$esp;
-  result=$(if($failed -and -not $sessionStarted){"SETUP FAILURE / NO HARDWARE TESTS RUN"}elseif($failed){"FAIL / INCOMPLETE"}elseif($SelfTest){"OFFLINE SELFTEST PASS; NO HARDWARE TESTED"}else{"EXACT-HEAD SOFTWARE VERIFIED; PHYSICAL NOT VERIFIED"});
-  checks=$steps;ci=$ci;artifacts=$artifacts;notes=@($notes)}
- $summary | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
- $lines=New-Object System.Collections.Generic.List[string]
- $lines.Add("# OpenTail Windows USB + BLE bench - $stamp")
- $lines.Add("Overall: "+$summary.result)
- $lines.Add("Android PR #111: "+$androidSha)
- $lines.Add("Firmware artifact PR #127 (installed firmware version not independently measured): "+$firmwareSha)
- $lines.Add("ADB: "+$phone+"; ESP serial: "+$esp)
- $lines.Add("")
- $lines.Add("| Check | Result | Evidence |")
- $lines.Add("|---|---|---|")
- foreach($key in $steps.Keys) {
-  $v=$steps[$key]
-  $lines.Add("| "+$key+" | "+$v.state+" | "+([string]$v.detail).Replace("|","/")+" |")
- }
- $lines.Add("")
- $lines.Add("## Executed GitHub Actions regression evidence")
- foreach($name in $ci.Keys){$lines.Add("- "+$name+": PASS, Actions run "+$ci[$name])}
- $lines.Add("")
- $lines.Add("## Exact-head artifact evidence")
- foreach($key in $artifacts.Keys){$lines.Add("- "+$key+": "+$artifacts[$key])}
- $lines.Add("")
- $lines.Add("## Logs: android-logcat.txt and esp32-serial.txt")
- $lines.Add("Raw logs stay on the PC. No BLE pairing secrets were requested.")
- $lines.Add("NEVER equate software/RMT_DONE with physical optical acceptance.")
- $lines.Add("No automatic firmware flashing, NVS erase, Save, reboot or hardcoded light counts.")
- foreach($n in $notes){$lines.Add("- "+$n)}
- $path=Join-Path $session "REPORT.md"
- $lines | Set-Content $path -Encoding UTF8
- Write-Host ("Report: "+$path)
-}
-$stamp=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-try {
- if($SelfTest) {
-  Need (-not $FlashFirmware -and -not $DirectLedProbe) "SelfTest cannot send hardware actions"
-  Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
-  AssertAdbParserSelfTest
-  Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
-  AssertEspSelectorSelfTest
-  Step "ESP COM selector self-test" "PASS" "Zero, one, multiple native/generic COM ports; strict-mode arrays"
-  Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
- } else {
-  EnsureGh
-  EnsureAdb
-  $phone=Phone $AndroidSerial;$esp=EspCom $EspPort
-  Step "USB" "PASS" "Authorized phone $phone; ESP logging $esp"
-  $androidSha=Head 111;$firmwareSha=Head 127
-  $androidRuns=Api "repos/$repo/actions/runs?head_sha=$androidSha&per_page=100"
-  $fwRuns=Api "repos/$repo/actions/runs?head_sha=$firmwareSha&per_page=100"
-  $ai=GoodRun $androidRuns "Android exact-head software integration"
-  $jni=GoodRun $androidRuns "Issue103 reconciled Effects/Firmware/Android exact SHA (software only)"
-  $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
-  $ci["Android regression"]=$ai.id;$ci["JNI 140 effects"]=$jni.id;$ci["Firmware regression"]=$fi.id
-  Step "CI software" "PASS" "Exact-head Android BLE/geometry/Save, JNI playback/140 effects and Firmware workflows passed"
-  LocalRegressions $androidSha
-  $runs=@($androidRuns.workflow_runs | Where-Object {$_.name -eq "Verify OpenTail active sources" -and $_.status -eq "completed"} | Sort-Object created_at -Descending)
-  Need ($runs.Count -ge 1) "No exact-head Android APK workflow"
-  $apkRun=$runs[0]
-  $jobs=Api "repos/$repo/actions/runs/$($apkRun.id)/jobs?per_page=100"
-  Need (@($jobs.jobs | Where-Object {$_.name -eq "android-debug-apk" -and $_.conclusion -eq "success"}).Count -eq 1) "APK build job failed"
-  $aa=Artifact $apkRun '^opentail-native-android-.+-debug-apk$' (Join-Path $session "apk")
-  $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') (Join-Path $session "firmware")
-  $apks=@(Get-ChildItem (Join-Path $session "apk") -Recurse -Filter "*.apk" -File)
-  Need ($apks.Count -eq 1) "Downloaded APK count not 1"
-  $apk=$apks[0].FullName
-  $firmware=FirmwarePackage (Join-Path $session "firmware") $firmwareSha
-  # The verified artifact includes an OPTIONAL destructive factory-reset
-  # utility. Remove it from this session so the owner cannot accidentally
-  # launch it while reviewing the downloaded images.
-  Get-ChildItem (Join-Path $session "firmware") -Recurse -File |
-    Where-Object {$_.Name -in @("03_FACTORY_RESET_COM9.bat","factory_reset.py")} |
-    Remove-Item -Force
-  $artifacts["Android APK"]=$aa.url+" SHA256="+(Get-FileHash -Algorithm SHA256 $apk).Hash
-  $artifacts["Firmware app"]=$fa.url+" SHA256="+$firmware.sha
-  Step "Verified artifacts" "PASS" "GitHub exact-head job, firmware manifest and SHA256SUMS verified"
-  $result=@(& adb -s $phone install -r $apk 2>&1)
-  Need ($LASTEXITCODE -eq 0 -and (($result -join " ") -match "Success")) ("ADB install failed; app data untouched: "+($result -join " "))
-  Step "Android install" "PASS" "adb install -r preserves app data; never uninstalls"
-  if($FlashFirmware) {
-   ConfirmedFlash $firmware.image $esp $firmwareSha
-   Step "Flash" "PASS" "Explicit app-only flash at 0x20000; no NVS erase"
-  } else {Step "Flash" "SKIPPED" "Default: never flash"}
-  $adbProcess=Start-Process -FilePath (Get-Command adb).Source -ArgumentList @("-s",$phone,"logcat","-v","threadtime","-T","1") -PassThru -NoNewWindow -RedirectStandardOutput $logcat -RedirectStandardError (Join-Path $session "logcat.stderr.txt")
-  $capture=Join-Path $PSScriptRoot "Serial-Capture.ps1"
-  Need (Test-Path $capture) "Serial-Capture.ps1 missing"
-  $captureArguments=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),"-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds")
-  $serialProcess=Start-Process -FilePath "powershell.exe" -ArgumentList $captureArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $session "serial.stderr.txt")
-  Start-Sleep -Seconds 2
-  Need (-not $serialProcess.HasExited) "Serial capture exited early; inspect serial.stderr.txt"
-  & adb -s $phone shell am start -n "com.opentail.android/.ComposeMainActivity" | Out-Null
-  $script:sessionStarted=$true
-  Step "Log capture" "CAPTURING" "$CaptureSeconds-second Android logcat + ESP USB serial session"
-  Write-Host "On PHONE: connect and authorize OpenTail using Bluetooth."
-  Write-Host "In Layout, use Check first LED (O1), then optionally O2, Show Modes and an unsaved edit."
-  Write-Host "The runner NEVER taps Save or sends a BLE effect automatically."
-  Write-Host "STOP priority remains in the existing BLE firmware/app protocol; this runner never sends LED commands."
-  if($DirectLedProbe){Write-Host "Independent RMT command unavailable in current firmware; BLE Pixel Probe + serial evidence only."}
-  Start-Sleep -Seconds $CaptureSeconds
-  if($serialProcess.HasExited -and $serialProcess.ExitCode -ne 0){throw "Serial capture failed during session; inspect serial.stderr.txt"}
-  if($adbProcess.HasExited -and $adbProcess.ExitCode -ne 0){throw "Android logcat capture failed during session; inspect logcat.stderr.txt"}
-  Step "Log capture" "PASS" "Android/ESP captures completed"
-  if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
-   $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
-   Step "Head consistency" "WARN" "PR updated after artifact selection"
-  } else {Step "Head consistency" "PASS" "Exact same PR heads after session"}
- }
-} catch {
- $failed=$true
- Step "Runner error" "FAIL" $_.Exception.Message
-} finally {
- foreach($proc in @($adbProcess,$serialProcess)){
-  if($null -ne $proc){try {if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue}}catch{}}
- }
- Start-Sleep -Milliseconds 400
- Report
-}
-if($failed){exit 1}
-exit 0
-}).Count -ge 1
- Need $hasHeader "ADB did not return a valid device list"
- if($null -ne $exitCode) {
-  Need ([int]$exitCode -eq 0) ("ADB device discovery exited with code "+$exitCode)
- }
-}
-function AssertAdbParserSelfTest {
- $none=@(ParseAdbList @("List of devices attached","* daemon started successfully"))
- $unauthorized=@(ParseAdbList @("List of devices attached","R5TEST001 unauthorized usb:1-1 transport_id:1"))
- $authorized=@(ParseAdbList @("List of devices attached","R5TEST001 device product:test model:Phone transport_id:2"))
- $mixed=@(ParseAdbList @("List of devices attached","emulator-5554 device product:sdk","192.168.1.5:5555 device product:wireless","R5TEST001 device usb:1-1"))
- $multiple=@(ParseAdbList @("List of devices attached","A1 device usb:1","B2 device usb:2"))
- Need ($none.Count -eq 0) "ADB parser no-device regression"
- Need ($unauthorized.Count -eq 1 -and $unauthorized[0].status -eq "unauthorized") "ADB parser authorization regression"
- Need ($authorized.Count -eq 1 -and $authorized[0].usb -and $authorized[0].status -eq "device") "ADB parser single USB phone regression"
- Need (@($mixed | Where-Object {$_.usb -and $_.status -eq "device"}).Count -eq 1) "ADB parser must ignore emulators and wireless transports"
- Need (@($multiple | Where-Object {$_.usb -and $_.status -eq "device"}).Count -eq 2) "ADB parser multiple phones regression"
-}
-function Phone([string]$specified) {
- # ADB may start its daemon on the first query. Allow the owner to unlock,
- # enable debugging and approve the RSA prompt without restarting the bench.
- for($attempt=1;$attempt -le 3;$attempt++) {
-  # Windows PowerShell 5.1 may promote ADB's harmless daemon-start
-  # stderr banner to a terminating NativeCommandError under Stop.
-  # Capture stdout/stderr separately and check the actual process exit code.
-  $adbStdout=Join-Path $session "adb-devices.stdout.txt"
-  $adbStderr=Join-Path $session "adb-devices.stderr.txt"
-  $adbExe=(Get-Command adb.exe -ErrorAction Stop).Source
-  Write-Host "Checking connected Android USB devices..."
-  # Do NOT use Start-Process -Wait: Windows may wait for ADB's daemon
-  # child process as well as the short-lived 'adb devices' client.
-  # Wait only for the client PID, with a bounded timeout.
-  $adbRun=Start-Process -FilePath $adbExe -ArgumentList @("devices","-l") -PassThru -NoNewWindow -RedirectStandardOutput $adbStdout -RedirectStandardError $adbStderr
-  if(-not $adbRun.WaitForExit(15000)) {
-   try {$adbRun.Kill()} catch {}
-   throw "ADB device detection timed out after 15 seconds. Close other ADB sessions or run 'adb kill-server' in a separate PowerShell window, then retry."
-  }
-  $adbRun.Refresh()
-  $out=@(Get-Content $adbStdout -ErrorAction SilentlyContinue)
-  $err=@(Get-Content $adbStderr -ErrorAction SilentlyContinue)
-  Need ($adbRun.ExitCode -eq 0) ("ADB device discovery failed (exit "+$adbRun.ExitCode+"): "+($err -join " ")+ " "+($out -join " "))
   $found=@(ParseAdbList $out)
   $ready=@($found | Where-Object {$_.usb -and $_.status -eq "device"})
   $waiting=@($found | Where-Object {$_.usb -and $_.status -ne "device"})
