@@ -32,6 +32,6 @@ assert "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768" in config
 assert ".mem_block_symbols=64" in rmt and ".flags={.with_dma=false}" in rmt
 assert "t0h_ns=300,.t0l_ns=900,.t1h_ns=900,.t1l_ns=300,.reset_us=320" in rmt
 assert "#define OT_ST_FIXED_BRIGHTNESS 65u" in (root/"main/status_led.h").read_text()
-assert "OT_MAX_BRIGHTNESS 32" in (root/"main/board_config.h").read_text()
+assert "#define CONFIG_OPENTAIL_MAX_BRIGHTNESS_LIMIT 32" in (root/"main/board_config.h").read_text()
 assert 'ot_st_set_fault("Wi-Fi diagnostic AP startup failed")' in core
 print("PASS: no HTTP listener; OTA RMT/BLE guard retained; BLE-first Wi-Fi memory preflight unchanged; Output1 non-DMA/64 unchanged (HOST ONLY)")
