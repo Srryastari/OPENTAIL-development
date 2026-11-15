@@ -16,6 +16,18 @@ android {
         versionCode 37
         versionName '0.2.0-alpha7'
     }
+    // Isolated physical-bench APK. Never replaces or clears the owner's
+    // com.opentail.android installation, projects or encrypted owner vault.
+    // The firmware still validates the Android OS bond and owner HMAC.
+    buildTypes {
+        bench {
+            initWith debug
+            applicationIdSuffix '.bench'
+            versionNameSuffix '-bench'
+            matchingFallbacks = ['debug']
+            debuggable true
+        }
+    }
     buildFeatures {
         compose true
     }
