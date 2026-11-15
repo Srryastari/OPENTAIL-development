@@ -608,7 +608,7 @@ try {
    $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
    $ci["Firmware regression"]=$fi.id
   }else{$notes.Add("Firmware #127 is undergoing independent development; no firmware build or flash required for read-only diagnostics")}
-  Step "CI software" "PASS" "Exact-head Android and JNI workflows verified; Firmware verification SHA checked independently"
+  Step "CI software" "PASS" "Exact-head Android and JNI workflows verified; Firmware #127 HEAD recorded, not flash-verified in diagnostics mode"
   LocalRegressions $androidSha
   # The exact-head Android workflow already gates native source, JNI,
   # JUnit and APK packaging. Use its own artifact rather than waiting for
