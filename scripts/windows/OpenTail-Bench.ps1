@@ -545,7 +545,7 @@ function Report {
  # Retain the old filename for existing no-hardware smoke tests and consumers.
  $summary | ConvertTo-Json -Depth 15 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
  $lines=New-Object System.Collections.Generic.List[string]
- $lines.Add("# OpenTail bench — $Mode — $overall")
+ $lines.Add("# OpenTail bench - $Mode - $overall")
  $lines.Add("Requested: $CaptureSeconds s; captured: $captureElapsed s; stop reason: "+$(if($earlyFailure){$earlyFailure}else{'normal/none'}))
  $lines.Add("Android source: "+$androidSha)
  $lines.Add("Downloaded firmware source (NOT confirmed installed): "+$firmwareSha)
@@ -563,7 +563,7 @@ function Report {
  $lines.Add("## Capture and integrity")
  foreach($name in $steps.Keys) {
   $v=$steps[$name]
-  $lines.Add("- "+$name+": "+$v.state+" — "+$v.detail)
+  $lines.Add("- "+$name+": "+$v.state+" - "+$v.detail)
  }
  $lines.Add("- Android/COM9 alignment: "+$(if($clockInfo.available){"Phone clock skew $($clockInfo.phone_skew_seconds) seconds; phone offset $($clockInfo.phone_utc_offset), uncertainty at least $($clockInfo.uncertainty_ms) ms; ESP UTC from receive-time stamps"}else{"Phone clock unavailable; do not claim aligned Android UTC"}))
  $lines.Add("- Installed firmware SHA is never inferred from the downloaded artifact.")
