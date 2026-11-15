@@ -49,8 +49,14 @@ jobs:
             if($required -eq 'Confirm*Flash'){continue}
             if(-not $runner.Contains($required)){throw "Missing safety/feature marker: $required"}
           }
-          if($runner.Contains('erase_flash') -or $runner.Contains('erase-flash') -or $runner.Contains('factory_reset.py')) {
-            throw "Destructive flash command reference in executable runner"
+          if($runner.Contains('erase_flash') -or $runner.Contains('erase-flash')) {
+            throw "Destructive flash invocation forbidden"
+          }
+          if($runner.Contains('factory_reset.py') -and -not $runner.Contains('Remove-Item -Force')) {
+            throw "The reset utility may only appear in the local artifact sanitization path"
+          }
+          if($runner -match '(?im)^\s*(?:\&|Start-Process|python|py)\s+[^\r\n]*factory_reset') {
+            throw "Executing factory reset is forbidden"
           }
           if(-not $runner.Contains('if($FlashFirmware)')){throw "Flash is not gated"}
           if(-not $runner.Contains('ConfirmedFlash $firmware.image')){throw "Missing explicit flash path"}
