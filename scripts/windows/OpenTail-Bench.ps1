@@ -21,6 +21,8 @@ $androidSha="";$firmwareSha="";$phone="";$esp="";$failed=$false
 $logcat=Join-Path $session "android-logcat.txt"
 $serial=Join-Path $session "esp32-serial.txt"
 $adbProcess=$null;$serialProcess=$null
+$sessionStarted=$false
+$ghExe=""
 $artifacts=[ordered]@{}
 $ci=[ordered]@{}
 function Step([string]$name,[string]$state,[string]$detail) {
@@ -29,8 +31,66 @@ function Step([string]$name,[string]$state,[string]$detail) {
 }
 function Need([bool]$condition,[string]$message) {if(-not $condition){throw $message}}
 function Tool([string]$name) {Need ($null -ne (Get-Command $name -ErrorAction SilentlyContinue)) "$name not installed or not on PATH"}
+# User-approved GitHub CLI bootstrap. Never silently install software or connect accounts.
+function FindGh {
+ $cmd=Get-Command gh.exe -ErrorAction SilentlyContinue
+ if($null -ne $cmd){return [string]$cmd.Source}
+ $candidates=@(
+  (Join-Path $env:ProgramFiles "GitHub CLI\gh.exe"),
+  (Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "GitHub CLI\gh.exe"),
+  (Join-Path $env:LOCALAPPDATA "Programs\GitHub CLI\gh.exe"),
+  (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\gh.exe")
+ )
+ foreach($candidate in $candidates){
+  if(Test-Path $candidate -PathType Leaf){return $candidate}
+ }
+ return ""
+}
+function EnsureGh {
+ $found=FindGh
+ if(-not $found) {
+  Write-Host "GitHub CLI is missing. It downloads VERIFIED GitHub Actions builds; controller Bluetooth is unaffected."
+  if($null -eq (Get-Command winget.exe -ErrorAction SilentlyContinue)){
+   throw "SETUP REQUIRED: WinGet is missing. Install GitHub CLI from https://cli.github.com/ then rerun OpenTail-Bench.bat."
+  }
+  $choice=Read-Host "Install official GitHub CLI using WinGet now? Type INSTALL to approve"
+  if($choice -cne "INSTALL") {
+   throw "SETUP DECLINED: GitHub CLI was not installed. Install it with winget install --id GitHub.cli --source winget."
+  }
+  & winget.exe install --exact --id GitHub.cli --source winget --accept-package-agreements --accept-source-agreements
+  if($LASTEXITCODE -ne 0){
+   throw "WinGet could not install GitHub CLI. Check installer output; retry from a fresh console."
+  }
+  # WinGet's MSI may update only the registry PATH; make it visible to THIS
+  # already-running PowerShell process so the owner needn't restart manually.
+  foreach($scope in @("Machine","User")){
+   $newPath=[Environment]::GetEnvironmentVariable("Path",$scope)
+   if($newPath){$env:Path=$env:Path+";"+$newPath}
+  }
+  $found=FindGh
+  if(-not $found){
+   throw "GitHub CLI installed but executable is not yet visible. Close this runner, open a new window and rerun OpenTail-Bench.bat."
+  }
+ }
+ $script:ghExe=$found
+ $version=@(& $script:ghExe --version 2>&1)
+ if($LASTEXITCODE -ne 0){throw "GitHub CLI is present but could not start. Repair GitHub CLI installation."}
+ $status=@(& $script:ghExe auth status --hostname github.com 2>&1)
+ if($LASTEXITCODE -ne 0){
+  Write-Host "A one-time GitHub browser sign-in is required. No account tokens will be saved in bench logs."
+  $choice=Read-Host "Open GitHub CLI authorization now? Type LOGIN"
+  if($choice -cne "LOGIN"){
+   throw "SETUP DECLINED: GitHub CLI sign-in not authorized. Run gh auth login or rerun the launcher."
+  }
+  & $script:ghExe auth login --hostname github.com --web --git-protocol https
+  if($LASTEXITCODE -ne 0){throw "GitHub browser sign-in did not finish. Rerun the launcher after signing in."}
+  $status=@(& $script:ghExe auth status --hostname github.com 2>&1)
+  if($LASTEXITCODE -ne 0){throw "GitHub CLI is still not authorized for github.com."}
+ }
+ Step "GitHub setup" "PASS" "Official GitHub CLI found and user authorization verified"
+}
 function Api([string]$path) {
- $data=@(& gh api $path 2>&1)
+ $data=@(& $script:ghExe api $path 2>&1)
  if($LASTEXITCODE -ne 0){throw "GitHub API failed for $path : $($data -join ' ')"}
  return (($data -join [Environment]::NewLine) | ConvertFrom-Json)
 }
@@ -49,7 +109,7 @@ function Artifact($run,[string]$pattern,[string]$folder) {
  $matches=@($manifest.artifacts | Where-Object {$_.expired -eq $false -and $_.name -match $pattern})
  Need ($matches.Count -eq 1) "Exactly one unexpired matching artifact required in run $($run.id): $pattern"
  New-Item -ItemType Directory -Path $folder -Force | Out-Null
- $msg=@(& gh run download ([string]$run.id) -R $repo -n ([string]$matches[0].name) -D $folder 2>&1)
+ $msg=@(& $script:ghExe run download ([string]$run.id) -R $repo -n ([string]$matches[0].name) -D $folder 2>&1)
  Need ($LASTEXITCODE -eq 0) "gh run download failed: $($msg -join ' ')"
  return [pscustomobject]@{id=$matches[0].id;name=$matches[0].name;run=$run.id;url="https://github.com/$repo/actions/runs/$($run.id)/artifacts/$($matches[0].id)"}
 }
@@ -126,6 +186,14 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
 }
 function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
 function Evidence {
+ if(-not $script:sessionStarted) {
+  Step "BLE runtime" "NOT RUN" "Session stopped during setup; no BLE log was captured"
+  Step "Pixel Probe" "NOT RUN" "No physical diagnostic was executed"
+  Step "Save runtime" "NOT RUN" "No Save test was executed"
+  Step "Playback runtime" "NOT RUN" "No playback test was executed"
+  Step "Independent RMT test" "UNAVAILABLE" "Firmware has no verified USB LED command"
+  return
+ }
  $a=Raw $logcat;$b=Raw $serial
  $errors=[regex]::Matches($a,'(?i)gatt.{0,30}133|status[=: ]+133').Count
  $busy=[regex]::Matches($a,'(?i)pixel probe busy|pixel probe queued behind').Count
@@ -142,7 +210,7 @@ function Evidence {
 function Report {
  Evidence
  $summary=[ordered]@{date=$stamp;android_sha=$androidSha;firmware_sha=$firmwareSha;phone_adb=$phone;esp_usb=$esp;
-  result=$(if($failed){"FAIL / INCOMPLETE"}elseif($SelfTest){"OFFLINE SELFTEST PASS; NO HARDWARE TESTED"}else{"EXACT-HEAD SOFTWARE VERIFIED; PHYSICAL NOT VERIFIED"});
+  result=$(if($failed -and -not $sessionStarted){"SETUP FAILURE / NO HARDWARE TESTS RUN"}elseif($failed){"FAIL / INCOMPLETE"}elseif($SelfTest){"OFFLINE SELFTEST PASS; NO HARDWARE TESTED"}else{"EXACT-HEAD SOFTWARE VERIFIED; PHYSICAL NOT VERIFIED"});
   checks=$steps;ci=$ci;artifacts=$artifacts;notes=@($notes)}
  $summary | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
  $lines=New-Object System.Collections.Generic.List[string]
@@ -181,7 +249,8 @@ try {
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } else {
-  Tool "gh";Tool "adb"
+  EnsureGh
+  Tool "adb"
   $phone=Phone $AndroidSerial;$esp=EspCom $EspPort
   Step "USB" "PASS" "Authorized phone $phone; ESP logging $esp"
   $androidSha=Head 111;$firmwareSha=Head 127
@@ -228,6 +297,7 @@ try {
   Start-Sleep -Seconds 2
   Need (-not $serialProcess.HasExited) "Serial capture exited early; inspect serial.stderr.txt"
   & adb -s $phone shell am start -n "com.opentail.android/.ComposeMainActivity" | Out-Null
+  $script:sessionStarted=$true
   Step "Log capture" "CAPTURING" "$CaptureSeconds-second Android logcat + ESP USB serial session"
   Write-Host "On PHONE: connect and authorize OpenTail using Bluetooth."
   Write-Host "In Layout, use Check first LED (O1), then optionally O2, Show Modes and an unsaved edit."
