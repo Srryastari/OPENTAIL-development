@@ -144,6 +144,30 @@ function LocalRegressions([string]$expectedSha) {
  }
  Step "Local source regressions" "PASS" "Exact checked-out Android SHA: native-source BLE, live geometry and Save/static regressions"
 }
+# Android Studio often installs adb under the user SDK without updating PATH.
+function EnsureAdb {
+ $adb=Get-Command adb.exe -ErrorAction SilentlyContinue
+ if($null -eq $adb) {
+  $roots=@(
+   [Environment]::GetEnvironmentVariable("ANDROID_HOME"),
+   [Environment]::GetEnvironmentVariable("ANDROID_SDK_ROOT"),
+   (Join-Path $env:LOCALAPPDATA "Android\Sdk")
+  )
+  foreach($sdk in $roots){
+   if([string]::IsNullOrWhiteSpace($sdk)){continue}
+   $exe=Join-Path $sdk "platform-tools\adb.exe"
+   if(Test-Path $exe -PathType Leaf){
+    $env:Path=(Split-Path $exe -Parent)+";"+$env:Path
+    $adb=Get-Command adb.exe -ErrorAction SilentlyContinue
+    if($null -ne $adb){break}
+   }
+  }
+ }
+ if($null -eq $adb){
+  throw "SETUP REQUIRED: Android ADB not found. Install Android SDK Platform Tools from https://developer.android.com/tools/releases/platform-tools, then rerun the launcher."
+ }
+ Step "ADB setup" "PASS" "Android Platform Tools found"
+}
 function Phone([string]$specified) {
  $out=@(& adb devices -l)
  Need ($LASTEXITCODE -eq 0) "ADB devices failed"
@@ -262,7 +286,7 @@ try {
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } else {
   EnsureGh
-  Tool "adb"
+  EnsureAdb
   $phone=Phone $AndroidSerial;$esp=EspCom $EspPort
   Step "USB" "PASS" "Authorized phone $phone; ESP logging $esp"
   $androidSha=Head 111;$firmwareSha=Head 127
