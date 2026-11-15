@@ -18,6 +18,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.text.SpannableString;
@@ -305,6 +306,9 @@ final class BleDiscovery {
     private BluetoothGattCharacteristic panelPreviewControl,panelPreviewUpdate,panelPreviewStatus;
     private boolean ownerBondingSupported=false,offerOwnerPin=false,ownerPinWritePending=false;
     private boolean ownerAutoAuthQueued=false;
+    private volatile boolean ownerKeyPresent=false;
+    private volatile String ownerAccessFailure=null;
+    private static final String OWNER_LOG_TAG="OpenTailOwner";
     private byte[] ownerPinQueued;
     private BluetoothGatt ownerPinQueuedOwner;
     private int ownerBondLease;
@@ -333,7 +337,10 @@ final class BleDiscovery {
             final int state;
             try {state=owner.getDevice().getBondState();}
             catch(SecurityException ex){pairPending=false;notifyStatus("Bluetooth permission is required to connect");return;}
-            if(state==BluetoothDevice.BOND_BONDED){pairPending=false;ownerAutoAuthQueued=true;pumpQueue();return;}
+            if(state==BluetoothDevice.BOND_BONDED){
+                Log.i(OWNER_LOG_TAG,"Bluetooth bond complete; attempting owner enrollment");
+                pairPending=false;ownerAutoAuthQueued=true;pumpQueue();return;
+            }
             if(attempts>=240||(attempts>4&&state==BluetoothDevice.BOND_NONE)){
                 pairPending=false;notifyStatus("Bluetooth pairing not completed; select controller to retry");pumpQueue();return;
             }
@@ -1489,6 +1496,7 @@ final class BleDiscovery {
         clearQueuedOutputRead();
         if (scanDialog != null) { scanDialog.dismiss(); scanDialog = null; }
         connected = false; connecting = false; authorized = false; scanning = false;
+        ownerKeyPresent=false;ownerAccessFailure=null;
         command = null; reply = null; fxCaps=null; fxCapsBusy=false; fxNotify("[]"); triggerMapping=null; triggerMapBusy=false; triggerMapSavePending=false; triggerMapExpected=null; enroll = null; challenge = null; cfgCommand = null; cfgReply = null;
         pairPending = false; challengePending = false; authPending = false;
         cfgBusy = false; cfgSaving = false; cfgWatchdog++;
@@ -1518,7 +1526,8 @@ final class BleDiscovery {
         if(infoReadPending)return "Reading controller capabilities";
         if(!ownerEnrollmentCharacteristicsPresent())
             return "Controller owner enrollment unavailable";
-        if(BleOwnerVault.load(activity,activeAddress)==null)
+        if(ownerAccessFailure!=null)return ownerAccessFailure;
+        if(!ownerKeyPresent)
             return "Bluetooth connected · owner enrollment incomplete";
         return "Bluetooth connected · owner authorization incomplete";
     }
@@ -1527,6 +1536,7 @@ final class BleDiscovery {
         // The combined Home/Settings action must not open a second GATT
         // challenge while this session is already authorized.
         if (canControl()) { notifyStatus("BLE already authorized"); return; }
+        ownerAccessFailure=null;
         if (!connected) { notifyStatus("Connect to CORE over Bluetooth first"); return; }
         if (BleOwnerVault.load(activity,activeAddress)==null) pairWithBoot();
         else authorizeStored();
@@ -1536,12 +1546,14 @@ final class BleDiscovery {
     void pairWithBoot(){
         if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
         if(!ownerEnrollmentCharacteristicsPresent()){
-            notifyStatus("Controller owner enrollment characteristics unavailable");return;
+            ownerAccessFailure="Controller owner enrollment characteristics unavailable";
+            notifyStatus(ownerAccessFailure);return;
         }
         if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::pairWithBoot))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
         pairPending=true;challengePending=false;
+        Log.i(OWNER_LOG_TAG,"Bonded owner enrollment read requested");
         notifyStatus("Reading controller owner key over encrypted Bluetooth…");
         try{if(!gatt.readCharacteristic(enroll)){pairPending=false;notifyStatus("Unable to request pairing");}
             else watchOwnerTransaction(gatt);}
@@ -1564,15 +1576,21 @@ final class BleDiscovery {
     private void ownerRead(BluetoothGatt connection,byte[] value,int status){
         pairPending=false;
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null||value.length!=16){
+            ownerAccessFailure="Owner enrollment refused (GATT "+status+")";
+            Log.w(OWNER_LOG_TAG,ownerAccessFailure);
             notifyStatus("Owner enrollment refused: this controller belongs to another phone or needs its configured PIN (GATT "+status+")");return;
         }
-        try{BleOwnerVault.save(activity,activeAddress,value);offerOwnerPin=true;notifyStatus("Controller owner remembered; connecting…");ui.post(()->authorizeStored());}
+        try{BleOwnerVault.save(activity,activeAddress,value);ownerKeyPresent=true;
+            Log.i(OWNER_LOG_TAG,"Owner enrollment accepted; encrypted key stored; starting HMAC challenge");
+            offerOwnerPin=true;notifyStatus("Controller owner remembered; connecting…");ui.post(()->authorizeStored());}
         catch(Exception e){notifyStatus("Could not securely store owner key; pairing not complete");}
     }
     private void ownerChallenge(byte[] value,int status){
         challengePending=false;
         byte[] key=BleOwnerVault.load(activity,activeAddress);
         if(status!=BluetoothGatt.GATT_SUCCESS||value==null||value.length!=16||key==null){
+            ownerAccessFailure="Owner challenge unavailable (GATT "+status+")";
+            Log.w(OWNER_LOG_TAG,ownerAccessFailure);
             notifyStatus("BLE challenge unavailable or pairing key missing (GATT "+status+")");return;
         }
         try{
@@ -1580,7 +1598,9 @@ final class BleDiscovery {
             hmac.update("OpenTail-BLE-v2".getBytes(StandardCharsets.US_ASCII));
             byte[] hash=hmac.doFinal(value);
             byte[] packet=new byte[18];packet[0]=1;packet[1]=4;System.arraycopy(hash,0,packet,2,16);
-            authorized=false;authPending=true;enqueueWrite(packet);
+            authorized=false;authPending=true;
+            Log.i(OWNER_LOG_TAG,"Owner HMAC proof queued; awaiting controller reply");
+            enqueueWrite(packet);
         }catch(Exception e){notifyStatus("BLE owner authentication could not be prepared");}
     }
 
@@ -2160,6 +2180,7 @@ final class BleDiscovery {
                 infoReadPending=false;
                 connecting = false;
                 connected = false;
+                ownerKeyPresent=false;ownerAccessFailure=null;
                 frameCapture.cancel();clearPreviewCommand();palette.reset();clearQueuedOutputRead();panelDisconnected();Arrays.fill(cfgKnownRevision,-1);authorized = false;command=null;reply=null;fxCaps=null;fxCapsBusy=false;fxNotify("[]");triggerMapping=null;triggerMapBusy=false;triggerMapSavePending=false;triggerMapExpected=null;enroll=null;challenge=null;cfgCommand=null;cfgReply=null;pairPending=false;challengePending=false;authPending=false;cfgBusy=false;cfgWatchdog++;writePending=false;readReplyPending=false;pendingPacket=null;nextPacket=null;afterStopPacket=null;
                 notifyStatus("BLE disconnected (GATT status " + status + ")" +
                     (status==133?" · Android GATT 133; pending transfers and Pixel Probe canceled":""));
@@ -2213,6 +2234,7 @@ final class BleDiscovery {
             BluetoothGattCharacteristic info = service == null ? null : service.getCharacteristic(INFO_UUID);
             clearInfo(); // never show a previous controller's firmware
             coreInfo=info;
+            ownerKeyPresent=false;ownerAccessFailure=null;
             ownerBondingSupported=false; // no stale capability from a prior link
             ownerAutoAuthQueued=false;
             if (info == null) {
@@ -2238,6 +2260,10 @@ final class BleDiscovery {
             enroll = service.getCharacteristic(ENROLL_UUID);
             challenge = service.getCharacteristic(CHALLENGE_UUID);
             activeAddress=connection.getDevice().getAddress();
+            ownerKeyPresent=BleOwnerVault.load(activity,activeAddress)!=null;
+            Log.i(OWNER_LOG_TAG,"GATT owner chars: enroll="+(enroll!=null)+
+                " challenge="+(challenge!=null)+" command="+(command!=null)+
+                " keyStored="+ownerKeyPresent);
             cfgCommand = service.getCharacteristic(CFG_CMD_UUID);
             cfgReply = service.getCharacteristic(CFG_RSP_UUID);
             frameCapture.configure(connection,service.getCharacteristic(FRAME_CMD_UUID),service.getCharacteristic(FRAME_RSP_UUID));
@@ -2252,7 +2278,7 @@ final class BleDiscovery {
             // The info read is optional discovery metadata. If Android rejects
             // its ATT start, do not strand owner auto-authorization indefinitely.
             // Stored owner-key authentication must not block on optional INFO.
-            if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null) {
+            if(challenge!=null && ownerKeyPresent) {
                 ui.post(thisAutoAuth(connection));
                 return;
             }
@@ -2998,6 +3024,8 @@ final class BleDiscovery {
                 if(!stopped && connection==gatt)receiver.accept(reported);
             });
         }else notifyStatus("CORE information read failed: "+status);
+        Log.i(OWNER_LOG_TAG,"CORE INFO status="+status+" v3="+ownerBondingSupported+
+            " secureEnrollChars="+ownerEnrollmentCharacteristicsPresent());
         // An optional INFO read/marker cannot block encrypted enrollment.
         // Firmware still verifies the bond, owner identity, and HMAC.
         if(!canControl() && !pairPending && !challengePending && !authPending &&
@@ -3033,6 +3061,9 @@ final class BleDiscovery {
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
         if(authPending){
             authorized="OK AUTH".equals(response);authPending=false;
+            ownerAccessFailure=authorized?null:"Owner authorization rejected (controller reply)";
+            if(authorized)Log.i(OWNER_LOG_TAG,"Controller accepted owner HMAC");
+            else Log.w(OWNER_LOG_TAG,"Owner HMAC rejected (GATT "+status+")");
             if(authorized)queuePanelCapabilitiesRead();
             if(authorized&&offerOwnerPin){offerOwnerPin=false;ui.post(this::promptOwnerPin);}
             if(authorized && coreInfo!=null) {
