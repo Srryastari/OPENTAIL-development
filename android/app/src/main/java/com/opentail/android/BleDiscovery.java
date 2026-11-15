@@ -2264,7 +2264,8 @@ final class BleDiscovery {
             if (!infoStarted) {
                 infoReadPending=false;
                 notifyStatus("CORE information read unavailable; authorization can still proceed");
-                if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)
+                if (ownerEnrollmentCharacteristicsPresent() ||
+                    (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null))
                     ui.post(thisAutoAuth(connection));
             }
         }
