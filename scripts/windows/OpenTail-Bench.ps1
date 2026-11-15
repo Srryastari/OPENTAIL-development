@@ -125,13 +125,41 @@ function Artifact($run,[string]$pattern,[string]$folder) {
  Need ($LASTEXITCODE -eq 0) "gh run download failed: $($msg -join ' ')"
  return [pscustomobject]@{id=$matches[0].id;name=$matches[0].name;run=$run.id;url="https://github.com/$repo/actions/runs/$($run.id)/artifacts/$($matches[0].id)"}
 }
+function HasGitMetadata([string]$folder) {
+ return [bool](Test-Path -LiteralPath (Join-Path $folder ".git"))
+}
+function AssertZipCheckoutSelfTest {
+ $folder=Join-Path $session "temporary-zip-check"
+ New-Item -ItemType Directory -Path $folder -Force | Out-Null
+ try {
+  Need (-not (HasGitMetadata $folder)) "ZIP checkout must not be treated as a Git checkout"
+  New-Item -ItemType Directory -Path (Join-Path $folder ".git") -Force | Out-Null
+  Need (HasGitMetadata $folder) "Git metadata detection regression"
+ } finally {
+  Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
+ }
+}
 function LocalRegressions([string]$expectedSha) {
+ # Source ZIPs do not contain .git. This is an optional check; do not invoke
+ # git and fail the hardware session after successful authoritative CI.
+ if(-not (HasGitMetadata $root)) {
+  Step "Local source regressions" "SKIPPED" "Downloaded ZIP has no .git metadata; exact-head GitHub CI remains authoritative"
+  return
+ }
  if($null -eq (Get-Command git -ErrorAction SilentlyContinue) -or $null -eq (Get-Command node -ErrorAction SilentlyContinue)) {
   Step "Local source regressions" "SKIPPED" "Git or Node missing; exact-head GitHub CI remains authoritative"
   return
  }
- $diskHead=@(& git -C $root rev-parse HEAD 2>$null)
- if($LASTEXITCODE -ne 0 -or (($diskHead -join "").Trim() -ne $expectedSha)) {
+ $diskHead=""
+ try {
+  $diskHeadLines=@(& git -C $root rev-parse HEAD 2>$null)
+  if($LASTEXITCODE -eq 0){$diskHead=($diskHeadLines -join "").Trim()}
+ } catch {
+  # PowerShell 5.1 with ErrorActionPreference=Stop can throw on git stderr.
+  Step "Local source regressions" "SKIPPED" "Local Git HEAD could not be read; exact-head GitHub CI remains authoritative"
+  return
+ }
+ if($diskHead -ne $expectedSha) {
   Step "Local source regressions" "SKIPPED" "Current checkout is not Android PR #111 exact HEAD; no branch switched"
   return
  }
@@ -406,6 +434,8 @@ try {
  if($SelfTest) {
   Need (-not $FlashFirmware -and -not $DirectLedProbe) "SelfTest cannot send hardware actions"
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
+  AssertZipCheckoutSelfTest
+  Step "ZIP checkout self-test" "PASS" "Missing Git metadata safely bypasses optional local source checks"
   AssertAdbParserSelfTest
   Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
   AssertEspSelectorSelfTest
