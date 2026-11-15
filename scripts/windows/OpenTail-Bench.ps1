@@ -199,8 +199,16 @@ function Phone([string]$specified) {
  # ADB may start its daemon on the first query. Allow the owner to unlock,
  # enable debugging and approve the RSA prompt without restarting the bench.
  for($attempt=1;$attempt -le 3;$attempt++) {
-  $out=@(& adb devices -l 2>&1)
-  Need ($LASTEXITCODE -eq 0) ("ADB device discovery failed: "+($out -join " "))
+  # Windows PowerShell 5.1 may promote ADB's harmless daemon-start
+  # stderr banner to a terminating NativeCommandError under Stop.
+  # Capture stdout/stderr separately and check the actual process exit code.
+  $adbStdout=Join-Path $session "adb-devices.stdout.txt"
+  $adbStderr=Join-Path $session "adb-devices.stderr.txt"
+  $adbExe=(Get-Command adb.exe -ErrorAction Stop).Source
+  $adbRun=Start-Process -FilePath $adbExe -ArgumentList @("devices","-l") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $adbStdout -RedirectStandardError $adbStderr
+  $out=@(Get-Content $adbStdout -ErrorAction SilentlyContinue)
+  $err=@(Get-Content $adbStderr -ErrorAction SilentlyContinue)
+  Need ($adbRun.ExitCode -eq 0) ("ADB device discovery failed (exit "+$adbRun.ExitCode+"): "+($err -join " ")+ " "+($out -join " "))
   $found=@(ParseAdbList $out)
   $ready=@($found | Where-Object {$_.usb -and $_.status -eq "device"})
   $waiting=@($found | Where-Object {$_.usb -and $_.status -ne "device"})
