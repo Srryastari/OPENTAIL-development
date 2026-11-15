@@ -99,8 +99,11 @@ final class BleDiscovery {
         if(connected) {
             if(canControl())notifyStatus("OpenTail CORE already connected and authorized");
             else {
-                notifyStatus("OpenTail CORE connected; owner authorization required");
-                if(BleOwnerVault.load(activity,activeAddress)!=null)authorizeStored();
+                notifyStatus("OpenTail CORE connected; retrying owner access");
+                // A bonded first owner has no vault key yet. Retry enrollment
+                // through the serialized GATT queue, not only stored-key auth.
+                if(!pairPending&&!challengePending&&!authPending)
+                    ui.post(thisAutoAuth(gatt));
             }
             return;
         }
@@ -1500,6 +1503,25 @@ final class BleDiscovery {
     }
     boolean isConnected() { return connected; }
     boolean canControl() { return connected && authorized && command != null; }
+    /** Enrollment GATT presence permits an attempt. Encrypted bonding and
+     * ownership are enforced by the controller's GATT handler, never by a
+     * feature-string assumption in an optional metadata read. */
+    private boolean ownerEnrollmentCharacteristicsPresent() {
+        return connected && enroll!=null && challenge!=null && command!=null;
+    }
+    String ownerAccessStatus() {
+        if(canControl())return "Owner connected";
+        if(!connected)return "Connect to controller";
+        if(pairPending)return "Waiting for secure Bluetooth pairing";
+        if(challengePending)return "Reading owner challenge";
+        if(authPending)return "Confirming controller authorization";
+        if(infoReadPending)return "Reading controller capabilities";
+        if(!ownerEnrollmentCharacteristicsPresent())
+            return "Controller owner enrollment unavailable";
+        if(BleOwnerVault.load(activity,activeAddress)==null)
+            return "Bluetooth connected · owner enrollment incomplete";
+        return "Bluetooth connected · owner authorization incomplete";
+    }
     /** One UI action: use the stored owner key or enroll the first encrypted bonded phone. */
     void authorizeOrPair() {
         // The combined Home/Settings action must not open a second GATT
@@ -1513,7 +1535,9 @@ final class BleDiscovery {
     @SuppressWarnings("MissingPermission")
     void pairWithBoot(){
         if(pixelProbeWritePending||panelSaveBusy){notifyStatus("BLE diagnostic or Panel Save in progress; retry after completion");return;}
-        if(!connected||enroll==null||!ownerBondingSupported){notifyStatus("Connect updated CORE for automatic owner enrollment");return;}
+        if(!ownerEnrollmentCharacteristicsPresent()){
+            notifyStatus("Controller owner enrollment characteristics unavailable");return;
+        }
         if(!ensureOwnerBond())return;
         if(deferBehindFrame(this::pairWithBoot))return;
         if(cfgBusy||writePending||readReplyPending||fxCapsBusy||infoReadPending||triggerMapBusy||frameCapture.busy()||palette.busy()||nextPacket!=null||pairPending||challengePending||authPending){notifyStatus("BLE is busy; retry pairing");return;}
@@ -2189,6 +2213,8 @@ final class BleDiscovery {
             BluetoothGattCharacteristic info = service == null ? null : service.getCharacteristic(INFO_UUID);
             clearInfo(); // never show a previous controller's firmware
             coreInfo=info;
+            ownerBondingSupported=false; // no stale capability from a prior link
+            ownerAutoAuthQueued=false;
             if (info == null) {
                 notifyStatus("BLE connected; no supported OpenTail info characteristic");
                 recoverStalledGatt(connection,"CORE GATT service missing or outdated");
@@ -2971,11 +2997,11 @@ final class BleDiscovery {
                 if(!stopped && connection==gatt)receiver.accept(reported);
             });
         }else notifyStatus("CORE information read failed: "+status);
-        // INFO is optional. Never gate or revoke owner authorization on it.
-        if(challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null &&
-           !canControl() && !challengePending && !authPending)
-            ui.post(thisAutoAuth(connection));
-        if(ownerBondingSupported&&!canControl()&&!pairPending&&!challengePending&&!authPending)
+        // An optional INFO read/marker cannot block encrypted enrollment.
+        // Firmware still verifies the bond, owner identity, and HMAC.
+        if(!canControl() && !pairPending && !challengePending && !authPending &&
+           (ownerEnrollmentCharacteristicsPresent() ||
+            (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)))
             ui.post(thisAutoAuth(connection));
         pumpQueue();
     }
