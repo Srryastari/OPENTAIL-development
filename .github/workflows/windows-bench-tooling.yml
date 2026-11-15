@@ -69,7 +69,7 @@ jobs:
           if($runner.Contains('/api/v1/') -or $runner.Contains('Invoke-RestMethod')){
             throw "Controller HTTP use forbidden; controller is BLE-only"
           }
-          foreach($required in @('function EnsureGh','function FindGh','Install official GitHub CLI using WinGet now? Type INSTALL','Open GitHub CLI authorization now? Type LOGIN','auth status --hostname github.com','--accept-package-agreements','--accept-source-agreements','$sessionStarted=$true')) {
+          foreach($required in @('function EnsureGh','function FindGh','Install official GitHub CLI using WinGet now? Type INSTALL','Open GitHub CLI authorization now? Type LOGIN','auth status --hostname github.com','--accept-package-agreements','--accept-source-agreements','$script:sessionStarted=$true')) {
             if(-not $runner.Contains($required)){throw "GitHub CLI setup guard absent: $required"}
           }
           if($runner -match '(?m)^\s*Tool "gh"'){throw "Old hard-fail gh prerequisite remains"}
