@@ -142,14 +142,14 @@ function Evidence {
 function Report {
  Evidence
  $summary=[ordered]@{date=$stamp;android_sha=$androidSha;firmware_sha=$firmwareSha;phone_adb=$phone;esp_usb=$esp;
-  result=$(if($failed){"FAIL / INCOMPLETE"}else{"SOFTWARE CHECKS COMPLETED; PHYSICAL NOT VERIFIED"});
+  result=$(if($failed){"FAIL / INCOMPLETE"}elseif($SelfTest){"OFFLINE SELFTEST PASS; NO HARDWARE TESTED"}else{"EXACT-HEAD SOFTWARE VERIFIED; PHYSICAL NOT VERIFIED"});
   checks=$steps;ci=$ci;artifacts=$artifacts;notes=@($notes)}
  $summary | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
  $lines=New-Object System.Collections.Generic.List[string]
  $lines.Add("# OpenTail Windows USB + BLE bench - $stamp")
  $lines.Add("Overall: "+$summary.result)
  $lines.Add("Android PR #111: "+$androidSha)
- $lines.Add("Firmware PR #127: "+$firmwareSha)
+ $lines.Add("Firmware artifact PR #127 (installed firmware version not independently measured): "+$firmwareSha)
  $lines.Add("ADB: "+$phone+"; ESP serial: "+$esp)
  $lines.Add("")
  $lines.Add("| Check | Result | Evidence |")
@@ -204,6 +204,12 @@ try {
   Need ($apks.Count -eq 1) "Downloaded APK count not 1"
   $apk=$apks[0].FullName
   $firmware=FirmwarePackage (Join-Path $session "firmware") $firmwareSha
+  # The verified artifact includes an OPTIONAL destructive factory-reset
+  # utility. Remove it from this session so the owner cannot accidentally
+  # launch it while reviewing the downloaded images.
+  Get-ChildItem (Join-Path $session "firmware") -Recurse -File |
+    Where-Object {$_.Name -in @("03_FACTORY_RESET_COM9.bat","factory_reset.py")} |
+    Remove-Item -Force
   $artifacts["Android APK"]=$aa.url+" SHA256="+(Get-FileHash -Algorithm SHA256 $apk).Hash
   $artifacts["Firmware app"]=$fa.url+" SHA256="+$firmware.sha
   Step "Verified artifacts" "PASS" "GitHub exact-head job, firmware manifest and SHA256SUMS verified"
