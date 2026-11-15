@@ -599,11 +599,15 @@ try {
   Step "USB" "PASS" "Authorized phone $phone; ESP logging $esp"
   $androidSha=Head 111;$firmwareSha=Head 127
   $androidRuns=Api "repos/$repo/actions/runs?head_sha=$androidSha&per_page=100"
-  $fwRuns=Api "repos/$repo/actions/runs?head_sha=$firmwareSha&per_page=100"
   $ai=GoodRun $androidRuns "Android exact-head software integration"
   $jni=GoodRun $androidRuns "Issue103 reconciled Effects/Firmware/Android exact SHA (software only)"
-  $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
-  $ci["Android regression"]=$ai.id;$ci["JNI 140 effects"]=$jni.id;$ci["Firmware regression"]=$fi.id
+  $ci["Android regression"]=$ai.id;$ci["JNI 140 effects"]=$jni.id
+  $fi=$null
+  if($FlashFirmware){
+   $fwRuns=Api "repos/$repo/actions/runs?head_sha=$firmwareSha&per_page=100"
+   $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
+   $ci["Firmware regression"]=$fi.id
+  }else{$notes.Add("Firmware #127 is undergoing independent development; no firmware build or flash required for read-only diagnostics")}
   Step "CI software" "PASS" "Exact-head Android and JNI workflows verified; Firmware verification SHA checked independently"
   LocalRegressions $androidSha
   # The exact-head Android workflow already gates native source, JNI,
@@ -628,22 +632,47 @@ try {
    ConfirmedFlash $firmware.image $esp $firmwareSha
    Step "Flash" "PASS" "Explicit app-only flash at 0x20000; no NVS erase"
   } else {Step "Flash" "SKIPPED" "Default: never flash"}
+  $script:clockInfo=Read-PhoneClock $phone
   $adbProcess=Start-Process -FilePath (Get-Command adb).Source -ArgumentList @("-s",$phone,"logcat","-v","threadtime","-T","1") -PassThru -NoNewWindow -RedirectStandardOutput $logcat -RedirectStandardError (Join-Path $session "logcat.stderr.txt")
   $capture=Join-Path $PSScriptRoot "Serial-Capture.ps1"
   Need (Test-Path $capture) "Serial-Capture.ps1 missing"
-  $captureArguments=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),"-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds")
+  $captureArguments=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),
+    "-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds",
+    "-TimelineFile",('"'+$timeline+'"'),"-StopFile",('"'+$stopFile+'"'))
   $serialProcess=Start-Process -FilePath "powershell.exe" -ArgumentList $captureArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $session "serial.stderr.txt")
   Start-Sleep -Seconds 2
   Need (-not $serialProcess.HasExited) "Serial capture exited early; inspect serial.stderr.txt"
   & adb -s $phone shell am start -n "com.opentail.android/.ComposeMainActivity" | Out-Null
   $script:sessionStarted=$true
-  Step "Log capture" "CAPTURING" "$CaptureSeconds-second Android logcat + ESP USB serial session"
-  Write-Host "On PHONE: connect and authorize OpenTail using Bluetooth."
-  Write-Host "In Layout, use Check first LED (O1), then optionally O2, Show Modes and an unsaved edit."
-  Write-Host "The runner NEVER taps Save or sends a BLE effect automatically."
-  Write-Host "STOP priority remains in the existing BLE firmware/app protocol; this runner never sends LED commands."
-  if($DirectLedProbe){Write-Host "Independent RMT command unavailable in current firmware; BLE Pixel Probe + serial evidence only."}
-  Start-Sleep -Seconds $CaptureSeconds
+  Step "Log capture" "CAPTURING" "$CaptureSeconds-second $Mode Android/COM9 read-only session (early exit on confirmed failures)"
+  switch($Mode){
+   'bluetooth' {Write-Host "PHONE: Connect, then check Controller access. Do not test lights yet."}
+   'layout' {Write-Host "PHONE: Open Layout and inspect live mapping; Pixel Probe only if you explicitly choose."}
+   'save' {Write-Host "PHONE: Test Save/Reload only when intentionally ready. No automatic writes."}
+   'playback' {Write-Host "PHONE: Select Show Modes and test playback manually; STOP remains available."}
+  }
+  Write-Host "Runner never sends BLE commands, invokes Save or activates LEDs."
+  if($DirectLedProbe){Write-Host "Independent RMT command unavailable; user-controlled BLE Pixel Probe only."}
+  $watch=[System.Diagnostics.Stopwatch]::StartNew()
+  while($watch.Elapsed.TotalSeconds -lt $CaptureSeconds){
+   Start-Sleep -Milliseconds 750
+   $at=@(Get-Content -LiteralPath $logcat -Tail 250 -ErrorAction SilentlyContinue) -join "`n"
+   $bt=@(Get-Content -LiteralPath $serial -Tail 250 -ErrorAction SilentlyContinue) -join "`n"
+   $reason=Get-BenchFailure $at $bt
+   if($reason){
+    $script:earlyFailure=$reason
+    New-Item -Path $stopFile -ItemType File -Force | Out-Null
+    Write-Host ("[FAIL] Early conclusive failure: "+$reason+"; finalizing logs now")
+    break
+   }
+  }
+  $script:captureElapsed=[int][Math]::Ceiling($watch.Elapsed.TotalSeconds)
+  # Signal a clean serial END marker; no process kill, DTR, RTS or device command.
+  if(-not (Test-Path $stopFile)){New-Item -Path $stopFile -ItemType File -Force | Out-Null}
+  for($wait=0;$wait -lt 35;$wait++){
+   if((Raw $serial).Contains("[OpenTail] USB SERIAL LOG END")){break}
+   Start-Sleep -Milliseconds 200
+  }
   # Start-Process -PassThru can expose a null ExitCode on Windows PS5.1.
   # Verify the receive-only serial logger's own START/END evidence instead of
   # treating a missing numeric exit code as a hardware/test failure.
@@ -658,7 +687,7 @@ try {
   if($adbProcess.HasExited -and $null -ne $adbProcess.ExitCode -and $adbProcess.ExitCode -ne 0) {
    throw "Android logcat exited with code $($adbProcess.ExitCode); inspect logcat.stderr.txt"
   }
-  Step "Log capture" "PASS" "Android logcat present; ESP serial START/END markers verified"
+  Step "Log capture" "PASS" "Android logcat and ESP serial START/END verified; captured $captureElapsed s"
   if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
    $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
    Step "Head consistency" "WARN" "PR updated after artifact selection"
@@ -666,7 +695,7 @@ try {
  }
 } catch {
  $failed=$true
- Step "Runner error" "FAIL" $_.Exception.Message
+ Step "Runner error" $(if($installBlocked){"BLOCKED"}else{"FAIL"}) $_.Exception.Message
 } finally {
  foreach($proc in @($adbProcess,$serialProcess)){
   if($null -ne $proc){try {if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue}}catch{}}
