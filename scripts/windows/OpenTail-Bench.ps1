@@ -53,6 +53,25 @@ function Artifact($run,[string]$pattern,[string]$folder) {
  Need ($LASTEXITCODE -eq 0) "gh run download failed: $($msg -join ' ')"
  return [pscustomobject]@{id=$matches[0].id;name=$matches[0].name;run=$run.id;url="https://github.com/$repo/actions/runs/$($run.id)/artifacts/$($matches[0].id)"}
 }
+function LocalRegressions([string]$expectedSha) {
+ if($null -eq (Get-Command git -ErrorAction SilentlyContinue) -or $null -eq (Get-Command node -ErrorAction SilentlyContinue)) {
+  Step "Local source regressions" "SKIPPED" "Git or Node missing; exact-head GitHub CI remains authoritative"
+  return
+ }
+ $diskHead=@(& git -C $root rev-parse HEAD 2>$null)
+ if($LASTEXITCODE -ne 0 -or (($diskHead -join "").Trim() -ne $expectedSha)) {
+  Step "Local source regressions" "SKIPPED" "Current checkout is not Android PR #111 exact HEAD; no branch switched"
+  return
+ }
+ foreach($file in @("android/qa/test_native_source.cjs","android/qa/test_live_edit.cjs")) {
+  $full=Join-Path $root $file
+  Need (Test-Path $full) "Missing source regression $file"
+  $output=@(& node $full 2>&1)
+  $output | Set-Content (Join-Path $session ("node-"+[System.IO.Path]::GetFileNameWithoutExtension($file)+".log")) -Encoding UTF8
+  Need ($LASTEXITCODE -eq 0) "Local regression failed: $file; inspect node log"
+ }
+ Step "Local source regressions" "PASS" "Exact checked-out Android SHA: native-source BLE, live geometry and Save/static regressions"
+}
 function Phone([string]$specified) {
  $out=@(& adb devices -l)
  Need ($LASTEXITCODE -eq 0) "ADB devices failed"
@@ -140,6 +159,9 @@ function Report {
   $lines.Add("| "+$key+" | "+$v.state+" | "+([string]$v.detail).Replace("|","/")+" |")
  }
  $lines.Add("")
+ $lines.Add("## Executed GitHub Actions regression evidence")
+ foreach($name in $ci.Keys){$lines.Add("- "+$name+": PASS, Actions run "+$ci[$name])}
+ $lines.Add("")
  $lines.Add("## Exact-head artifact evidence")
  foreach($key in $artifacts.Keys){$lines.Add("- "+$key+": "+$artifacts[$key])}
  $lines.Add("")
@@ -169,7 +191,8 @@ try {
   $jni=GoodRun $androidRuns "Issue103 reconciled Effects/Firmware/Android exact SHA (software only)"
   $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
   $ci["Android regression"]=$ai.id;$ci["JNI 140 effects"]=$jni.id;$ci["Firmware regression"]=$fi.id
-  Step "CI software" "PASS" "Exact-head Android, JNI effects, geometry and Firmware workflows passed"
+  Step "CI software" "PASS" "Exact-head Android BLE/geometry/Save, JNI playback/140 effects and Firmware workflows passed"
+  LocalRegressions $androidSha
   $runs=@($androidRuns.workflow_runs | Where-Object {$_.name -eq "Verify OpenTail active sources" -and $_.status -eq "completed"} | Sort-Object created_at -Descending)
   Need ($runs.Count -ge 1) "No exact-head Android APK workflow"
   $apkRun=$runs[0]
