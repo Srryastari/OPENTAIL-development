@@ -420,6 +420,79 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
  Need ($LASTEXITCODE -eq 0) "Flashing failed; no erase command was used"
 }
 function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
+function Invoke-AdbCapture([string[]]$arguments,[string]$label,[int]$timeoutMs=20000) {
+ $stdout=Join-Path $session ($label+".stdout.txt")
+ $stderr=Join-Path $session ($label+".stderr.txt")
+ $adbExe=[string](Get-Command adb.exe -ErrorAction Stop).Source
+ $p=Start-Process -FilePath $adbExe -ArgumentList $arguments -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+ if(-not $p.WaitForExit($timeoutMs)){
+  try{$p.Kill()}catch{}
+  throw "ADB command timed out ($label); inspect its capture files"
+ }
+ $p.Refresh()
+ return [pscustomobject]@{exit=$p.ExitCode;
+   output=((Raw $stdout)+[Environment]::NewLine+(Raw $stderr)).Trim()}
+}
+function Get-AndroidPackageState([string]$phone) {
+ $r=Invoke-AdbCapture @("-s",$phone,"shell","dumpsys","package","com.opentail.android") "adb-package"
+ if($r.exit -ne 0){return [pscustomobject]@{exists=$false;lastUpdate=""}}
+ $present=([regex]::IsMatch($r.output,'(?m)^\s*Package \[com\.opentail\.android\]'))
+ $m=[regex]::Match($r.output,'(?m)^\s*lastUpdateTime=([^\r\n]+)')
+ return [pscustomobject]@{exists=$present;lastUpdate=$(if($m.Success){$m.Groups[1].Value.Trim()}else{""})}
+}
+function Install-VerifiedAndroid([string]$phone,[string]$apk,[string]$sha) {
+ $package=Get-AndroidPackageState $phone
+ $hash=(Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash
+ $statePath=Join-Path $root "bench-cache\android-install.json"
+ if((Test-Path $statePath) -and $package.exists -and $package.lastUpdate) {
+  try {
+   $previous=Get-Content $statePath -Raw | ConvertFrom-Json
+   if($previous.phone -ceq $phone -and $previous.apk_sha256 -ceq $hash -and
+      $previous.source_sha -ceq $sha -and $previous.last_update -ceq $package.lastUpdate) {
+    Step "Android install" "PASS" "Verified same APK remains installed on same phone; skipped reinstall"
+    return
+   }
+  }catch{}
+ }
+ $result=Invoke-AdbCapture @("-s",$phone,"install","-r",('"'+$apk+'"')) "adb-install" 120000
+ if($result.output -match '(?i)INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
+  # Previous runner silently erased owner credentials. Never repeat that.
+  Write-Warning "Existing OpenTail Android signing key differs. Uninstall deletes phone app data, saved owner key, layouts/projects stored only on phone."
+  $answer=Read-Host "Type exactly ERASE APP DATA to permit uninstall/reinstall, or press ENTER to keep everything"
+  if($answer -cne "ERASE APP DATA") {
+   $script:installBlocked=$true
+   Step "Android install" "BLOCKED" "Signing mismatch; owner did not authorize deleting app data; existing app untouched"
+   throw "Android APK update blocked by signing mismatch; no uninstall attempted"
+  }
+  $gone=Invoke-AdbCapture @("-s",$phone,"uninstall","com.opentail.android") "adb-uninstall" 120000
+  Need ($gone.exit -eq 0 -and $gone.output -match '(?m)^Success\s*$') ("Approved Android uninstall failed: "+$gone.output)
+  $result=Invoke-AdbCapture @("-s",$phone,"install",('"'+$apk+'"')) "adb-install-replacement" 120000
+  Need ($result.exit -eq 0 -and $result.output -match '(?m)^Success\s*$') ("Approved app uninstall succeeded but reinstall FAILED: "+$result.output)
+  Step "Android install" "PASS" "Owner explicitly approved reinstall; phone app data and owner key erased, controller NVS unchanged"
+ } else {
+  Need ($result.exit -eq 0 -and $result.output -match '(?m)^Success\s*$') ("Android install failed without signing mismatch; existing app untouched: "+$result.output)
+  Step "Android install" "PASS" "APK installed/updated, app data preserved"
+ }
+ $new=Get-AndroidPackageState $phone
+ if($new.exists -and $new.lastUpdate) {
+  $parent=Split-Path $statePath -Parent
+  New-Item -Path $parent -ItemType Directory -Force | Out-Null
+  [ordered]@{phone=$phone;apk_sha256=$hash;source_sha=$sha;last_update=$new.lastUpdate} |
+      ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $statePath -Encoding UTF8
+ }else{$notes.Add("Installed package fingerprint unavailable; next session will verify again")}
+}
+function Read-PhoneClock([string]$phone) {
+ $before=(Get-Date).ToUniversalTime()
+ try {
+  $epoch=Invoke-AdbCapture @("-s",$phone,"shell","date","+%s") "adb-phone-epoch"
+  $zone=Invoke-AdbCapture @("-s",$phone,"shell","date","+%z") "adb-phone-zone"
+  $after=(Get-Date).ToUniversalTime()
+  if($epoch.exit -eq 0 -and $zone.exit -eq 0) {
+   return Get-ClockCorrelation (($epoch.output.Trim())+" "+($zone.output.Trim())) $before $after
+  }
+ }catch{}
+ return [ordered]@{available=$false;phone_skew_seconds=$null;phone_utc_offset=$null;uncertainty_ms=$null}
+}
 function OwnerLogStage([string]$body) {
  # Non-secret, app-owned BLE diagnostic events; never evidence of optical output.
  $found=@([regex]::Matches($body,'(?m)^[^\r\n]*OpenTailOwner:\s*([^\r\n]+)') |
