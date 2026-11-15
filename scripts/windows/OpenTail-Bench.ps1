@@ -5,7 +5,8 @@ param(
  [switch]$FlashFirmware,
  [switch]$DirectLedProbe,
  [switch]$SelfTest,
- [ValidateRange(30,1800)][int]$CaptureSeconds=120,
+ [ValidateRange(30,1800)][int]$CaptureSeconds=30,
+ [ValidateSet('bluetooth','layout','save','playback')][string]$Mode='bluetooth',
  [string]$AndroidSerial="",
  [string]$EspPort=""
 )
@@ -20,8 +21,15 @@ $notes=New-Object System.Collections.Generic.List[string]
 $androidSha="";$firmwareSha="";$phone="";$esp="";$failed=$false
 $logcat=Join-Path $session "android-logcat.txt"
 $serial=Join-Path $session "esp32-serial.txt"
+$timeline=Join-Path $session "esp32-timeline.txt"
+$stopFile=Join-Path $session "capture.stop"
 $adbProcess=$null;$serialProcess=$null
 $sessionStarted=$false
+$installBlocked=$false
+$earlyFailure=""
+$clockInfo=[ordered]@{available=$false;phone_skew_seconds=$null;phone_utc_offset=$null;uncertainty_ms=$null}
+$captureElapsed=0
+. (Join-Path $PSScriptRoot "Bench-Diagnostics.ps1")
 $ghExe=""
 $artifacts=[ordered]@{}
 $ci=[ordered]@{}
@@ -116,14 +124,54 @@ function GoodRun($runs,[string]$name) {
  Need ($items.Count -ge 1) "Missing successful exact-head workflow: $name"
  return $items[0]
 }
-function Artifact($run,[string]$pattern,[string]$folder) {
+function Artifact($run,[string]$pattern,[string]$kind,[string]$sha) {
+ # CI must have built this *exact* PR head; cache is keyed to artifact ID too.
+ Need ([string]$run.head_sha -eq $sha) "Artifact workflow does not match expected immutable source SHA"
  $manifest=Api "repos/$repo/actions/runs/$($run.id)/artifacts?per_page=100"
  $matches=@($manifest.artifacts | Where-Object {$_.expired -eq $false -and $_.name -match $pattern})
  Need ($matches.Count -eq 1) "Exactly one unexpired matching artifact required in run $($run.id): $pattern"
- New-Item -ItemType Directory -Path $folder -Force | Out-Null
- $msg=@(& $script:ghExe run download ([string]$run.id) -R $repo -n ([string]$matches[0].name) -D $folder 2>&1)
- Need ($LASTEXITCODE -eq 0) "gh run download failed: $($msg -join ' ')"
- return [pscustomobject]@{id=$matches[0].id;name=$matches[0].name;run=$run.id;url="https://github.com/$repo/actions/runs/$($run.id)/artifacts/$($matches[0].id)"}
+ $entry=$matches[0]
+ $directory=Join-Path $root ("bench-cache\"+$kind+"\"+$sha+"-"+$entry.id)
+ $marker=Join-Path $directory "cache.json"
+ $valid=$false
+ if(Test-Path $marker -PathType Leaf) {
+  try {
+   $saved=Get-Content $marker -Raw | ConvertFrom-Json
+   $valid=([string]$saved.sha -ceq $sha -and [string]$saved.artifact_id -ceq [string]$entry.id -and @($saved.files).Count -gt 0)
+   if($valid) {
+    foreach($file in @($saved.files)) {
+     $local=Join-Path $directory ([string]$file.relative)
+     if(-not (Test-Path -LiteralPath $local -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash -ne [string]$file.sha256){$valid=$false;break}
+    }
+   }
+  } catch {$valid=$false}
+ }
+ if(-not $valid) {
+  if(Test-Path $directory){Remove-Item -LiteralPath $directory -Recurse -Force}
+  New-Item -Path $directory -ItemType Directory -Force | Out-Null
+  $msg=@(& $script:ghExe run download ([string]$run.id) -R $repo -n ([string]$entry.name) -D $directory 2>&1)
+  Need ($LASTEXITCODE -eq 0) "gh run download failed: $($msg -join ' ')"
+  # Never leave an executable factory-reset utility in the reusable cache.
+  if($kind -eq 'firmware'){
+   Get-ChildItem $directory -Recurse -File |
+     Where-Object {$_.Name -in @('03_FACTORY_RESET_COM9.bat','factory_reset.py')} |
+     Remove-Item -Force
+  }
+  $checks=@(Get-ChildItem -LiteralPath $directory -Recurse -File |
+    ForEach-Object {
+     [pscustomobject]@{relative=$_.FullName.Substring($directory.Length+1);
+                       sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash}
+    })
+  Need ($checks.Count -gt 0) "Downloaded artifact was empty"
+  [ordered]@{sha=$sha;artifact_id=[string]$entry.id;files=$checks} |
+     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $marker -Encoding UTF8
+  Step ("Artifact "+$kind) "PASS" "Downloaded exact-SHA artifact and cached verified file checksums"
+ } else {
+  Step ("Artifact "+$kind) "PASS" "Reused checksum-verified exact-SHA cache; no download"
+ }
+ return [pscustomobject]@{id=$entry.id;name=$entry.name;run=$run.id;folder=$directory;
+    url="https://github.com/$repo/actions/runs/$($run.id)/artifacts/$($entry.id)"}
 }
 function HasGitMetadata([string]$folder) {
  return [bool](Test-Path -LiteralPath (Join-Path $folder ".git"))
