@@ -498,9 +498,21 @@ try {
   Write-Host "STOP priority remains in the existing BLE firmware/app protocol; this runner never sends LED commands."
   if($DirectLedProbe){Write-Host "Independent RMT command unavailable in current firmware; BLE Pixel Probe + serial evidence only."}
   Start-Sleep -Seconds $CaptureSeconds
-  if($serialProcess.HasExited -and $serialProcess.ExitCode -ne 0){throw "Serial capture failed during session; inspect serial.stderr.txt"}
-  if($adbProcess.HasExited -and $adbProcess.ExitCode -ne 0){throw "Android logcat capture failed during session; inspect logcat.stderr.txt"}
-  Step "Log capture" "PASS" "Android/ESP captures completed"
+  # Start-Process -PassThru can expose a null ExitCode on Windows PS5.1.
+  # Verify the receive-only serial logger's own START/END evidence instead of
+  # treating a missing numeric exit code as a hardware/test failure.
+  $serialBody=Raw $serial
+  Need ($serialBody.Contains("[OpenTail] USB SERIAL LOG START")) "Serial logger did not write START marker; inspect serial.stderr.txt"
+  Need (-not $serialBody.Contains("[OpenTail] USB SERIAL CAPTURE ERROR:")) "Serial logger recorded an error; inspect esp32-serial.txt and serial.stderr.txt"
+  Need ($serialBody.Contains("[OpenTail] USB SERIAL LOG END")) "Serial logger did not complete; inspect esp32-serial.txt and serial.stderr.txt"
+  if($serialProcess.HasExited -and $null -ne $serialProcess.ExitCode -and $serialProcess.ExitCode -ne 0) {
+   throw "Serial capture exited with code $($serialProcess.ExitCode); inspect serial.stderr.txt"
+  }
+  Need ((Test-Path $logcat) -and ((Get-Item $logcat).Length -gt 0)) "Android logcat is missing or empty; inspect logcat.stderr.txt"
+  if($adbProcess.HasExited -and $null -ne $adbProcess.ExitCode -and $adbProcess.ExitCode -ne 0) {
+   throw "Android logcat exited with code $($adbProcess.ExitCode); inspect logcat.stderr.txt"
+  }
+  Step "Log capture" "PASS" "Android logcat present; ESP serial START/END markers verified"
   if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
    $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
    Step "Head consistency" "WARN" "PR updated after artifact selection"
