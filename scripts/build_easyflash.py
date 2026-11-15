@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 import hashlib
 import json
+import os
 import shutil
 
 parser = ArgumentParser()
@@ -14,6 +15,8 @@ parser.add_argument("--out", required=True, type=Path)
 parser.add_argument("--sha", required=True)
 parser.add_argument("--version", required=True)
 args = parser.parse_args()
+ci_build = os.environ.get("GITHUB_RUN_NUMBER", "local")
+assert ci_build == "local" or (ci_build.isdecimal() and len(ci_build) <= 12)
 build = args.build.resolve()
 out = args.out.resolve()
 root = Path(__file__).resolve().parent.parent
@@ -45,6 +48,8 @@ shutil.copy2(build/"flasher_args.json", out/"flasher_args.json")
 manifest = {
     "product": "OpenTail CORE",
     "version": args.version,
+    "ci_build_number": ci_build,
+    "build_label": f"v{args.version} / Build {ci_build} / {args.sha[:12]}",
     "git_sha": args.sha,
     "chip": "ESP32-S3 N16R8",
     "esp_idf": "v5.5.5",
@@ -62,7 +67,7 @@ scripts = {
     "01_FLASH_COM9.bat": r"""@echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-echo OpenTail 0.1.32-alpha BENCH ONLY. Never erase NVS at 0x9000.
+echo OpenTail @VERSION@ BENCH ONLY. Never erase NVS at 0x9000.
 py -3 verify_sha256.py
 if errorlevel 1 (echo SHA-256 validation FAILED. Nothing flashed. & exit /b 1)
 echo Close other COM9 serial monitors before continuing.
@@ -91,7 +96,7 @@ pause
 """,
 }
 for name, body in scripts.items():
-    (out/name).write_bytes(body.strip().replace("\n","\r\n").encode("ascii"))
+    (out/name).write_bytes(body.replace("@VERSION@", args.version).strip().replace("\n","\r\n").encode("ascii"))
 (out/"verify_sha256.py").write_text("""from pathlib import Path
 import hashlib, sys
 root=Path(__file__).resolve().parent
@@ -122,7 +127,7 @@ except KeyboardInterrupt:
     print("\\nSaved:",target)
 """)
 (out/"START_HERE.txt").write_text(
-    ("OpenTail CORE " + args.version + " | Git SHA " + args.sha + "\n"
+    ("OpenTail CORE " + args.version + " | CI Build " + ci_build + " | Git SHA " + args.sha + "\n"
     "WINDOWS BENCH ONLY. Extract this artifact ZIP to C:\\OpenTail\\EasyFlash\\\n\n"
     "1. If needed, run INSTALL_ESPTOOL.bat to install esptool + pyserial.\n"
     "2. Close ESP-IDF, Arduino, and other COM9 serial monitors.\n"

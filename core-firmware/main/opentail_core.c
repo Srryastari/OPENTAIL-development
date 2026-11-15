@@ -2520,11 +2520,15 @@ static esp_err_t status_get(httpd_req_t *r) {
     active_pixels_json[used]=0;
     char elf_sha256[65]={0};
     (void)esp_app_get_elf_sha256(elf_sha256,sizeof(elf_sha256));
+    /* Compiled-image identity is immutable, unlike the random per-boot ID.
+     * Do not infer flashed firmware from downloaded CI artifacts. */
+    const esp_app_desc_t *build_info=esp_app_get_description();
     char buf[2700];char led_json[384],wd_json[420];
     ot_st_format_json(led_json,sizeof(led_json));
     ot_sw_idf_status_json(wd_json,sizeof(wd_json));
-    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"config_commit_phase\":%u,\"config_commit_transaction_id\":%lu,\"config_commit_pending\":%s,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
-       OT_FW,(unsigned long)core_boot_id,elf_sha256,
+    snprintf(buf,sizeof(buf),"{\"name\":\"OpenTail CORE Alpha\",\"version\":\"%s\",\"build_id\":\"B-%.12s\",\"build_date\":\"%s\",\"build_time\":\"%s\",\"idf_version\":\"%s\",\"boot_id\":%lu,\"elf_sha256\":\"%s\",\"bench_only\":true,\"hardware_failover\":false,\"ble_ready\":%s,\"ble_radio_ready\":%s,\"outputs_ready\":%s,\"mode\":\"%s\",\"input_mask\":%u,\"simulated_mask\":%u,\"physical_function_mask\":%u,\"effective_mask\":%u,\"demo_active\":%s,\"native_show_active\":%s,\"frames\":%lu,\"measured_fps\":%lu,\"target_fps\":%u,\"active_pixels_per_output\":%s,\"leds_per_chain\":%u,\"brightness_cap\":%u,\"output_refreshes\":[%lu,%lu],\"incomplete_frames\":%lu,\"failed_output_mask\":%lu,\"stop_requested\":%lu,\"stop_rendered\":%lu,\"config_commit_phase\":%u,\"config_commit_transaction_id\":%lu,\"config_commit_pending\":%s,\"status_led\":%s,\"arbitration\":%s,\"watchdog\":%s}",
+       OT_FW,elf_sha256,build_info->date,build_info->time,build_info->idf_ver,
+       (unsigned long)core_boot_id,elf_sha256,
        ble_startup_ready?"true":"false",ble_radio_ready?"true":"false",
        outputs_ready?"true":"false","user-configured",
        (unsigned)physical,(unsigned)sim,(unsigned)function_mask,(unsigned)effective,mode==OT_DEMO_OFF?"false":"true",show_active?"true":"false",
@@ -3951,6 +3955,11 @@ void app_main(void) {
     core_boot_id=esp_random();
     if(core_boot_id==0u)core_boot_id=1u;
     ESP_LOGI(TAG,"CORE boot identity: %08lx",(unsigned long)core_boot_id);
+    char build_elf_sha256[65]={0};
+    (void)esp_app_get_elf_sha256(build_elf_sha256,sizeof(build_elf_sha256));
+    const esp_app_desc_t *build_desc=esp_app_get_description();
+    ESP_LOGI(TAG,"CORE build: version=%s build=B-%.12s date=%s time=%s idf=%s",
+             OT_FW,build_elf_sha256,build_desc->date,build_desc->time,build_desc->idf_ver);
     ot_sw_idf_boot_record();
     ESP_LOGW(TAG,"CORE %s BENCH ONLY: one ESP watchdog, NO redundant lights.",OT_FW);
     const bool psram_ready=ot_boot_psram_ready();

@@ -188,11 +188,11 @@ jobs:
         env:
           PIN: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$PIN" --version 0.1.32-alpha
+          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$PIN" --version 0.1.33-alpha
           (cd core-firmware/build/EasyFlash && python3 verify_sha256.py)
       - uses: actions/upload-artifact@v4
         with:
-          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          name: opentail-easyflash-v0.1.33-alpha-build${{ github.run_number }}-COM9-${{ github.event.pull_request.head.sha || github.sha }}
           path: core-firmware/build/EasyFlash/
           if-no-files-found: error
           retention-days: 14
@@ -221,7 +221,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: opentail-easyflash-v0.1.32-alpha-COM9-${{ github.event.pull_request.head.sha || github.sha }}
+          name: opentail-easyflash-v0.1.33-alpha-build${{ github.run_number }}-COM9-${{ github.event.pull_request.head.sha || github.sha }}
           path: EasyFlash
       - name: Validate downloaded ZIP-root scripts and checksums (NO FLASH)
         shell: pwsh
@@ -232,6 +232,6 @@ jobs:
           python EasyFlash/verify_sha256.py
           if ($LASTEXITCODE -ne 0) { throw 'EasyFlash SHA-256 failure' }
           $m = Get-Content EasyFlash/release_manifest.json -Raw | ConvertFrom-Json
-          if ($m.erase_nvs -or $m.road_safe -or $m.version -ne '0.1.32-alpha') { throw 'Unsafe manifest' }
+          if ($m.erase_nvs -or $m.road_safe -or $m.version -ne '0.1.33-alpha') { throw 'Unsafe manifest' }
           python EasyFlash/factory_reset.py --package EasyFlash --sha $m.git_sha
           if ($LASTEXITCODE -ne 0) { throw 'Factory-reset package validation failure' }
