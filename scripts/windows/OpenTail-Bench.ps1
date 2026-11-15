@@ -75,8 +75,16 @@ function EnsureGh {
  $script:ghExe=$found
  $version=@(& $script:ghExe --version 2>&1)
  if($LASTEXITCODE -ne 0){throw "GitHub CLI is present but could not start. Repair GitHub CLI installation."}
- $status=@(& $script:ghExe auth status --hostname github.com 2>&1)
- if($LASTEXITCODE -ne 0){
+ $authorized=$false
+ try {
+  & $script:ghExe auth status --hostname github.com 1>$null 2>$null
+  $authorized=($LASTEXITCODE -eq 0)
+ } catch {
+  # gh returns a nonzero status while signed out; this is a setup prompt,
+  # not a fatal PowerShell NativeCommandError.
+  $authorized=$false
+ }
+ if(-not $authorized){
   Write-Host "A one-time GitHub browser sign-in is required. No account tokens will be saved in bench logs."
   $choice=Read-Host "Open GitHub CLI authorization now? Type LOGIN"
   if($choice -cne "LOGIN"){
@@ -84,8 +92,12 @@ function EnsureGh {
   }
   & $script:ghExe auth login --hostname github.com --web --git-protocol https
   if($LASTEXITCODE -ne 0){throw "GitHub browser sign-in did not finish. Rerun the launcher after signing in."}
-  $status=@(& $script:ghExe auth status --hostname github.com 2>&1)
-  if($LASTEXITCODE -ne 0){throw "GitHub CLI is still not authorized for github.com."}
+  $authorized=$false
+  try {
+   & $script:ghExe auth status --hostname github.com 1>$null 2>$null
+   $authorized=($LASTEXITCODE -eq 0)
+  } catch {$authorized=$false}
+  if(-not $authorized){throw "GitHub CLI is still not authorized for github.com."}
  }
  Step "GitHub setup" "PASS" "Official GitHub CLI found and user authorization verified"
 }
