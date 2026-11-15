@@ -14,6 +14,7 @@ echo Firmware flash: OFF unless explicitly selected with "flash".
 echo.
 set "EXTRA="
 if /I "%~1"=="flash" set "EXTRA=-FlashFirmware"
+if /I "%~1"=="led" set "EXTRA=-DirectLedProbe"
 if /I "%~1"=="selftest" set "EXTRA=-SelfTest"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\OpenTail-Bench.ps1" %EXTRA%
 set "RESULT=%ERRORLEVEL%"
