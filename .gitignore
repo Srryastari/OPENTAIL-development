@@ -1,0 +1,2 @@
+# Private local diagnostic sessions; never push phone/ESP logs.
+/bench-reports/
