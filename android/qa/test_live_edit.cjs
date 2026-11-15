@@ -186,6 +186,23 @@ assert(ble.includes('pendingPacket = null; nextPacket = null; afterStopPacket = 
        ble.includes('private void recoverStalledGatt(BluetoothGatt owner, String reason)'),
   'Post-STOP queue must reset on adapter off, reconnect and disconnect');
 assert(qa.includes('test_native_source.cjs'), 'Release QA disconnected.');
+// Owner P0: Show Modes must never silently discard the only Play gesture.
+// The UI must expose a discoverable STOP and report the actual serialized
+// FX reply, not infer light output from a GATT write or Pixel Probe.
+const showModeScreen = compose.split('private fun ShowModesPage(t: Tone) {')[1]
+  ?.split('private fun effectLabel(')[0];
+assert(showModeScreen &&
+  showModeScreen.includes('Pill("Play", t, enabled=chosen >= 0, strong=true) { playShowMode(chosen) }') &&
+  showModeScreen.includes('Pill("Stop", t) { stopControllerShow() }') &&
+  showModeScreen.includes('Caption(showModeNotice.value, t)') &&
+  compose.includes('private fun playShowMode(effectId: Int)') &&
+  compose.includes('queuedShowPlayEffect = null // STOP cancels a deferred Play/capabilities read.') &&
+  compose.includes('showModeNotice.value = "Show not sent: CORE effect catalog is unavailable; tap Play to retry"') &&
+  compose.includes('ble.setShowCommandListener { result ->') &&
+  ble.includes('showCommandNotice(pendingPacket,response); // The actual serialized CORE reply.') &&
+  ble.includes('showCommandNotice(pendingPacket,"ERR GATT WRITE");'),
+  'Show Modes must expose Play + Stop, actionable preflight failures, and real CORE reply feedback.');
+
 console.log('PASS: live authoring pixel/zone/trigger/effect contract; continuous authenticated CORE playback; no NVS writes on edit.');
 
  // PR90 bench regression: the existing physical controls and authenticated
