@@ -98,9 +98,34 @@ static int rmt_tx_switch_gpio(rmt_channel_handle_t ch,int gpio,bool invert){(voi
 cfg=re.search(r'const led_strip_config_t cfg=\{.*?\n    \};',init,re.S).group()
 rmt=re.search(r'const led_strip_rmt_config_t rmt=\{.*?\n    \};',init,re.S).group()
 source=stubs+clean('include/led_strip_types.h')+clean('interface/led_strip_interface.h')+clean('include/led_strip_rmt.h')+clean('src/led_strip_rmt_encoder.h')+clean('src/led_strip_common.h')
+# Stage B compiles the exact allocation shim used by the two dependency TUs.
+shim=root/'main/led_strip_internal_alloc.h'
+if shim.exists():
+    source+=r"""
+#define MALLOC_CAP_INTERNAL 1u
+#define MALLOC_CAP_8BIT 2u
+#define ESP_LOGI(...) ((void)0)
+static unsigned internal_allocations;
+static bool fail_internal;
+static void *heap_caps_calloc(size_t n,size_t size,unsigned caps){
+ assert(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));internal_allocations++;
+ return fail_internal?NULL:calloc(n,size);
+}
+static bool esp_ptr_internal(const void *p){return p!=NULL;}
+"""
+    source+=re.sub(r'^\s*#(?:include|pragma once)[^\n]*','',shim.read_text(),flags=re.M)
 source+=clean('src/led_strip_rmt_encoder.c').replace('TAG','ENC_TAG')+clean('src/led_strip_rmt_dev.c')
 source+='\nstatic const int out_pin[2]={16,17};\nstatic led_strip_config_t core_cfg(unsigned ch,unsigned pixels){'+cfg+'return cfg;}\n'
 source+='static led_strip_rmt_config_t core_rmt(unsigned ch){'+rmt+'return rmt;}\n'
+if shim.exists():
+    source+=r"""
+static void allocation_failure_test(void){
+ led_strip_handle_t handle=NULL;led_strip_config_t cfg=core_cfg(0,2048);
+ led_strip_rmt_config_t rmt=core_rmt(0);fail_internal=true;
+ assert(led_strip_new_rmt_device(&cfg,&rmt,&handle)==ESP_ERR_NO_MEM&&handle==NULL);
+ fail_internal=false;
+}
+"""
 source+=r'''
 int main(void){
  led_strip_handle_t handles[2]={0};
@@ -148,6 +173,9 @@ int main(void){
  puts("PASS actual led_strip 3.1.1: bit0=3/9 bit1=9/3 reset=1600+1600 low; separate 6144-byte buffers, exact transmit pointer/length, nonzero white, busy/error paths and resize; GPIO16 DMA/1024 + GPIO17 non-DMA/64 at 10MHz (host only)");
 }
 '''
+if shim.exists():
+    source=source.replace('int main(void){','int main(void){allocation_failure_test();')
+    source=source.replace(' puts("PASS actual', ' assert(internal_allocations==9); puts("PASS internal-SRAM-only allocations and no-memory failure");\n puts("PASS actual')
 with tempfile.TemporaryDirectory(prefix='ot-ws2815-') as d:
     c=Path(d)/'driver.c';exe=Path(d)/'driver';c.write_text(source)
     subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-I',str(root/'main'),str(c),str(root/'main/output_manager.c'),str(root/'main/core_logic.c'),str(root/'main/arbitration_logic.c'),'-o',str(exe)],check=True)

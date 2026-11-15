@@ -84,7 +84,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: core-firmware
-          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf && python3 tests/check_rmt_cache_safe.py build/opentail_core_alpha.elf "$IDF_PATH"
       - name: Verify actual pinned WS2815 encoder and RMT buffers (host simulated)
         run: python3 core-firmware/tests/test_ws2815_driver.py core-firmware/managed_components/espressif__led_strip
       - name: Verify application and flash manifest
@@ -130,6 +130,8 @@ jobs:
               "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
               "CONFIG_BT_NIMBLE_NVS_PERSIST=y",
               "CONFIG_BT_NIMBLE_SECURITY_ENABLE=y",
+              "CONFIG_RMT_TX_ISR_CACHE_SAFE=y", "CONFIG_RMT_OBJ_CACHE_SAFE=y",
+              "CONFIG_RMT_ENCODER_FUNC_IN_IRAM=y", "CONFIG_RMT_TX_ISR_HANDLER_IN_IRAM=y",
               "CONFIG_BT_NIMBLE_SM_SC=y",
           }
           assert required_config.issubset(actual),(
@@ -159,6 +161,8 @@ jobs:
               "isr-evidence/input_edge_isr.symbols.txt",
               "isr-evidence/input_edge_isr.dis",
               "isr-evidence/input_edge_isr.audit.txt",
+              "rmt-evidence/rmt.symbols.txt", "rmt-evidence/rmt-isr.dis",
+              "rmt-evidence/rmt-cache-audit.txt",
           }
           assert all((build/name).is_file() and (build/name).stat().st_size>0 for name in required)
           evidence={
@@ -204,6 +208,7 @@ jobs:
             core-firmware/build/flasher_args.json
             core-firmware/build/CORE_BUILD_EVIDENCE.json
             core-firmware/build/isr-evidence/
+            core-firmware/build/rmt-evidence/
           if-no-files-found: error
           retention-days: 14
 # Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
