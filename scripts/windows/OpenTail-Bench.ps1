@@ -168,13 +168,69 @@ function EnsureAdb {
  }
  Step "ADB setup" "PASS" "Android Platform Tools found"
 }
+# Pure parser used by the Windows offline self-test; never runs ADB by itself.
+function ParseAdbList([string[]]$lines) {
+ $result=@()
+ foreach($line in $lines) {
+  $match=[regex]::Match([string]$line,'^\s*(\S+)\s+(device|unauthorized|offline|authorizing|recovery|sideload)(?:\s|$)')
+  if(-not $match.Success){continue}
+  $serial=[string]$match.Groups[1].Value
+  $status=[string]$match.Groups[2].Value
+  # An emulator and an ADB-over-TCP session are not the requested USB phone.
+  $usb=($serial -notmatch '^(emulator-\d+|(?:[0-9]{1,3}\.){3}[0-9]{1,3}:\d+|localhost:\d+|127\.0\.0\.1:\d+)$') -and
+       ($serial -notmatch '^.+:\d+$')
+  $result+=,[pscustomobject]@{serial=$serial;status=$status;usb=$usb}
+ }
+ return @($result)
+}
+function AssertAdbParserSelfTest {
+ $none=@(ParseAdbList @("List of devices attached","* daemon started successfully"))
+ $unauthorized=@(ParseAdbList @("List of devices attached","R5TEST001 unauthorized usb:1-1 transport_id:1"))
+ $authorized=@(ParseAdbList @("List of devices attached","R5TEST001 device product:test model:Phone transport_id:2"))
+ $mixed=@(ParseAdbList @("List of devices attached","emulator-5554 device product:sdk","192.168.1.5:5555 device product:wireless","R5TEST001 device usb:1-1"))
+ $multiple=@(ParseAdbList @("List of devices attached","A1 device usb:1","B2 device usb:2"))
+ Need ($none.Count -eq 0) "ADB parser no-device regression"
+ Need ($unauthorized.Count -eq 1 -and $unauthorized[0].status -eq "unauthorized") "ADB parser authorization regression"
+ Need ($authorized.Count -eq 1 -and $authorized[0].usb -and $authorized[0].status -eq "device") "ADB parser single USB phone regression"
+ Need (@($mixed | Where-Object {$_.usb -and $_.status -eq "device"}).Count -eq 1) "ADB parser must ignore emulators and wireless transports"
+ Need (@($multiple | Where-Object {$_.usb -and $_.status -eq "device"}).Count -eq 2) "ADB parser multiple phones regression"
+}
 function Phone([string]$specified) {
- $out=@(& adb devices -l)
- Need ($LASTEXITCODE -eq 0) "ADB devices failed"
- $devices=@($out | Where-Object {$_ -match '^(\S+)\s+device(\s|$)'} | ForEach-Object {([regex]::Match($_,'^(\S+)')).Groups[1].Value})
- if($specified){Need ($devices -contains $specified) "Phone $specified not authorized/connected";return $specified}
- Need ($devices.Count -eq 1) "Connect and authorize exactly one USB Android phone or use -AndroidSerial"
- return $devices[0]
+ # ADB may start its daemon on the first query. Allow the owner to unlock,
+ # enable debugging and approve the RSA prompt without restarting the bench.
+ for($attempt=1;$attempt -le 3;$attempt++) {
+  $out=@(& adb devices -l 2>&1)
+  Need ($LASTEXITCODE -eq 0) ("ADB device discovery failed: "+($out -join " "))
+  $found=@(ParseAdbList $out)
+  $ready=@($found | Where-Object {$_.usb -and $_.status -eq "device"})
+  $waiting=@($found | Where-Object {$_.usb -and $_.status -ne "device"})
+  if($specified) {
+   $chosen=@($ready | Where-Object {$_.serial -eq $specified})
+   if($chosen.Count -eq 1){return $specified}
+   $diagnosis=if(@($waiting | Where-Object {$_.serial -eq $specified}).Count -gt 0){"Device $specified is connected but USB debugging is not authorized/online"}else{"USB Android device $specified is not detected"}
+  } elseif($ready.Count -eq 1) {
+   Write-Host ("Authorized USB Android phone detected: "+$ready[0].serial)
+   return [string]$ready[0].serial
+  } elseif($ready.Count -gt 1) {
+   $diagnosis="Multiple authorized USB Android devices: "+(($ready | ForEach-Object {$_.serial}) -join ", ")
+  } elseif($waiting.Count -gt 0) {
+   $diagnosis="USB Android detected but not authorized/online: "+(($waiting | ForEach-Object {$_.serial+" ("+$_.status+")"}) -join ", ")
+  } else {
+   $diagnosis="No USB Android phone detected by ADB"
+  }
+  Write-Warning $diagnosis
+  Write-Host "On your PHONE: unlock it, enable Developer options > USB debugging, and approve 'Allow USB debugging?' (RSA fingerprint)."
+  Write-Host "Check that the USB-C cable supports DATA and try File transfer / Android Auto in USB preferences if the PC doesn't see it."
+  Write-Host "Do not change Bluetooth pairing, firmware, or NVS; these steps only enable USB diagnostics."
+  if($ready.Count -gt 1){Write-Host "Unplug extra phones or run PowerShell with -AndroidSerial SERIAL to select one."}
+  if($attempt -lt 3) {
+   $answer=Read-Host "After checking the phone, press ENTER to retry ADB (or Q to stop)"
+   if($answer -match '^(?i:q|quit|exit)$'){throw "ADB USB setup stopped by owner: $diagnosis"}
+  } else {
+   throw "ADB USB setup incomplete: $diagnosis. Run 'adb devices -l' in PowerShell to inspect the phone state."
+  }
+ }
+ throw "ADB USB device detection failed"
 }
 function EspCom([string]$specified) {
  if($specified){Need ($specified -match '^COM[0-9]{1,3}$') "ESP port must be COM-number";return $specified.ToUpperInvariant()}
@@ -283,6 +339,8 @@ try {
  if($SelfTest) {
   Need (-not $FlashFirmware -and -not $DirectLedProbe) "SelfTest cannot send hardware actions"
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
+  AssertAdbParserSelfTest
+  Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } else {
   EnsureGh
