@@ -1,0 +1,221 @@
+name: Issue103 reconciled Effects/Firmware/Android exact SHA (software only)
+on:
+  pull_request:
+    paths:
+      - 'core-firmware/**'
+      - 'android/app/src/main/cpp/**'
+      - 'android/qa/**'
+      - 'scripts/package_core_flash.py'
+      - 'scripts/tests/test_core_flash_package.py'
+      - 'docs/EFFECTS-**'
+      - '.github/workflows/verify-issue103-exact-head.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sources-and-140-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout reviewed Effects #110 renderer
+        uses: actions/checkout@v4
+        with:
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
+          path: pinned-effects110
+          persist-credentials: false
+      - name: Checkout exact Firmware #127 geometry and BLE contract
+        uses: actions/checkout@v4
+        with:
+          ref: dfe1a48c3f48dddf7f4c511f063d3743298ccd6a
+          path: pinned-firmware127
+          persist-credentials: false
+      - name: Exact HEAD, frozen 106 lineage, immutable renderer and firmware ZIP provenance
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          git merge-base --is-ancestor db7bcdff187197c0493b5c38991870224f2c244a HEAD
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):
+              return subprocess.check_output(['git',*args],text=True).strip()
+          def pin_git(path,*args):
+              return subprocess.check_output(['git','-C',path,*args],text=True).strip()
+          fx='601155a196a692792e60fd399505fdc676dc57d9'
+          fw='df27209b9876630b2b10f3a189f36817a2764009'
+          fw127='dfe1a48c3f48dddf7f4c511f063d3743298ccd6a'
+          assert pin_git('pinned-effects110','rev-parse','HEAD')==fx
+          assert pin_git('pinned-firmware127','rev-parse','HEAD')==fw127
+          for p in ('ot_auto_effects.c','ot_auto_effects.h','wled_fx_compat.c','wled_fx_compat.h'):
+              want=pin_git('pinned-effects110','rev-parse','HEAD:core-firmware/main/'+p)
+              assert git('rev-parse','HEAD:android/app/src/main/cpp/core/'+p)==want
+          for p in ('effects_1d.c','effects_1d.h'):
+              want=pin_git('pinned-firmware127','rev-parse','HEAD:core-firmware/main/'+p)
+              assert git('rev-parse','HEAD:android/app/src/main/cpp/core/'+p)==want
+          for p in ('scripts/package_core_flash.py',
+                    'scripts/tests/test_core_flash_package.py',
+                    '.github/workflows/verify-core-tertiary-ble.yml'):
+              assert git('rev-parse','HEAD:'+p)==git('rev-parse',fw+':'+p),p
+          protected=git('diff','--name-only','db7bcdff187197c0493b5c38991870224f2c244a','HEAD').splitlines()
+          # Owner continuation also applies issue #122's 2000-pixel board limit.
+          owner_p0_java={
+              'android/app/src/main/java/com/opentail/android/BleConfigCodec.java',
+              'android/app/src/main/java/com/opentail/android/BleDiscovery.java',
+              'android/app/src/main/java/com/opentail/android/OwnerPinCommand.java',
+              'android/app/src/main/java/com/opentail/android/ComposeMainActivity.kt',
+              'android/app/src/main/java/com/opentail/android/NativeProject.java',
+              'android/app/src/main/java/com/opentail/android/NativeOutputManager.java',
+              'android/app/src/main/java/com/opentail/android/GeometryTransactionManager.java',
+              'android/app/src/main/java/com/opentail/android/PanelPreviewProtocol.java',
+              'android/app/src/main/java/com/opentail/android/PanelV4LayoutProtocol.java',
+              'android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java',
+              'android/app/src/main/java/com/opentail/android/PanelV4DraftCodec.java',
+              'android/app/src/main/java/com/opentail/android/TelemetrySequenceWatchdog.java',
+              'android/app/src/main/java/com/opentail/android/TertiaryFxCommand.java',
+          }
+          changed_java={p for p in protected if p.startswith('android/app/src/main/java/')}
+          assert changed_java==owner_p0_java,(changed_java,owner_p0_java)
+          # NativeProject is explicitly in scope for the owner-mandated
+          # empty/zero-LED commissioning default, not arbitrary source drift.
+          native_model=git('show','HEAD:android/app/src/main/java/com/opentail/android/NativeProject.java')
+          assert 'wholeNumber(z.opt("length"), 0, 10000)' in native_model
+          assert 'zoneCount() >= MAX_ZONES || length < 0' in native_model
+          assert 'index < 0 || length < 0' in native_model
+          assert not any(p.startswith('android/app/src/main/res/') for p in protected)
+          allowed_ble_contract={
+              'core-firmware/main/ble_fx_command.c',
+              'core-firmware/main/ble_fx_command.h',
+              'core-firmware/main/ble_status.c',
+          }
+          assert not any((p.startswith('core-firmware/main/ble_') and p not in allowed_ble_contract) or
+              p.startswith(('core-firmware/main/config_journal.',
+              'core-firmware/main/trigger_', 'core-firmware/main/output_manager.',
+              'core-firmware/main/ot_version.')) for p in protected)
+          # Pin the admitted 13-mode capability to the verified Firmware #127 contract.
+          fw127_header=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_fx_command.h')
+          fw127_parser=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_fx_command.c')
+          fw127_status=pin_git('pinned-firmware127','show','HEAD:core-firmware/main/ble_status.c')
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY "fx-tertiary13-v1"' in fw127_header
+          assert 'return ot_wled_fx_tertiary_supported(id);' in fw127_parser
+          assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in fw127_parser
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in fw127_status
+          local_parser=git('show','HEAD:core-firmware/main/ble_fx_command.c')
+          local_status=git('show','HEAD:core-firmware/main/ble_status.c')
+          assert 'return ot_wled_fx_tertiary_supported(id);' in local_parser
+          assert '(candidate.effect_id==38u && candidate.palette_id!=4u)' in local_parser
+          assert 'OT_BLE_FX_TERTIARY13_CAPABILITY' in local_status
+          print('PASS: exact Effects #110 CORE+JNI, Firmware #127 13-mode BLE contract, owner-allowlisted Panel v2 Android P0, locked six-screen UI and physical gate')
+          PY
+      - name: Verify exact Firmware #127 Panel/Zone and BLE contract
+        run: python3 android/qa/check_pinned_firmware127_contract.py
+      - name: All 140 CORE host golden, speed, third roles, palette, stop, independent original/regression
+        run: cd core-firmware && bash tests/run-host-tests.sh
+      - name: Firmware #96 flash package unit regression, including missing OTA fail-closed
+        run: python3 -m unittest -v scripts/tests/test_core_flash_package.py
+
+  android-jni-140-oracle:
+    needs: sources-and-140-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 601155a196a692792e60fd399505fdc676dc57d9
+          path: pinned-effects110
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: dfe1a48c3f48dddf7f4c511f063d3743298ccd6a
+          path: pinned-firmware127
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: JNI file SHA256, locked UI architecture and Android source checks
+        env:
+          OPENTAIL_FIRMWARE_SOURCE_DIR: pinned-firmware127/core-firmware/main
+          OPENTAIL_EFFECTS_SOURCE_DIR: pinned-effects110/core-firmware/main
+        run: |
+          python3 android/qa/check_pinned_firmware127_contract.py
+          node android/qa/test_native_source.cjs
+          node android/qa/test_live_edit.cjs
+          python3 android/qa/check_release.py
+      - name: Independent 140/140 JNI vs reconciled CORE RGB oracle + 13 third roles
+        run: |
+          python3 android/qa/test_full_offline_preview.py \
+            --core-dir pinned-effects110 \
+            --continuity-dir pinned-effects110 \
+            --color-dir pinned-effects110 \
+            --state-dir pinned-firmware127 > issue103-jni-140-parity.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue103-jni-140-oracle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: issue103-jni-140-parity.json
+          if-no-files-found: error
+
+  esp-idf555-complete-package:
+    needs: sources-and-140-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Compile ESP32-S3 exact HEAD, do not flash
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+      - name: Package and verify four real images, OTA at 0xF000 and CRC/SHA256
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py build \
+            --build-dir core-firmware/build \
+            --project-dir core-firmware \
+            --output "core-firmware/releases/opentail-issue103-$PIN.zip" \
+            --source-sha "$PIN"
+          python3 scripts/package_core_flash.py verify \
+            --zip "core-firmware/releases/opentail-issue103-$PIN.zip" \
+            --sha256-file "core-firmware/releases/opentail-issue103-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue103-complete-bench-package-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            core-firmware/releases/opentail-issue103-${{ github.event.pull_request.head.sha || github.sha }}.zip
+            core-firmware/releases/opentail-issue103-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256
+          if-no-files-found: error
+
+  recheck-downloaded-package:
+    needs: esp-idf555-complete-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue103-complete-bench-package-${{ github.event.pull_request.head.sha || github.sha }}
+          path: downloaded
+      - name: Independently reject missing OTA, wrong offsets and mismatched SHA
+        env:
+          PIN: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 scripts/package_core_flash.py verify \
+            --zip "downloaded/opentail-issue103-$PIN.zip" \
+            --sha256-file "downloaded/opentail-issue103-$PIN.zip.sha256" \
+            --source-sha "$PIN"
+# Host/software only: 22 physical checks, owner phone, backup failover and vehicle release NOT CERTIFIED.

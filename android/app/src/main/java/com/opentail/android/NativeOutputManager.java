@@ -124,7 +124,7 @@ final class NativeOutputManager {
         if(page==null)return;
         page.removeAllViews();
         page.addView(theme.text("Readback-controlled hardware editor",16,true));
-        page.addView(theme.caption("Current firmware: two physical outputs, up to 623 LEDs / output (1,246 total), " +
+        page.addView(theme.caption("User-defined outputs, up to "+BleConfigCodec.MAX_LEDS_PER_OUTPUT+" LEDs per output in this editor, " +
                 "eight zones per output. These limits are firmware protocol bounds, not Studio design defaults."),
                 theme.lp(5,8));
         LinearLayout chooser=theme.horizontal();
@@ -147,7 +147,7 @@ final class NativeOutputManager {
         LinearLayout fields=theme.card();
         fields.addView(theme.text("Output "+(selected+1),16,true));
         field(fields,"Output name",draft.optString("name"),false,value->put(draft,"name",value));
-        field(fields,"Active pixels (1–623)",String.valueOf(draft.optInt("pixels",0)),true,
+        field(fields,"Active pixels (0–"+BleConfigCodec.MAX_LEDS_PER_OUTPUT+")",String.valueOf(draft.optInt("pixels",0)),true,
                 value->put(draft,"pixels",getInt(value,-1)));
         spinner(fields,"Color order",BleConfigCodec.ORDERS,
                 draft.optString("color_order","RGB"),value->put(draft,"color_order",value));
@@ -170,8 +170,8 @@ final class NativeOutputManager {
                     value->put(zone,"role",value));
             final JSONArray zoneArr=zones;
             action(card,"Remove zone",()->{
-                if(zoneArr.length()<2) {
-                    notifyUser("At least one zone required","The current CORE BLE protocol requires 1–8 zones.");return;
+                if(zoneArr.length()==1 && draft.optInt("pixels",0)!=0) {
+                    notifyUser("Set the output length to zero first","An empty output has zero pixels and zero zones.");return;
                 }
                 JSONArray next=new JSONArray();
                 for(int j=0;j<zoneArr.length();j++)

@@ -7,9 +7,8 @@ import org.json.JSONArray;
 
 /** Cross-platform fixed-size, independently validated BLE output configuration encoding. */
 final class BleConfigCodec {
-    // On-wire uint16_t representation limit, NOT the board's actual capacity.
-    // CORE validates its current resource budget before accepting a save.
-    static final int MAX_LEDS_PER_OUTPUT = 65535;
+    // Approved two-output board budget; the unchanged wire fields remain uint16.
+    static final int MAX_LEDS_PER_OUTPUT = 2000;
     static final int LENGTH = 261;
     static final String[] ORDERS = {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR"};
     static final String[] ROLES = {"off", "park_brake", "parking", "brake", "left_turn", "right_turn", "reverse", "aux1", "aux2", "aux3", "decorative"};
@@ -36,12 +35,26 @@ final class BleConfigCodec {
         for(byte x:b){crc^=(x&255)<<8;for(int i=0;i<8;i++)crc=((crc&0x8000)!=0)?((crc<<1)^0x1021)&0xffff:(crc<<1)&0xffff;}
         return crc;
     }
+    private static int pixelCount(JSONObject json) throws Exception {
+        Object value = json.get("pixels");
+        // getInt truncates fractions and wraps oversized Numbers before validation.
+        if (!(value instanceof Number))
+            throw new IllegalArgumentException("Pixel counts must be integers");
+        final int number;
+        try { number = new java.math.BigDecimal(value.toString()).intValueExact(); }
+        catch (ArithmeticException | NumberFormatException ex) {
+            throw new IllegalArgumentException("Pixel counts must be integers", ex);
+        }
+        if (number < 0 || number > MAX_LEDS_PER_OUTPUT)
+            throw new IllegalArgumentException("Pixel counts must be integers from 0 to 2000");
+        return number;
+    }
     static byte[] encode(JSONObject json) throws Exception {
         byte[] bytes=new byte[LENGTH];
-        int pixelCount=json.getInt("pixels");
+        int pixelCount=pixelCount(json);
         int order=index(ORDERS,json.getString("color_order"));
         JSONArray zones=json.getJSONArray("zones");
-        if(pixelCount<1||pixelCount>MAX_LEDS_PER_OUTPUT||order<0||zones.length()<1||zones.length()>8)
+        if(pixelCount<0||pixelCount>MAX_LEDS_PER_OUTPUT||order<0||((pixelCount==0)!=(zones.length()==0))||zones.length()>8)
             throw new IllegalArgumentException("Invalid output pixel count / color order / zone count");
         bytes[0]=1;bytes[1]=(byte)pixelCount;bytes[2]=(byte)(pixelCount>>8);
         bytes[3]=(byte)order;bytes[4]=(byte)zones.length();
@@ -58,7 +71,7 @@ final class BleConfigCodec {
         bytes[36]=(byte)(cal!=null&&cal.optBoolean("gamma_enabled",false)?1:0);
         int sum=0;
         for(int z=0;z<zones.length();z++){
-            JSONObject zone=zones.getJSONObject(z);int length=zone.getInt("pixels");
+            JSONObject zone=zones.getJSONObject(z);int length=pixelCount(zone);
             int role=index(ROLES,zone.getString("role"));
             if(length<0||length>MAX_LEDS_PER_OUTPUT||role<0)throw new IllegalArgumentException("Invalid zone length or role");
             int start=37+z*28;
@@ -72,7 +85,7 @@ final class BleConfigCodec {
     static JSONObject decode(byte[] bytes,int index) throws Exception {
         if(bytes.length!=LENGTH||bytes[0]!=1)throw new Exception("Unsupported BLE output format");
         int pixels=(bytes[1]&255)|((bytes[2]&255)<<8),order=bytes[3]&255,count=bytes[4]&255;
-        if(pixels<1||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||count<1||count>8)throw new Exception("Invalid BLE output configuration");
+        if(pixels<0||pixels>MAX_LEDS_PER_OUTPUT||order>=ORDERS.length||((pixels==0)!=(count==0))||count>8)throw new Exception("Invalid BLE output configuration");
         JSONObject result=new JSONObject();
         result.put("index",index); // Physical pin is board-owned, not encoded in v1.
         result.put("pixels",pixels);result.put("name",readName(bytes,5));
