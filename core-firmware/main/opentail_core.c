@@ -51,6 +51,8 @@
 #include "xt_utils.h"
 #include "esp_psram.h"
 #include "hal/gpio_ll.h"
+#include "soc/gpio_sig_map.h"
+#include "soc/io_mux_reg.h"
 #include "esp_random.h"
 #include "esp_attr.h"
 #include "esp_intr_alloc.h"
@@ -81,6 +83,8 @@ static const gpio_num_t input_pin[OT_IN_COUNT]=OT_INPUT_GPIO_LIST;
 static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT];
 static const gpio_num_t out_pin[OT_CHAIN_COUNT]={OT_OUT_LEFT_GPIO,OT_OUT_RIGHT_GPIO};
 static led_strip_handle_t strip[OT_CHAIN_COUNT]={0};
+static bool strip_probe_route_pending[OT_CHAIN_COUNT];
+static uint32_t strip_gpio_signal[OT_CHAIN_COUNT];
 static uint16_t strip_capacity[OT_CHAIN_COUNT]={0}; /* Currently allocated/transmitted pixel count per lane. */
 static const ot_layout_t layout={OT_LAYOUT_SECTIONS,OT_CHAIN_PIXELS,OT_MAX_BRIGHTNESS};
 static TaskHandle_t render_task_handle=NULL; /* physical sampler wakeups */
@@ -3029,7 +3033,10 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
     }
     const led_strip_config_t cfg={
         .strip_gpio_num=out_pin[ch],.max_leds=pixels,
-        .led_model=LED_MODEL_WS2812, // WS2815-compatible nominal 800 kHz; physical timing remains unverified.
+        .led_model=LED_MODEL_CUSTOM,
+        /* WS2815: at 10 MHz bit0=3/9, bit1=9/3, reset=1600+1600 low.
+         * Keep the asymmetric GPIO16 DMA / GPIO17 non-DMA baseline. */
+        .timings={.t0h_ns=300,.t0l_ns=900,.t1h_ns=900,.t1l_ns=300,.reset_us=320},
         .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}},
         .flags={.invert_out=false}
     };
@@ -3047,6 +3054,10 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
         ot_st_set_fault("external pixel RMT initialization failed");return false;
     }
     strip[ch]=next;strip_capacity[ch]=(uint16_t)pixels;
+    gpio_io_config_t route={0};
+    strip_gpio_signal[ch]=gpio_get_io_config(out_pin[ch],&route)==ESP_OK?
+        route.sig_out:UINT32_MAX;
+    strip_probe_route_pending[ch]=true; /* New handle, including every resize. */
     /* One-time/resize-only driver evidence: successful RMT allocation and
      * clear are not proof of voltage at the shifter or an optical LED. */
     ESP_LOGI(TAG,"RMT_OUTPUT_READY lane=%u gpio=%u pixels=%u dma=%u symbols=%u (driver only, not optical proof)",
@@ -3764,6 +3775,25 @@ static void led_task(void *p) {
                if(pixel_write_failed)continue; /* Never transmit a partial pixel buffer. */
                // Hardware driver transmits only this output's configured active length.
                if(ch==0)ot_sw_idf_fault_inject(3u); /* Bench-only pre-submit stall. */
+               if(strip_probe_route_pending[ch]&&probe_nonblack[ch]&&
+                  local_diag.mode==OT_PZ_DIAG_PROBE&&local_diag.lane==(uint8_t)ch){
+                   /* Only the authenticated probe path can arm this lease.
+                    * Render task only, once per driver lifetime, before submit. */
+                   strip_probe_route_pending[ch]=false;
+                   gpio_io_config_t route={0};
+                   const bool read_ok=gpio_get_io_config(out_pin[ch],&route)==ESP_OK;
+                   const bool route_ok=read_ok&&route.oe&&!route.oe_inv&&!route.od&&
+                       route.fun_sel==PIN_FUNC_GPIO&&
+                       route.sig_out==strip_gpio_signal[ch]&&
+                       route.sig_out>=RMT_SIG_OUT0_IDX&&route.sig_out<=RMT_SIG_OUT3_IDX;
+                   ESP_LOGI(TAG,"PIXEL_PROBE_ROUTE lane=%u gpio=%u driver=%p capacity=%u bytes=%u dma=%u symbols=%u hz=10000000 signal=%lu output_en=%u unchanged_rmt=%u (not optical proof)",
+                       (unsigned)(ch+1u),(unsigned)out_pin[ch],(void *)strip[ch],
+                       (unsigned)strip_capacity[ch],(unsigned)strip_capacity[ch]*3u,
+                       (unsigned)(ch==0),(unsigned)(ch==0?1024:64),
+                       (unsigned long)route.sig_out,(unsigned)route.oe,(unsigned)route_ok);
+                   (void)gpio_dump_io_configuration(stdout,(1ULL << 16) | (1ULL << 17));
+                   if(!route_ok)ESP_LOGE(TAG,"Pixel probe GPIO routing differs from allocated RMT route");
+               }
                esp_err_t e=led_strip_refresh_async(strip[ch]);
                if(e!=ESP_OK){
                    output_runtime_fault((unsigned)ch,"transfer submit",e);

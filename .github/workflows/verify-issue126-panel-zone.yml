@@ -85,6 +85,8 @@ jobs:
           target: esp32s3
           path: core-firmware
           command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
+      - name: Verify actual pinned WS2815 encoder and RMT buffers (host simulated)
+        run: python3 core-firmware/tests/test_ws2815_driver.py core-firmware/managed_components/espressif__led_strip
       - name: Verify application and flash manifest
         env:
           PIN: ${{ github.event.pull_request.head.sha || github.sha }}

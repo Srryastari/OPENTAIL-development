@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main tests/test_ble_owner_policy.c -o /tmp/ot-owner-policy
 /tmp/ot-owner-policy
 python3 tests/test_ble_owner_storage.py
+python3 tests/test_ws2815_driver.py
 python3 -m unittest discover -s ../scripts/tests -p test_factory_reset.py
 cc -std=c11 -Wall -Wextra -Werror -pedantic -I main main/core_logic.c main/arbitration_logic.c tests/test_core_logic.c -o /tmp/opentail-core-alpha-tests
 /tmp/opentail-core-alpha-tests
