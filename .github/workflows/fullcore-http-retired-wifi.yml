@@ -1,0 +1,92 @@
+name: Full CORE retire HTTP runtime and low-RAM Wi-Fi
+on:
+  push:
+    branches: [diagnostic/fullcore-http-retired-wifi-lean-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify exact-source change scope
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          python3 - <<'PY'
+          import subprocess
+          base="da4f6a7005ad5d8109be1a4bc066fbe20b181597"
+          changed=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          allowed={
+              "core-firmware/main/opentail_core.c",
+              "core-firmware/sdkconfig.defaults",
+              "core-firmware/tests/test_ble_hci_boot_contract.py",
+              "core-firmware/tests/test_main_stack_boot_contract.py",
+              "core-firmware/tests/test_ota_boot_confirmation_contract.py",
+              "core-firmware/tests/test_wifi_beacon_boot_contract.py",
+              "core-firmware/tests/test_http_retirement_runtime_contract.py",
+              "core-firmware/tests/run-host-tests.sh",
+              ".github/workflows/fullcore-http-retired-wifi.yml",
+              "diagnostics/fullcore-retired-http-wifi/README.txt"
+          }
+          assert changed<=allowed, f"Out-of-scope edits: {changed-allowed}"
+          print("PASS exact-scope change from proven full-CORE Output1 non-DMA image")
+          PY
+      - name: HTTP retired and Wi-Fi source contract
+        run: python3 core-firmware/tests/test_http_retirement_runtime_contract.py
+      - name: Full existing CORE host regression suite
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  compile-and-package:
+    needs: contract-host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Build full ESP32-S3 firmware with ESP-IDF 5.5.5 (NO FLASH)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
+      - name: Verify actual pinned non-DMA WS2815 driver
+        run: python3 core-firmware/tests/test_ws2815_driver.py core-firmware/managed_components/espressif__led_strip
+      - name: Package verified four-image Windows COM9 runner (NOT FLASHED)
+        shell: bash
+        env:
+          PIN: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          sudo chown -R "$(id -u):$(id -g)" core-firmware/build
+          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$PIN" --version 0.1.33-alpha
+          (cd core-firmware/build/EasyFlash && python3 verify_sha256.py)
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path("core-firmware/build/EasyFlash")
+          m=json.loads((p/"release_manifest.json").read_text())
+          assert m["git_sha"]==os.environ["PIN"]
+          assert m["erase_nvs"] is False
+          assert m["version"]=="0.1.33-alpha"
+          assert m["flasher_offsets"]=={
+            "0x0":"bootloader/bootloader.bin",
+            "0x8000":"partition_table/partition-table.bin",
+            "0xf000":"ota_data_initial.bin",
+            "0x20000":"opentail_core_alpha.bin"}
+          assert (p/"01_FLASH_COM9.bat").is_file()
+          print("PASS exact-SHA manifest, non-erasing COM9 runner and offsets")
+          PY
+          cp diagnostics/fullcore-retired-http-wifi/README.txt core-firmware/build/EasyFlash/README-HTTP-RETIRED.txt
+      - name: Upload diagnostic build (not flashed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FULLCORE-HTTP-RETIRED-WIFI-LEAN-v0.1.33-alpha-build${{ github.run_number }}-${{ github.sha }}
+          path: core-firmware/build/EasyFlash/
+          if-no-files-found: error
