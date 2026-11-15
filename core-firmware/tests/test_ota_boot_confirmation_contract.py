@@ -28,7 +28,8 @@ assert render_alloc < startup.index("om_write_mutex=xSemaphoreCreateMutex();")
 assert 'HTTP diagnostic server DISABLED (obsolete)' in startup
 assert 'http_startup_ready' not in core
 assert 'http_start();' not in startup
-assert 'om_write_mutex && ble_startup_ready &&\n               ot_ble_radio_ever_ready()' in led
+assert "om_write_mutex && ble_startup_ready &&" in led
+assert "ot_ble_radio_ever_ready() && !boot_frame_verified" in led
 # The obsolete HTTP service never starts. OTA image confirmation still
 # requires stable renderer progress, valid BLE advertising and no reset fault.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
