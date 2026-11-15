@@ -594,8 +594,7 @@ try {
   # Prevent reintroduction of the old unconditional Firmware #127 gate.
   $contract=Get-Content -LiteralPath $PSCommandPath -Raw
   Need ($contract.Contains('if($FlashFirmware){$firmwareSha=Head 127}')) "Firmware PR lookup must be flash-only"
-  Need ($contract.Contains('if($FlashFirmware){'+"\n"+'   $fwRuns=') -or
-        $contract.Contains('if($FlashFirmware){'+"\r\n"+'   $fwRuns=')) "Firmware CI must be flash-only"
+  Need ([regex]::IsMatch($contract,'(?s)if\(\$FlashFirmware\)\{\s*\$fwRuns=')) "Firmware CI must be flash-only"
   Need ($contract.Contains('($FlashFirmware -and (Head 127) -ne $firmwareSha)')) "Playback must not re-query Firmware #127"
   Step "Firmware-gate self-test" "PASS" "Playback skips firmware PR, CI and artifact lookup; no flash"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
