@@ -623,7 +623,7 @@ try {
    $ci["Firmware regression"]=$fi.id
   }else{
    $notes.Add("Read-only playback uses installed firmware; no Firmware #127 PR query, CI gate, firmware download or flash")
-   Step "Firmware CI" "SKIPPED" "Read-only $Mode: installed controller firmware only; Firmware #127 not required"
+   Step "Firmware CI" "SKIPPED" "Read-only ${Mode}: installed controller firmware only; Firmware #127 not required"
   }
   Step "CI software" "PASS" "Exact-head Android and JNI workflow passed; firmware CI only for explicit flash"
   LocalRegressions $androidSha
