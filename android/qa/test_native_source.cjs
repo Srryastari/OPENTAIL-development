@@ -631,7 +631,8 @@ assert(servicesBlock && servicesBlock.includes('infoStarted=connection.readChara
        servicesBlock.includes('if (!infoStarted) {') &&
        servicesBlock.includes('ui.post(thisAutoAuth(connection));') &&
        servicesBlock.includes('catch (SecurityException ex)') &&
-       bleSource.includes('if (challenge!=null && BleOwnerVault.load(activity,activeAddress)!=null)') &&
+       servicesBlock.includes('if(challenge!=null && ownerKeyPresent)') &&
+       servicesBlock.includes('if (ownerEnrollmentCharacteristicsPresent() ||') &&
        bleSource.includes('if(status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
        bleSource.includes('finishInfoRead(connection,value,status);') &&
        bleSource.includes('finishInfoRead(connection,characteristic.getValue(),status);') &&
