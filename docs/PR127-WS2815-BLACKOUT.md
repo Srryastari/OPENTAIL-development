@@ -96,6 +96,10 @@ safety in a separate commit:
   queues, descriptors and DMA buffers use IDF's internal allocation paths. The
   GPIO16 GDMA ISR is explicitly registered cache-safe by IDF when TX cache safety
   is selected. No application RMT completion callback is installed.
+- `CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y` and `CONFIG_GDMA_ISR_HANDLER_IN_IRAM=y`
+  satisfy IDF 5.5.5's cache-safe DMA creation guard and keep GDMA start/reset
+  and their HAL paths executable while cache is disabled. These place code in
+  IRAM; they do not change either output's DMA mode or symbol allocation.
 - `CONFIG_RMT_TX_ISR_CACHE_SAFE=y` selects IDF's IRAM handler/encoder and internal
   object requirements. `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024` is unchanged.
 - `check_rmt_cache_safe.py` checks the generated config and compiler commands,

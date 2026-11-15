@@ -5,7 +5,7 @@ import json, re, shutil, subprocess, sys
 elf=Path(sys.argv[1]).resolve();build=elf.parent
 idf=Path(sys.argv[2]).resolve()
 config=set((build/'config/sdkconfig.h').read_text().splitlines())
-for key in ('RMT_TX_ISR_CACHE_SAFE','RMT_TX_ISR_HANDLER_IN_IRAM','RMT_ENCODER_FUNC_IN_IRAM','RMT_OBJ_CACHE_SAFE','GDMA_ISR_HANDLER_IN_IRAM','GDMA_OBJ_DRAM_SAFE'):
+for key in ('RMT_TX_ISR_CACHE_SAFE','RMT_TX_ISR_HANDLER_IN_IRAM','RMT_ENCODER_FUNC_IN_IRAM','RMT_OBJ_CACHE_SAFE','GDMA_ISR_HANDLER_IN_IRAM','GDMA_OBJ_DRAM_SAFE','GDMA_CTRL_FUNC_IN_IRAM'):
     assert f'#define CONFIG_{key} 1' in config,key
 assert '#define CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL 1024' in config
 # Only the two pinned source files receive the forced allocator include.
@@ -42,9 +42,11 @@ for line in table.splitlines():
 required=['rmt_encode_led_strip','rmt_led_strip_encoder_reset','rmt_encode_bytes',
           'rmt_bytes_encoder_reset','rmt_encode_copy','rmt_copy_encoder_reset',
           'rmt_encoder_reset','rmt_tx_default_isr','rmt_dma_tx_eof_cb',
+          'gdma_reset','gdma_start','gdma_hal_reset','gdma_hal_start_with_desc',
           'gdma_default_tx_isr','gdma_hal_clear_intr','gdma_hal_read_intr_status','gdma_hal_get_eof_desc_addr']
 optional=['rmt_encode_check_result','rmt_tx_do_transaction','rmt_tx_mark_eof',
           'rmt_isr_handle_tx_done','rmt_isr_handle_tx_threshold','rmt_isr_handle_tx_loop_end',
+          'gdma_ahb_hal_reset','gdma_ahb_hal_start_with_desc',
           'gdma_ahb_hal_clear_intr','gdma_ahb_hal_read_intr_status','gdma_ahb_hal_get_eof_desc_addr']
 audit=[];dis=[]
 for name in required+optional:
