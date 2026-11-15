@@ -487,9 +487,31 @@ try {
   $artifacts["Android APK"]=$aa.url+" SHA256="+(Get-FileHash -Algorithm SHA256 $apk).Hash
   $artifacts["Firmware app"]=$fa.url+" SHA256="+$firmware.sha
   Step "Verified artifacts" "PASS" "GitHub exact-head job, firmware manifest and SHA256SUMS verified"
-  $result=@(& adb -s $phone install -r $apk 2>&1)
-  Need ($LASTEXITCODE -eq 0 -and (($result -join " ") -match "Success")) ("ADB install failed; app data untouched: "+($result -join " "))
-  Step "Android install" "PASS" "adb install -r preserves app data; never uninstalls"
+  # Android refuses upgrades when Actions builds have a different debug
+  # signature. Retry non-destructively first. On precisely this error alone,
+  # replace the existing Android APP via ADB and retry (controller/NVS untouched).
+  # The owner explicitly requested the uninstall/reinstall fallback; this
+  # deletes Android-local app data and the phone's saved BLE owner key.
+  $adbExe=[string](Get-Command adb).Source
+  $installOut=Join-Path $session "adb-install.stdout.txt"
+  $installErr=Join-Path $session "adb-install.stderr.txt"
+  $installProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"install","-r",('"' + $apk + '"')) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $installOut -RedirectStandardError $installErr
+  $installText=((Raw $installOut)+[Environment]::NewLine+(Raw $installErr)).Trim()
+  if($installText -match '(?i)INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
+   Step "Android signature" "REPLACE" "Debug signing mismatch; uninstall/reinstall existing Android app only (phone app data and saved BLE owner key will be erased)"
+   $uninstallOut=Join-Path $session "adb-uninstall.stdout.txt"
+   $uninstallErr=Join-Path $session "adb-uninstall.stderr.txt"
+   $uninstallProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"uninstall","com.opentail.android") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $uninstallOut -RedirectStandardError $uninstallErr
+   $uninstallText=((Raw $uninstallOut)+[Environment]::NewLine+(Raw $uninstallErr)).Trim()
+   Need ($uninstallProc.ExitCode -eq 0 -and $uninstallText -match '(?m)^Success\s*$') ("Existing Android app uninstall failed; reinstall not attempted: "+$uninstallText)
+   $installProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"install",('"' + $apk + '"')) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $installOut -RedirectStandardError $installErr
+   $installText=((Raw $installOut)+[Environment]::NewLine+(Raw $installErr)).Trim()
+   Need ($installProc.ExitCode -eq 0 -and $installText -match '(?m)^Success\s*$') ("Android app was uninstalled, but replacement install FAILED; inspect adb-install.stderr.txt: "+$installText)
+   Step "Android install" "PASS" "Signing mismatch recovered using adb uninstall + reinstall; Android app data reset, controller NVS untouched"
+  } else {
+   Need ($installProc.ExitCode -eq 0 -and $installText -match '(?m)^Success\s*$') ("ADB install failed without signature mismatch; existing app untouched: "+$installText)
+   Step "Android install" "PASS" "adb install -r preserved Android app data"
+  }
   if($FlashFirmware) {
    ConfirmedFlash $firmware.image $esp $firmwareSha
    Step "Flash" "PASS" "Explicit app-only flash at 0x20000; no NVS erase"
