@@ -584,6 +584,9 @@ try {
   Need ((OwnerLogStage ("I OpenTailOwner: bonding`nI OpenTailOwner: Controller accepted owner HMAC")) -eq "Controller accepted owner HMAC") "Owner log stage selection failed"
   Need ((OwnerLogStage "I unrelated: no owner") -eq "No OpenTailOwner handshake stage captured") "Owner absent stage selection failed"
   Step "Owner log parser self-test" "PASS" "Latest sanitized app owner stage; not physical acceptance"
+  AssertBenchDiagnosticsSelfTest
+  Step "Stage classifier self-test" "PASS" "GATT2, bond, auth, Save, renderer, RMT, installed firmware and UTC timeline verified without hardware"
+  Need ($CaptureSeconds -ge 30 -and $Mode -in @('bluetooth','layout','save','playback')) "FAST and targeted session parameter regression"
   AssertAdbParserSelfTest
   Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
   AssertEspSelectorSelfTest
@@ -601,53 +604,26 @@ try {
   $jni=GoodRun $androidRuns "Issue103 reconciled Effects/Firmware/Android exact SHA (software only)"
   $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
   $ci["Android regression"]=$ai.id;$ci["JNI 140 effects"]=$jni.id;$ci["Firmware regression"]=$fi.id
-  Step "CI software" "PASS" "Exact-head Android BLE/geometry/Save, JNI playback/140 effects and Firmware workflows passed"
+  Step "CI software" "PASS" "Exact-head Android and JNI workflows verified; Firmware verification SHA checked independently"
   LocalRegressions $androidSha
   # The exact-head Android workflow already gates native source, JNI,
   # JUnit and APK packaging. Use its own artifact rather than waiting for
   # unrelated firmware tasks in the broader source verification workflow.
   $jobs=Api "repos/$repo/actions/runs/$($ai.id)/jobs?per_page=100"
   Need (@($jobs.jobs | Where-Object {$_.name -eq "android-exact-head" -and $_.conclusion -eq "success"}).Count -eq 1) "Exact-head Android build job failed"
-  $aa=Artifact $ai '^opentail-android-exact-head-debug-apk$' (Join-Path $session "apk")
-  $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') (Join-Path $session "firmware")
-  $apks=@(Get-ChildItem (Join-Path $session "apk") -Recurse -Filter "*.apk" -File)
-  Need ($apks.Count -eq 1) "Downloaded APK count not 1"
+  $aa=Artifact $ai '^opentail-android-exact-head-debug-apk$' 'android' $androidSha
+  $apks=@(Get-ChildItem $aa.folder -Recurse -Filter "*.apk" -File)
+  Need ($apks.Count -eq 1) "Verified Android artifact must contain exactly one APK"
   $apk=$apks[0].FullName
-  $firmware=FirmwarePackage (Join-Path $session "firmware") $firmwareSha
-  # The verified artifact includes an OPTIONAL destructive factory-reset
-  # utility. Remove it from this session so the owner cannot accidentally
-  # launch it while reviewing the downloaded images.
-  Get-ChildItem (Join-Path $session "firmware") -Recurse -File |
-    Where-Object {$_.Name -in @("03_FACTORY_RESET_COM9.bat","factory_reset.py")} |
-    Remove-Item -Force
   $artifacts["Android APK"]=$aa.url+" SHA256="+(Get-FileHash -Algorithm SHA256 $apk).Hash
-  $artifacts["Firmware app"]=$fa.url+" SHA256="+$firmware.sha
-  Step "Verified artifacts" "PASS" "GitHub exact-head job, firmware manifest and SHA256SUMS verified"
-  # Android refuses upgrades when Actions builds have a different debug
-  # signature. Retry non-destructively first. On precisely this error alone,
-  # replace the existing Android APP via ADB and retry (controller/NVS untouched).
-  # The owner explicitly requested the uninstall/reinstall fallback; this
-  # deletes Android-local app data and the phone's saved BLE owner key.
-  $adbExe=[string](Get-Command adb).Source
-  $installOut=Join-Path $session "adb-install.stdout.txt"
-  $installErr=Join-Path $session "adb-install.stderr.txt"
-  $installProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"install","-r",('"' + $apk + '"')) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $installOut -RedirectStandardError $installErr
-  $installText=((Raw $installOut)+[Environment]::NewLine+(Raw $installErr)).Trim()
-  if($installText -match '(?i)INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
-   Step "Android signature" "REPLACE" "Debug signing mismatch; uninstall/reinstall existing Android app only (phone app data and saved BLE owner key will be erased)"
-   $uninstallOut=Join-Path $session "adb-uninstall.stdout.txt"
-   $uninstallErr=Join-Path $session "adb-uninstall.stderr.txt"
-   $uninstallProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"uninstall","com.opentail.android") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $uninstallOut -RedirectStandardError $uninstallErr
-   $uninstallText=((Raw $uninstallOut)+[Environment]::NewLine+(Raw $uninstallErr)).Trim()
-   Need ($uninstallProc.ExitCode -eq 0 -and $uninstallText -match '(?m)^Success\s*$') ("Existing Android app uninstall failed; reinstall not attempted: "+$uninstallText)
-   $installProc=Start-Process -FilePath $adbExe -ArgumentList @("-s",$phone,"install",('"' + $apk + '"')) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $installOut -RedirectStandardError $installErr
-   $installText=((Raw $installOut)+[Environment]::NewLine+(Raw $installErr)).Trim()
-   Need ($installProc.ExitCode -eq 0 -and $installText -match '(?m)^Success\s*$') ("Android app was uninstalled, but replacement install FAILED; inspect adb-install.stderr.txt: "+$installText)
-   Step "Android install" "PASS" "Signing mismatch recovered using adb uninstall + reinstall; Android app data reset, controller NVS untouched"
-  } else {
-   Need ($installProc.ExitCode -eq 0 -and $installText -match '(?m)^Success\s*$') ("ADB install failed without signature mismatch; existing app untouched: "+$installText)
-   Step "Android install" "PASS" "adb install -r preserved Android app data"
+  $firmware=$null
+  if($FlashFirmware){
+   $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') 'firmware' $firmwareSha
+   $firmware=FirmwarePackage $fa.folder $firmwareSha
+   $artifacts["Firmware app (optional flash only)"]=$fa.url+" SHA256="+$firmware.sha
   }
+  Step "Verified artifacts" "PASS" "Exact Android SHA and cached file hashes verified; firmware binary downloaded only for explicit flash"
+  Install-VerifiedAndroid $phone $apk $androidSha
   if($FlashFirmware) {
    ConfirmedFlash $firmware.image $esp $firmwareSha
    Step "Flash" "PASS" "Explicit app-only flash at 0x20000; no NVS erase"
