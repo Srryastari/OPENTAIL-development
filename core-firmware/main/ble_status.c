@@ -146,6 +146,7 @@ extern void ot_ble_panel_preview_cancel_lane(uint8_t lane);
 static ot_ble_result_t last_result=OT_BLE_ERR_AUTH;
 static uint8_t owner_key[16],owner_challenge[16];
 static bool owner_valid=false,challenge_ready=false;
+static int64_t owner_challenge_expires_us;
 typedef struct {
     uint32_t version;
     uint8_t key[16],peer_type,peer[6],pin_enabled;
@@ -184,8 +185,8 @@ static bool owner_commit(owner_record_t *next){
 static uint8_t pair_failures=0;
 static bool owner_load(void){
     nvs_handle_t h;esp_err_t e=nvs_open("ot_blepair",NVS_READONLY,&h);
-    if(e==ESP_ERR_NVS_NOT_FOUND)return false;
-    if(e!=ESP_OK){owner_storage_fault=true;return false;}
+    if(e==ESP_ERR_NVS_NOT_FOUND){ESP_LOGI(TAG,"Owner storage: fresh namespace");return false;}
+    if(e!=ESP_OK){ESP_LOGE(TAG,"Owner storage: namespace read failed");owner_storage_fault=true;return false;}
     size_t n=sizeof(owner_record);
     e=nvs_get_blob(h,"owner_v3",&owner_record,&n);
     if(e==ESP_OK){
@@ -193,21 +194,27 @@ static bool owner_load(void){
         if(n!=sizeof(owner_record)||owner_record.version!=3||owner_record.pin_enabled>1||
            !ot_owner_pin_valid(owner_record.pin_enabled,owner_record.pin)||
            owner_record.crc!=owner_crc(&owner_record)){
+            ESP_LOGE(TAG,"Owner storage: invalid owner record");
             owner_storage_fault=true;return false;
         }
+        ESP_LOGI(TAG,"Owner storage: bonded owner loaded");
         memcpy(owner_key,owner_record.key,sizeof(owner_key));owner_peer_valid=true;return true;
     }
-    if(e!=ESP_ERR_NVS_NOT_FOUND){nvs_close(h);owner_storage_fault=true;return false;}
+    if(e!=ESP_ERR_NVS_NOT_FOUND){nvs_close(h);ESP_LOGE(TAG,"Owner storage: record read failed");owner_storage_fault=true;return false;}
     n=sizeof(owner_key);e=nvs_get_blob(h,"owner",owner_key,&n);nvs_close(h);
     if(e==ESP_ERR_NVS_NOT_FOUND)return false;
-    if(e!=ESP_OK||n!=sizeof(owner_key)){owner_storage_fault=true;return false;}
+    if(e!=ESP_OK||n!=sizeof(owner_key)){ESP_LOGE(TAG,"Owner storage: legacy record read failed");owner_storage_fault=true;return false;}
+    ESP_LOGI(TAG,"Owner storage: legacy owner loaded; HMAC proof required before peer binding");
     /* Legacy owner must prove the existing key before its bonded peer is bound. */
     return true;
 }
 static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_access_ctxt *ctx,void *arg){
     (void)handle;(void)arg;
     struct ble_gap_conn_desc desc;
-    if(conn!=active_conn||!owner_link(&desc))return BLE_ATT_ERR_INSUFFICIENT_ENC;
+    if(conn!=active_conn||!owner_link(&desc)){
+        ESP_LOGW(TAG,"Owner enrollment denied: encrypted bonded active link required");
+        return BLE_ATT_ERR_INSUFFICIENT_ENC;
+    }
     if(ctx->op==BLE_GATT_ACCESS_OP_WRITE_CHR){
         uint8_t p[6];uint16_t n=0;
         if(!authorized||!owner_valid||!owner_peer_valid||owner_storage_fault)return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
@@ -222,15 +229,28 @@ static int owner_enroll_read(uint16_t conn,uint16_t handle,struct ble_gatt_acces
         owner_security_config();return 0;
     }
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
-    const bool same=owner_peer_valid&&owner_record.peer_type==desc.peer_id_addr.type&&
-        memcmp(owner_record.peer,desc.peer_id_addr.val,6)==0;
+    const bool same=owner_peer_valid&&ot_owner_peer_same(owner_record.peer_type,
+        owner_record.peer,desc.peer_id_addr.type,desc.peer_id_addr.val);
     if(!ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same,
         desc.sec_state.encrypted,desc.sec_state.bonded,
-        owner_record.pin_enabled,desc.sec_state.authenticated))return BLE_ATT_ERR_READ_NOT_PERMITTED;
+        owner_record.pin_enabled,desc.sec_state.authenticated)){
+        const char *reason=owner_storage_fault?"storage fault":
+            !owner_peer_valid?"legacy owner requires key proof":
+            owner_record.pin_enabled?"peer mismatch; PIN authentication required":
+            "bonded identity mismatch; existing owner proof required";
+        ESP_LOGW(TAG,"Owner enrollment denied: %s",reason);
+        return BLE_ATT_ERR_READ_NOT_PERMITTED;
+    }
     if(!owner_valid){
         owner_record_t next={0};esp_fill_random(next.key,sizeof(next.key));
         next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
-        if(!owner_commit(&next))return BLE_ATT_ERR_UNLIKELY;
+        if(!owner_commit(&next)){
+            ESP_LOGE(TAG,"Owner enrollment denied: credential commit failed");
+            return BLE_ATT_ERR_UNLIKELY;
+        }
+        challenge_ready=false;authorized=false;pair_failures=0;
+        memset(owner_challenge,0,sizeof(owner_challenge));
+        ESP_LOGI(TAG,"Owner enrollment committed");
     }
     return os_mbuf_append(ctx->om,owner_key,sizeof(owner_key))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
@@ -239,12 +259,14 @@ static int owner_challenge_read(uint16_t conn,uint16_t handle,struct ble_gatt_ac
     if(ctx->op!=BLE_GATT_ACCESS_OP_READ_CHR)return BLE_ATT_ERR_UNLIKELY;
     if(conn!=active_conn||!owner_valid||pair_failures>=5)return BLE_ATT_ERR_READ_NOT_PERMITTED;
     esp_fill_random(owner_challenge,sizeof(owner_challenge));challenge_ready=true;
+    owner_challenge_expires_us=esp_timer_get_time()+30000000LL;
     return os_mbuf_append(ctx->om,owner_challenge,sizeof(owner_challenge))==0?0:BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 static bool owner_verify(const uint8_t mac[16]){
     struct ble_gap_conn_desc desc;
     if(owner_storage_fault||!owner_link(&desc)||!owner_valid||!challenge_ready||pair_failures>=5)return false;
     challenge_ready=false; /* never permit challenge replay */
+    if(esp_timer_get_time()>=owner_challenge_expires_us)return false;
     static const uint8_t context[]="OpenTail-BLE-v2";
     uint8_t message[sizeof(context)-1+16],expected[32];
     memcpy(message,context,sizeof(context)-1);
@@ -255,10 +277,14 @@ static bool owner_verify(const uint8_t mac[16]){
     for(int i=0;i<16;i++)mismatch|=(uint8_t)(expected[i]^mac[i]);
     if(mismatch)pair_failures++;
     if(mismatch)return false;
-    if(!owner_peer_valid){
-        owner_record_t next={0};memcpy(next.key,owner_key,16);
+    if(!owner_peer_valid||!ot_owner_peer_same(owner_record.peer_type,owner_record.peer,
+                                             desc.peer_id_addr.type,desc.peer_id_addr.val)){
+        /* Only successful HMAC proof may migrate/rebind the owner identity.
+         * Retain the configured PIN; ordinary reconnects perform no NVS write. */
+        owner_record_t next=owner_record;memcpy(next.key,owner_key,16);
         next.peer_type=desc.peer_id_addr.type;memcpy(next.peer,desc.peer_id_addr.val,6);
         if(!owner_commit(&next))return false;
+        ESP_LOGI(TAG,"Owner identity bound after valid HMAC proof");
     }
     return true;
 }

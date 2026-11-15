@@ -2,6 +2,12 @@
 #include <stdio.h>
 #include "ble_owner_policy.h"
 int main(void){
+    uint8_t a[6]={1,2,3,4,5,6},b[6]={1,2,3,4,5,7};
+    for(unsigned x=0;x<256;x++)for(unsigned y=0;y<256;y++){
+        assert(ot_owner_peer_same(x,a,y,a)==(x<=3&&y<=3&&(x%2)==(y%2)));
+        assert(!ot_owner_peer_same(x,a,y,b));
+    }
+
     /* Every combination: insecure/unbonded/storage-fault links never enroll. */
     for(unsigned bits=0;bits<128;bits++){
         bool fault=bits&1,owned=bits&2,same=bits&4,encrypted=bits&8;
