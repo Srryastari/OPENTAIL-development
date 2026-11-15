@@ -18,6 +18,12 @@ That was a **preflight error**, not a Bluetooth, Pixel Probe, Save or RMT test. 
 
 You can also install GitHub CLI manually with 'winget install --id GitHub.cli --exact --source winget', open a fresh PowerShell window, and run 'gh auth login'.
 
+## USB phone detected but not authorized
+
+If the runner says **Connect and authorize exactly one USB Android phone**, do not adjust controller BLE, ESP32 firmware or NVS. The revised runner now shows the actual ADB device state and offers two in-session retries. With the phone unlocked, turn on Developer options > USB debugging and approve **Allow USB debugging?** on the phone. If the phone doesn't appear, try a USB-C data cable or select File transfer / Android Auto from the phone's USB preferences. Use `adb devices -l` in PowerShell to distinguish `device`, `unauthorized`, and no USB device. Disconnect extra USB Android phones, or use `-AndroidSerial SERIAL` if multiple authorized phones are present.
+
+Previous reports showing zero Pixel Probe/RMT entries because preflight failed mean **NOT RUN**. No optical, Save or Bluetooth conclusion can be drawn from them.
+
 ## Normal one-click session
 
 1. Double-click **OpenTail-Bench.bat** with both USB devices connected.
