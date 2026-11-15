@@ -17,7 +17,7 @@ jobs:
       - name: Parse all Windows PowerShell 5.1 scripts
         shell: powershell
         run: |
-          $files=@('scripts/windows/OpenTail-Bench.ps1','scripts/windows/Serial-Capture.ps1')
+          $files=@('scripts/windows/OpenTail-Bench.ps1','scripts/windows/Serial-Capture.ps1','scripts/windows/Bench-Diagnostics.ps1')
           foreach($file in $files) {
             $tokens=$null
             $errors=$null
@@ -47,7 +47,13 @@ jobs:
           if($json.checks.'ESP COM selector self-test'.state -ne 'PASS') {
             throw "USB ESP32 COM single/multiple/missing-port regression failed"
           }
-          Write-Host "PASS offline report and physically honest RMT status"
+          if($json.checks.'Stage classifier self-test'.state -ne 'PASS'){throw "Read-only stage/identity/clock regressions failed"}
+          $results=Get-Content (Join-Path $latest.FullName 'RESULTS.json') -Raw | ConvertFrom-Json
+          if($results.mode -ne 'bluetooth' -or $results.capture_requested_seconds -ne 30 -or $results.status -ne 'PASS'){
+            throw "FAST defaults or structured machine-readable report failed"
+          }
+          if($results.stages.owner_enrollment.status -ne 'NOT RUN'){throw "Offline test fabricated owner enrollment"}
+          Write-Host "PASS offline report, 30s FAST defaults, classifications and physically honest RMT status"
       - name: Safety contract audit
         shell: powershell
         run: |
@@ -89,4 +95,13 @@ jobs:
             throw "Preflight must report hardware checks NOT RUN"
           }
           if(-not $bat.Contains('OpenTail-Bench.ps1')){throw "Launcher script missing"}
+          if(-not $runner.Contains('Read-Host "Type exactly ERASE APP DATA')){throw "Owner approval prompt required"}
+          if(-not $runner.Contains('if($answer -cne "ERASE APP DATA")')){throw "Uninstall must fail closed"}
+          if(-not $runner.Contains('Install-VerifiedAndroid')){throw "Installed-app fingerprint contract missing"}
+          if(-not $runner.Contains('RESULTS.json')){throw "Machine-readable report missing"}
+          if(-not $runner.Contains('Get-BenchFailure')){throw "FAST failure classification missing"}
+          if(-not $runner.Contains('Get-InstalledFirmwareIdentity')){throw "Installed firmware identity must be observed"}
+          if(-not $bat.Contains('SECONDS=30')){throw "FAST default missing"}
+          if(-not $bat.Contains('MODE=save') -or -not $bat.Contains('MODE=playback')){throw "Targeted modes missing"}
+          if(-not $serial.Contains('$sp.DtrEnable=$false') -or -not $serial.Contains('$sp.RtsEnable=$false')){throw "Receive-only serial safety lost"}
           Write-Host "PASS no controller HTTP, no automatic flash, app-partition only and receive-only serial"
