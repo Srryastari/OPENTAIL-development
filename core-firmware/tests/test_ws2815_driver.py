@@ -134,7 +134,7 @@ int main(void){
   assert(led_strip_new_rmt_device(&cfg,&rmt,&handles[ch])==0);
   led_strip_rmt_obj *obj=(void*)handles[ch];
   assert(obj->rmt_chan->gpio==out_pin[ch]);assert(obj->rmt_chan->dma==false);
-  assert(obj->rmt_chan->symbols==64;
+  assert(obj->rmt_chan->symbols==64);
   assert(encoded_bits.bit0.duration0==3&&encoded_bits.bit0.duration1==9);
   assert(encoded_bits.bit1.duration0==9&&encoded_bits.bit1.duration1==3);
   assert(encoded_bits.bit0.level0==1&&encoded_bits.bit0.level1==0&&encoded_bits.flags.msb_first);
