@@ -369,6 +369,8 @@ try {
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
   AssertAdbParserSelfTest
   Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
+  AssertEspSelectorSelfTest
+  Step "ESP COM selector self-test" "PASS" "Zero, one, multiple native/generic COM ports; strict-mode arrays"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } else {
   EnsureGh
