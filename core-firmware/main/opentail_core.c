@@ -99,7 +99,7 @@ static void request_render_refresh(void){
     if(task)xTaskNotifyGive(task);
 }
 /* Latches successful physical GPIO setup and sampler task creation before
- * BLE/HTTP configuration endpoints start accepting durable mapping writes. */
+ * authenticated BLE configuration accepts durable mapping writes. */
 static bool input_sampler_ready=false;
 /* GPIO any-edge ISR records transitions even during a slow NVS write.
  * A quiet debounced window + unchanged epoch is required to promote. */
@@ -162,13 +162,13 @@ static uint32_t output_refreshes[OT_CHAIN_COUNT]={0};
 static uint32_t incomplete_frames=0;
 static uint32_t output_runtime_fault_mask=0; /* Latched physical RMT lanes; bench diagnostics. */
 static uint32_t stop_request_generation=0,stop_render_generation=0;
-/* Single render-task owner of physical outputs; HTTP handlers only modify copied state. */
+/* Single render-task owner of physical outputs; retired HTTP handlers remain unreachable. */
 static ot_show_t native_show={0};
 static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
 static bool ble_startup_ready=false; /* Set once before render task creation. */
-static bool http_startup_ready=false; /* Diagnostics are required to confirm a new OTA image. */
+/* No HTTP readiness gate: the obsolete bench HTTP server is not started. */
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
@@ -2742,7 +2742,7 @@ static bool wifi_ap_init(void) {
         return false;
     }
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
-    init.mgmt_sbuf_num=8; /* IDF 5.5.5 permits 6..32; secondary AP has two clients. */
+    init.mgmt_sbuf_num=6; /* IDF 5.5.5 minimum; bounded secondary AP for 2 clients. */
     e=esp_wifi_init(&init);
     if(e!=ESP_OK){
         ESP_LOGE(TAG,"CORE Wi-Fi driver init failed: %s",esp_err_to_name(e));
@@ -2768,7 +2768,7 @@ static bool wifi_ap_init(void) {
         return false;
     }
     ot_st_wifi_ready();
-    ESP_LOGW(TAG,"BENCH ONLY: connect to Wi-Fi %s; browse http://192.168.4.1/",OT_AP_SSID);
+    ESP_LOGI(TAG,"Secondary Wi-Fi AP %s started; no HTTP listener/control transport",OT_AP_SSID);
     return true;
 }
 /* ESP-IDF 5.5.x esp_timer_get_time is ISR-safe/IRAM-backed; capture only the
@@ -3863,7 +3863,7 @@ static void led_task(void *p) {
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
            if(full_frame && ot_sw_idf_stable() &&
-              om_write_mutex && ble_startup_ready && http_startup_ready &&
+              om_write_mutex && ble_startup_ready &&
               ot_ble_radio_ever_ready() && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
@@ -4068,7 +4068,8 @@ void app_main(void) {
     const bool wifi_started=wifi_ap_init();
     if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");
     ot_boot_heap_snapshot("post-wifi");
-    http_startup_ready=wifi_started&&http_start();
-    if(!http_startup_ready)ot_st_set_fault("HTTP diagnostic startup failed");
-    ot_boot_heap_snapshot("post-http");
+    /* Owner-retired obsolete HTTP diagnostic/UI/OTA receiver: no listener,
+     * no route registration or server-task allocation. Keep ESP-IDF OTA
+     * boot confirmation gated by stable RMT + BLE, not by HTTP readiness. */
+    ESP_LOGI(TAG,"HTTP diagnostic server DISABLED (obsolete); no listener");
 }

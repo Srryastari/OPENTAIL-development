@@ -25,11 +25,12 @@ assert 'if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation f
 assert "if(!om_write_mutex || xSemaphoreTake(" in core
 render_alloc = startup.index('led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL')
 assert render_alloc < startup.index("om_write_mutex=xSemaphoreCreateMutex();")
-assert "http_startup_ready=wifi_started&&http_start();" in startup
-assert "if(!http_startup_ready)ot_st_set_fault(" in startup
-assert render_alloc < startup.index("http_startup_ready=wifi_started&&http_start();")
-# The diagnostic HTTP service must never take down physical lighting on
-# registration failure. OTA acceptance still requires service startup.
+assert 'HTTP diagnostic server DISABLED (obsolete)' in startup
+assert 'http_startup_ready' not in core
+assert 'http_start();' not in startup
+assert 'om_write_mutex && ble_startup_ready &&\n               ot_ble_radio_ever_ready()' in led
+# The obsolete HTTP service never starts. OTA image confirmation still
+# requires stable renderer progress, valid BLE advertising and no reset fault.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
 wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static bool input_init(void)",1)[0]
 assert "ESP_ERROR_CHECK(" not in wifi
@@ -62,12 +63,10 @@ assert "const bool outputs_ready=sampler_ready&&psram_ready&&!config_recovery_fa
 assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < render_alloc
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
-assert "http_startup_ready=wifi_started&&http_start();" in startup
+assert 'HTTP diagnostic server DISABLED (obsolete)' in startup
 assert render_alloc < startup.index("const bool wifi_started=wifi_ap_init();")
-assert "ESP_ERROR_CHECK(httpd_start" not in http
-assert "ESP_ERROR_CHECK(httpd_register_uri_handler" not in http
-assert "httpd_stop(server);" in http
-assert "return false;" in http and "return true;" in http
+assert 'http_start();' not in startup
+assert 'http_startup_ready' not in startup
 assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
 assert render_alloc < startup.index("ble_startup_ready=ot_ble_start();")
 # BLE-primary radio resource admission must precede the much larger Wi-Fi
@@ -135,7 +134,7 @@ assert "ESP_ERR_NOT_FOUND" in ota
 assert "image_state!=ESP_OTA_IMG_PENDING_VERIFY" in ota
 assert "if(state==OTA_BOOT_EXPIRED)return false;" in ota
 assert "esp_timer_stop(boot_guard)" in ota
-# The HTTP/BLE renderer-ready flag must not be raised during strip creation;
+# The BLE renderer-ready flag must not be raised during strip creation;
 # it is raised by the render task only after its frame timer exists.
 assert "native_outputs_ready=outputs_ready" not in startup
 timer_ready = led.index("if(esp_timer_create(&timer_args,&frame_timer)!=ESP_OK)")

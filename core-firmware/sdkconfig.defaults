@@ -12,7 +12,7 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 
 # ESP32-S3 N16R8: 16 MB flash, 8 MB octal PSRAM. Make PSRAM
-# available to normal heap allocations so radio/HTTP buffers do not consume
+# available to normal heap allocations so radio/optional buffers do not consume
 # all internal RAM reserved for FreeRTOS task stacks and RMT/DMA needs.
 # Task stacks themselves MUST remain internal (flash/NVS cache-off safety).
 CONFIG_SPIRAM=y
@@ -31,10 +31,11 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 # SoftAP is a secondary diagnostic/Studio transport (max 2 clients), not
 # a throughput benchmark. Match the RX BA window to static RX buffers.
-# Retain AMPDU reception, full Wi-Fi/HTTP and OTA; bound per-session
-# internal DMA buffer demand so BLE HCI and the 8KB safety renderer coexist.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
-CONFIG_ESP_WIFI_RX_BA_WIN=6
+# Keep low-bandwidth secondary Wi-Fi AP (no HTTP listener); cap static RX
+# heap cost while preserving BLE-first memory reserve and RMT. OTA partition
+# and boot/rollback rules stay intact; HTTP OTA upload is retired.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_RX_BA_WIN=4
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 # Low-IRAM, low-DMA secondary 2-client Wi-Fi; BLE and RMT remain active.

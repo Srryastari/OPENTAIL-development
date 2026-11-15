@@ -23,7 +23,7 @@ assert boot.index("input_init()") < boot.index("ot_ble_start()")
 print("PASS: ESP32-S3 main task startup stack explicit, guarded, and observable")
 
 # P0 real N16R8 device evidence: xTaskCreate(ot_led) failed after Wi-Fi,
-# NimBLE, HTTP and the configuration worker started. Firmware host build did
+# NimBLE, Wi-Fi and the configuration worker started. Firmware host build did
 # not exercise those memory allocations. Prove the fixed initialization order,
 # guarded PSRAM configuration, and multi-capability heap observations.
 required_config={
@@ -37,8 +37,8 @@ required_config={
     "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM":"n",
     "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL":"1024",
     "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL":"32768",
-    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM":"6",
-    "CONFIG_ESP_WIFI_RX_BA_WIN":"6",
+    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM":"4",
+    "CONFIG_ESP_WIFI_RX_BA_WIN":"4",
     "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM":"6",
     "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM":"16",
     "CONFIG_ESP_WIFI_IRAM_OPT":"n",
@@ -61,8 +61,7 @@ for fn in ("heap_caps_get_free_size", "heap_caps_get_largest_free_block",
     assert fn+"(internal_caps)" in source, "missing internal heap telemetry: "+fn
     assert fn+"(MALLOC_CAP_SPIRAM)" in source, "missing PSRAM telemetry: "+fn
 for stage in ('early-boot','pre-render-task','post-render-task','pre-ble',
-              'pre-wifi','post-wifi',
-              'post-ble','post-http','render-create-failed'):
+              'pre-wifi','post-wifi','post-ble','render-create-failed'):
     assert 'ot_boot_heap_snapshot("'+stage+'")' in boot, stage
 # Real pixel rendering is the priority: after GPIO ISR, sampler and configured
 # RMT lanes, before service heap usage. It must not be launched in a
@@ -75,7 +74,7 @@ assert boot.index('ot_boot_heap_snapshot("pre-render-task")') < boot.index("xTas
 renderer_call=boot.index('led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL')
 assert boot.index("xTaskCreate(",boot.index('ot_boot_heap_snapshot("pre-render-task")')) < renderer_call
 for other in ("xTaskCreate(config_activation_task","wifi_ap_init()",
-              "ot_ble_start()","http_start()"):
+              "ot_ble_start()"):
     assert renderer_call < boot.index(other),(other,"allocated before render stack")
 assert "#define OT_RENDER_TASK_STACK_BYTES 8192u" in source
 assert "ot_boot_psram_ready()" in boot

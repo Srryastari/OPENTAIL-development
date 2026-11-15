@@ -10,7 +10,7 @@ assert "ieee80211_hostap_attach" in s
 assert "wifi_heap_start_preflight()" in wifi
 assert wifi.index("esp_wifi_init(&init)")<wifi.index('ot_boot_heap_snapshot("wifi-driver-initialized")')
 assert wifi.index("esp_wifi_set_config(")<wifi.rindex("wifi_heap_start_preflight()")<wifi.index("esp_wifi_start()")
-assert "init.mgmt_sbuf_num=8;" in wifi
+assert "init.mgmt_sbuf_num=6;" in wifi
 assert "esp_wifi_deinit()" in wifi
 assert "esp_netif_destroy_default_wifi(wifi_netif)" in wifi
 assert "esp_netif_attach_wifi_ap(wifi_netif)" in wifi
@@ -20,7 +20,7 @@ assert "esp_netif_new(&ap_cfg)" in wifi
 assert wifi.index("wifi_heap_start_preflight()") < wifi.index("esp_netif_init()")
 assert "BLE remains primary" in wifi
 assert "MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA" in s
-for k,v in {"ESP_WIFI_STATIC_RX_BUFFER_NUM":"6","ESP_WIFI_RX_BA_WIN":"6",
+for k,v in {"ESP_WIFI_STATIC_RX_BUFFER_NUM":"4","ESP_WIFI_RX_BA_WIN":"4",
 "ESP_WIFI_STATIC_TX_BUFFER_NUM":"6","ESP_WIFI_DYNAMIC_RX_BUFFER_NUM":"16",
 "ESP_WIFI_IRAM_OPT":"n","ESP_WIFI_RX_IRAM_OPT":"n","LWIP_IRAM_OPTIMIZATION":"n"}.items():
     assert re.search(r"^CONFIG_"+k+"="+v+r"$",cfg,re.M),k

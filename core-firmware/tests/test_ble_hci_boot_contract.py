@@ -28,9 +28,8 @@ mutex = at("om_write_mutex=xSemaphoreCreateMutex();")
 ble_init = at("ble_startup_ready=ot_ble_start();")
 promoter = at("xTaskCreate(config_activation_task")
 wifi = at("const bool wifi_started=wifi_ap_init();")
-http = at("http_startup_ready=wifi_started&&http_start();")
 assert at("input_init()") < at("strip_init()") < renderer
-assert renderer < mutex < ble_init < promoter < wifi < http, (
+assert renderer < mutex < ble_init < promoter < wifi, (
     "BLE primary HCI memory must be allocated before Wi-Fi and config worker")
 assert at('ot_boot_heap_snapshot("pre-ble")') < ble_init
 assert ble_init < at('ot_boot_heap_snapshot("post-ble")')
@@ -43,10 +42,11 @@ assert ble_init < at("if(ble_startup_ready){") < promoter
 assert at("if(ble_startup_ready){") < wifi
 assert at('ot_boot_heap_snapshot("pre-wifi")') < wifi
 assert wifi < at('ot_boot_heap_snapshot("post-wifi")')
-assert at('ot_boot_heap_snapshot("post-wifi")') < http
 assert "if(!ble_startup_ready)ot_st_set_fault(\"BLE GATT startup failed\")" in boot
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed")' in boot
-assert "if(!http_startup_ready)ot_st_set_fault(" in boot
+assert 'HTTP diagnostic server DISABLED (obsolete)' in boot
+assert 'http_startup_ready' not in boot
+assert 'http_start();' not in boot
 assert "if(om_write_mutex)" in boot
 assert "ot_sw_idf_watch_inputs()" in boot and "ot_sw_idf_watch_render()" in core
 assert "sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init()" in boot
@@ -99,8 +99,8 @@ for key, expected in {
     "CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL": "1024",
     "CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL": "32768",
     "CONFIG_FREERTOS_PLACE_TASK_STACKS_IN_EXT_RAM": "n",
-    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM": "6",
-    "CONFIG_ESP_WIFI_RX_BA_WIN": "6",
+    "CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM": "4",
+    "CONFIG_ESP_WIFI_RX_BA_WIN": "4",
     "CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM": "6",
     "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM": "16",
     "CONFIG_ESP_WIFI_IRAM_OPT":"n",
@@ -117,4 +117,4 @@ assert int(config["CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM"]) >= int(
 assert "conf.ap.max_connection=2;" in core
 assert "esp_wifi_start()" in core and "httpd_register_uri_handler(" in core
 assert "OT_RENDER_TASK_STACK_BYTES 8192u" in core
-print("PASS P0 BLE startup: renderer→HCI→config→Wi-Fi→HTTP, allocation failure/DMA diagnostics, BLE advertising, bounded secondary SoftAP with protected internal stacks; HOST SOURCE CONTRACT ONLY")
+print("PASS P0 BLE startup: renderer→HCI→config→Wi-Fi (no HTTP listener), allocation failure/DMA diagnostics, BLE advertising, bounded secondary SoftAP with protected internal stacks; HOST SOURCE CONTRACT ONLY")
