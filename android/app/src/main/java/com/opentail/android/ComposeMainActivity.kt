@@ -1137,7 +1137,10 @@ class ComposeMainActivity : ComponentActivity() {
                     Text("OpenTail Controller", color = t.fg, fontSize = 14.sp)
                     Caption(connectionPhase, t)
                 }
-                Pill("Connect", t, strong=true) { foundDevices.clear(); ble.scanHeadless() }
+                Pill("Connect", t, strong=true) {
+                    if(ble.isConnected()) ble.authorizeOrPair()
+                    else { foundDevices.clear(); ble.scanHeadless() }
+                }
             }
             // Discovered choices disappear while a controller is connected.
             if (!ble.isConnected()) foundDevices.forEach { (address, label) ->
@@ -1150,7 +1153,7 @@ class ComposeMainActivity : ComponentActivity() {
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Controller access", color = t.fg, fontSize = 14.sp)
-                    Caption(if (ble.canControl()) "Owner connected" else "Securing connection automatically", t)
+                    Caption(ble.ownerAccessStatus(), t)
                 }
                 Pill("Set PIN", t, enabled=ble.canControl()) { ble.promptOwnerPin() }
             }
