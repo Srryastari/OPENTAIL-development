@@ -1,0 +1,64 @@
+name: OpenTail Windows bench tooling
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'OpenTail-Bench.bat'
+      - 'scripts/windows/**'
+      - '.github/workflows/windows-bench-tooling.yml'
+  workflow_dispatch:
+jobs:
+  windows-bench-smoke:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all Windows PowerShell 5.1 scripts
+        shell: powershell
+        run: |
+          $files=@('scripts/windows/OpenTail-Bench.ps1','scripts/windows/Serial-Capture.ps1')
+          foreach($file in $files) {
+            $tokens=$null
+            $errors=$null
+            $null=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "$file at $($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "$file PowerShell parse failed"
+            }
+            Write-Host "PASS parse $file"
+          }
+      - name: Offline no-hardware runner self-test
+        shell: powershell
+        run: |
+          & .\scripts\windows\OpenTail-Bench.ps1 -SelfTest
+          if($LASTEXITCODE -ne 0){throw "Offline bench self-test failed"}
+          $latest=Get-ChildItem .\bench-reports -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if($null -eq $latest){throw "No bench report directory"}
+          $json=Get-Content (Join-Path $latest.FullName 'report.json') -Raw | ConvertFrom-Json
+          if($json.checks.'Runner self-test'.state -ne 'PASS'){throw "Report did not record PASS"}
+          if($json.checks.'Independent RMT test'.state -ne 'UNAVAILABLE'){throw "False physical RMT claim"}
+          Write-Host "PASS offline report and physically honest RMT status"
+      - name: Safety contract audit
+        shell: powershell
+        run: |
+          $runner=Get-Content 'scripts/windows/OpenTail-Bench.ps1' -Raw
+          $serial=Get-Content 'scripts/windows/Serial-Capture.ps1' -Raw
+          $bat=Get-Content 'OpenTail-Bench.bat' -Raw
+          foreach($required in @('Confirm*Flash','0x20000','FLASH $port','release_manifest.json','SHA256SUMS.txt','adb','gh run download','Pixel Probe','STOP')) {
+            if($required -eq 'Confirm*Flash'){continue}
+            if(-not $runner.Contains($required)){throw "Missing safety/feature marker: $required"}
+          }
+          if($runner.Contains('erase_flash') -or $runner.Contains('erase-flash') -or $runner.Contains('factory_reset.py')) {
+            throw "Destructive flash command reference in executable runner"
+          }
+          if(-not $runner.Contains('if($FlashFirmware)')){throw "Flash is not gated"}
+          if(-not $runner.Contains('ConfirmedFlash $firmware.image')){throw "Missing explicit flash path"}
+          if(-not $serial.Contains('$sp.DtrEnable=$false') -or -not $serial.Contains('$sp.RtsEnable=$false')) {
+            throw "Serial capture must not assert reset controls"
+          }
+          if($runner.Contains('/api/v1/') -or $runner.Contains('Invoke-RestMethod')){
+            throw "Controller HTTP use forbidden; controller is BLE-only"
+          }
+          if(-not $bat.Contains('OpenTail-Bench.ps1')){throw "Launcher script missing"}
+          Write-Host "PASS no controller HTTP, no automatic flash, app-partition only and receive-only serial"
