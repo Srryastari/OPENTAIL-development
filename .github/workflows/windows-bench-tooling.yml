@@ -38,6 +38,9 @@ jobs:
           $json=Get-Content (Join-Path $latest.FullName 'report.json') -Raw | ConvertFrom-Json
           if($json.checks.'Runner self-test'.state -ne 'PASS'){throw "Report did not record PASS"}
           if($json.checks.'Independent RMT test'.state -ne 'UNAVAILABLE'){throw "False physical RMT claim"}
+          if($json.checks.'BLE runtime'.state -ne 'NOT RUN' -or $json.checks.'Pixel Probe'.state -ne 'NOT RUN') {
+            throw "Hardware checks were falsely evaluated before a capture session"
+          }
           Write-Host "PASS offline report and physically honest RMT status"
       - name: Safety contract audit
         shell: powershell
@@ -45,7 +48,7 @@ jobs:
           $runner=Get-Content 'scripts/windows/OpenTail-Bench.ps1' -Raw
           $serial=Get-Content 'scripts/windows/Serial-Capture.ps1' -Raw
           $bat=Get-Content 'OpenTail-Bench.bat' -Raw
-          foreach($required in @('Confirm*Flash','0x20000','FLASH $port','release_manifest.json','SHA256SUMS.txt','adb','gh run download','Pixel Probe','STOP')) {
+          foreach($required in @('Confirm*Flash','0x20000','FLASH $port','release_manifest.json','SHA256SUMS.txt','adb','$script:ghExe run download','Pixel Probe','STOP')) {
             if($required -eq 'Confirm*Flash'){continue}
             if(-not $runner.Contains($required)){throw "Missing safety/feature marker: $required"}
           }
@@ -65,6 +68,13 @@ jobs:
           }
           if($runner.Contains('/api/v1/') -or $runner.Contains('Invoke-RestMethod')){
             throw "Controller HTTP use forbidden; controller is BLE-only"
+          }
+          foreach($required in @('function EnsureGh','function FindGh','Install official GitHub CLI using WinGet now? Type INSTALL','Open GitHub CLI authorization now? Type LOGIN','auth status --hostname github.com','--accept-package-agreements','--accept-source-agreements','$sessionStarted=$true')) {
+            if(-not $runner.Contains($required)){throw "GitHub CLI setup guard absent: $required"}
+          }
+          if($runner -match '(?m)^\s*Tool "gh"'){throw "Old hard-fail gh prerequisite remains"}
+          if(-not $runner.Contains('if(-not $script:sessionStarted)')) {
+            throw "Preflight must report hardware checks NOT RUN"
           }
           if(-not $bat.Contains('OpenTail-Bench.ps1')){throw "Launcher script missing"}
           Write-Host "PASS no controller HTTP, no automatic flash, app-partition only and receive-only serial"
