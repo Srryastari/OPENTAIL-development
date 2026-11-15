@@ -44,6 +44,9 @@ jobs:
           if($json.checks.'ADB device parser self-test'.state -ne 'PASS') {
             throw "USB Android phone discovery regression failed"
           }
+          if($json.checks.'ESP COM selector self-test'.state -ne 'PASS') {
+            throw "USB ESP32 COM single/multiple/missing-port regression failed"
+          }
           Write-Host "PASS offline report and physically honest RMT status"
       - name: Safety contract audit
         shell: powershell
@@ -74,6 +77,9 @@ jobs:
           }
           foreach($required in @('function ParseAdbList','function AssertAdbParserSelfTest','ADB USB setup incomplete','press ENTER to retry ADB','unauthorized','emulator-')) {
             if(-not $runner.Contains($required)){throw "Missing ADB USB diagnostic and retry guard: $required"}
+          }
+          foreach($required in @('function SelectEspPort','function AssertEspSelectorSelfTest','SelectEspPort -candidates $found','Single ESP port must not scalarize','Multiple ESP ports must fail closed')) {
+            if(-not $runner.Contains($required)){throw "Missing strict-mode COM-port selector regression: $required"}
           }
           foreach($required in @('function EnsureGh','function FindGh','Install official GitHub CLI using WinGet now? Type INSTALL','Open GitHub CLI authorization now? Type LOGIN','auth status --hostname github.com','--accept-package-agreements','--accept-source-agreements','$script:sessionStarted=$true')) {
             if(-not $runner.Contains($required)){throw "GitHub CLI setup guard absent: $required"}
