@@ -469,80 +469,10 @@ try {
   LocalRegressions $androidSha
   # The exact-head Android workflow already gates native source, JNI,
   # JUnit and APK packaging. Use its own artifact rather than waiting for
-  # the broader source-verification workflow to finish unrelated firmware.
+  # unrelated firmware tasks in the broader source verification workflow.
   $jobs=Api "repos/$repo/actions/runs/$($ai.id)/jobs?per_page=100"
   Need (@($jobs.jobs | Where-Object {$_.name -eq "android-exact-head" -and $_.conclusion -eq "success"}).Count -eq 1) "Exact-head Android build job failed"
-  $aa=Artifact $ai '^opentail-android-exact-head-debug-apk
-  $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') (Join-Path $session "firmware")
-  $apks=@(Get-ChildItem (Join-Path $session "apk") -Recurse -Filter "*.apk" -File)
-  Need ($apks.Count -eq 1) "Downloaded APK count not 1"
-  $apk=$apks[0].FullName
-  $firmware=FirmwarePackage (Join-Path $session "firmware") $firmwareSha
-  # The verified artifact includes an OPTIONAL destructive factory-reset
-  # utility. Remove it from this session so the owner cannot accidentally
-  # launch it while reviewing the downloaded images.
-  Get-ChildItem (Join-Path $session "firmware") -Recurse -File |
-    Where-Object {$_.Name -in @("03_FACTORY_RESET_COM9.bat","factory_reset.py")} |
-    Remove-Item -Force
-  $artifacts["Android APK"]=$aa.url+" SHA256="+(Get-FileHash -Algorithm SHA256 $apk).Hash
-  $artifacts["Firmware app"]=$fa.url+" SHA256="+$firmware.sha
-  Step "Verified artifacts" "PASS" "GitHub exact-head job, firmware manifest and SHA256SUMS verified"
-  $result=@(& adb -s $phone install -r $apk 2>&1)
-  Need ($LASTEXITCODE -eq 0 -and (($result -join " ") -match "Success")) ("ADB install failed; app data untouched: "+($result -join " "))
-  Step "Android install" "PASS" "adb install -r preserves app data; never uninstalls"
-  if($FlashFirmware) {
-   ConfirmedFlash $firmware.image $esp $firmwareSha
-   Step "Flash" "PASS" "Explicit app-only flash at 0x20000; no NVS erase"
-  } else {Step "Flash" "SKIPPED" "Default: never flash"}
-  $adbProcess=Start-Process -FilePath (Get-Command adb).Source -ArgumentList @("-s",$phone,"logcat","-v","threadtime","-T","1") -PassThru -NoNewWindow -RedirectStandardOutput $logcat -RedirectStandardError (Join-Path $session "logcat.stderr.txt")
-  $capture=Join-Path $PSScriptRoot "Serial-Capture.ps1"
-  Need (Test-Path $capture) "Serial-Capture.ps1 missing"
-  $captureArguments=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),"-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds")
-  $serialProcess=Start-Process -FilePath "powershell.exe" -ArgumentList $captureArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $session "serial.stderr.txt")
-  Start-Sleep -Seconds 2
-  Need (-not $serialProcess.HasExited) "Serial capture exited early; inspect serial.stderr.txt"
-  & adb -s $phone shell am start -n "com.opentail.android/.ComposeMainActivity" | Out-Null
-  $script:sessionStarted=$true
-  Step "Log capture" "CAPTURING" "$CaptureSeconds-second Android logcat + ESP USB serial session"
-  Write-Host "On PHONE: connect and authorize OpenTail using Bluetooth."
-  Write-Host "In Layout, use Check first LED (O1), then optionally O2, Show Modes and an unsaved edit."
-  Write-Host "The runner NEVER taps Save or sends a BLE effect automatically."
-  Write-Host "STOP priority remains in the existing BLE firmware/app protocol; this runner never sends LED commands."
-  if($DirectLedProbe){Write-Host "Independent RMT command unavailable in current firmware; BLE Pixel Probe + serial evidence only."}
-  Start-Sleep -Seconds $CaptureSeconds
-  # Start-Process -PassThru can expose a null ExitCode on Windows PS5.1.
-  # Verify the receive-only serial logger's own START/END evidence instead of
-  # treating a missing numeric exit code as a hardware/test failure.
-  $serialBody=Raw $serial
-  Need ($serialBody.Contains("[OpenTail] USB SERIAL LOG START")) "Serial logger did not write START marker; inspect serial.stderr.txt"
-  Need (-not $serialBody.Contains("[OpenTail] USB SERIAL CAPTURE ERROR:")) "Serial logger recorded an error; inspect esp32-serial.txt and serial.stderr.txt"
-  Need ($serialBody.Contains("[OpenTail] USB SERIAL LOG END")) "Serial logger did not complete; inspect esp32-serial.txt and serial.stderr.txt"
-  if($serialProcess.HasExited -and $null -ne $serialProcess.ExitCode -and $serialProcess.ExitCode -ne 0) {
-   throw "Serial capture exited with code $($serialProcess.ExitCode); inspect serial.stderr.txt"
-  }
-  Need ((Test-Path $logcat) -and ((Get-Item $logcat).Length -gt 0)) "Android logcat is missing or empty; inspect logcat.stderr.txt"
-  if($adbProcess.HasExited -and $null -ne $adbProcess.ExitCode -and $adbProcess.ExitCode -ne 0) {
-   throw "Android logcat exited with code $($adbProcess.ExitCode); inspect logcat.stderr.txt"
-  }
-  Step "Log capture" "PASS" "Android logcat present; ESP serial START/END markers verified"
-  if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
-   $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
-   Step "Head consistency" "WARN" "PR updated after artifact selection"
-  } else {Step "Head consistency" "PASS" "Exact same PR heads after session"}
- }
-} catch {
- $failed=$true
- Step "Runner error" "FAIL" $_.Exception.Message
-} finally {
- foreach($proc in @($adbProcess,$serialProcess)){
-  if($null -ne $proc){try {if(-not $proc.HasExited){Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue}}catch{}}
- }
- Start-Sleep -Milliseconds 400
- Report
-}
-if($failed){exit 1}
-exit 0
- (Join-Path $session "apk")
+  $aa=Artifact $ai '^opentail-android-exact-head-debug-apk$' (Join-Path $session "apk")
   $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') (Join-Path $session "firmware")
   $apks=@(Get-ChildItem (Join-Path $session "apk") -Recurse -Filter "*.apk" -File)
   Need ($apks.Count -eq 1) "Downloaded APK count not 1"
