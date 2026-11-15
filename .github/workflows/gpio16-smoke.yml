@@ -1,0 +1,54 @@
+name: GPIO16 bare-bones RMT smoke diagnostic
+on:
+  push:
+    branches: [diagnostic/gpio16-rmt-smoke-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile-gpio16:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify isolated 80-percent test and unchanged partition offsets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("diagnostics/gpio16-smoke/main/gpio16_smoke.c").read_text()
+          assert "#define SMOKE_GPIO GPIO_NUM_16" in p
+          assert "#define SMOKE_PIXELS 8u" in p
+          assert "#define SMOKE_BRIGHTNESS 204u" in p
+          assert ".with_dma = 0" in p
+          assert "GPIO_NUM_17" not in p
+          assert "nvs_flash" not in p
+          assert "rmt_transmit(tx, enc, pixels, sizeof(pixels)" in p
+          def rows(s):
+              return [",".join(x.split(",")[:5]).replace(" ","").lower()
+                      for x in s.splitlines() if x.strip() and not x.lstrip().startswith("#")]
+          assert rows(Path("diagnostics/gpio16-smoke/partitions_ota.csv").read_text()) == rows(
+              Path("core-firmware/partitions_ota.csv").read_text())
+          print("PASS isolated 8px/204 brightness, GPIO16, no DMA, production partition layout")
+          PY
+      - name: Build ESP32-S3 firmware with ESP-IDF v5.5.5 - no flash
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: diagnostics/gpio16-smoke
+          command: idf.py build
+      - name: Verify real images and package Windows COM9 runner
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" diagnostics/gpio16-smoke/build
+          python3 diagnostics/gpio16-smoke/package.py --source-sha "$SOURCE_SHA"
+      - name: Publish isolated diagnostic artifact (not flashed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-gpio16-smoke-80pct-${{ github.sha }}
+          path: diagnostics/gpio16-smoke/build/SmokePackage/
+          if-no-files-found: error
