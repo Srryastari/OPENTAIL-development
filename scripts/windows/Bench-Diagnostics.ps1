@@ -7,12 +7,12 @@ function Get-BenchFailure([string]$android,[string]$esp) {
  $cases=@(
   @('OWNER_ENROLLMENT','OpenTailOwner:\s*Owner enrollment refused\s*\(GATT\s*2\)|Owner enrollment refused[^\r\n]*GATT\s*2'),
   @('OWNER_CHALLENGE','OpenTailOwner:\s*Owner challenge unavailable|BLE challenge unavailable'),
-  @('OWNER_AUTHORIZATION','OpenTailOwner:\s*Owner HMAC rejected|Owner authorization rejected|BLE\s*[·:]\s*ERR AUTH'),
+  @('OWNER_AUTHORIZATION','OpenTailOwner:\s*Owner HMAC rejected|Owner authorization rejected|BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*ERR AUTH'),
   @('GATT_CONNECTION','(?:OpenTailOwner:|BluetoothGatt:)[^\r\n]*(?:GATT 133|status=133|status: 133)|BLE connection failed[^\r\n]*GATT'),
   @('SAVE','SAVE_REJECT|Panel Save[^\r\n]*(?:reject|failed)|Save[^\r\n]*code 10'),
   @('RENDERER','Renderer internal stack/TCB allocation failed|Pixel task intentionally disabled|render task could not start|render(?:er)?[^\r\n]*FAULT'),
   @('RMT','PIXEL_PROBE_RMT_FAIL|RMT[^\r\n]*(?:failed|error|timeout)'),
-  @('COMMAND','BLE write failed[^\r\n]*GATT|BLE\s*[·:]\s*ERR (?:FORMAT|BUSY|RANGE)')
+  @('COMMAND','BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*ERR (?:FORMAT|BUSY|RANGE)')
  )
  foreach($case in $cases) {
   if(HasBenchEvidence ($android+"\n"+$esp) $case[1]) {return [string]$case[0]}
@@ -32,8 +32,8 @@ function Get-BenchStages([string]$android,[string]$esp,[string]$mode,[bool]$star
   @('os_bond','BluetoothBondStateMachine:[^\r\n]*newState:\s*2\b|bond state change to 11 -> 12|BLUETOOTH_BOND_STATE_BONDED|OpenTailOwner:[^\r\n]*Bluetooth bond complete','Bluetooth pairing (?:failed|not completed)|BLE bond failed'),
   @('owner_enrollment','OpenTailOwner:[^\r\n]*Owner enrollment accepted','Owner enrollment refused|OpenTailOwner:[^\r\n]*Owner enrollment refused'),
   @('owner_challenge','OpenTailOwner:[^\r\n]*Owner HMAC proof queued','OpenTailOwner:[^\r\n]*Owner challenge unavailable|BLE challenge unavailable'),
-  @('owner_authorization','OpenTailOwner:[^\r\n]*Controller accepted owner HMAC|BLE\s*[·:]\s*OK AUTH','OpenTailOwner:[^\r\n]*Owner HMAC rejected|Owner authorization rejected|BLE\s*[·:]\s*ERR AUTH'),
-  @('command','BLE\s*[·:]\s*OK (?:SHOW|STOP|FX)|PIXEL_PROBE_ACCEPT','BLE write failed[^\r\n]*GATT|BLE\s*[·:]\s*ERR (?:FORMAT|RANGE|BUSY)'),
+  @('owner_authorization','OpenTailOwner:[^\r\n]*Controller accepted owner HMAC|BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*OK AUTH','OpenTailOwner:[^\r\n]*Owner HMAC rejected|Owner authorization rejected|BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*ERR AUTH'),
+  @('command','BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*OK (?:SHOW|STOP|FX)|PIXEL_PROBE_ACCEPT','BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\\r\\n]{1,4}\s*ERR (?:FORMAT|RANGE|BUSY)'),
   @('layout','Panel v4[^\r\n]*(?:readback[^\r\n]*verified|snapshot[^\r\n]*accepted)|PANEL_PREVIEW_UPDATE_ACCEPT','Panel v4[^\r\n]*(?:rejected|failed)|PANEL_PREVIEW_UPDATE_REJECT'),
   @('save','Panel Save[^\r\n]*(?:confirmed|complete|saved)[^\r\n]*readback|Save[^\r\n]*authoritative readback verified','SAVE_REJECT|Panel Save[^\r\n]*(?:reject|failed)|Save[^\r\n]*code 10'),
   @('renderer','Renderer task READY|Renderer task[^\r\n]*READY','Renderer internal stack/TCB allocation failed|Pixel task intentionally disabled|render task could not start'),
