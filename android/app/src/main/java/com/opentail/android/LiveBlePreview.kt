@@ -90,7 +90,7 @@ internal class LiveBlePreview(
             return false
         }
         armed = true
-        report("Continuous CORE playback enabled · Stop on Home")
+        report("CORE effects ready; waiting for controller command acknowledgement")
         return true
     }
 

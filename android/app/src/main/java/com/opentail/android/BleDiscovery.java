@@ -42,6 +42,16 @@ import java.util.function.Consumer;
 /** BLE discovery, encrypted bonded owner enrollment, and configuration. */
 final class BleDiscovery {
     interface StatusListener { void onStatus(String message); }
+    // Dedicated accepted/rejected FX/STOP notices; other BLE replies cannot
+    // be mistaken for a Show Modes acknowledgement.
+    private Consumer<String> showCommandListener;
+    void setShowCommandListener(Consumer<String> listener) { showCommandListener=listener; }
+    private void showCommandNotice(byte[] packet,String phase) {
+        String message=ShowPlaybackFeedback.describe(packet,phase);
+        if(message==null)return;
+        Log.i("OT_SHOW_CMD",message); // No tokens, owner keys or credentials.
+        ui.post(()->{if(!stopped && showCommandListener!=null)showCommandListener.accept(message);});
+    }
     // ESP-IDF NimBLE BLE_UUID128_INIT uses little-endian byte order.
     private static final UUID SERVICE_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf21");
     private static final UUID INFO_UUID = UUID.fromString("55a56022-4915-7a92-cf44-b8b7102eaf22");
@@ -1464,8 +1474,10 @@ final class BleDiscovery {
         final int lease=++commandWatchLease;
         ui.postDelayed(()->{
             if(!stopped && owner==gatt && lease==commandWatchLease &&
-                (writePending || readReplyPending))
+                (writePending || readReplyPending)) {
+                showCommandNotice(pendingPacket,"ERR TIMEOUT");
                 recoverStalledGatt(owner,"CORE command acknowledgement timed out");
+            }
         },COMMAND_TRANSACTION_TIMEOUT_MS);
     }
     private boolean writePending = false;
@@ -1723,6 +1735,7 @@ final class BleDiscovery {
         }
     }
     private void commandWriteStartFailed(String message) {
+        showCommandNotice(pendingPacket,"ERR WRITE START");
         discardFollowingFxIfStopFailed();
         writePending=false;
         authPending=false;
@@ -1798,7 +1811,10 @@ final class BleDiscovery {
                 ok=gatt.writeCharacteristic(command);
             }
             if(!ok)commandWriteStartFailed("BLE write could not start");
-            else watchCommandTransaction(gatt);
+            else {
+                showCommandNotice(packet,"GATT SENT");
+                watchCommandTransaction(gatt);
+            }
         }catch(SecurityException ex){commandWriteStartFailed("BLE permission missing");}
     }
     private void pumpQueue(){
@@ -2380,18 +2396,20 @@ final class BleDiscovery {
             if (!COMMAND_UUID.equals(characteristic.getUuid())) return;
             writePending=false;
             if(status!=BluetoothGatt.GATT_SUCCESS){
+                showCommandNotice(pendingPacket,"ERR GATT WRITE");
                 discardFollowingFxIfStopFailed();
                 authPending=false;authorized=false;
                 notifyStatus("BLE write failed (GATT " + status + ")");pumpQueue();return;
             }
-            if(reply==null){discardFollowingFxIfStopFailed();authPending=false;notifyStatus("CORE missing BLE reply characteristic");pumpQueue();return;}
+            if(reply==null){showCommandNotice(pendingPacket,"ERR REPLY MISSING");discardFollowingFxIfStopFailed();authPending=false;notifyStatus("CORE missing BLE reply characteristic");pumpQueue();return;}
             readReplyPending=true;
             try {
                 if (!connection.readCharacteristic(reply)){
+                    showCommandNotice(pendingPacket,"ERR REPLY READ");
                     readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;
                     notifyStatus("Could not read CORE BLE result");pumpQueue();
                 }
-            } catch(SecurityException ex){readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;notifyStatus("BLE read permission missing");pumpQueue();}
+            } catch(SecurityException ex){showCommandNotice(pendingPacket,"ERR REPLY READ");readReplyPending=false;discardFollowingFxIfStopFailed();authPending=false;notifyStatus("BLE read permission missing");pumpQueue();}
         }
     };
 
@@ -3059,6 +3077,7 @@ final class BleDiscovery {
         String response = status==BluetoothGatt.GATT_SUCCESS && raw!=null
                 ? new String(raw,StandardCharsets.US_ASCII) : "ERR READ";
         if (response.startsWith("ERR")) discardFollowingFxIfStopFailed();
+        showCommandNotice(pendingPacket,response); // The actual serialized CORE reply.
         if(authPending){
             authorized="OK AUTH".equals(response);authPending=false;
             ownerAccessFailure=authorized?null:"Owner authorization rejected (controller reply)";

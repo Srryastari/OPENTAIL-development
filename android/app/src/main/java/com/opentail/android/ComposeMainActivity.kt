@@ -219,6 +219,9 @@ class ComposeMainActivity : ComponentActivity() {
     private lateinit var livePreview: LiveBlePreview
     private val liveArmed = mutableStateOf(false)
     private val stopNotice = mutableStateOf<String?>(null)
+    // Show Modes reports real controller responses, not an inferred playback state.
+    private val showModeNotice = mutableStateOf("Select an effect, then Play to send it to CORE.")
+    private var queuedShowPlayEffect: Int? = null
     private val offlinePreview = mutableStateOf(false)
     private val offlineReplay = mutableIntStateOf(0)
     private val selectedEffect = mutableIntStateOf(0)
@@ -252,6 +255,10 @@ class ComposeMainActivity : ComponentActivity() {
     }
 
     private fun stopControllerShow() {
+        queuedShowPlayEffect = null // STOP cancels a deferred Play/capabilities read.
+        showModeNotice.value = if(ble.canControl())
+            "STOP requested; awaiting CORE acknowledgement"
+        else "STOP not sent: reconnect and authorize CORE"
         stopNotice.value = if(ble.canControl()) null else "STOP not sent: reconnect and authorize CORE"
         livePreview.stop()
         liveArmed.value = false
@@ -267,16 +274,45 @@ class ComposeMainActivity : ComponentActivity() {
         invalidateCoreFrame()
     }
 
+    // Explicit Play is independent of changing the editor's selected effect.
+    // On an authorized link, read capabilities once if their initial BLE read
+    // did not complete. A deferred request cannot survive STOP or disconnect.
+    private fun playShowMode(effectId: Int) {
+        queuedShowPlayEffect = null
+        if (effectId < 0 || NativeEffectCatalog.autoEventOnly(effectId)) {
+            showModeNotice.value = "Select a Show Modes effect before playing"
+            return
+        }
+        if (!ble.canControl()) {
+            showModeNotice.value = "Show not sent: connect and authorize the CORE owner"
+            return
+        }
+        offlinePreview.value = false // Explicit Play exits local-only design mode.
+        if (supportedIds.value.isEmpty()) {
+            queuedShowPlayEffect = effectId
+            showModeNotice.value = "Reading CORE effect capabilities before Play"
+            ble.readFxCapabilities()
+            return
+        }
+        previewCurrentEffect(effectId)
+    }
+
     // A single gesture updates the on-screen design immediately. When the
     // owner has explicitly armed a physical bench preview, the same gesture
     // also coalesces an ephemeral BLE FX update to the already-saved zones.
     private fun previewCurrentEffect(effectOverride: Int? = null) {
         invalidateCoreFrame() // any parameter change invalidates the frozen CORE frame
+        if (offlinePreview.value)
+            showModeNotice.value = "Offline design only; tap Play to send an effect to CORE"
         if (offlinePreview.value) return // Settings Preview Offline cannot send BLE edits
         // Live editing is the DEFAULT. Offline rendering always updates;
         // if owner-authorized BLE can preview this effect, stream the gesture
         // automatically without an extra "Live Edit Mode" switch.
         val effectId = effectOverride ?: prefs.getInt("effectId", 0)
+        if (!ble.canControl())
+            showModeNotice.value = "Show not sent: connect and authorize the CORE owner"
+        else if (supportedIds.value.isEmpty())
+            showModeNotice.value = "Show not sent: CORE effect catalog is unavailable; tap Play to retry"
         if (!ble.canControl() || supportedIds.value.isEmpty()) return
         val paletteId = prefs.getInt("paletteId", 0)
         // Preflight BEFORE arming or coalescing a BLE packet. Otherwise
@@ -288,15 +324,20 @@ class ComposeMainActivity : ComponentActivity() {
                 livePreview.detach()
                 liveArmed.value = false
             }
-            bleMessage.value = if (effectId !in supportedIds.value)
-                "Selected effect is unavailable on this CORE; design stays local"
-            else "Selected palette is unavailable for this CORE effect; design stays local"
+            showModeNotice.value = if (effectId !in supportedIds.value)
+                "Show not sent: selected effect is unsupported by this CORE"
+            else "Show not sent: selected palette is unsupported by this CORE effect"
+            bleMessage.value = showModeNotice.value
             return
         }
         if (!livePreview.isArmed()) {
-            if (!livePreview.arm()) return
+            if (!livePreview.arm()) {
+                showModeNotice.value = "Show not sent: CORE continuous FX capability unavailable or unauthorized"
+                return
+            }
             liveArmed.value = true
         }
+        showModeNotice.value = "Show queued; awaiting controller command result"
         livePreview.update(LiveBlePreview.Frame(
             effectId = effectId,
             chainMask = liveChainMask.intValue,
@@ -429,6 +470,8 @@ class ComposeMainActivity : ComponentActivity() {
                 }
             }
             if (!ble.canControl()) {
+                queuedShowPlayEffect = null
+                showModeNotice.value = "Controller disconnected or not authorized; no Show command available"
                 invalidateCoreFrame()
                 supportedIds.value = emptySet() // never reuse another CORE's FX capability list
                 coreTriggerMapping.value = null // never reuse another controller's physical input mapping
@@ -496,6 +539,9 @@ class ComposeMainActivity : ComponentActivity() {
         livePreview = LiveBlePreview(ble, { supportedIds.value }) { message ->
             runOnUiThread { bleMessage.value = message }
         }
+        ble.setShowCommandListener { result ->
+            runOnUiThread { showModeNotice.value = result }
+        }
         ble.setFrameListener { output, sequence, rgb, error ->
             runOnUiThread {
                 if (pendingFrameRevision != frameRevision ||
@@ -533,10 +579,21 @@ class ComposeMainActivity : ComponentActivity() {
             runOnUiThread { coreTriggerMapping.value = mapping }
         }
         ble.setFxCapabilitiesListener { data ->
-            try {
+            val available = runCatching {
                 val list = JSONArray(data)
-                supportedIds.value = (0 until list.length()).map { list.optInt(it) }.toSet()
-            } catch (_: Exception) { supportedIds.value = emptySet() }
+                (0 until list.length()).map { list.optInt(it) }.toSet()
+            }.getOrDefault(emptySet())
+            runOnUiThread {
+                supportedIds.value = available
+                queuedShowPlayEffect?.let { pending ->
+                    queuedShowPlayEffect = null
+                    if (!ble.canControl())
+                        showModeNotice.value = "Show cancelled: controller owner authorization unavailable"
+                    else if (pending !in available)
+                        showModeNotice.value = "Show not sent: CORE did not report selected effect capability"
+                    else playShowMode(pending) // Only the original explicit Play may resume.
+                }
+            }
         }
         ble.setPaletteListener { result ->
             runOnUiThread {
@@ -1429,6 +1486,11 @@ class ComposeMainActivity : ComponentActivity() {
         var chosen by rememberSaveable(projectLoadRevision.intValue) {
             mutableIntStateOf(effect)
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Pill("Play", t, enabled=chosen >= 0, strong=true) { playShowMode(chosen) }
+            Pill("Stop", t) { stopControllerShow() }
+        }
+        Caption(showModeNotice.value, t)
         EffectsPreview(t, if(chosen >= 0) chosen else -1, animateOffline=true)
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             listOf("Effects", "Presets", "Sequences").forEach { tab ->
