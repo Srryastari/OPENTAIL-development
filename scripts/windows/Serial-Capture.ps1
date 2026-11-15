@@ -7,13 +7,13 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
-$sp=New-Object System.IO.Ports.SerialPort($Port,115200,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One)
+$sp=[System.IO.Ports.SerialPort]::new($Port,115200,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One)
 $sp.Handshake=[System.IO.Ports.Handshake]::None
 $sp.DtrEnable=$false
 $sp.RtsEnable=$false
 $sp.ReadTimeout=250
 $sp.Encoding=[System.Text.Encoding]::UTF8
-$writer=New-Object System.IO.StreamWriter($OutFile,$false,(New-Object System.Text.UTF8Encoding($false)))
+$writer=[System.IO.StreamWriter]::new($OutFile,$false,[System.Text.UTF8Encoding]::new($false))
 try {
  $sp.Open()
  $writer.WriteLine("[OpenTail] USB SERIAL LOG START "+(Get-Date).ToString("o")+" port="+$Port+" baud=115200; receive-only")
