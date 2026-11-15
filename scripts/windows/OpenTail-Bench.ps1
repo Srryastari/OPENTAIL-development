@@ -266,8 +266,8 @@ function EspCom([string]$specified) {
   Need ($specified -match '^COM[0-9]{1,3}$') "ESP port must be COM-number"
   return $specified.ToUpperInvariant()
  }
- $found=@(Get-CimInstance Win32_PnPEntity | Where-Object {[string]$_.Name -match '\\(COM[0-9]+\\)'} | ForEach-Object {
-  [pscustomobject]@{port=([regex]::Match([string]$_.Name,'\\((COM[0-9]+)\\)')).Groups[1].Value;
+ $found=@(Get-CimInstance Win32_PnPEntity | Where-Object {[string]$_.Name -match '\(COM[0-9]+\)'} | ForEach-Object {
+  [pscustomobject]@{port=([regex]::Match([string]$_.Name,'\((COM[0-9]+)\)')).Groups[1].Value;
     label=[string]$_.Name;id=[string]$_.PNPDeviceID}
  })
  return SelectEspPort -candidates $found
