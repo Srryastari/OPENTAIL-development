@@ -103,3 +103,13 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Exact-SHA isolated bench APK compile
+        working-directory: android
+        run: gradle --no-daemon --stacktrace :app:assembleBench
+      - name: Upload side-by-side OpenTail Bench APK (manual install safe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-android-exact-head-bench-apk
+          path: android/app/build/outputs/apk/bench/app-bench.apk
+          if-no-files-found: error
+          retention-days: 14
