@@ -101,8 +101,8 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
  Tool "py"
  $version=@(& py -3 -m esptool version 2>&1)
  Need ($LASTEXITCODE -eq 0) "Install esptool: py -3 -m pip install esptool"
- $args=@("-3","-m","esptool","--chip","esp32s3","--port",$port,"--baud","115200","write_flash","--flash_mode","dio","--flash_freq","80m","--flash_size","16MB","0x20000",$image)
- & py @args 2>&1 | Tee-Object -FilePath (Join-Path $session "flash.log")
+ $esptoolArguments=@("-3","-m","esptool","--chip","esp32s3","--port",$port,"--baud","115200","write_flash","--flash_mode","dio","--flash_freq","80m","--flash_size","16MB","0x20000",$image)
+ & py @esptoolArguments 2>&1 | Tee-Object -FilePath (Join-Path $session "flash.log")
  Need ($LASTEXITCODE -eq 0) "Flashing failed; no erase command was used"
 }
 function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
@@ -194,8 +194,8 @@ try {
   $adbProcess=Start-Process -FilePath (Get-Command adb).Source -ArgumentList @("-s",$phone,"logcat","-v","threadtime","-T","1") -PassThru -NoNewWindow -RedirectStandardOutput $logcat -RedirectStandardError (Join-Path $session "logcat.stderr.txt")
   $capture=Join-Path $PSScriptRoot "Serial-Capture.ps1"
   Need (Test-Path $capture) "Serial-Capture.ps1 missing"
-  $args=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),"-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds")
-  $serialProcess=Start-Process -FilePath "powershell.exe" -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $session "serial.stderr.txt")
+  $captureArguments=@("-NoProfile","-ExecutionPolicy","Bypass","-File",('"'+$capture+'"'),"-Port",$esp,"-OutFile",('"'+$serial+'"'),"-Seconds","$CaptureSeconds")
+  $serialProcess=Start-Process -FilePath "powershell.exe" -ArgumentList $captureArguments -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $session "serial.stderr.txt")
   Start-Sleep -Seconds 2
   Need (-not $serialProcess.HasExited) "Serial capture exited early; inspect serial.stderr.txt"
   & adb -s $phone shell am start -n "com.opentail.android/.ComposeMainActivity" | Out-Null
@@ -203,8 +203,11 @@ try {
   Write-Host "On PHONE: connect and authorize OpenTail using Bluetooth."
   Write-Host "In Layout, use Check first LED (O1), then optionally O2, Show Modes and an unsaved edit."
   Write-Host "The runner NEVER taps Save or sends a BLE effect automatically."
+  Write-Host "STOP priority remains in the existing BLE firmware/app protocol; this runner never sends LED commands."
   if($DirectLedProbe){Write-Host "Independent RMT command unavailable in current firmware; BLE Pixel Probe + serial evidence only."}
   Start-Sleep -Seconds $CaptureSeconds
+  if($serialProcess.HasExited -and $serialProcess.ExitCode -ne 0){throw "Serial capture failed during session; inspect serial.stderr.txt"}
+  if($adbProcess.HasExited -and $adbProcess.ExitCode -ne 0){throw "Android logcat capture failed during session; inspect logcat.stderr.txt"}
   Step "Log capture" "PASS" "Android/ESP captures completed"
   if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
    $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
