@@ -205,7 +205,16 @@ function Phone([string]$specified) {
   $adbStdout=Join-Path $session "adb-devices.stdout.txt"
   $adbStderr=Join-Path $session "adb-devices.stderr.txt"
   $adbExe=(Get-Command adb.exe -ErrorAction Stop).Source
-  $adbRun=Start-Process -FilePath $adbExe -ArgumentList @("devices","-l") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $adbStdout -RedirectStandardError $adbStderr
+  Write-Host "Checking connected Android USB devices..."
+  # Do NOT use Start-Process -Wait: Windows may wait for ADB's daemon
+  # child process as well as the short-lived 'adb devices' client.
+  # Wait only for the client PID, with a bounded timeout.
+  $adbRun=Start-Process -FilePath $adbExe -ArgumentList @("devices","-l") -PassThru -NoNewWindow -RedirectStandardOutput $adbStdout -RedirectStandardError $adbStderr
+  if(-not $adbRun.WaitForExit(15000)) {
+   try {$adbRun.Kill()} catch {}
+   throw "ADB device detection timed out after 15 seconds. Close other ADB sessions or run 'adb kill-server' in a separate PowerShell window, then retry."
+  }
+  $adbRun.Refresh()
   $out=@(Get-Content $adbStdout -ErrorAction SilentlyContinue)
   $err=@(Get-Content $adbStderr -ErrorAction SilentlyContinue)
   Need ($adbRun.ExitCode -eq 0) ("ADB device discovery failed (exit "+$adbRun.ExitCode+"): "+($err -join " ")+ " "+($out -join " "))
