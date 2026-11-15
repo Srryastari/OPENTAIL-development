@@ -1603,3 +1603,41 @@ assert(compose.includes('else savedMapping.withLane(lane,') &&
   compose.includes('withCurrentEditorDraft(projected,lane)') &&
   compose.includes('withCurrentEditorDraft(projected,panelGeometryActiveLane)'),
   'Both outputs must preserve unedited authoritative Panel v4 geometry');
+
+
+// P0 bonded first-owner recovery regression (2026-11-14 physical bench).
+// The GATT link and Android OS bond can succeed while OpenTail owner HMAC
+// authorization remains incomplete. This test checks routing and admission;
+// a green CI status is never evidence of physical BLE/LED acceptance.
+const connectedOwnerRetry=bleSource.split('void connectFromApp(String preferredAddress) {')[1]
+  ?.split('if(connecting) {')[0];
+assert(connectedOwnerRetry &&
+       connectedOwnerRetry.includes('if(connected) {') &&
+       connectedOwnerRetry.includes('ui.post(thisAutoAuth(gatt));') &&
+       !connectedOwnerRetry.includes('if(BleOwnerVault.load(activity,activeAddress)!=null)authorizeStored();'),
+       'Connected without a vault key must retry owner enrollment rather than silently stop');
+const firstOwnerAttempt=bleSource.split('void pairWithBoot(){')[1]
+  ?.split('void authorizeStored(){')[0];
+assert(firstOwnerAttempt &&
+       firstOwnerAttempt.includes('if(!ownerEnrollmentCharacteristicsPresent())') &&
+       firstOwnerAttempt.includes('if(!ensureOwnerBond())return;') &&
+       !firstOwnerAttempt.includes('!ownerBondingSupported'),
+       'First-owner enrollment requires discovered GATT chars and secure bond, not optional INFO text');
+const infoCompletion=bleSource.split('private void finishInfoRead(')[1]
+  ?.split('private Runnable thisAutoAuth(')[0];
+assert(infoCompletion &&
+       infoCompletion.includes('if(status==BluetoothGatt.GATT_SUCCESS && value!=null)') &&
+       infoCompletion.includes('ownerEnrollmentCharacteristicsPresent()') &&
+       infoCompletion.includes('ui.post(thisAutoAuth(connection));'),
+       'Both INFO success and failure must allow a protected first-owner retry');
+assert(servicesBlock.includes('if (ownerEnrollmentCharacteristicsPresent() ||') &&
+       servicesBlock.includes('ui.post(thisAutoAuth(connection));'),
+       'An INFO read rejected at ATT start must not strand a bonded first owner');
+const homeConnect=compose.split('private fun HomePage(')[1]?.split('private fun capturePreviewFrame()')[0];
+assert(homeConnect &&
+       homeConnect.includes('if(ble.isConnected()) ble.authorizeOrPair()') &&
+       homeConnect.includes('Caption(ble.ownerAccessStatus(), t)') &&
+       bleSource.includes('String ownerAccessStatus() {') &&
+       bleSource.includes('return "Bluetooth connected · owner enrollment incomplete";') &&
+       bleSource.includes('return "Bluetooth connected · owner authorization incomplete";'),
+       'Home must show owner-vs-link status and allow manual recovery with no new UI workflow');
