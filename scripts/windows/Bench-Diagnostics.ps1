@@ -12,7 +12,7 @@ function Get-BenchFailure([string]$android,[string]$esp) {
   @('SAVE','SAVE_REJECT|Panel Save[^\r\n]*(?:reject|failed)|Save[^\r\n]*code 10'),
   @('RENDERER','Renderer internal stack/TCB allocation failed|Pixel task intentionally disabled|render task could not start|render(?:er)?[^\r\n]*FAULT'),
   @('RMT','PIXEL_PROBE_RMT_FAIL|RMT[^\r\n]*(?:failed|error|timeout)'),
-  @('COMMAND','BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*ERR (?:FORMAT|BUSY|RANGE)')
+  @('COMMAND','OT_SHOW_CMD:[^\r\n]*(?:Show|STOP) rejected|BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*ERR (?:FORMAT|BUSY|RANGE)')
  )
  foreach($case in $cases) {
   if(HasBenchEvidence ($android+"\n"+$esp) $case[1]) {return [string]$case[0]}
@@ -33,7 +33,7 @@ function Get-BenchStages([string]$android,[string]$esp,[string]$mode,[bool]$star
   @('owner_enrollment','OpenTailOwner:[^\r\n]*Owner enrollment accepted','Owner enrollment refused|OpenTailOwner:[^\r\n]*Owner enrollment refused'),
   @('owner_challenge','OpenTailOwner:[^\r\n]*Owner HMAC proof queued','OpenTailOwner:[^\r\n]*Owner challenge unavailable|BLE challenge unavailable'),
   @('owner_authorization','OpenTailOwner:[^\r\n]*Controller accepted owner HMAC|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*OK AUTH','OpenTailOwner:[^\r\n]*Owner HMAC rejected|Owner authorization rejected|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*ERR AUTH'),
-  @('command','BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*OK (?:SHOW|STOP|FX)|PIXEL_PROBE_ACCEPT','BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*ERR (?:FORMAT|RANGE|BUSY)'),
+  @('command','OT_SHOW_CMD:[^\r\n]*(?:CORE accepted Show effect|CORE acknowledged STOP)|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*OK (?:SHOW|STOP|FX)|PIXEL_PROBE_ACCEPT','OT_SHOW_CMD:[^\r\n]*(?:Show|STOP) rejected|BLE write failed[^\r\n]*GATT|BLE\s*[^A-Za-z0-9\r\n]{1,4}\s*ERR (?:FORMAT|RANGE|BUSY)'),
   @('layout','Panel v4[^\r\n]*(?:readback[^\r\n]*verified|snapshot[^\r\n]*accepted)|PANEL_PREVIEW_UPDATE_ACCEPT','Panel v4[^\r\n]*(?:rejected|failed)|PANEL_PREVIEW_UPDATE_REJECT'),
   @('save','Panel Save[^\r\n]*(?:confirmed|complete|saved)[^\r\n]*readback|Save[^\r\n]*authoritative readback verified','SAVE_REJECT|Panel Save[^\r\n]*(?:reject|failed)|Save[^\r\n]*code 10'),
   @('renderer','Renderer task READY|Renderer task[^\r\n]*READY','Renderer internal stack/TCB allocation failed|Pixel task intentionally disabled|render task could not start'),
@@ -104,7 +104,7 @@ function Get-CorrelatedEvents([string]$android,[string]$timeline,$clock,[int]$ma
   $offset=[TimeSpan]::FromMinutes($mins)
  }
  foreach($line in ($android -split '\r?\n')) {
-  if($line -notmatch 'OpenTailOwner:|BluetoothGatt:.*(?:onSearchComplete|onClientConnectionState|GATT 133)|BluetoothBondStateMachine:.*bondStateChange|SAVE_REJECT|BLE.*(?:ERR AUTH|OK AUTH)'){continue}
+  if($line -notmatch 'OT_SHOW_CMD:|OpenTailOwner:|BluetoothGatt:.*(?:onSearchComplete|onClientConnectionState|GATT 133)|BluetoothBondStateMachine:.*bondStateChange|SAVE_REJECT|BLE.*(?:ERR AUTH|OK AUTH)'){continue}
   $utc=$null
   $m=[regex]::Match($line,'^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})')
   if($clock.available -and $m.Success) {
@@ -149,4 +149,9 @@ function AssertBenchDiagnosticsSelfTest {
  $ev=@(Get-CorrelatedEvents "11-14 19:18:23.300 W OpenTailOwner: Owner enrollment refused (GATT 2)" "2026-11-15T01:18:23Z | I (123) OT_BLE: hello" $clock 5)
  Need ($ev.Count -eq 2 -and @($ev | Where-Object {$_.source -eq 'esp32'}).Count -eq 1) 'Correlated event parser failed'
  Need ((Get-BenchStages '' '' save $false).save.status -eq 'NOT RUN') 'Unexecuted Save must remain NOT RUN'
+ Need ((Get-BenchFailure 'I OT_SHOW_CMD: Show rejected (BUSY): verify Layout zone' '') -eq 'COMMAND') 'Rejected FX must classify as COMMAND'
+ Need ((Get-BenchStages 'I OT_SHOW_CMD: CORE accepted Show effect; verify physical LEDs' '' playback $true).command.status -eq 'PASS') 'CORE-accepted Show must be command PASS only, not optical PASS'
+ Need ((Get-BenchStages 'I OT_SHOW_CMD: Show sent over BLE; waiting for CORE reply' '' playback $true).command.status -eq 'NOT RUN') 'Pending GATT write cannot count as CORE acceptance'
+ Need ((Get-BenchStages 'I OT_SHOW_CMD: Show rejected (BUSY)' '' playback $true).command.status -eq 'FAIL') 'Explicit Show rejection must classify as FAIL'
+ Need ((Get-BenchStages '' '' playback $true).command.status -eq 'NOT RUN') 'No user Play means NOT RUN'
 }

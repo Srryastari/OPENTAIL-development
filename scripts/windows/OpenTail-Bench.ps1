@@ -591,13 +591,28 @@ try {
   Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
   AssertEspSelectorSelfTest
   Step "ESP COM selector self-test" "PASS" "Zero, one, multiple native/generic COM ports; strict-mode arrays"
+  # Prevent reintroduction of the old unconditional Firmware #127 gate.
+  $contract=Get-Content -LiteralPath $PSCommandPath -Raw
+  Need ($contract.Contains('if($FlashFirmware){$firmwareSha=Head 127}')) "Firmware PR lookup must be flash-only"
+  Need ($contract.Contains('if($FlashFirmware){'+"\n"+'   $fwRuns=') -or
+        $contract.Contains('if($FlashFirmware){'+"\r\n"+'   $fwRuns=')) "Firmware CI must be flash-only"
+  Need ($contract.Contains('($FlashFirmware -and (Head 127) -ne $firmwareSha)')) "Playback must not re-query Firmware #127"
+  Step "Firmware-gate self-test" "PASS" "Playback skips firmware PR, CI and artifact lookup; no flash"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } else {
   EnsureGh
   EnsureAdb
   $phone=Phone $AndroidSerial;$esp=EspCom $EspPort
   Step "USB" "PASS" "Authorized phone $phone; ESP logging $esp"
-  $androidSha=Head 111;$firmwareSha=Head 127
+  # Explicit flash is the ONLY mode that depends on firmware PR #127 CI.
+  # A playback session uses the real installed controller, with no firmware
+  # PR query, release lookup, download, erase, or write.
+  if($FlashFirmware -and $Mode -eq 'playback'){
+   throw "Playback is read-only. Use OpenTail-Bench.bat flash separately if you intentionally want to flash firmware."
+  }
+  $androidSha=Head 111
+  $firmwareSha=""
+  if($FlashFirmware){$firmwareSha=Head 127}
   $androidRuns=Api "repos/$repo/actions/runs?head_sha=$androidSha&per_page=100"
   $ai=GoodRun $androidRuns "Android exact-head software integration"
   $jni=GoodRun $androidRuns "Issue103 reconciled Effects/Firmware/Android exact SHA (software only)"
@@ -607,8 +622,11 @@ try {
    $fwRuns=Api "repos/$repo/actions/runs?head_sha=$firmwareSha&per_page=100"
    $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
    $ci["Firmware regression"]=$fi.id
-  }else{$notes.Add("Firmware #127 is undergoing independent development; no firmware build or flash required for read-only diagnostics")}
-  Step "CI software" "PASS" "Exact-head Android and JNI workflows verified; Firmware #127 HEAD recorded, not flash-verified in diagnostics mode"
+  }else{
+   $notes.Add("Read-only playback uses installed firmware; no Firmware #127 PR query, CI gate, firmware download or flash")
+   Step "Firmware CI" "SKIPPED" "Read-only $Mode: installed controller firmware only; Firmware #127 not required"
+  }
+  Step "CI software" "PASS" "Exact-head Android and JNI workflow passed; firmware CI only for explicit flash"
   LocalRegressions $androidSha
   # The exact-head Android workflow already gates native source, JNI,
   # JUnit and APK packaging. Use its own artifact rather than waiting for
@@ -688,7 +706,7 @@ try {
    throw "Android logcat exited with code $($adbProcess.ExitCode); inspect logcat.stderr.txt"
   }
   Step "Log capture" "PASS" "Android logcat and ESP serial START/END verified; captured $captureElapsed s"
-  if((Head 111) -ne $androidSha -or (Head 127) -ne $firmwareSha) {
+  if((Head 111) -ne $androidSha -or ($FlashFirmware -and (Head 127) -ne $firmwareSha)) {
    $notes.Add("PR head changed during session; pinned artifacts may no longer be latest")
    Step "Head consistency" "WARN" "PR updated after artifact selection"
   } else {Step "Head consistency" "PASS" "Exact same PR heads after session"}

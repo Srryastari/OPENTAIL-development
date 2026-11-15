@@ -21,7 +21,8 @@ if /I "%~1"=="flash" set "EXTRA=-FlashFirmware"
 if /I "%~1"=="led" set "EXTRA=-DirectLedProbe"
 if /I "%~1"=="selftest" set "EXTRA=-SelfTest"
 echo.
-echo OpenTail FAST bench: %MODE% ^| %SECONDS% seconds
+echo OpenTail FAST bench v2026.11.15.2: %MODE% ^| %SECONDS% seconds
+echo Read-only playback NEVER requires Firmware #127 CI or a firmware flash.
 echo Android USB logcat + ESP COM receive-only; no automatic BLE, LED or firmware commands.
 echo APK data erase requires a separate explicit approval prompt.
 echo.

@@ -2,6 +2,12 @@
 
 **Default:** double-click `OpenTail-Bench.bat` for a **30-second Bluetooth-only** capture. There is **no automatic controller command**, LED activation, Save, reset or firmware flash. Keep the Android phone on USB debugging and the ESP32 serial adapter on COM9 (or another detected unambiguous COM port).
 
+## One-click playback diagnosis
+
+For Show Modes, **run `OpenTail-Playback.bat`** from the project root. Its `-Mode playback -CaptureSeconds 30` invocation never passes `-FlashFirmware`. Firmware #127 PR lookup, firmware CI, and firmware artifact download are omitted: the runner observes the **installed** ESP32 firmware. When capture begins, tap Android **Show Modes → Solid Red → Play → Stop**. The runner does not send BLE commands or activate physical LEDs. `OK FX` proves controller acceptance only, not illumination.
+
+If your console still says **"OpenTail one-click USB + BLE bench session"**, your local copy is outdated. Replace the runner scripts and launcher from the verified patch artifact. The corrected launcher says **"OpenTail Playback Diagnostics v2026.11.15.2"**. Never mix the newer launcher with older scripts.
+
 ## One launcher, four targeted sessions
 
 | Command | Scope | Default duration |
@@ -9,7 +15,7 @@
 | `OpenTail-Bench.bat` / `OpenTail-Bench.bat ble` | Bluetooth connection, OS bond, owner enrollment/challenge/authorization | 30 s |
 | `OpenTail-Bench.bat layout` | Layout and optional owner-controlled Pixel Probe | 30 s |
 | `OpenTail-Bench.bat save` | Owner-initiated Save/Reload | 30 s |
-| `OpenTail-Bench.bat playback` | Owner-initiated Show Modes and STOP | 30 s |
+| `OpenTail-Playback.bat` / `OpenTail-Bench.bat playback` | Owner-initiated Show Modes / STOP, no firmware CI/flash | 30 s |
 | `OpenTail-Bench.bat extended` | Bluetooth capture | 120 s |
 | `OpenTail-Bench.bat layout extended` | Layout capture | 120 s |
 | `OpenTail-Bench.bat selftest` | Offline PowerShell 5.1 regressions; **no hardware** | N/A |

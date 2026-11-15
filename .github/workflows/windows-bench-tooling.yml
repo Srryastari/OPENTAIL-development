@@ -104,4 +104,22 @@ jobs:
           if(-not $bat.Contains('SECONDS=30')){throw "FAST default missing"}
           if(-not $bat.Contains('MODE=save') -or -not $bat.Contains('MODE=playback')){throw "Targeted modes missing"}
           if(-not $serial.Contains('$sp.DtrEnable=$false') -or -not $serial.Contains('$sp.RtsEnable=$false')){throw "Receive-only serial safety lost"}
+          $playback=Get-Content 'OpenTail-Playback.bat' -Raw
+          if(-not $playback.Contains('-Mode playback -CaptureSeconds 30') -or $playback.Contains('-FlashFirmware')){throw "One-click playback must never request firmware flash"}
+          if(-not $runner.Contains('Step "Firmware CI" "SKIPPED"') -or -not $runner.Contains('if($FlashFirmware){$firmwareSha=Head 127}')){throw "Read-only playback must not depend on Firmware #127"}
           Write-Host "PASS no controller HTTP, no automatic flash, app-partition only and receive-only serial"
+
+      - name: Upload verified Windows FAST runner replacement
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentail-playback-runner-fix-v2026-11-15-2
+          path: |
+            OpenTail-Bench.bat
+            OpenTail-Playback.bat
+            scripts/windows/OpenTail-Bench.ps1
+            scripts/windows/Bench-Diagnostics.ps1
+            scripts/windows/Serial-Capture.ps1
+            scripts/windows/BENCH-README.md
+          if-no-files-found: error
+          retention-days: 30
