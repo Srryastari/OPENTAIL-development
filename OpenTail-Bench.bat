@@ -3,23 +3,32 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 where powershell.exe >nul 2>&1
 if errorlevel 1 (
-  echo ERROR: Windows PowerShell is required.
+  echo ERROR: Windows PowerShell 5.1 is required.
   pause
   exit /b 1
 )
-echo.
-echo OpenTail one-click USB + BLE bench session
-echo Android: USB ADB, ESP32: USB serial logs, controller commands: phone BLE.
-echo Firmware flash: OFF unless explicitly selected with "flash".
-echo.
+set "MODE=bluetooth"
+set "SECONDS=30"
 set "EXTRA="
+if /I "%~1"=="bluetooth" set "MODE=bluetooth"
+if /I "%~1"=="ble" set "MODE=bluetooth"
+if /I "%~1"=="layout" set "MODE=layout"
+if /I "%~1"=="save" set "MODE=save"
+if /I "%~1"=="playback" set "MODE=playback"
+if /I "%~1"=="extended" set "SECONDS=120"
+if /I "%~2"=="extended" set "SECONDS=120"
 if /I "%~1"=="flash" set "EXTRA=-FlashFirmware"
 if /I "%~1"=="led" set "EXTRA=-DirectLedProbe"
 if /I "%~1"=="selftest" set "EXTRA=-SelfTest"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\OpenTail-Bench.ps1" %EXTRA%
+echo.
+echo OpenTail FAST bench: %MODE% ^| %SECONDS% seconds
+echo Android USB logcat + ESP COM receive-only; no automatic BLE, LED or firmware commands.
+echo APK data erase requires a separate explicit approval prompt.
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\windows\OpenTail-Bench.ps1" -Mode %MODE% -CaptureSeconds %SECONDS% %EXTRA%
 set "RESULT=%ERRORLEVEL%"
 echo.
 echo Runner exit code: %RESULT%.
-echo Log and report directories are under bench-reports.
+echo REPORT.md and RESULTS.json are under bench-reports.
 pause
 exit /b %RESULT%
