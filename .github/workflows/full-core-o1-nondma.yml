@@ -1,0 +1,100 @@
+name: Full CORE GPIO16 non-DMA isolation build
+on:
+  push:
+    branches: [diagnostic/full-core-o1-nondma-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-and-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact SHA, narrow diagnostic changes, and unchanged physical mapping
+        shell: bash
+        env:
+          PIN: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PIN"
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          baseline="f13379ca5498195d076c7ce4e43f5fe24d194527"
+          modified=set(subprocess.check_output(
+              ["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          allowed={
+              "core-firmware/main/opentail_core.c",
+              "core-firmware/tests/test_ws2815_driver.py",
+              "core-firmware/tests/check_rmt_cache_safe.py",
+              ".github/workflows/full-core-o1-nondma.yml",
+              "diagnostics/full-core-o1-nondma/README.txt",
+          }
+          assert modified<=allowed, f"Unauthorized change: {modified-allowed}"
+          core=Path("core-firmware/main/opentail_core.c").read_text()
+          snippet=core.split("static bool strip_configure_channel(",1)[1].split("static bool strip_init(",1)[0]
+          assert ".mem_block_symbols=64" in snippet and ".flags={.with_dma=false}" in snippet
+          assert ".resolution_hz=10000000" in snippet
+          assert "t0h_ns=300,.t0l_ns=900,.t1h_ns=900,.t1l_ns=300,.reset_us=320" in snippet
+          assert "strip_gpio_num=out_pin[ch]" in snippet
+          assert "0u,64u," in core
+          assert "#define OT_OUT_LEFT_GPIO 16" in Path("core-firmware/main/board_config.h").read_text()
+          print("PASS exact scope: O1 nonDMA/64; GPIO16, LED timing, Panel v4 untouched")
+          PY
+      - name: Full CORE host tests — preserve renderer/Panel/BLE/trigger behavior
+        run: cd core-firmware && bash tests/run-host-tests.sh
+  esp-idf-exact-sha-and-easyflash:
+    needs: source-and-host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build full CORE for ESP32-S3, ESP-IDF 5.5.5 (NO FLASH)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: core-firmware
+          command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf
+      - name: Validate exact pinned WS2815 driver on simulated RMT
+        shell: bash
+        run: |
+          python3 core-firmware/tests/test_ws2815_driver.py core-firmware/managed_components/espressif__led_strip
+      - name: Build full-image COM9 runner from verified binaries (NO FLASH)
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          sudo chown -R "$(id -u):$(id -g)" core-firmware/build
+          python3 scripts/build_easyflash.py --build core-firmware/build --out core-firmware/build/EasyFlash --sha "$SOURCE_SHA" --version 0.1.33-alpha
+          (cd core-firmware/build/EasyFlash && python3 verify_sha256.py)
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,json
+          p=Path("core-firmware/build/EasyFlash")
+          meta=json.loads((p/"release_manifest.json").read_text())
+          assert meta["git_sha"]==os.environ["SOURCE_SHA"]
+          assert meta["version"]=="0.1.33-alpha"
+          assert meta["erase_nvs"] is False
+          assert meta["flasher_offsets"]=={
+              "0x0":"bootloader/bootloader.bin",
+              "0x8000":"partition_table/partition-table.bin",
+              "0xf000":"ota_data_initial.bin",
+              "0x20000":"opentail_core_alpha.bin"}
+          assert (p/"01_FLASH_COM9.bat").is_file()
+          print("PASS exact-source/runner/offsets/NVS preserved")
+          PY
+          cp diagnostics/full-core-o1-nondma/README.txt core-firmware/build/EasyFlash/README-OUTPUT1-NODMA.txt
+      - name: Upload isolated full-CORE build and Windows runner (NOT FLASHED)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FULLCORE-o1-NODMA-64sym-v0.1.33-alpha-run${{ github.run_number }}-${{ github.sha }}
+          path: core-firmware/build/EasyFlash/
+          if-no-files-found: error
