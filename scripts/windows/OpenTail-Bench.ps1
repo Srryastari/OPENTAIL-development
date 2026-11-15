@@ -372,6 +372,14 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
  Need ($LASTEXITCODE -eq 0) "Flashing failed; no erase command was used"
 }
 function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
+function OwnerLogStage([string]$body) {
+ # Non-secret, app-owned BLE diagnostic events; never evidence of optical output.
+ $found=@([regex]::Matches($body,'(?m)^[^\r\n]*OpenTailOwner:\s*([^\r\n]+)') |
+   ForEach-Object {$_.Groups[1].Value.Trim()})
+ if($found.Count -eq 0){return "No OpenTailOwner handshake stage captured"}
+ $last=[string]$found[$found.Count-1]
+ return $last.Substring(0,[Math]::Min($last.Length,180))
+}
 function Evidence {
  if(-not $script:sessionStarted) {
   Step "BLE runtime" "NOT RUN" "Session stopped during setup; no BLE log was captured"
@@ -389,6 +397,7 @@ function Evidence {
  $frame=[regex]::Matches($b,'PIXEL_PROBE_NONBLACK_FRAME').Count
  $save=[regex]::Matches(($a+[Environment]::NewLine+$b),'(?i)save.{0,50}(reject|code 10)|SAVE_REJECT').Count
  Step "BLE runtime" $(if($errors -gt 0){"FAIL"}else{"NOT VERIFIED"}) "GATT133=$errors; queued/busy=$busy"
+ Step "Owner authorization" "NOT VERIFIED" (OwnerLogStage $a)
  Step "Pixel Probe" "NOT OPTICALLY VERIFIED" "Controller ACCEPT=$ok; RMT_DONE=$rmt; NONBLACK_FRAME=$frame"
  Step "Save runtime" $(if($save -gt 0){"FAIL"}else{"NOT VERIFIED"}) "save rejection matches=$save; no automatic NVS write"
  Step "Playback runtime" "NOT OPTICALLY VERIFIED" "Human BLE app action required; no command issued by runner"
@@ -436,6 +445,9 @@ try {
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
   AssertZipCheckoutSelfTest
   Step "ZIP checkout self-test" "PASS" "Missing Git metadata safely bypasses optional local source checks"
+  Need ((OwnerLogStage ("I OpenTailOwner: bonding`nI OpenTailOwner: Controller accepted owner HMAC")) -eq "Controller accepted owner HMAC") "Owner log stage selection failed"
+  Need ((OwnerLogStage "I unrelated: no owner") -eq "No OpenTailOwner handshake stage captured") "Owner absent stage selection failed"
+  Step "Owner log parser self-test" "PASS" "Latest sanitized app owner stage; not physical acceptance"
   AssertAdbParserSelfTest
   Step "ADB device parser self-test" "PASS" "No USB device / unauthorized / authorized / emulator / multiple device cases"
   AssertEspSelectorSelfTest
