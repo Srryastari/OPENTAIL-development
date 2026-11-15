@@ -7,7 +7,7 @@ The controller is commanded **only over Bluetooth through the Android OpenTail a
 ## One-time prerequisites
 
 - Windows PowerShell 5.1 (included with Windows).
-- Android SDK Platform Tools ADB on PATH. Enable Developer Options / USB debugging on the phone; attach a data USB-C cable; approve USB debugging. The command 'adb devices -l' should show exactly one 'device'.
+- Android SDK Platform Tools ADB installed. The runner detects ADB on PATH **or** in Android Studio's standard local SDK directory, without editing system PATH. If unavailable, it provides an official installation link. Enable Developer Options / USB debugging on the phone, attach a data USB-C cable, and approve USB debugging. ADB should report exactly one authorized 'device'.
 - GitHub CLI gh (for verified Actions artifacts). **The launcher now checks for it, including standard Windows installation folders.** If missing, it offers to run the official WinGet installer only after you type INSTALL; if not signed in, it offers GitHub's browser authorization only after you type LOGIN. Both are one-time setup steps. If WinGet is unavailable, install GitHub CLI from https://cli.github.com/ and rerun. No account tokens are copied into the launcher or logs.
 - ESP32-S3 N16R8 USB-C cable and USB serial/JTAG driver. Device Manager must show a COM port. The runner recognizes ESP32 VID_303A, USB-JTAG, CP210, CH340 and FTDI, and refuses to guess when multiple ports qualify.
 - Only for optional **explicit firmware flashing**: Python Windows launcher 'py -3' and 'py -3 -m pip install esptool'. Not needed for serial logging.
