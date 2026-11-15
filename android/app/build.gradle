@@ -15,6 +15,7 @@ android {
         targetSdk 35
         versionCode 37
         versionName '0.2.0-alpha7'
+        manifestPlaceholders = [appDisplayName: '@string/app_name']
     }
     // Isolated physical-bench APK. Never replaces or clears the owner's
     // com.opentail.android installation, projects or encrypted owner vault.
@@ -23,6 +24,7 @@ android {
         bench {
             initWith debug
             applicationIdSuffix '.bench'
+            manifestPlaceholders = [appDisplayName: 'OpenTail Bench']
             versionNameSuffix '-bench'
             matchingFallbacks = ['debug']
             debuggable true
