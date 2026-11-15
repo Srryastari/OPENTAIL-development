@@ -502,62 +502,77 @@ function OwnerLogStage([string]$body) {
  return $last.Substring(0,[Math]::Min($last.Length,180))
 }
 function Evidence {
+ $a=Raw $logcat;$b=Raw $serial
+ $script:benchStages=Get-BenchStages $a $b $Mode $script:sessionStarted
+ $script:installedIdentity=Get-InstalledFirmwareIdentity $b $a
+ $script:correlated=@(Get-CorrelatedEvents $a (Raw $timeline) $clockInfo 40)
  if(-not $script:sessionStarted) {
-  Step "BLE runtime" "NOT RUN" "Session stopped during setup; no BLE log was captured"
-  Step "Pixel Probe" "NOT RUN" "No physical diagnostic was executed"
-  Step "Save runtime" "NOT RUN" "No Save test was executed"
-  Step "Playback runtime" "NOT RUN" "No playback test was executed"
-  Step "Independent RMT test" "UNAVAILABLE" "Firmware has no verified USB LED command"
+  Step "BLE runtime" "NOT RUN" "Session stopped before physical capture"
+  Step "Pixel Probe" "NOT RUN" "Not exercised"
+  Step "Save runtime" "NOT RUN" "Not exercised"
+  Step "Playback runtime" "NOT RUN" "Not exercised"
+  Step "Independent RMT test" "UNAVAILABLE" "No verified read-only serial RMT diagnostic; BLE Pixel Probe requires owner action"
   return
  }
- $a=Raw $logcat;$b=Raw $serial
- $errors=[regex]::Matches($a,'(?i)gatt.{0,30}133|status[=: ]+133').Count
- $busy=[regex]::Matches($a,'(?i)pixel probe busy|pixel probe queued behind').Count
- $ok=[regex]::Matches($b,'PIXEL_PROBE_ACCEPT').Count
- $rmt=[regex]::Matches($b,'PIXEL_PROBE_RMT_DONE').Count
- $frame=[regex]::Matches($b,'PIXEL_PROBE_NONBLACK_FRAME').Count
- $save=[regex]::Matches(($a+[Environment]::NewLine+$b),'(?i)save.{0,50}(reject|code 10)|SAVE_REJECT').Count
- Step "BLE runtime" $(if($errors -gt 0){"FAIL"}else{"NOT VERIFIED"}) "GATT133=$errors; queued/busy=$busy"
- Step "Owner authorization" "NOT VERIFIED" (OwnerLogStage $a)
- Step "Pixel Probe" "NOT OPTICALLY VERIFIED" "Controller ACCEPT=$ok; RMT_DONE=$rmt; NONBLACK_FRAME=$frame"
- Step "Save runtime" $(if($save -gt 0){"FAIL"}else{"NOT VERIFIED"}) "save rejection matches=$save; no automatic NVS write"
- Step "Playback runtime" "NOT OPTICALLY VERIFIED" "Human BLE app action required; no command issued by runner"
- Step "Independent RMT test" "UNAVAILABLE" "Existing firmware has no verified USB serial LED command; BLE Pixel Probe plus serial logs only"
+ Step "BLE runtime" $benchStages.gatt_connection.status $benchStages.gatt_connection.evidence
+ Step "Owner authorization" $benchStages.owner_authorization.status $benchStages.owner_authorization.evidence
+ Step "Pixel Probe" $benchStages.pixel_probe.status "Firmware receipt only; physical illumination requires human verification"
+ Step "Save runtime" $benchStages.save.status $benchStages.save.evidence
+ Step "Playback runtime" $benchStages.command.status "BLE command acknowledgment only; physical output not certified"
+ Step "Independent RMT test" "UNAVAILABLE" "No verified independent USB RMT command"
 }
 function Report {
  Evidence
- $summary=[ordered]@{date=$stamp;android_sha=$androidSha;firmware_sha=$firmwareSha;phone_adb=$phone;esp_usb=$esp;
-  result=$(if($failed -and -not $sessionStarted){"SETUP FAILURE / NO HARDWARE TESTS RUN"}elseif($failed){"FAIL / INCOMPLETE"}elseif($SelfTest){"OFFLINE SELFTEST PASS; NO HARDWARE TESTED"}else{"EXACT-HEAD SOFTWARE VERIFIED; PHYSICAL NOT VERIFIED"});
-  checks=$steps;ci=$ci;artifacts=$artifacts;notes=@($notes)}
- $summary | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
+ $stages=$script:benchStages
+ $observedFailures=@($stages.GetEnumerator() | Where-Object {$_.Value.status -eq 'FAIL'})
+ $overall='BLOCKED'
+ if($SelfTest){$overall='PASS'}
+ elseif($failed -and -not $installBlocked){$overall='FAIL'}
+ elseif($observedFailures.Count -gt 0){$overall='FAIL'}
+ elseif($installBlocked){$overall='BLOCKED'}
+ elseif($sessionStarted) {
+  $goal=$(switch($Mode){'bluetooth'{'owner_authorization'};'layout'{'layout'};'save'{'save'};'playback'{'command'}})
+  if($stages[$goal].status -eq 'PASS'){$overall='PASS'}
+ }
+ $summary=[ordered]@{schema_version=1;date=$stamp;mode=$Mode;status=$overall;
+   capture_requested_seconds=$CaptureSeconds;capture_elapsed_seconds=$captureElapsed;
+   early_exit_cause=$(if($earlyFailure){$earlyFailure}else{$null});
+   android_sha=$androidSha;downloaded_firmware_sha=$firmwareSha;
+   installed_firmware=$installedIdentity;phone_adb=$phone;esp_usb=$esp;
+   clock_correlation=$clockInfo;stages=$stages;checks=$steps;ci=$ci;
+   artifacts=$artifacts;events=$correlated;notes=@($notes)}
+ $summary | ConvertTo-Json -Depth 15 | Set-Content (Join-Path $session "RESULTS.json") -Encoding UTF8
+ # Retain the old filename for existing no-hardware smoke tests and consumers.
+ $summary | ConvertTo-Json -Depth 15 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
  $lines=New-Object System.Collections.Generic.List[string]
- $lines.Add("# OpenTail Windows USB + BLE bench - $stamp")
- $lines.Add("Overall: "+$summary.result)
- $lines.Add("Android PR #111: "+$androidSha)
- $lines.Add("Firmware artifact PR #127 (installed firmware version not independently measured): "+$firmwareSha)
- $lines.Add("ADB: "+$phone+"; ESP serial: "+$esp)
+ $lines.Add("# OpenTail bench — $Mode — $overall")
+ $lines.Add("Requested: $CaptureSeconds s; captured: $captureElapsed s; stop reason: "+$(if($earlyFailure){$earlyFailure}else{'normal/none'}))
+ $lines.Add("Android source: "+$androidSha)
+ $lines.Add("Downloaded firmware source (NOT confirmed installed): "+$firmwareSha)
+ $installedVersion=$(if($installedIdentity.version){$installedIdentity.version}else{'UNAVAILABLE (no physical version banner)'})
+ $lines.Add("Installed firmware version: "+$installedVersion+"; source: "+$installedIdentity.source)
+ $lines.Add("Installed firmware Git SHA: "+$(if($installedIdentity.installed_git_sha){$installedIdentity.installed_git_sha}else{'NOT OBSERVED'}))
  $lines.Add("")
- $lines.Add("| Check | Result | Evidence |")
+ $lines.Add("| Stage | Result | Evidence |")
  $lines.Add("|---|---|---|")
- foreach($key in $steps.Keys) {
-  $v=$steps[$key]
-  $lines.Add("| "+$key+" | "+$v.state+" | "+([string]$v.detail).Replace("|","/")+" |")
+ foreach($name in $stages.Keys) {
+  $value=$stages[$name]
+  $lines.Add("| "+$name+" | "+$value.status+" | "+([string]$value.evidence).Replace('|','/')+" |")
  }
  $lines.Add("")
- $lines.Add("## Executed GitHub Actions regression evidence")
- foreach($name in $ci.Keys){$lines.Add("- "+$name+": PASS, Actions run "+$ci[$name])}
- $lines.Add("")
- $lines.Add("## Exact-head artifact evidence")
- foreach($key in $artifacts.Keys){$lines.Add("- "+$key+": "+$artifacts[$key])}
- $lines.Add("")
- $lines.Add("## Logs: android-logcat.txt and esp32-serial.txt")
- $lines.Add("Raw logs stay on the PC. No BLE pairing secrets were requested.")
- $lines.Add("NEVER equate software/RMT_DONE with physical optical acceptance.")
- $lines.Add("No automatic firmware flashing, NVS erase, Save, reboot or hardcoded light counts.")
+ $lines.Add("## Capture and integrity")
+ foreach($name in $steps.Keys) {
+  $v=$steps[$name]
+  $lines.Add("- "+$name+": "+$v.state+" — "+$v.detail)
+ }
+ $lines.Add("- Android/COM9 alignment: "+$(if($clockInfo.available){"Phone clock skew $($clockInfo.phone_skew_seconds) seconds; phone offset $($clockInfo.phone_utc_offset), uncertainty at least $($clockInfo.uncertainty_ms) ms; ESP UTC from receive-time stamps"}else{"Phone clock unavailable; do not claim aligned Android UTC"}))
+ $lines.Add("- Installed firmware SHA is never inferred from the downloaded artifact.")
+ $lines.Add("- Physical LED illumination and saved-scene behavior require owner observation.")
+ $lines.Add("- Files: RESULTS.json, android-logcat.txt, esp32-serial.txt, esp32-timeline.txt (when capture ran)")
  foreach($n in $notes){$lines.Add("- "+$n)}
- $path=Join-Path $session "REPORT.md"
- $lines | Set-Content $path -Encoding UTF8
- Write-Host ("Report: "+$path)
+ $lines | Set-Content (Join-Path $session "REPORT.md") -Encoding UTF8
+ Write-Host ("Report: "+(Join-Path $session "REPORT.md"))
+ Write-Host ("Structured: "+(Join-Path $session "RESULTS.json"))
 }
 $stamp=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 try {
