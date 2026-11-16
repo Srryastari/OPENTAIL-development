@@ -465,9 +465,15 @@ function Install-VerifiedAndroid([string]$phone,[string]$apk,[string]$sha) {
    throw "Android APK update blocked by signing mismatch; no uninstall attempted"
   }
   $gone=Invoke-AdbCapture @("-s",$phone,"uninstall","com.opentail.android") "adb-uninstall" 120000
-  Need ($gone.exit -eq 0 -and $gone.output -match '(?m)^Success\s*$') ("Approved Android uninstall failed: "+$gone.output)
+  # ADB sometimes prints Success even when Windows reports an inconsistent process exit code.
+  # Verify the actual package state rather than accepting or rejecting the uninstall on text alone.
+  $afterUninstall=Invoke-AdbCapture @("-s",$phone,"shell","pm","path","com.opentail.android") "adb-uninstall-verify" 20000
+  $removed=($afterUninstall.exit -eq 0 -and $afterUninstall.output -notmatch '(?m)^package:')
+  Need $removed ("Approved Android uninstall could not be verified; adb said: "+$gone.output+"; pm path: "+$afterUninstall.output)
   $result=Invoke-AdbCapture @("-s",$phone,"install",('"'+$apk+'"')) "adb-install-replacement" 120000
-  Need ($result.exit -eq 0 -and $result.output -match '(?m)^Success\s*$') ("Approved app uninstall succeeded but reinstall FAILED: "+$result.output)
+  $afterInstall=Invoke-AdbCapture @("-s",$phone,"shell","pm","path","com.opentail.android") "adb-reinstall-verify" 20000
+  $installed=($afterInstall.exit -eq 0 -and $afterInstall.output -match '(?m)^package:')
+  Need $installed ("Approved app uninstall succeeded but reinstall FAILED or could not be verified: "+$result.output+"; pm path: "+$afterInstall.output)
   Step "Android install" "PASS" "Owner explicitly approved reinstall; phone app data and owner key erased, controller NVS unchanged"
  } else {
   Need ($result.exit -eq 0 -and $result.output -match '(?m)^Success\s*$') ("Android install failed without signing mismatch; existing app untouched: "+$result.output)
