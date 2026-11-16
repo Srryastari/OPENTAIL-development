@@ -18,12 +18,12 @@ if /I "%~1"=="playback" set "MODE=playback"
 if /I "%~1"=="extended" set "SECONDS=120"
 if /I "%~2"=="extended" set "SECONDS=120"
 if /I "%~1"=="flash" set "EXTRA=-FlashFirmware"
-if /I "%~1"=="flash-auto" set "EXTRA=-FlashFirmware -AutoFlash"
+if /I "%~1"=="flash-auto" set "EXTRA=-FlashFirmware -AutoFlash -EspPort COM9"
 if /I "%~1"=="led" set "EXTRA=-DirectLedProbe"
 if /I "%~1"=="selftest" set "EXTRA=-SelfTest"
 echo.
 if /I "%~1"=="flash-auto" (
-  echo OpenTail VERIFIED auto-flash on detected ESP32 COM port. Firmware CI and hashes are mandatory.
+  echo OpenTail VERIFIED auto-flash to ESP32 COM9. Firmware CI and hashes are mandatory.
   echo Application partition only. NVS is NOT erased. Close serial monitors first.
 ) else (
   echo OpenTail FAST bench v2026.11.15.2: %MODE% ^| %SECONDS% seconds
