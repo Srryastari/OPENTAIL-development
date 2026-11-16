@@ -1,0 +1,720 @@
+/* Effects-owned FX/PZ runtime continuity regression.
+ * Uses the real Panel/Zone mapper, preview model, FX zone bank and effect
+ * renderers. The preview commit is a simulated atomic promotion: this test
+ * does not claim to exercise ESP NVS, BLE scheduling, RMT or physical optics.
+ */
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "effects_1d.h"
+#include "fx_zone_bank.h"
+#include "ot_auto_effects.h"
+#include "panel_zone.h"
+#include "panel_zone_protocol.h"
+
+#define TEST_PIXELS 16u
+#define TEST_BASE_REVISION 7u
+
+static bool same_wled_rgb(ot_wled_rgb_t a,ot_wled_rgb_t b){
+    return a.r==b.r&&a.g==b.g&&a.b==b.b;
+}
+static bool same_rgb(ot_rgb_t a,ot_rgb_t b){
+    return a.r==b.r&&a.g==b.g&&a.b==b.b;
+}
+static bool same_effect_state(const ot_effects_1d_state_t *a,
+                               const ot_effects_1d_state_t *b){
+    if(!a||!b||a->wled.scratch_bytes!=b->wled.scratch_bytes||
+       a->wled.scratch_magic!=b->wled.scratch_magic)return false;
+    if(a->wled.scratch_bytes&&(!a->wled.scratch||!b->wled.scratch||
+       memcmp(a->wled.scratch,b->wled.scratch,a->wled.scratch_bytes)!=0))
+        return false;
+    ot_effects_1d_state_t ac=*a,bc=*b;
+    ac.wled.scratch=NULL;bc.wled.scratch=NULL;
+    return memcmp(&ac,&bc,sizeof(ac))==0;
+}
+
+typedef struct {
+    ot_effects_1d_state_t state[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint8_t resolved_bank_index[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    ot_wled_rgb_t frame[OT_PZ_OUTPUTS][TEST_PIXELS];
+    ot_wled_rgb_t logical_frame[OT_PZ_OUTPUTS][OT_OM_ZONES][TEST_PIXELS];
+    uint8_t prior_pixel_zone_map[OT_PZ_OUTPUTS][OT_PZ_MAX_PIXELS];
+    uint16_t prior_zone_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint16_t prior_panel_id[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    uint32_t prior_generation[OT_PZ_OUTPUTS][OT_OM_ZONES];
+    bool prior_active[OT_PZ_OUTPUTS][OT_OM_ZONES];
+} render_probe_t;
+
+static void clone_render_probe(render_probe_t *dst,const render_probe_t *src){
+    *dst=*src;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        for(unsigned zone=0;zone<OT_OM_ZONES;zone++){
+            const ot_wled_fx_state_t *from=&src->state[lane][zone].wled;
+            ot_wled_fx_state_t *to=&dst->state[lane][zone].wled;
+            if(from->scratch&&from->scratch_bytes){
+                to->scratch=malloc(from->scratch_bytes);
+                assert(to->scratch);
+                memcpy(to->scratch,from->scratch,from->scratch_bytes);
+            }
+        }
+}
+static void release_render_probe(render_probe_t *probe){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
+            ot_effects_1d_reset(&probe->state[lane][zone],0u);
+}
+
+static void make_output(ot_pz_output_t *out,unsigned lane){
+    memset(out,0,sizeof(*out));
+    snprintf(out->name,sizeof(out->name),"Output %u",lane+1u);
+    out->active_pixels=TEST_PIXELS;
+    out->color_order=OT_OM_GRB;
+    out->panel_count=1u;
+    out->zone_count=2u;
+
+    const uint16_t panel_id=(uint16_t)(100u+lane);
+    out->panels[0].id=panel_id;
+    out->panels[0].lane=(uint8_t)lane;
+    snprintf(out->panels[0].name,sizeof(out->panels[0].name),"Housing Panel");
+    out->panels[0].zone_count=2u;
+
+    out->zones[0].id=(uint16_t)(200u+lane*10u);
+    out->zones[0].panel_id=panel_id;
+    out->zones[0].role=lane==0u?OT_OM_LEFT:OT_OM_RIGHT;
+    snprintf(out->zones[0].name,sizeof(out->zones[0].name),"Turn Zone");
+    out->zones[0].range_count=2u;
+    out->zones[0].ranges[0]=(ot_pz_range_t){0u,3u};
+    out->zones[0].ranges[1]=(ot_pz_range_t){8u,3u};
+
+    out->zones[1].id=(uint16_t)(201u+lane*10u);
+    out->zones[1].panel_id=panel_id;
+    out->zones[1].role=lane==0u?OT_OM_BRAKE:OT_OM_REVERSE;
+    snprintf(out->zones[1].name,sizeof(out->zones[1].name),"Safety Zone");
+    out->zones[1].range_count=2u;
+    out->zones[1].ranges[0]=(ot_pz_range_t){3u,3u};
+    out->zones[1].ranges[1]=(ot_pz_range_t){12u,3u};
+}
+
+static void make_controller(ot_pz_controller_t *cfg){
+    memset(cfg,0,sizeof(*cfg));
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        make_output(&cfg->outputs[lane],lane);
+    assert(ot_pz_valid(cfg));
+}
+
+static ot_ble_fx_packet_t make_fx(uint16_t effect,unsigned lane,unsigned zone){
+    ot_ble_fx_packet_t request={0};
+    request.effect_id=effect;
+    request.chain_mask=(uint8_t)(1u<<lane);
+    request.zone_mask=(uint8_t)(1u<<zone);
+    request.r=210u;request.g=75u;request.b=180u;
+    request.bg_r=0u;request.bg_g=0u;request.bg_b=0u;
+    request.brightness=24u;
+    request.speed=180u;
+    request.intensity=190u;
+    request.palette_id=effect==OT_FX_EMBERS?2u:0u;
+    request.ttl_sec=60u;
+    return request;
+}
+
+/* Mirrors the CORE per-zone renderer's state-identity and gather/render/scatter
+ * path. The source-order contract separately pins this harness to led_task().
+ */
+static bool render_probe_frame(render_probe_t *probe,
+        const ot_pz_controller_t *panel,ot_fx_zone_bank_t *bank,
+        uint32_t now_ms){
+    if(!probe||!panel||!bank)return false;
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        const ot_pz_output_t *panel_out=&panel->outputs[lane];
+        ot_om_output_t output={0};
+        if(!ot_pz_to_fx_view(panel_out,lane,&output))return false;
+        ot_layout_t layout;
+        if(!ot_om_layout(&output,&layout))return false;
+
+        if(!ot_fx_bank_resolve_zone_identity(panel_out,bank,lane,now_ms,
+            probe->resolved_bank_index[lane]))
+            return false;
+
+        uint8_t zone_map[OT_PZ_MAX_PIXELS];
+        uint16_t logical_map[OT_PZ_MAX_PIXELS];
+        ot_pz_build_pixel_map(panel_out,zone_map,logical_map);
+        uint16_t old_zone_id[OT_OM_ZONES],old_panel_id[OT_OM_ZONES];
+        uint32_t old_generation[OT_OM_ZONES];
+        bool old_active[OT_OM_ZONES];
+        ot_effects_1d_state_t old_state[OT_OM_ZONES];
+        memcpy(old_zone_id,probe->prior_zone_id[lane],sizeof(old_zone_id));
+        memcpy(old_panel_id,probe->prior_panel_id[lane],sizeof(old_panel_id));
+        memcpy(old_generation,probe->prior_generation[lane],sizeof(old_generation));
+        memcpy(old_active,probe->prior_active[lane],sizeof(old_active));
+        memcpy(old_state,probe->state[lane],sizeof(old_state));
+        memset(probe->state[lane],0,sizeof(probe->state[lane]));
+
+        for(unsigned zone=0;zone<output.zone_count;zone++){
+            const unsigned len=output.zones[zone].pixels;
+            const ot_pz_zone_t *zone_cfg=&panel_out->zones[zone];
+            const uint8_t bank_z=probe->resolved_bank_index[lane][zone];
+            const ot_fx_zone_slot_t *slot=bank_z<OT_OM_ZONES?
+                &bank->zones[lane][bank_z]:NULL;
+            const bool active=len>0u&&slot&&
+                ot_fx_slot_active(slot,now_ms);
+            const int prior_index=active?
+                ot_effects_1d_find_prior_zone_state(zone_cfg->panel_id,
+                    zone_cfg->id,slot->generation,old_panel_id,old_zone_id,
+                    old_generation,old_active,OT_OM_ZONES):-1;
+            const bool same_identity=prior_index>=0;
+            if(active&&len<=OT_PZ_MAX_PIXELS&&len<=TEST_PIXELS){
+                if(same_identity){
+                    ot_effects_1d_move_state(&probe->state[lane][zone],
+                        &old_state[prior_index]);
+                }else{
+                    ot_effects_1d_reset(&probe->state[lane][zone],
+                        0x1234u+lane*97u+zone*19u+slot->generation);
+                }
+
+                ot_wled_rgb_t scratch[OT_PZ_MAX_PIXELS];
+                memset(scratch,0,(size_t)len*sizeof(scratch[0]));
+                for(unsigned px=0;px<panel_out->active_pixels;px++){
+                    if(zone_map[px]!=(uint8_t)zone)continue;
+                    const unsigned logical=logical_map[px];
+                    if(logical>=len)continue;
+                    const uint8_t old_z=probe->prior_pixel_zone_map[lane][px];
+                    if(same_identity&&old_z<OT_OM_ZONES&&old_active[old_z]&&
+                       old_z==(uint8_t)prior_index&&
+                       old_zone_id[old_z]==zone_cfg->id&&
+                       old_panel_id[old_z]==zone_cfg->panel_id)
+                        scratch[logical]=probe->frame[lane][px];
+                }
+
+                const ot_ble_fx_packet_t *fx=&slot->request;
+                const ot_wled_fx_config_t cfg={
+                    .effect_id=fx->effect_id,.speed=fx->speed,
+                    .intensity=fx->intensity,.brightness=fx->brightness,
+                    .palette_id=fx->palette_id,.frame_time_ms=8u,
+                    .foreground={fx->r,fx->g,fx->b},
+                    .background={fx->bg_r,fx->bg_g,fx->bg_b},
+                    .tertiary={slot->tertiary.r,slot->tertiary.g,slot->tertiary.b},
+                    .tertiary_set=slot->tertiary.set,.spark_style=slot->spark.style,
+                    .spark_peak=slot->spark.peak,.spark_color=slot->spark.color,
+                    .resolved_palette=NULL
+                };
+                const uint32_t zone_elapsed=now_ms-slot->started_ms;
+                if(!ot_effects_1d_render(&cfg,&probe->state[lane][zone],
+                                         zone_elapsed,scratch,len))return false;
+                memset(probe->logical_frame[lane][zone],0,
+                       sizeof(probe->logical_frame[lane][zone]));
+                memcpy(probe->logical_frame[lane][zone],scratch,
+                       (size_t)len*sizeof(scratch[0]));
+                for(unsigned px=0;px<panel_out->active_pixels;px++){
+                    if(zone_map[px]!=(uint8_t)zone)continue;
+                    const unsigned logical=logical_map[px];
+                    if(logical<len)probe->frame[lane][px]=scratch[logical];
+                }
+                probe->prior_active[lane][zone]=true;
+                probe->prior_generation[lane][zone]=slot->generation;
+            }else probe->prior_active[lane][zone]=false;
+            probe->prior_zone_id[lane][zone]=zone_cfg->id;
+            probe->prior_panel_id[lane][zone]=zone_cfg->panel_id;
+        }
+        for(unsigned zone=output.zone_count;zone<OT_OM_ZONES;zone++)
+            probe->prior_active[lane][zone]=false;
+        for(unsigned old_z=0;old_z<OT_OM_ZONES;old_z++)
+            ot_effects_1d_reset(&old_state[old_z],0u);
+        memcpy(probe->prior_pixel_zone_map[lane],zone_map,
+               OT_PZ_MAX_PIXELS*sizeof(zone_map[0]));
+    }
+    return true;
+}
+
+static void test_production_identity_lookup(void){
+    const uint16_t panel_ids[3]={100u,100u,200u};
+    const uint16_t zone_ids[3]={200u,201u,300u};
+    const uint32_t generations[3]={11u,22u,33u};
+    const bool active[3]={true,true,false};
+    assert(ot_effects_1d_find_prior_zone_state(100u,201u,22u,
+        panel_ids,zone_ids,generations,active,3u)==1);
+    assert(ot_effects_1d_find_prior_zone_state(100u,200u,11u,
+        panel_ids,zone_ids,generations,active,3u)==0);
+    assert(ot_effects_1d_find_prior_zone_state(100u,201u,99u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
+    assert(ot_effects_1d_find_prior_zone_state(200u,300u,33u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
+    const uint32_t wrapped_generations[3]={11u,22u,0u};
+    const bool wrapped_active[3]={true,true,true};
+    assert(ot_effects_1d_find_prior_zone_state(200u,300u,0u,
+        panel_ids,zone_ids,wrapped_generations,wrapped_active,3u)==2);
+    assert(ot_effects_1d_find_prior_zone_state(0u,201u,22u,
+        panel_ids,zone_ids,generations,active,3u)==-1);
+}
+
+static void test_zone_independence_and_discontiguous_ranges(
+        ot_pz_controller_t *active,ot_fx_zone_bank_t *bank,
+        render_probe_t *probe){
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        const uint32_t started=1000u+lane*40u;
+        ot_ble_fx_packet_t turn=make_fx(OT_FX_DIMENSIONAL_RIFT,lane,0u);
+        ot_ble_fx_packet_t safety=make_fx(OT_WLED_RIPPLE,lane,1u);
+        assert(ot_fx_bank_apply(bank,&turn,started,false));
+        assert(ot_fx_bank_apply(bank,&safety,started,false));
+        bank->zones[lane][0].continuous=true;
+        bank->zones[lane][1].continuous=true;
+    }
+    assert(render_probe_frame(probe,active,bank,1100u));
+    assert(probe->state[0][0].original_clock_initialized);
+    assert(probe->state[1][0].original_clock_initialized);
+    assert(probe->state[0][0].original_phase_q32!=
+           probe->state[1][0].original_phase_q32);
+    assert(probe->state[0][1].wled.scratch!=NULL);
+    assert(probe->state[1][1].wled.scratch!=NULL);
+    assert(probe->state[0][0].particles.seed!=
+           probe->state[0][1].particles.seed);
+    assert(bank->zones[0][0].generation!=bank->zones[0][1].generation);
+    assert(bank->zones[0][0].started_ms==1000u);
+    assert(bank->zones[1][0].started_ms==1040u);
+
+    uint8_t zone_map[OT_PZ_MAX_PIXELS];
+    uint16_t logical_map[OT_PZ_MAX_PIXELS];
+    ot_pz_build_pixel_map(&active->outputs[0],zone_map,logical_map);
+    assert(zone_map[0]==0u&&logical_map[0]==0u);
+    assert(zone_map[2]==0u&&logical_map[2]==2u);
+    assert(zone_map[8]==0u&&logical_map[8]==3u);
+    assert(zone_map[10]==0u&&logical_map[10]==5u);
+    assert(zone_map[3]==1u&&logical_map[3]==0u);
+    assert(zone_map[12]==1u&&logical_map[12]==3u);
+    assert(zone_map[6]==0xffu&&zone_map[11]==0xffu);
+
+    for(unsigned i=0;i<3u;i++)
+        assert(same_wled_rgb(probe->frame[0][i],
+                             probe->logical_frame[0][0][i]));
+    for(unsigned i=0;i<3u;i++)
+        assert(same_wled_rgb(probe->frame[0][8u+i],
+                             probe->logical_frame[0][0][3u+i]));
+}
+
+static void test_preview_phase_commit_cancel_and_unaffected_zone(
+        ot_pz_controller_t *active,ot_fx_zone_bank_t *bank,
+        render_probe_t *probe){
+    const uint32_t generation=bank->zones[0][0].generation;
+    const uint32_t started=bank->zones[0][0].started_ms;
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,active,0u,TEST_BASE_REVISION,
+                               TEST_BASE_REVISION,false,1100u));
+    ot_pz_range_update_t move={100u,200u,1u,9u,3u,OT_OM_LEFT};
+    assert(ot_pz_preview_apply_updates(&preview,0u,&move,1u,
+        TEST_BASE_REVISION,TEST_BASE_REVISION,false,1110u));
+    assert(active->outputs[0].zones[0].ranges[1].start==8u);
+    assert(preview.candidate.outputs[0].zones[0].ranges[1].start==9u);
+
+    /* Compare independent clones at the same timestamp. Zone 1 is unchanged
+     * and must produce byte-identical reference frames during zone 0 editing. */
+    render_probe_t reference,previewed;
+    clone_render_probe(&reference,probe);
+    clone_render_probe(&previewed,probe);
+    assert(render_probe_frame(&reference,active,bank,1110u));
+    assert(render_probe_frame(&previewed,&preview.candidate,bank,1110u));
+    const unsigned untouched[]={3u,4u,5u,12u,13u,14u};
+    for(size_t i=0;i<sizeof(untouched)/sizeof(untouched[0]);i++)
+        assert(same_wled_rgb(reference.frame[0][untouched[i]],
+                             previewed.frame[0][untouched[i]]));
+    assert(previewed.state[0][0].original_last_ms==110u);
+    assert(previewed.state[0][0].original_phase_q32!=
+           probe->state[0][0].original_phase_q32);
+    assert(bank->zones[0][0].generation==generation);
+    assert(bank->zones[0][0].started_ms==started);
+
+    /* Repeated PREVIEW_UPDATE changes only the shadow geometry; the same
+     * effect generation and its source-owned phase clock continue. */
+    move.start=7u;
+    assert(ot_pz_preview_apply_updates(&preview,0u,&move,1u,
+        TEST_BASE_REVISION,TEST_BASE_REVISION,false,1118u));
+    assert(render_probe_frame(&previewed,&preview.candidate,bank,1118u));
+    assert(previewed.state[0][0].original_last_ms==118u);
+    const uint32_t phase_before_commit=previewed.state[0][0].original_phase_q32;
+    move.start=9u;
+    assert(ot_pz_preview_apply_updates(&preview,0u,&move,1u,
+        TEST_BASE_REVISION,TEST_BASE_REVISION,false,1126u));
+    assert(render_probe_frame(&previewed,&preview.candidate,bank,1126u));
+    assert(previewed.state[0][0].original_last_ms==126u);
+    assert(previewed.state[0][0].original_phase_q32!=phase_before_commit);
+
+    /* Simulated successful durable promotion. The CORE worker owns the real
+     * NVS journal and atomic activation; this host model tests renderer state. */
+    preview.committing=true;
+    *active=preview.candidate;
+    ot_pz_preview_cancel(&preview);
+    assert(active->outputs[0].zones[0].ranges[1].start==9u);
+    assert(render_probe_frame(&previewed,active,bank,1134u));
+    assert(previewed.state[0][0].original_last_ms==134u);
+    assert(bank->zones[0][0].generation==generation);
+    assert(bank->zones[0][0].started_ms==started);
+
+    /* A later preview is cancelled. The committed geometry and running FX
+     * state remain authoritative; cancellation must not restart the effect. */
+    const ot_pz_controller_t committed=*active;
+    assert(ot_pz_preview_begin(&preview,active,0u,8u,8u,false,1140u));
+    move.start=7u;
+    assert(ot_pz_preview_apply_updates(&preview,0u,&move,1u,8u,8u,false,1142u));
+    assert(preview.candidate.outputs[0].zones[0].ranges[1].start==7u);
+    ot_pz_preview_cancel(&preview);
+    assert(memcmp(active,&committed,sizeof(committed))==0);
+    const uint32_t phase_before_cancel=previewed.state[0][0].original_phase_q32;
+    assert(render_probe_frame(&previewed,active,bank,1142u));
+    assert(previewed.state[0][0].original_last_ms==142u);
+    assert(previewed.state[0][0].original_phase_q32!=phase_before_cancel);
+    assert(bank->zones[0][0].generation==generation);
+    assert(bank->zones[0][0].started_ms==started);
+    release_render_probe(&reference);
+    release_render_probe(&previewed);
+}
+
+static void test_identity_state_survives_reorder_delete_and_cancel(
+        ot_pz_controller_t *active,ot_fx_zone_bank_t *bank,
+        render_probe_t *probe){
+    const uint16_t original_zone0=active->outputs[0].zones[0].id;
+    const uint16_t original_zone1=active->outputs[0].zones[1].id;
+    const uint16_t panel_id=active->outputs[0].zones[0].panel_id;
+    assert(original_zone0!=original_zone1);
+    uint8_t *moving_scratch=probe->state[0][1].wled.scratch;
+    assert(moving_scratch!=NULL);
+
+    /* Reference both continuous effects at the same future timestamp
+     * without changing the active geometry. */
+    render_probe_t original_order_reference;
+    clone_render_probe(&original_order_reference,probe);
+    assert(render_probe_frame(&original_order_reference,active,bank,1158u));
+
+    /* Reorder through the real preview candidate and commit promotion. */
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,active,0u,9u,9u,false,1150u));
+    ot_pz_zone_t swap=preview.candidate.outputs[0].zones[0];
+    preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
+    preview.candidate.outputs[0].zones[1]=swap;
+    assert(ot_pz_valid(&preview.candidate));
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone1);
+    assert(preview.candidate.outputs[0].zones[1].id==original_zone0);
+    preview.committing=true;
+    *active=preview.candidate;
+    ot_pz_preview_cancel(&preview);
+
+    assert(render_probe_frame(probe,active,bank,1158u));
+    assert(same_effect_state(&original_order_reference.state[0][1],
+                             &probe->state[0][0]));
+    assert(same_effect_state(&original_order_reference.state[0][0],
+                             &probe->state[0][1]));
+    assert(probe->state[0][0].wled.scratch==moving_scratch);
+    assert(probe->resolved_bank_index[0][0]==1u);
+    assert(probe->resolved_bank_index[0][1]==0u);
+
+    /* Same-effect parameter refresh to reordered B resolves to bank slot 1.
+     * It changes parameters but retains B's generation/start/phase and leaves
+     * A's effect, generation and renderer phase untouched. */
+    ot_om_output_t current_outputs[OT_OM_OUTPUTS]={0};
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+        assert(ot_pz_to_fx_view(&active->outputs[o],o,&current_outputs[o]));
+    const uint32_t zone1_generation=bank->zones[0][1].generation;
+    const uint32_t zone1_started=bank->zones[0][1].started_ms;
+    const uint32_t zone0_generation=bank->zones[0][0].generation;
+    const uint32_t zone0_started=bank->zones[0][0].started_ms;
+    ot_fx_zone_bank_t same_reference_bank=*bank;
+    render_probe_t same_reference;
+    clone_render_probe(&same_reference,probe);
+    assert(render_probe_frame(&same_reference,active,&same_reference_bank,1160u));
+    ot_ble_fx_packet_t refresh=make_fx(OT_WLED_RIPPLE,0u,0u);
+    refresh.speed=37u;refresh.intensity=71u;refresh.brightness=33u;
+    assert(ot_fx_bank_apply_configured_identity(bank,&refresh,current_outputs,
+        active->outputs,1160u,false));
+    assert(bank->zones[0][1].request.effect_id==OT_WLED_RIPPLE);
+    assert(bank->zones[0][1].request.speed==37u);
+    assert(bank->zones[0][1].request.intensity==71u);
+    assert(bank->zones[0][1].generation==zone1_generation);
+    assert(bank->zones[0][1].started_ms==zone1_started);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+    assert(bank->zones[0][0].generation==zone0_generation);
+    assert(bank->zones[0][0].started_ms==zone0_started);
+    assert(render_probe_frame(probe,active,bank,1160u));
+    assert(same_effect_state(&same_reference.state[0][1],&probe->state[0][1]));
+    assert(probe->state[0][0].wled.scratch==moving_scratch);
+    release_render_probe(&same_reference);
+
+    /* Replacing B with a different effect must reset only B. A continues at
+     * the exact same renderer phase as an uninterrupted reference. */
+    const uint32_t b_generation_before_replace=bank->zones[0][1].generation;
+    const uint32_t a_generation_before_replace=bank->zones[0][0].generation;
+    const uint32_t a_started_before_replace=bank->zones[0][0].started_ms;
+    ot_fx_zone_bank_t replacement_reference_bank=*bank;
+    render_probe_t replacement_reference;
+    clone_render_probe(&replacement_reference,probe);
+    assert(render_probe_frame(&replacement_reference,active,
+                              &replacement_reference_bank,1168u));
+    ot_ble_fx_packet_t replacement=make_fx(OT_FX_EMBERS,0u,0u);
+    assert(ot_fx_bank_apply_configured_identity(bank,&replacement,current_outputs,
+        active->outputs,1168u,false));
+    assert(bank->zones[0][1].request.effect_id==OT_FX_EMBERS);
+    assert(bank->zones[0][1].generation!=b_generation_before_replace);
+    assert(bank->zones[0][1].started_ms==1168u);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+    assert(bank->zones[0][0].generation==a_generation_before_replace);
+    assert(bank->zones[0][0].started_ms==a_started_before_replace);
+    assert(render_probe_frame(probe,active,bank,1168u));
+    assert(same_effect_state(&replacement_reference.state[0][1],
+                             &probe->state[0][1]));
+    release_render_probe(&replacement_reference);
+
+    /* Sparkle and overlay-only updates target B's stable slot 1, not current
+     * index 0's old slot. A's accents remain byte-for-byte unchanged. */
+    const ot_fx_spark_style_t a_spark={
+        .style=1u,.peak=19u,.color={11u,22u,33u}
+    };
+    const ot_fx_spark_style_t b_spark={
+        .style=2u,.peak=7u,.color={44u,55u,66u}
+    };
+    bank->zones[0][0].spark=a_spark;
+    assert(ot_fx_bank_set_spark_identity(bank,current_outputs,active->outputs,
+        1u,1u,1170u,&b_spark));
+    assert(bank->zones[0][1].spark.style==b_spark.style);
+    assert(bank->zones[0][1].spark.peak==b_spark.peak);
+    assert(same_wled_rgb(bank->zones[0][1].spark.color,b_spark.color));
+    assert(bank->zones[0][0].spark.style==a_spark.style);
+    assert(bank->zones[0][0].spark.peak==a_spark.peak);
+    assert(same_wled_rgb(bank->zones[0][0].spark.color,a_spark.color));
+
+    const ot_fx_overlay_config_t a_overlay={
+        .style=OT_FX_OVERLAY_FLARES,.peak=6u,.density=80u,
+        .radius=3u,.fade_ms=180u,.color={20u,30u,40u}
+    };
+    const ot_fx_overlay_config_t b_overlay={
+        .style=OT_FX_OVERLAY_SPARKS,.peak=8u,.density=100u,
+        .radius=4u,.fade_ms=120u,.color={255u,255u,255u}
+    };
+    bank->zones[0][0].overlay=a_overlay;
+    assert(ot_fx_bank_set_overlay_identity(bank,current_outputs,active->outputs,
+        1u,1u,1171u,&b_overlay));
+    assert(bank->zones[0][1].overlay.style==b_overlay.style);
+    assert(bank->zones[0][1].overlay.peak==b_overlay.peak);
+    assert(bank->zones[0][1].overlay.density==b_overlay.density);
+    assert(bank->zones[0][1].overlay.radius==b_overlay.radius);
+    assert(bank->zones[0][1].overlay.fade_ms==b_overlay.fade_ms);
+    assert(same_wled_rgb(bank->zones[0][1].overlay.color,b_overlay.color));
+    assert(bank->zones[0][0].overlay.style==a_overlay.style);
+    assert(bank->zones[0][0].overlay.peak==a_overlay.peak);
+    assert(bank->zones[0][0].overlay.density==a_overlay.density);
+    assert(bank->zones[0][0].overlay.radius==a_overlay.radius);
+    assert(bank->zones[0][0].overlay.fade_ms==a_overlay.fade_ms);
+    assert(same_wled_rgb(bank->zones[0][0].overlay.color,a_overlay.color));
+
+    /* A continuous update to B must not clear A's separate continuous slot. */
+    assert(bank->zones[0][0].configured&&bank->zones[0][0].continuous);
+    const uint32_t continuous_a_generation=bank->zones[0][0].generation;
+    ot_ble_fx_packet_t continuous=make_fx(OT_FX_EMBERS,0u,0u);
+    continuous.speed=91u;
+    assert(ot_fx_bank_apply_continuous_tertiary_identity(bank,&continuous,
+        current_outputs,active->outputs,NULL,1172u));
+    assert(bank->zones[0][1].continuous);
+    assert(bank->zones[0][1].request.effect_id==OT_FX_EMBERS);
+    assert(bank->zones[0][1].owner_zone_id==original_zone1);
+    assert(bank->zones[0][0].configured&&bank->zones[0][0].continuous);
+    assert(bank->zones[0][0].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+    assert(bank->zones[0][0].generation==continuous_a_generation);
+
+    /* Saved-scene restoration also binds each selected current zone to its
+     * logical owner instead of persisting the transient bank index. */
+    ot_fx_zone_bank_t restored_bank;
+    ot_fx_bank_reset(&restored_bank);
+    ot_ble_fx_packet_t saved_b=make_fx(OT_FX_EMBERS,0u,0u);
+    ot_ble_fx_packet_t saved_a=make_fx(OT_FX_DIMENSIONAL_RIFT,0u,1u);
+    assert(ot_fx_bank_apply_configured_identity(&restored_bank,&saved_b,
+        current_outputs,active->outputs,1173u,true));
+    assert(ot_fx_bank_apply_configured_identity(&restored_bank,&saved_a,
+        current_outputs,active->outputs,1174u,true));
+    assert(restored_bank.zones[0][0].owner_zone_id==original_zone1);
+    assert(restored_bank.zones[0][1].owner_zone_id==original_zone0);
+    assert(restored_bank.zones[0][0].request.effect_id==OT_FX_EMBERS);
+    assert(restored_bank.zones[0][1].request.effect_id==OT_FX_DIMENSIONAL_RIFT);
+
+    assert(render_probe_frame(probe,active,bank,1174u));
+    release_render_probe(&original_order_reference);
+
+    /* A subsequent reorder is cancelled. The committed mapping and both
+     * animation clocks must remain unchanged and continue on the next frame. */
+    const ot_pz_controller_t committed=*active;
+    render_probe_t cancel_reference;
+    clone_render_probe(&cancel_reference,probe);
+    assert(render_probe_frame(&cancel_reference,active,bank,1180u));
+    assert(ot_pz_preview_begin(&preview,active,0u,11u,11u,false,1178u));
+    swap=preview.candidate.outputs[0].zones[0];
+    preview.candidate.outputs[0].zones[0]=preview.candidate.outputs[0].zones[1];
+    preview.candidate.outputs[0].zones[1]=swap;
+    assert(ot_pz_valid(&preview.candidate));
+    assert(render_probe_frame(probe,&preview.candidate,bank,1180u));
+    ot_pz_preview_cancel(&preview);
+    assert(memcmp(active,&committed,sizeof(committed))==0);
+    assert(render_probe_frame(&cancel_reference,active,bank,1184u));
+    assert(render_probe_frame(probe,active,bank,1184u));
+    assert(same_effect_state(&cancel_reference.state[0][0],&probe->state[0][0]));
+    assert(same_effect_state(&cancel_reference.state[0][1],&probe->state[0][1]));
+    release_render_probe(&cancel_reference);
+
+    /* Delete B (the first ordered zone) in a preview and cancel it. Neither
+     * the real bank nor a B-only continuous bank may be pruned on CANCEL. */
+    const ot_pz_range_update_t delete_first={
+        .panel_id=panel_id,.zone_id=original_zone1,.range_id=0u,
+        .start=0u,.count=0u,
+        .role_flags=(uint8_t)(OT_PZ_TX_DELETE_ZONE<<OT_PZ_TX_ACTION_SHIFT)
+    };
+    const ot_fx_zone_bank_t bank_before_cancel=*bank;
+    ot_fx_zone_bank_t orphan_only;
+    ot_fx_bank_reset(&orphan_only);
+    orphan_only.zones[0][1]=bank->zones[0][1];
+    assert(ot_fx_bank_any_active(&orphan_only,1186u));
+    const ot_fx_zone_bank_t orphan_before_cancel=orphan_only;
+    assert(ot_pz_preview_begin(&preview,active,0u,12u,12u,false,1186u));
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_first,1u,
+        12u,12u,false,1187u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
+    ot_pz_preview_cancel(&preview);
+    assert(memcmp(active,&committed,sizeof(committed))==0);
+    assert(memcmp(bank,&bank_before_cancel,sizeof(*bank))==0);
+    assert(memcmp(&orphan_only,&orphan_before_cancel,sizeof(orphan_only))==0);
+    assert(ot_fx_bank_any_active(&orphan_only,1188u));
+
+    /* Commit the same deletion. B's bank slot becomes an orphan and is
+     * retired; A shifts index 1->0 and retains its renderer state/phase. */
+    render_probe_t delete_reference;
+    clone_render_probe(&delete_reference,probe);
+    ot_fx_zone_bank_t delete_reference_bank=*bank;
+    assert(render_probe_frame(&delete_reference,active,&delete_reference_bank,1194u));
+    assert(ot_pz_preview_begin(&preview,active,0u,13u,13u,false,1190u));
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delete_first,1u,
+        13u,13u,false,1192u));
+    assert(preview.candidate.outputs[0].zone_count==1u);
+    assert(preview.candidate.outputs[0].zones[0].id==original_zone0);
+    preview.committing=true;
+    *active=preview.candidate;
+    ot_fx_bank_prune_orphans(bank,active->outputs);
+    ot_fx_bank_prune_orphans(&orphan_only,active->outputs);
+    ot_pz_preview_cancel(&preview);
+    assert(!ot_fx_slot_active(&bank->zones[0][1],1194u));
+    assert(ot_fx_slot_active(&bank->zones[0][0],1194u));
+    assert(ot_fx_bank_any_active(bank,1194u));
+    assert(!ot_fx_bank_any_active(&orphan_only,1194u));
+    assert(render_probe_frame(probe,active,bank,1194u));
+    assert(same_effect_state(&delete_reference.state[0][1],&probe->state[0][0]));
+    release_render_probe(&delete_reference);
+    assert(probe->prior_zone_id[0][0]==original_zone0);
+    assert(probe->resolved_bank_index[0][0]==0u);
+    assert(probe->state[0][0].wled.scratch==NULL);
+}
+
+static void test_committing_and_sync_fault_admission(
+        const ot_pz_controller_t *active){
+    ot_pz_preview_t preview={0};
+    assert(ot_pz_preview_begin(&preview,active,0u,8u,8u,false,1200u));
+    const ot_pz_range_update_t delayed={100u,200u,0u,1u,2u,OT_OM_LEFT};
+    assert(ot_pz_preview_apply_updates(&preview,0u,&delayed,1u,8u,8u,false,1201u));
+    preview.committing=true;
+    const ot_pz_controller_t shadow_before=preview.candidate;
+    assert(!ot_pz_preview_apply_updates(&preview,0u,&delayed,1u,8u,8u,false,1202u));
+    assert(memcmp(&preview.candidate,&shadow_before,sizeof(shadow_before))==0);
+
+    struct packet_case {
+        uint32_t last_sequence,last_crc,sequence,packet_crc;
+    };
+    const struct packet_case cases[]={
+        {4u,0x1111u,5u,0x2222u}, /* delayed next packet */
+        {4u,0x1111u,4u,0x1111u}, /* exact duplicate */
+        {4u,0x1111u,6u,0x3333u}, /* forward gap */
+        {4u,0x1111u,3u,0x4444u}, /* out of order */
+        {4u,0x1111u,4u,0x9999u}  /* same sequence, changed payload */
+    };
+    for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);i++){
+        assert(ot_pz_tx_update_admit(true,false,true,
+            cases[i].last_sequence,cases[i].last_crc,
+            cases[i].sequence,cases[i].packet_crc)==
+            OT_PZ_TX_UPDATE_REJECT_COMMITTING);
+    }
+    assert(memcmp(&preview.candidate,&shadow_before,sizeof(shadow_before))==0);
+
+    /* A latched synchronization fault rejects further UPDATE admission.
+     * Firmware's source-contract test separately verifies the COMMIT guard
+     * precedes ot_ble_panel_preview_commit() in the actual BLE handler. */
+    assert(ot_pz_tx_update_admit(false,true,true,4u,0x1111u,5u,0x2222u)==
+           OT_PZ_TX_UPDATE_REJECT_SYNC_REQUIRED);
+    assert(memcmp(&preview.candidate,&shadow_before,sizeof(shadow_before))==0);
+    ot_pz_preview_cancel(&preview);
+}
+
+static void test_stop_and_physical_priority(ot_fx_zone_bank_t *bank){
+    ot_fx_bank_stop_all(bank);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
+        for(unsigned zone=0;zone<OT_OM_ZONES;zone++)
+            assert(!ot_fx_slot_active(&bank->zones[lane][zone],1300u));
+
+    ot_rgb_t physical={0};
+    const ot_rgb_t effect={24u,10u,80u};
+    assert(ot_om_trigger_overlay(OT_OM_BRAKE,OT_SIG_BRAKE,true,255u,&physical));
+    const ot_rgb_t brake=ot_om_trigger_color(OT_OM_BRAKE,OT_SIG_BRAKE,255u);
+    assert(same_rgb(physical,brake));
+    assert(!same_rgb(physical,effect));
+
+    assert(ot_om_trigger_overlay(OT_OM_LEFT,
+        (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),true,255u,&physical));
+    const ot_rgb_t left=ot_om_trigger_color(OT_OM_LEFT,
+        (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),255u);
+    assert(same_rgb(physical,left));
+    assert(ot_om_trigger_overlay(OT_OM_RIGHT,
+        (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),true,255u,&physical));
+    const ot_rgb_t right=ot_om_trigger_color(OT_OM_RIGHT,
+        (uint8_t)(OT_SIG_LEFT|OT_SIG_RIGHT),255u);
+    assert(same_rgb(physical,right));
+    assert(ot_om_trigger_overlay(OT_OM_REVERSE,OT_SIG_REVERSE,true,255u,&physical));
+    const ot_rgb_t reverse=ot_om_trigger_color(OT_OM_REVERSE,OT_SIG_REVERSE,255u);
+    assert(same_rgb(physical,reverse));
+}
+
+/* Owner P0: trigger-role OFF means no road overlay, not Show exclusion. */
+static void test_off_role_still_accepts_independent_show_effect(void){
+    ot_pz_controller_t panel;
+    make_controller(&panel);
+    panel.outputs[0].zones[0].role=OT_OM_OFF;
+    assert(ot_pz_valid(&panel));
+    ot_om_output_t output_view[OT_OM_OUTPUTS];
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++)
+        assert(ot_pz_to_fx_view(&panel.outputs[lane],lane,&output_view[lane]));
+    ot_fx_zone_bank_t bank;
+    ot_fx_bank_reset(&bank);
+    ot_ble_fx_packet_t red=make_fx(OT_WLED_RIPPLE,0u,0u);
+    red.r=255u;red.g=0u;red.b=0u;
+    assert(ot_fx_bank_apply_configured_identity(&bank,&red,output_view,
+        panel.outputs,1000u,false));
+    render_probe_t *probe=calloc(1u,sizeof(*probe));
+    assert(probe);
+    assert(render_probe_frame(probe,&panel,&bank,1010u));
+    assert(probe->prior_active[0][0]);
+    assert(!probe->prior_active[1][0]);
+    release_render_probe(probe);
+    free(probe);
+}
+
+int main(void){
+    ot_pz_controller_t active;
+    make_controller(&active);
+    ot_fx_zone_bank_t bank;
+    ot_fx_bank_reset(&bank);
+    render_probe_t probe={0};
+
+    test_off_role_still_accepts_independent_show_effect();
+    test_production_identity_lookup();
+    test_zone_independence_and_discontiguous_ranges(&active,&bank,&probe);
+    test_preview_phase_commit_cancel_and_unaffected_zone(&active,&bank,&probe);
+    test_identity_state_survives_reorder_delete_and_cancel(&active,&bank,&probe);
+    test_committing_and_sync_fault_admission(&active);
+    test_stop_and_physical_priority(&bank);
+    release_render_probe(&probe);
+
+    puts("PASS FX-PZ: independent zone/output state, discontiguous ranges, live preview, stable identity bank/state migration through reorder/delete/cancel, COMMITTING/sync-fault rejection, STOP and physical priority (host simulated; no NVS/RMT/optics)");
+    return 0;
+}

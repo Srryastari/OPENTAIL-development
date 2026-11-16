@@ -7,7 +7,8 @@ static ot_rgb_t scaled(ot_rgb_t c, unsigned scale) {
     return rgb((c.r*scale+127)/255, (c.g*scale+127)/255, (c.b*scale+127)/255);
 }
 bool ot_layout_valid(const ot_layout_t *cfg) {
-    if (!cfg || !cfg->chain_pixels || cfg->brightness_cap > 64) return false;
+    /* brightness_cap is an 8-bit RGB ceiling; all values 0..255 are valid. */
+    if (!cfg || !cfg->chain_pixels) return false;
     unsigned total=0;
     for (int i=0; i<OT_SECTION_COUNT; ++i) {total += cfg->sections[i];}
     return total==cfg->chain_pixels;

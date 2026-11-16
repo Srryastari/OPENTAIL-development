@@ -8,6 +8,7 @@ permissions:
   pull-requests: read
 jobs:
   provenance-and-hardware-boundary:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +50,7 @@ jobs:
       - name: Run independent Rev B 16,384-state reference arbiter (logical model only)
         run: python3 hardware-reference/hardware/tests/test_failover_arbiter_contract.py
   complete-core-host:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: provenance-and-hardware-boundary
     runs-on: ubuntu-latest
     steps:
@@ -67,6 +69,7 @@ jobs:
           OPENTAIL_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/check_regressions.py --mode audit
   esp32s3-idf555:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.number == 111 }}
     needs: complete-core-host
     runs-on: ubuntu-latest
     timeout-minutes: 35

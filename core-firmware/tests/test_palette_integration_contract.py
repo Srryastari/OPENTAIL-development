@@ -32,7 +32,14 @@ load=runtime.split("void ot_palette_runtime_load(void){",1)[1].split(
 assert "if(record.index!=i){" in load
 assert load.index("if(record.index!=i){") < load.index("if(ot_palette_record_is_tombstone(&record))")
 assert "candidate.crc=record_crc(&candidate)" in profile
-assert 'nvs_open("ot_palettes",NVS_READWRITE' in runtime
+assert 'nvs_open("ot_fx_presets",NVS_READWRITE' in runtime
+assert 'nvs_open("ot_palettes",NVS_READONLY' in runtime
+assert 'nvs_set_blob(active,key,&record,sizeof(record))' in runtime
+assert 'nvs_commit(active)' in runtime
+assert 'nvs_open("ot_palettes",NVS_READWRITE' not in runtime
+assert 'nvs_open("ot_fx_presets",NVS_READONLY' in runtime
+assert '"ot_fx_presets"' in core
+assert '"ot_palettes"' not in core
 assert runtime.index("nvs_commit_record(record)") < runtime.index("palette_bank[record->index]=next;")
 assert runtime.index("nvs_commit_record(&dead)") < runtime.index("palette_bank[index]=")
 assert "ot_palette_runtime_snapshot(" in runtime and "portENTER_CRITICAL(&palette_lock)" in runtime
@@ -67,4 +74,5 @@ assert "ot_palette_runtime_read_record(index,&record)" in wire
 assert "bool ot_palette_runtime_read_record(" in runtime
 assert "return palette<=72u||(palette>=73u&&palette<=200u);" in fx
 assert '"ot_output_cfg"' not in runtime and '"ot_trig_cfg"' not in runtime
+assert '"ot_fx_presets"' in runtime
 print("PASS: CORE palette v3 transport/persistence/frame integration contracts")

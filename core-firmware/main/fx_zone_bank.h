@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "ble_fx_command.h"
 #include "output_manager.h"
+#include "panel_zone.h"
 #include "fx_overlay_engine.h"
 
 /* Temporary per-zone effect accents; not part of saved NVS v1/v2 payload. */
@@ -25,13 +26,14 @@ typedef struct {
     uint32_t started_ms; /* stable animation/overlay phase anchor */
     uint32_t refreshed_ms; /* independent transient TTL renewal */
     uint32_t generation; /* changes only on this zone's replacement */
+    uint16_t owner_panel_id; /* stable Panel/Zone identity, RAM-only */
+    uint16_t owner_zone_id;
 } ot_fx_zone_slot_t;
 
 typedef struct {
     ot_fx_zone_slot_t zones[OT_OM_OUTPUTS][OT_OM_ZONES];
     uint32_t next_generation;
 } ot_fx_zone_bank_t;
-
 void ot_fx_bank_reset(ot_fx_zone_bank_t *bank);
 bool ot_fx_bank_apply(ot_fx_zone_bank_t *bank,const ot_ble_fx_packet_t *request,
                       uint32_t now_ms,bool standalone);
@@ -45,6 +47,27 @@ bool ot_fx_bank_set_overlay(ot_fx_zone_bank_t *bank,
  const ot_om_output_t outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
  uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
 bool ot_fx_slot_active(const ot_fx_zone_slot_t *slot,uint32_t now_ms);
+bool ot_fx_bank_resolve_zone_identity(const ot_pz_output_t *panel_output,
+ ot_fx_zone_bank_t *bank,unsigned output,uint32_t now_ms,
+ uint8_t resolved_indices[OT_OM_ZONES]);
+bool ot_fx_bank_apply_configured_identity(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint32_t now_ms,bool standalone);
+bool ot_fx_bank_set_overlay_identity(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_overlay_config_t *overlay);
+bool ot_fx_bank_set_spark_identity(ot_fx_zone_bank_t *bank,
+ const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],uint8_t chain_mask,
+ uint8_t zone_mask,uint32_t now_ms,const ot_fx_spark_style_t *spark);
+/* Update only the requested logical zones; unselected continuous slots persist. */
+bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
+ const ot_ble_fx_packet_t *request,const ot_om_output_t outputs[OT_OM_OUTPUTS],
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS],
+ const ot_ble_fx_tertiary_t *tertiary,uint32_t now_ms);
+void ot_fx_bank_prune_orphans(ot_fx_zone_bank_t *bank,
+ const ot_pz_output_t panel_outputs[OT_OM_OUTPUTS]);
 bool ot_fx_bank_any_active(const ot_fx_zone_bank_t *bank,uint32_t now_ms);
 void ot_fx_bank_stop_temporary(ot_fx_zone_bank_t *bank);
 void ot_fx_bank_stop_all(ot_fx_zone_bank_t *bank);

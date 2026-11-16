@@ -7,8 +7,12 @@ root = Path(__file__).resolve().parents[1] / "main"
 version = (root / "ot_version.h").read_text()
 core = (root / "opentail_core.c").read_text()
 ble = (root / "ble_status.c").read_text()
-assert re.search(r'#define\s+OT_FW_VERSION\s+"0\.1\.31-alpha"', version)
+cmake = (root.parent / "CMakeLists.txt").read_text()
+match = re.search(r'#define\s+OT_FW_VERSION\s+"([^"]+)"', version)
+assert match and f'set(PROJECT_VER "{match.group(1)}")' in cmake
 assert '#define OT_FW OT_FW_VERSION' in core
-assert '"OpenTail CORE " OT_FW_VERSION " | BLE HMAC enrollment bench v2"' in ble
+assert 'CORE build: version=' in core
+assert 'build_id' in core and 'build_date' in core and 'build_time' in core
+assert '"OpenTail CORE " OT_FW_VERSION " | owner-bond-v3"' in ble
 assert 'OpenTail CORE 0.1.25' not in ble
 print("CORE REST/BLE firmware version identity regression passed")
