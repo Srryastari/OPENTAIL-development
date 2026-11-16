@@ -421,18 +421,55 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha,[bool]$auto=$f
  # esptool v5 uses hyphenated CLI names. Windows PowerShell 5.1 promotes
  # native stderr warnings into terminating errors under Stop; isolate stdout
  # and stderr, and judge the real process exit code instead.
- $esptoolArguments=@("-3","-m","esptool","--chip","esp32s3","--port",$port,
+ # -u forces unbuffered Python stdout so progress is visible during flash.
+ $esptoolArguments=@("-3","-u","-m","esptool","--chip","esp32s3","--port",$port,
   "--baud","115200","write-flash","--flash-mode","dio",
   "--flash-freq","80m","--flash-size","16MB","0x20000",('"'+$image+'"'))
  $stdout=Join-Path $session "esptool.stdout.txt"
  $stderr=Join-Path $session "esptool.stderr.txt"
  $flashLog=Join-Path $session "flash.log"
  $python=[string](Get-Command py -ErrorAction Stop).Source
- $process=Start-Process -FilePath $python -ArgumentList $esptoolArguments -Wait -PassThru -NoNewWindow `
+ Write-Host "Starting esptool on $port; live output follows. Don't unplug during writing."
+ $process=Start-Process -FilePath $python -ArgumentList $esptoolArguments -PassThru -NoNewWindow `
   -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+ $watch=[Diagnostics.Stopwatch]::StartNew()
+ $stdoutLength=0;$stderrLength=0;$lastHeartbeat=-15
+ $timedOut=$false
+ while(-not $process.HasExited){
+  # Read only newly appended bytes from redirected streams; progress is
+  # unbuffered and appears while esptool is still running, not only after it exits.
+  foreach($entry in @(@($stdout,[ref]$stdoutLength),@($stderr,[ref]$stderrLength))){
+   $file=[string]$entry[0];$previous=[int]$entry[1].Value
+   if(Test-Path -LiteralPath $file -PathType Leaf){
+    try{
+     $body=[string](Get-Content -LiteralPath $file -Raw -ErrorAction Stop)
+     if($body.Length -gt $previous){
+      Write-Host -NoNewline $body.Substring($previous)
+      $entry[1].Value=$body.Length
+     }
+    }catch{}
+   }
+  }
+  if(($watch.Elapsed.TotalSeconds-[double]$lastHeartbeat) -ge 15){
+   Write-Host ("[FLASH] esptool still running on "+$port+" ("+[int]$watch.Elapsed.TotalSeconds+" seconds).")
+   $lastHeartbeat=[int]$watch.Elapsed.TotalSeconds
+  }
+  if($watch.Elapsed.TotalMinutes -ge 10){
+   # A stuck flash must not create an unbounded invisible wait. A stopped
+   # write may require re-entering the ESP32 ROM loader and retrying.
+   $timedOut=$true
+   try{$process.Kill()}catch{}
+   break
+  }
+  Start-Sleep -Milliseconds 500
+ }
+ try{$process.WaitForExit(5000)|Out-Null}catch{}
+ $process.Refresh()
+ # Flush final output and retain raw independent stderr for diagnosis.
  $combined=((Raw $stdout)+[Environment]::NewLine+(Raw $stderr)).Trim()
  $combined | Set-Content -LiteralPath $flashLog -Encoding UTF8
- if($combined){Write-Host $combined}
+ Need (-not $timedOut) ("esptool timed out after 10 minutes; inspect "+$flashLog+
+  ". Flash may be incomplete; keep COM9 connected and retry with ROM bootloader if needed.")
  $code=$process.ExitCode
  Need ($code -eq 0) ("esptool failed with exit code "+$code+"; inspect "+$flashLog+
   ". No NVS or full-flash erase was requested.")
