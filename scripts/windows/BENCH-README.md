@@ -2,6 +2,14 @@
 
 **Default:** double-click `OpenTail-Bench.bat` for a **30-second Bluetooth-only** capture. There is **no automatic controller command**, LED activation, Save, reset or firmware flash. Keep the Android phone on USB debugging and the ESP32 serial adapter on COM9 (or another detected unambiguous COM port).
 
+## Explicit one-command firmware recovery on COM9
+
+- **`OpenTail-Bench.bat flash-auto`**: writes the current exact-head Firmware #127 application to ESP32-S3 **COM9** without a second confirmation prompt. The `flash-auto` command is the owner's explicit authorization to write firmware. The standard `flash` command still requires typing `FLASH COM9`.
+- This is a **firmware-only path**: no phone, ADB, Android APK, Bluetooth pairing, layout writes, or Pixel Probe. The controller's NVS, owner credentials, and partition table are preserved.
+- Before any write: confirm PR #127 remains draft/unmerged, verify **successful exact-head** Issue126 host, ESP-IDF 5.5.5 and package workflow; verify artifact SHA and release manifest, board type, app offset `0x20000`, and SHA256SUMS. Stop without writing on any failure or if the PR head changes.
+- Close serial monitors before running. If the ESP32 cannot automatically enter the ROM loader, stop and use the board's BOOT/EN sequence; never erase flash to recover from a port-connection problem.
+- A successful flash write is **not** a physical boot/playback PASS. Check COM9 boot logs; report any task overflow, panic reset or missing BLE startup before further lights testing.
+
 ## One-click playback diagnosis
 
 For Show Modes, **run `OpenTail-Playback.bat`** from the project root. Its `-Mode playback -CaptureSeconds 30` invocation never passes `-FlashFirmware`. Firmware #127 PR lookup, firmware CI, and firmware artifact download are omitted: the runner observes the **installed** ESP32 firmware. When capture begins, tap Android **Show Modes → Solid Red → Play → Stop**. The runner does not send BLE commands or activate physical LEDs. `OK FX` proves controller acceptance only, not illumination.
