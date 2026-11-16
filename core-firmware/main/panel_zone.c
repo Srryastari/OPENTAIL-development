@@ -190,17 +190,20 @@ bool ot_pz_split(const ot_pz_controller_t *runtime,
     *lanes=next_lanes;*map=next_map;
     return true;
 }
-bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
-                ot_pz_controller_t *runtime){
+/* Panel v4 journal validation runs inside ot_cfg_activate's bounded task
+ * stack. Avoid a second full controller copy when the caller already owns
+ * temporary output storage. The public join remains all-or-nothing. */
+static bool pz_join_into(const ot_pz_lane_config_set_t *lanes,
+                         const ot_pz_map_t *map,ot_pz_controller_t *runtime){
     if(!lanes||!map||!runtime)return false;
-    ot_pz_controller_t next;ot_pz_defaults(&next);
+    ot_pz_defaults(runtime);
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         const ot_pz_lane_config_t *hardware=&lanes->lanes[lane];
         const ot_pz_map_output_t *geometry=&map->outputs[lane];
         if(hardware->lane_id!=lane||geometry->lane_id!=lane||
            geometry->panel_count>OT_PZ_MAX_PANELS_PER_OUTPUT||
            geometry->zone_count>OT_PZ_MAX_ZONES_PER_OUTPUT)return false;
-        ot_pz_output_t *out=&next.outputs[lane];
+        ot_pz_output_t *out=&runtime->outputs[lane];
         memcpy(out->name,hardware->name,sizeof(out->name));
         out->active_pixels=hardware->active_pixels;
         out->color_order=hardware->color_order;
@@ -214,7 +217,13 @@ bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
         memcpy(out->zones,geometry->zones,
                (size_t)geometry->zone_count*sizeof(out->zones[0]));
     }
-    if(!ot_pz_valid(&next))return false;
+    return ot_pz_valid(runtime);
+}
+bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
+                ot_pz_controller_t *runtime){
+    if(!lanes||!map||!runtime)return false;
+    ot_pz_controller_t next;
+    if(!pz_join_into(lanes,map,&next))return false;
     *runtime=next;
     return true;
 }
@@ -224,7 +233,7 @@ bool ot_pz_lane_config_set_valid(const ot_pz_lane_config_set_t *lanes){
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
         empty.outputs[lane].lane_id=(uint8_t)lane;
     ot_pz_controller_t joined;
-    return ot_pz_join(lanes,&empty,&joined);
+    return pz_join_into(lanes,&empty,&joined);
 }
 bool ot_pz_map_valid(const ot_pz_map_t *map){
     if(!map)return false;
@@ -240,7 +249,7 @@ bool ot_pz_map_valid(const ot_pz_map_t *map){
             hardware->rgb_gain[c]=hardware->white_gain[c]=255u;
     }
     ot_pz_controller_t joined;
-    return ot_pz_join(&maximum,map,&joined);
+    return pz_join_into(&maximum,map,&joined);
 }
 bool ot_pz_activation_inputs_quiet(uint8_t instantaneous,uint8_t debounced,
                                    uint8_t quiet_samples,uint8_t required_samples,
