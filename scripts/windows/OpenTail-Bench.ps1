@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
  [switch]$FlashFirmware,
+ [switch]$AutoFlash,
  [switch]$DirectLedProbe,
  [switch]$SelfTest,
  [ValidateRange(30,1800)][int]$CaptureSeconds=30,
@@ -407,11 +408,15 @@ function FirmwarePackage([string]$folder,[string]$sha) {
  }
  return [pscustomobject]@{image=$image;sha=(Get-FileHash -Algorithm SHA256 $image).Hash}
 }
-function ConfirmedFlash([string]$image,[string]$port,[string]$sha) {
+function ConfirmedFlash([string]$image,[string]$port,[string]$sha,[bool]$auto=$false) {
  Write-Warning "Optional flash changes app partition 0x20000 ONLY; NVS never erased."
  Write-Host "Firmware $sha to ESP32-S3 $port"
- $answer=Read-Host "To confirm type exactly FLASH $port"
- Need ($answer -ceq "FLASH $port") "Flash cancelled without writing"
+ if($auto){
+  Write-Host "EXPLICIT flash-auto mode: verified exact-head image will flash on $port without another prompt."
+ }else{
+  $answer=Read-Host "To confirm type exactly FLASH $port"
+  Need ($answer -ceq "FLASH $port") "Flash cancelled without writing"
+ }
  Tool "py"
  $version=@(& py -3 -m esptool version 2>&1)
  Need ($LASTEXITCODE -eq 0) "Install esptool: py -3 -m pip install esptool"
@@ -545,6 +550,7 @@ function Report {
  elseif($failed -and -not $installBlocked){$overall='FAIL'}
  elseif($observedFailures.Count -gt 0){$overall='FAIL'}
  elseif($installBlocked){$overall='BLOCKED'}
+ elseif($FlashFirmware -and $steps.Contains("Flash") -and $steps["Flash"].state -eq "PASS"){$overall='PASS'}
  elseif($sessionStarted) {
   $goal=$(switch($Mode){'bluetooth'{'owner_authorization'};'layout'{'layout'};'save'{'save'};'playback'{'command'}})
   if($stages[$goal].status -eq 'PASS'){$overall='PASS'}
@@ -592,7 +598,7 @@ function Report {
 $stamp=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 try {
  if($SelfTest) {
-  Need (-not $FlashFirmware -and -not $DirectLedProbe) "SelfTest cannot send hardware actions"
+  Need (-not $FlashFirmware -and -not $DirectLedProbe -and -not $AutoFlash) "SelfTest cannot send hardware actions"
   Need ([string]$repo -eq "Srryastari/OPENTAIL-development") "Wrong repo"
   AssertZipCheckoutSelfTest
   Step "ZIP checkout self-test" "PASS" "Missing Git metadata safely bypasses optional local source checks"
@@ -613,7 +619,26 @@ try {
   Need ($contract.Contains('($FlashFirmware -and (Head 127) -ne $firmwareSha)')) "Playback must not re-query Firmware #127"
   Step "Firmware-gate self-test" "PASS" "Playback skips firmware PR, CI and artifact lookup; no flash"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
+ } elseif($FlashFirmware){
+  # Dedicated firmware recovery: no phone, APK signing, BLE or Android CI dependency.
+  # The explicit flash-auto CLI selection is consent; every firmware integrity gate stays mandatory.
+  Need (-not $DirectLedProbe) "Flash and direct LED probe cannot run together"
+  EnsureGh
+  $esp=EspCom $EspPort
+  Step "USB" "PASS" "ESP32 serial port $esp selected; phone connection not required"
+  $firmwareSha=Head 127
+  $fwRuns=Api "repos/$repo/actions/runs?head_sha=$firmwareSha&per_page=100"
+  $fi=GoodRun $fwRuns "Issue126 Panel/Zone exact-head CORE verification"
+  $ci["Firmware regression"]=$fi.id
+  Step "Firmware CI" "PASS" "Exact-head CORE host, ESP-IDF and Windows flash package gates passed"
+  $fa=Artifact $fi ('^opentail-easyflash-.+'+[regex]::Escape($firmwareSha)+'$') 'firmware' $firmwareSha
+  $firmware=FirmwarePackage $fa.folder $firmwareSha
+  $artifacts["Firmware app (explicit flash)"]=$fa.url+" SHA256="+$firmware.sha
+  Need ((Head 127) -eq $firmwareSha) "Firmware branch changed during verification; no flash performed"
+  ConfirmedFlash $firmware.image $esp $firmwareSha ([bool]$AutoFlash)
+  Step "Flash" "PASS" "Exact-head app-only firmware written at 0x20000; NVS not erased"
  } else {
+  Need (-not $AutoFlash) "-AutoFlash requires -FlashFirmware"
   EnsureGh
   EnsureAdb
   $phone=Phone $AndroidSerial;$esp=EspCom $EspPort
