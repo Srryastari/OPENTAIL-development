@@ -418,11 +418,25 @@ function ConfirmedFlash([string]$image,[string]$port,[string]$sha,[bool]$auto=$f
   Need ($answer -ceq "FLASH $port") "Flash cancelled without writing"
  }
  Tool "py"
- $version=@(& py -3 -m esptool version 2>&1)
- Need ($LASTEXITCODE -eq 0) "Install esptool: py -3 -m pip install esptool"
- $esptoolArguments=@("-3","-m","esptool","--chip","esp32s3","--port",$port,"--baud","115200","write_flash","--flash_mode","dio","--flash_freq","80m","--flash_size","16MB","0x20000",$image)
- & py @esptoolArguments 2>&1 | Tee-Object -FilePath (Join-Path $session "flash.log")
- Need ($LASTEXITCODE -eq 0) "Flashing failed; no erase command was used"
+ # esptool v5 uses hyphenated CLI names. Windows PowerShell 5.1 promotes
+ # native stderr warnings into terminating errors under Stop; isolate stdout
+ # and stderr, and judge the real process exit code instead.
+ $esptoolArguments=@("-3","-m","esptool","--chip","esp32s3","--port",$port,
+  "--baud","115200","write-flash","--flash-mode","dio",
+  "--flash-freq","80m","--flash-size","16MB","0x20000",('"'+$image+'"'))
+ $stdout=Join-Path $session "esptool.stdout.txt"
+ $stderr=Join-Path $session "esptool.stderr.txt"
+ $flashLog=Join-Path $session "flash.log"
+ $python=[string](Get-Command py -ErrorAction Stop).Source
+ $process=Start-Process -FilePath $python -ArgumentList $esptoolArguments -Wait -PassThru -NoNewWindow `
+  -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+ $combined=((Raw $stdout)+[Environment]::NewLine+(Raw $stderr)).Trim()
+ $combined | Set-Content -LiteralPath $flashLog -Encoding UTF8
+ if($combined){Write-Host $combined}
+ $code=$process.ExitCode
+ Need ($code -eq 0) ("esptool failed with exit code "+$code+"; inspect "+$flashLog+
+  ". No NVS or full-flash erase was requested.")
+ Step "esptool" "PASS" ("write-flash exited 0; COM9 app partition 0x20000 (log: "+$flashLog+")")
 }
 function Raw([string]$name) {if(Test-Path $name){return [string](Get-Content $name -Raw -ErrorAction SilentlyContinue)};return ""}
 function Invoke-AdbCapture([string[]]$arguments,[string]$label,[int]$timeoutMs=20000) {
@@ -620,6 +634,8 @@ try {
   Need ($contract.Contains('($FlashFirmware -and (Head 127) -ne $firmwareSha)')) "Playback must not re-query Firmware #127"
   Need ($contract.Contains('elseif($FlashFirmware)')) "Explicit firmware-only recovery branch missing"
   Need ($contract.Contains('ConfirmedFlash $firmware.image $esp $firmwareSha ([bool]$AutoFlash)')) "AutoFlash must remain under verified firmware gate"
+  Need ($contract.Contains('"write-flash","--flash-mode","dio"')) "esptool v5 hyphenated CLI required"
+  Need ($contract.Contains('-RedirectStandardOutput $stdout -RedirectStandardError $stderr')) "Native warnings must not abort before exit-code evaluation"
   Need ($contract.Contains('Need ((Head 127) -eq $firmwareSha)')) "Flash must verify latest PR head before writing"
   Step "Firmware-gate self-test" "PASS" "Playback stays read-only; explicit flash-auto remains SHA/CI gated"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
