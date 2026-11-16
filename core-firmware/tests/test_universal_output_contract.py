@@ -55,6 +55,14 @@ assert om_get.index("if(!entry){cJSON_Delete(obj);") < om_get.index("cJSON_Print
 # Out-of-memory status must leave hardware-owned data and output config unchanged.
 assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
 
+# Panel journal validation must not nest two full-controller stack copies
+# inside ot_cfg_activate's small internal FreeRTOS task stack.
+panel_source=(root / "panel_zone.c").read_text(encoding="utf-8")
+assert "static bool pz_join_into(" in panel_source
+assert "return pz_join_into(lanes,&empty,&joined);" in panel_source
+assert "return pz_join_into(&maximum,map,&joined);" in panel_source
+assert "if(!pz_join_into(lanes,map,&next))return false;" in panel_source
+
 # Runtime driver length must follow each saved output, not a global max.
 assert ".max_leds=pixels" in core
 # Runtime RMT lengths now come from the active Panel/Zone lane snapshot,
@@ -152,7 +160,10 @@ assert "(unsigned long)measured_fps" not in status
 assert "outputs_ready=native_outputs_ready;" in status
 assert r'\"ble_ready\":%s' in status
 assert r'\"outputs_ready\":%s' in status
-assert 'OT_FW,(unsigned long)core_boot_id,elf_sha256,' in status
+# Build metadata precedes the random boot ID; keep the argument order
+# synchronized with the JSON format and the compiled-image fingerprint.
+assert 'OT_FW,elf_sha256,build_info->date,build_info->time,build_info->idf_ver,' in status
+assert '(unsigned long)core_boot_id,elf_sha256,' in status
 assert 'ble_startup_ready?"true":"false",ble_radio_ready?"true":"false"' in status
 # A semantic version repeats across alpha commits; physical evidence needs
 # the running ELF fingerprint to match the exact CI-generated firmware image.
