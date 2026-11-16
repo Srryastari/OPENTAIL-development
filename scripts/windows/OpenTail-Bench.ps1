@@ -555,7 +555,8 @@ function Report {
   $goal=$(switch($Mode){'bluetooth'{'owner_authorization'};'layout'{'layout'};'save'{'save'};'playback'{'command'}})
   if($stages[$goal].status -eq 'PASS'){$overall='PASS'}
  }
- $summary=[ordered]@{schema_version=1;date=$stamp;mode=$Mode;status=$overall;
+ $reportMode=$(if($FlashFirmware){"firmware-flash"}else{$Mode})
+ $summary=[ordered]@{schema_version=1;date=$stamp;mode=$reportMode;status=$overall;
    capture_requested_seconds=$CaptureSeconds;capture_elapsed_seconds=$captureElapsed;
    early_exit_cause=$(if($earlyFailure){$earlyFailure}else{$null});
    android_sha=$androidSha;downloaded_firmware_sha=$firmwareSha;
@@ -566,7 +567,7 @@ function Report {
  # Retain the old filename for existing no-hardware smoke tests and consumers.
  $summary | ConvertTo-Json -Depth 15 | Set-Content (Join-Path $session "report.json") -Encoding UTF8
  $lines=New-Object System.Collections.Generic.List[string]
- $lines.Add("# OpenTail bench - $Mode - $overall")
+ $lines.Add("# OpenTail bench - $reportMode - $overall")
  $lines.Add("Requested: $CaptureSeconds s; captured: $captureElapsed s; stop reason: "+$(if($earlyFailure){$earlyFailure}else{'normal/none'}))
  $lines.Add("Android source: "+$androidSha)
  $lines.Add("Downloaded firmware source (NOT confirmed installed): "+$firmwareSha)
@@ -617,7 +618,10 @@ try {
   Need ($contract.Contains('if($FlashFirmware){$firmwareSha=Head 127}')) "Firmware PR lookup must be flash-only"
   Need ([regex]::IsMatch($contract,'(?s)if\(\$FlashFirmware\)\{\s*\$fwRuns=')) "Firmware CI must be flash-only"
   Need ($contract.Contains('($FlashFirmware -and (Head 127) -ne $firmwareSha)')) "Playback must not re-query Firmware #127"
-  Step "Firmware-gate self-test" "PASS" "Playback skips firmware PR, CI and artifact lookup; no flash"
+  Need ($contract.Contains('elseif($FlashFirmware)')) "Explicit firmware-only recovery branch missing"
+  Need ($contract.Contains('ConfirmedFlash $firmware.image $esp $firmwareSha ([bool]$AutoFlash)')) "AutoFlash must remain under verified firmware gate"
+  Need ($contract.Contains('Need ((Head 127) -eq $firmwareSha)')) "Flash must verify latest PR head before writing"
+  Step "Firmware-gate self-test" "PASS" "Playback stays read-only; explicit flash-auto remains SHA/CI gated"
   Step "Runner self-test" "PASS" "No USB or Bluetooth commands, firmware write or NVS reset"
  } elseif($FlashFirmware){
   # Dedicated firmware recovery: no phone, APK signing, BLE or Android CI dependency.
