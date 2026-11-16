@@ -435,7 +435,8 @@ function Invoke-AdbCapture([string[]]$arguments,[string]$label,[int]$timeoutMs=2
 }
 function Get-AndroidPackageState([string]$phone) {
  $r=Invoke-AdbCapture @("-s",$phone,"shell","dumpsys","package","com.opentail.android") "adb-package"
- if($r.exit -ne 0){return [pscustomobject]@{exists=$false;lastUpdate=""}}
+ # Start-Process may return a null ExitCode on Windows PowerShell 5.1 even when ADB prints valid output.
+ if($null -ne $r.exit -and $r.exit -ne 0){return [pscustomobject]@{exists=$false;lastUpdate=""}}
  $present=([regex]::IsMatch($r.output,'(?m)^\s*Package \[com\.opentail\.android\]'))
  $m=[regex]::Match($r.output,'(?m)^\s*lastUpdateTime=([^\r\n]+)')
  return [pscustomobject]@{exists=$present;lastUpdate=$(if($m.Success){$m.Groups[1].Value.Trim()}else{""})}
@@ -468,12 +469,14 @@ function Install-VerifiedAndroid([string]$phone,[string]$apk,[string]$sha) {
   # ADB sometimes prints Success even when Windows reports an inconsistent process exit code.
   # Verify the actual package state rather than accepting or rejecting the uninstall on text alone.
   $afterUninstall=Invoke-AdbCapture @("-s",$phone,"shell","pm","path","com.opentail.android") "adb-uninstall-verify" 20000
-  $removed=($afterUninstall.exit -eq 0 -and $afterUninstall.output -notmatch '(?m)^package:')
+  $uninstallSuccess=[regex]::IsMatch($gone.output,'(?m)^\s*Success\s*$')
+  $removed=($uninstallSuccess -and ($null -eq $afterUninstall.exit -or $afterUninstall.exit -eq 0) -and $afterUninstall.output -notmatch '(?m)^package:')
   Need $removed ("Approved Android uninstall could not be verified; adb said: "+$gone.output+"; pm path: "+$afterUninstall.output)
   $result=Invoke-AdbCapture @("-s",$phone,"install",('"'+$apk+'"')) "adb-install-replacement" 120000
   $afterInstall=Invoke-AdbCapture @("-s",$phone,"shell","pm","path","com.opentail.android") "adb-reinstall-verify" 20000
-  $installed=($afterInstall.exit -eq 0 -and $afterInstall.output -match '(?m)^package:')
-  Need $installed ("Approved app uninstall succeeded but reinstall FAILED or could not be verified: "+$result.output+"; pm path: "+$afterInstall.output)
+  $reinstallSuccess=[regex]::IsMatch($result.output,'(?m)^\s*Success\s*$')
+  $installed=($reinstallSuccess -and ($null -eq $afterInstall.exit -or $afterInstall.exit -eq 0) -and $afterInstall.output -match '(?m)^package:')
+  Need $installed ("Approved app uninstall succeeded but reinstall FAILED or could not be verified: "+$result.output+"; pm path: "+$afterInstall.output+"; pm exit: "+$afterInstall.exit)
   Step "Android install" "PASS" "Owner explicitly approved reinstall; phone app data and owner key erased, controller NVS unchanged"
  } else {
   # Streamed Install can report Success despite an inconsistent ADB process exit
@@ -481,8 +484,8 @@ function Install-VerifiedAndroid([string]$phone,[string]$apk,[string]$sha) {
   # read-only package verification, rather than failing on the exit code alone.
   $installSuccess=[regex]::IsMatch($result.output,'(?m)^\s*Success\s*$')
   $afterInstall=Invoke-AdbCapture @("-s",$phone,"shell","pm","path","com.opentail.android") "adb-install-verify" 20000
-  $installed=($afterInstall.exit -eq 0 -and $afterInstall.output -match '(?m)^package:')
-  Need ($installSuccess -and $installed) ("Android APK installation could not be verified; adb response: "+$result.output+"; package lookup: "+$afterInstall.output)
+  $installed=(($null -eq $afterInstall.exit -or $afterInstall.exit -eq 0) -and $afterInstall.output -match '(?m)^package:')
+  Need ($installSuccess -and $installed) ("Android APK installation could not be verified; adb response: "+$result.output+"; package lookup: "+$afterInstall.output+"; pm exit: "+$afterInstall.exit)
   Step "Android install" "PASS" "ADB reported Success and phone package lookup verified install; app data preserved"
  }
  $new=Get-AndroidPackageState $phone
