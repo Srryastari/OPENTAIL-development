@@ -334,6 +334,75 @@ static void reset_marker_and_fail_closed(void){
     store.map_active.present=false;store.lane_active.present=false;
     assert(!ot_pz_pair_store_recover(&io,&workspace,&base,&live,&pending,ar,sr,NULL,NULL,NULL));
 }
+/* Reproduce physical Build 957: committed zero O1, revision 2, live one
+ * panel/one zone with 39 LEDs, then exactly one v4 Save. Also exercise the
+ * largest legal shape on both lanes, with every panel/zone/range occupied.
+ * These run the real portable journal functions (fake NVS), not ESP stacks. */
+static void physical_39_and_maximum_save(void){
+    static fake_store_t store;
+    static ot_pz_controller_t base,selected,maximum;
+    memset(&store,0,sizeof(store));
+    ot_pz_pair_store_io_t io=make_io(&store);
+    ot_pz_defaults(&base);
+    const uint16_t initial[OT_PZ_OUTPUTS]={1u,1u},fresh[OT_PZ_OUTPUTS]={2u,1u};
+    const uint16_t saved[OT_PZ_OUTPUTS]={3u,1u},maxrev[OT_PZ_OUTPUTS]={4u,2u};
+    assert(ot_pz_pair_store_begin(&io,&workspace,&base,&base,initial,fresh,
+        0x39390001u,0u,true,NULL,NULL));
+    assert(ot_pz_pair_store_finish(&io,&workspace,0x39390001u,NULL,NULL));
+    make_runtime(&selected,39u,OT_OM_GRB,39u);
+    selected.outputs[1]=base.outputs[1];
+    assert(ot_pz_valid(&selected));
+    const unsigned before=store.durable_writes;
+    assert(ot_pz_pair_store_begin(&io,&workspace,&base,&selected,fresh,saved,
+        0x39390002u,0u,false,NULL,NULL));
+    assert(store.durable_writes==before+3u);
+    assert(ot_pz_pair_store_finish(&io,&workspace,0x39390002u,NULL,NULL));
+    assert(store.durable_writes==before+9u);
+    assert(ot_pz_pair_store_snapshot(&io,&workspace));
+    assert(workspace.snapshot.map_active.candidate_revision[0]==3u);
+    assert(workspace.snapshot.map_active.candidate_revision[1]==1u);
+    assert(ot_pz_join(&workspace.snapshot.lane_active.candidate,
+        &workspace.snapshot.map_active.candidate,&workspace.pending.candidate));
+    assert(memcmp(&workspace.pending.candidate,&selected,sizeof(selected))==0);
+    ot_pz_defaults(&maximum);
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        ot_pz_output_t *o=&maximum.outputs[lane];
+        o->active_pixels=OT_PZ_MAX_PIXELS;
+        o->panel_count=OT_PZ_MAX_PANELS_PER_OUTPUT;
+        o->zone_count=OT_PZ_MAX_ZONES_PER_OUTPUT;
+        const unsigned per_panel=o->zone_count/o->panel_count;
+        const unsigned per_range=o->active_pixels/(o->zone_count*OT_PZ_MAX_RANGES_PER_ZONE);
+        assert(per_panel>0u&&per_range>0u);
+        for(unsigned p=0;p<o->panel_count;p++){
+            ot_pz_panel_t *panel=&o->panels[p];
+            panel->id=(uint16_t)(0x8001u+lane*16u+p);
+            panel->lane=(uint8_t)lane;panel->zone_count=(uint8_t)per_panel;
+            (void)snprintf(panel->name,sizeof(panel->name),"Panel %u",p);
+        }
+        for(unsigned z=0;z<o->zone_count;z++){
+            ot_pz_zone_t *zone=&o->zones[z];
+            zone->id=(uint16_t)(0x4081u+lane*16u+z);
+            zone->panel_id=o->panels[z/per_panel].id;
+            zone->role=OT_OM_DECORATIVE;zone->range_count=OT_PZ_MAX_RANGES_PER_ZONE;
+            (void)snprintf(zone->name,sizeof(zone->name),"Zone %u",z);
+            for(unsigned i=0;i<zone->range_count;i++){
+                const unsigned k=i*o->zone_count+z;
+                zone->ranges[i]=(ot_pz_range_t){(uint16_t)(k*per_range),(uint16_t)per_range};
+            }
+        }
+    }
+    assert(ot_pz_valid(&maximum));
+    assert(ot_pz_pair_store_begin(&io,&workspace,&selected,&maximum,saved,maxrev,
+        0x39390003u,0u,false,NULL,NULL));
+    assert(ot_pz_pair_store_finish(&io,&workspace,0x39390003u,NULL,NULL));
+    assert(ot_pz_pair_store_snapshot(&io,&workspace));
+    assert(ot_pz_join(&workspace.snapshot.lane_active.candidate,
+        &workspace.snapshot.map_active.candidate,&workspace.pending.candidate));
+    assert(memcmp(&workspace.pending.candidate,&maximum,sizeof(maximum))==0);
+    printf("PASS physical 39-pixel revision-2 Save and maximum dual-lane %u pixels/%u panels/%u zones/%u ranges each: staging and readback (fake NVS only)\n",
+        (unsigned)OT_PZ_MAX_PIXELS,(unsigned)OT_PZ_MAX_PANELS_PER_OUTPUT,
+        (unsigned)OT_PZ_MAX_ZONES_PER_OUTPUT,(unsigned)OT_PZ_MAX_RANGES_PER_ZONE);
+}
 int main(void){
     assert(sizeof(workspace)<=16u*1024u);
     zeroed_crc_compatibility();
@@ -341,6 +410,7 @@ int main(void){
     marker_read_error_fails_closed();
     durable_boundary_matrix();
     metadata_only_one_save_pair_recovery();
+    physical_39_and_maximum_save();
     reset_marker_rejects_pending_intent();
     reset_marker_first_write_and_idempotence();
     reset_marker_and_fail_closed();
