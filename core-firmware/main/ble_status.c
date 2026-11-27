@@ -1018,8 +1018,10 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
         panel_preview_set_error(OT_PZ_TX_ERROR_STALE);return 0;
     }
 
+    uint32_t candidate_crc=0u;
     const int rc=ot_ble_panel_preview_update_ranges(update.lane,
-        panel_preview_tx.base_revision,update.descriptors,update.descriptor_count);
+        panel_preview_tx.base_revision,update.descriptors,update.descriptor_count,
+        &candidate_crc);
     if(rc!=0){
         const uint8_t error=rc==2?OT_PZ_TX_ERROR_BUSY:
             (rc==3?OT_PZ_TX_ERROR_STALE:OT_PZ_TX_ERROR_INVALID);
@@ -1030,23 +1032,17 @@ static int panel_preview_update_write(uint16_t conn,uint16_t handle,
         }
         return 0;
     }
-    uint32_t candidate_crc=0u;
-    if(!ot_ble_panel_preview_crc32(update.lane,panel_preview_tx.base_revision,
-                                   &candidate_crc)){
-        /* The shadow may already contain this edit. Freeze the session so the
-         * client must reconcile/cancel rather than guess whether it was applied. */
-        panel_preview_reject_update(update.sequence,
-            OT_PZ_TX_ERROR_INTERNAL,0u);
-        panel_preview_tx.sequence_sync_warning=true;
-        panel_preview_tx.sequence_sync_fault=true;
-        return 0;
-    }
     panel_preview_tx.last_sequence=update.sequence;
     panel_preview_tx.last_packet_crc32=update.packet_crc32;
     panel_preview_tx.has_sequence=true;
     panel_preview_tx.candidate_crc32=candidate_crc;
     panel_preview_tx.status=OT_PZ_TX_ACTIVE;
     panel_preview_tx.last_error=OT_PZ_TX_ERROR_NONE;
+    /* Acknowledge only after the full candidate/CRC has been published, not
+     * merely after a NimBLE Write Without Response was queued by Android. */
+    ESP_LOGI(TAG,"BLE_PANEL_UPDATE_ACK lane=%u seq=%lu descriptors=%u crc32=%08lx",
+        (unsigned)(update.lane+1u),(unsigned long)update.sequence,
+        (unsigned)update.descriptor_count,(unsigned long)candidate_crc);
     /* UPDATE deliberately does not renew the 5-second lease. HEARTBEAT owns it. */
     return 0;
 }
