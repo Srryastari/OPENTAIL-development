@@ -230,6 +230,16 @@ bool ot_fx_bank_apply_continuous_tertiary_identity(ot_fx_zone_bank_t *bank,
  bool any=false;
  for(unsigned o=0;o<OT_OM_OUTPUTS;o++){
   if(!(request->chain_mask&(1u<<o)))continue;
+  /* Broadcast Show Mode must not be vetoed by a valid lane with no
+   * logical pixels. The FX projection can be empty even with physical
+   * capacity or legacy empty placeholders. Never accept malformed geometry,
+   * and require at least one real target across all selected lanes. */
+  if(outputs[o].zone_count==0u&&outputs[o].active_pixels==0u){
+   if(!ot_pz_output_valid(&panel_outputs[o],o))return false;
+   for(unsigned z=0;z<panel_outputs[o].zone_count;z++)
+    if(ot_pz_zone_pixel_count(&panel_outputs[o].zones[z])!=0u)return false;
+   continue;
+  }
   if(outputs[o].zone_count<1u||outputs[o].zone_count>OT_OM_ZONES||
      outputs[o].active_pixels<1u||
      outputs[o].active_pixels>OT_OM_MAX_PIXELS_PER_OUTPUT)return false;
