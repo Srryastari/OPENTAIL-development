@@ -231,6 +231,17 @@ typedef struct {
 /* Pair-store and legacy-migration scratch is static BSS, not task stack.
  * Every runtime user holds om_write_mutex; boot recovery runs before tasks. */
 static ot_pz_pair_store_workspace_t pz_pair_workspace;
+/* The synchronous Panel v4 GATT ACK is preserved, but its flash/journal
+ * call chain must run on ot_cfg_activate, never on nimble_host.
+ * The requesting task retains om_write_mutex until the worker signals done.
+ * This gives the worker exclusive delegated access to candidate/workspace
+ * without allowing another writer to interleave or reacquiring that mutex. */
+#define OT_CONFIG_WORKER_STACK_BYTES 8192u
+static SemaphoreHandle_t pz_save_done=NULL;
+static bool pz_save_requested=false,pz_save_result=false;
+static uint8_t pz_save_lane=0u;
+static uint16_t pz_save_base_revision=0u;
+static unsigned pz_save_host_hwm=0u;
 static ot_pz_journal_t pz_legacy_active_journal,pz_legacy_stage_journal;
 static ot_pz_reset_tombstone_t pz_legacy_tombstone;
 _Static_assert(sizeof(pz_pair_workspace)<=16u*1024u,
@@ -795,6 +806,39 @@ static bool pz_save_controller_locked(const ot_pz_controller_t *candidate){
     __atomic_store_n(&pz_pair_commit_pending,true,__ATOMIC_RELEASE);
     return true;
 }
+/* Called only by ot_cfg_activate, before taking om_write_mutex. The
+ * requesting GATT task owns that mutex and is waiting on pz_save_done.
+ * The immutable candidate is in static workspace; nothing here references
+ * the caller's stack. Keep the existing durable-stage ACK contract. */
+static void pz_service_delegated_save(void){
+    bool requested=false;
+    portENTER_CRITICAL(&state_lock);
+    requested=pz_save_requested;
+    pz_save_requested=false;
+    portEXIT_CRITICAL(&state_lock);
+    if(!requested)return;
+    const ot_pz_output_t *next=&pz_pair_workspace.candidate.outputs[pz_save_lane];
+    const int64_t started=esp_timer_get_time();
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_BEGIN lane=%u base_revision=%u pixels=%u panels=%u zones=%u task=ot_cfg_activate host_stack_hwm=%u stack_hwm=%u internal_heap=%u",
+        (unsigned)(pz_save_lane+1u),(unsigned)pz_save_base_revision,
+        (unsigned)next->active_pixels,(unsigned)next->panel_count,
+        (unsigned)next->zone_count,pz_save_host_hwm,
+        (unsigned)uxTaskGetStackHighWaterMark(NULL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    const bool saved=pz_save_controller_locked(&pz_pair_workspace.candidate);
+    const unsigned worker_hwm=(unsigned)uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG,"BLE_PANEL_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx task=ot_cfg_activate stack_hwm=%u",
+        (unsigned)(pz_save_lane+1u),(unsigned)saved,
+        (unsigned long)((esp_timer_get_time()-started)/1000LL),
+        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
+        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
+        worker_hwm);
+    if(worker_hwm<1024u)ot_st_set_fault("Panel Save configuration worker stack reserve low");
+    pz_save_result=saved;
+    /* Completion is published only AFTER durable staging/readback. */
+    xSemaphoreGive(pz_save_done);
+}
+
 /* Legacy output writes are lossless only while the current lane is representable
  * as one panel with contiguous zones. Complex hierarchy is never silently flattened. */
 static bool om_save(const ot_om_output_t items[OT_OM_OUTPUTS]){
@@ -1565,7 +1609,7 @@ int ot_ble_panel_reset_confirm(uint8_t lane,uint16_t expected_revision,
 }
 int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revision){
     if(lane>=OT_PZ_OUTPUTS||!next||!ot_pz_output_valid(next,lane))return 1;
-    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault)return 2;
+    if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||!pz_save_done)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)return 2;
     const TickType_t now=xTaskGetTickCount();
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
@@ -1621,23 +1665,18 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
         pz_preview[lane].committing=true;
         portEXIT_CRITICAL(&state_lock);
     }
-    /* The authoritative Panel v4 Save also originates in the NimBLE GATT
-     * callback. Record host-stack headroom and durable journal timing without
-     * introducing another controller copy or changing ACK ordering. A later
-     * COM9 log can correlate this interval with a reset reason / GATT 133. */
-    const int64_t save_started_us=esp_timer_get_time();
-    ESP_LOGI(TAG,"BLE_PANEL_SAVE_BEGIN lane=%u base_revision=%u pixels=%u panels=%u zones=%u stack_hwm=%u internal_heap=%u",
-        (unsigned)(lane+1u),(unsigned)base_revision,
-        (unsigned)next->active_pixels,(unsigned)next->panel_count,
-        (unsigned)next->zone_count,(unsigned)uxTaskGetStackHighWaterMark(NULL),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
-    const bool saved=pz_save_controller_locked(candidate);
-    const uint32_t save_elapsed_ms=(uint32_t)((esp_timer_get_time()-save_started_us)/1000LL);
-    ESP_LOGI(TAG,"BLE_PANEL_SAVE_END lane=%u staged=%u elapsed_ms=%lu phase=%u txn=%08lx stack_hwm=%u",
-        (unsigned)(lane+1u),(unsigned)saved,(unsigned long)save_elapsed_ms,
-        (unsigned)__atomic_load_n(&pz_pair_commit_phase,__ATOMIC_ACQUIRE),
-        (unsigned long)__atomic_load_n(&pz_pair_commit_phase_txn,__ATOMIC_ACQUIRE),
-        (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    /* Preserve one action and the durable-stage ACK: the host waits for a
+     * single worker result, retaining the writer mutex across the handoff.
+     * No retry or timeout can report an uncertain NVS outcome as success.
+     * The worker was created before config_promotion_ready was published. */
+    pz_save_lane=lane;
+    pz_save_base_revision=base_revision;
+    pz_save_host_hwm=(unsigned)uxTaskGetStackHighWaterMark(NULL);
+    portENTER_CRITICAL(&state_lock);
+    pz_save_requested=true;
+    portEXIT_CRITICAL(&state_lock);
+    xSemaphoreTake(pz_save_done,portMAX_DELAY);
+    const bool saved=pz_save_result;
     if(live_match){
         portENTER_CRITICAL(&state_lock);
         if(!saved){
@@ -3291,6 +3330,10 @@ static void pz_promote(uint32_t epoch){
 static void config_activation_task(void *unused){
     (void)unused;
     for(;;){
+        /* Delegated synchronous staging must run before attempting the
+         * mutex held by its waiting caller. Normal promotion still owns
+         * the mutex in the ordinary path below. */
+        pz_service_delegated_save();
         if(input_sampler_ready&&!config_recovery_fault&&om_write_mutex &&
            xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(1))==pdTRUE){
             bool trigger_pending,panel_pending;
@@ -4096,10 +4139,14 @@ void app_main(void) {
             ESP_LOGW(TAG,"BLE HCI started but advertising not confirmed in 2000ms; Wi-Fi diagnostics still starting");
     }
     if(om_write_mutex){
-        config_promotion_ready=xTaskCreate(config_activation_task,"ot_cfg_activate",
-            5120,NULL,5,NULL)==pdPASS;
+        pz_save_done=xSemaphoreCreateBinary();
+        config_promotion_ready=pz_save_done&&
+            xTaskCreate(config_activation_task,"ot_cfg_activate",
+            OT_CONFIG_WORKER_STACK_BYTES,NULL,5,NULL)==pdPASS;
         if(!config_promotion_ready)
             ot_st_set_fault("durable configuration promoter failed to start");
+        else ESP_LOGI(TAG,"Configuration worker started: internal stack=%u bytes",
+                      (unsigned)OT_CONFIG_WORKER_STACK_BYTES);
     }
     if(!boot_network_diagnostics){
         ESP_LOGI(TAG,"BLE-only bench startup; network diagnostics disabled");
