@@ -34,6 +34,21 @@ assert "xSemaphoreTake(om_write_mutex,0)" in active_crc
 assert "xSemaphoreTake(om_write_mutex,0)" in preview_crc
 assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in active_crc
 assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in preview_crc
+# BEGIN has the same atomic receipt requirement: creating a first zone
+# must not require two follow-up nonblocking CRC mutex reads.
+live_begin=core.split("int ot_ble_panel_preview_begin(",1)[1].split("int ot_ble_panel_preview_update_ranges(",1)[0]
+assert "uint32_t *base_crc32" in live_begin and "uint32_t *candidate_crc32" in live_begin
+assert "pz_controller_wire_crc32(&pz_outputs,&base_crc)" in live_begin
+assert "pz_controller_wire_crc32(&pz_preview[lane].candidate,&live_crc)" in live_begin
+assert live_begin.index("pz_controller_wire_crc32(&pz_preview[lane].candidate,&live_crc)") < live_begin.index("xSemaphoreGive(om_write_mutex)")
+assert "*base_crc32=base_crc;" in live_begin and "*candidate_crc32=live_crc;" in live_begin
+begin_gatt=ble.split("if(command.opcode==OT_PZ_TX_OP_BEGIN){",1)[1].split("const uint8_t lane=command.lane;",1)[1].split("const uint8_t lane=command.lane;",1)[0] if False else ble.split("if(command.opcode==OT_PZ_TX_OP_BEGIN){",1)[1].split("\n    const uint8_t lane=command.lane;",1)[0]
+assert "ot_ble_panel_preview_begin(lane,revision,capacity," in begin_gatt
+assert "panel_preview_tx.base_crc32=base_crc;" in begin_gatt
+assert "panel_preview_tx.candidate_crc32=candidate_crc;" in begin_gatt
+assert "ot_ble_panel_active_crc32(" not in begin_gatt
+assert "ot_ble_panel_preview_crc32(" not in begin_gatt
+assert "BLE_PANEL_BEGIN_ACK" in begin_gatt
 # The 0xFE UPDATE callback may not publish a shadow and then race the
 # 25ms configuration worker for a separate non-blocking CRC lock. Accepted
 # geometry and its CRC must be one atomic receipt.
