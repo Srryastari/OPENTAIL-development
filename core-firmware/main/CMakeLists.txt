@@ -17,3 +17,6 @@ idf_component_register(
     REQUIRES esp_psram esp_wifi esp_netif esp_event esp_http_server esp_driver_spi
              esp_timer driver nvs_flash json bt mbedtls app_update esp_partition
 )
+
+# Retain compiler frame sizes for exact-target Save call-chain audit.
+target_compile_options(${COMPONENT_LIB} PRIVATE -fstack-usage)
