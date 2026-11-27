@@ -379,7 +379,9 @@ assert(bleSource.includes('boolean savePanelV4(int lane,String json)') &&
        bleSource.includes('panelSavePhase=4') &&
        bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)') &&
        hardware.includes('panelSaveQueuedLane=index') &&
-       compose.includes('Save could not start; live configuration remains unsaved'),
+       compose.includes('queuedSaveTimedOut(lane,"durable Save transport admission")') &&
+       compose.includes('endQueuedSaveWithoutWrite(lane,') &&
+       compose.includes('Unsaved draft retained.'),
   'Output Manager must not claim a rejected save is verifying hardware');
 for(const required of ['MAX_ZONES = 200', 'previewZoneOffsets(',
   'synchronized boolean editZone(', 'synchronized boolean moveZone(',
