@@ -821,6 +821,9 @@ final class BleDiscovery {
         BluetoothGatt owner=gatt;
         int lease=++panelSaveLease;
         panelSaveWaitingWrite=true;
+        if(panelSavePhase==0||panelSavePhase==2)
+            Log.i("OpenTailPanelSave","durable "+(panelSavePhase==0?"BEGIN":"COMPLETE")+
+                " write lane="+panelSaveLane+" (not yet an ACK)");
         boolean ok=false;
         try {
             if(Build.VERSION.SDK_INT>=33)
@@ -899,6 +902,8 @@ final class BleDiscovery {
             return;
         }
         if(result!=0) {
+            Log.w("OpenTailPanelSave","durable Save rejection lane="+panelSaveLane+
+                " phase="+panelSavePhase+" code="+result);
             panelSaveFinish(false,"Controller rejected Panel v4 Save: "+
                 PanelV4LayoutProtocol.saveRejectionMessage(result),null);
             return;
@@ -908,6 +913,8 @@ final class BleDiscovery {
             return;
         }
         if(panelSavePhase==2) {
+            Log.i("OpenTailPanelSave","durable COMPLETE acknowledged lane="+
+                panelSaveLane+"; verifying authoritative map");
             // Final ACK is admission, not durable promotion. A queued STOP
             // must take precedence over long snapshot polling.
             if(isStopPacket(nextPacket)) {
@@ -921,7 +928,10 @@ final class BleDiscovery {
             return;
         }
         if(panelSavePhase==1)panelSaveOffset+=panelSaveLastCount;
-        else panelSavePhase=1;
+        else {
+            Log.i("OpenTailPanelSave","durable BEGIN acknowledged lane="+panelSaveLane);
+            panelSavePhase=1;
+        }
         if(isStopPacket(nextPacket)) {
             panelSavePhase=3;
             panelSaveWrite(PanelV4LayoutProtocol.cancelUncommittedSave(panelSaveLane));
@@ -941,6 +951,8 @@ final class BleDiscovery {
         panelSaveLane=-1;panelSaveWire=null;panelSaveBaseWire=null;
         panelSavePhase=0;panelSaveOffset=0;panelSaveVerificationReads=0;
         panelSaveVerifyDeadlineMs=0L;panelSaveLease++;
+        Log.i("OpenTailPanelSave","durable Save result lane="+lane+
+            " confirmed="+success+"; never assume ATT ACK is persistent");
         if(lane>=0&&lane<2)cfgNotify(success,message,confirmed,lane);
         if(!success)notifyStatus(message);
         pumpQueue();
@@ -2962,6 +2974,8 @@ final class BleDiscovery {
                 boolean durable=Arrays.equals(panelSaveWire,snapshot.wire)&&
                     revisionMatches&&!snapshot.pending&&snapshot.persistent;
                 if(durable) {
+                    Log.i("OpenTailPanelSave","authoritative readback matched full Panel v4 wire lane="+
+                        snapshot.lane+" revision="+snapshot.activeRevision);
                     try {
                         org.json.JSONObject result=PanelV4DraftCodec.fromSnapshot(snapshot);
                         panelGeometryManagers[snapshot.lane]=new GeometryTransactionManager(
