@@ -441,7 +441,8 @@ final class BleDiscovery {
     private int panelControlAction=0,panelControlLane=-1,panelUpdateLane=-1;
     private int panelControlWriteLease=0,panelUpdateWriteLease=0,negotiatedMtu=23;
     private long panelCancelAttemptedSession=-1L;
-    private volatile int panelPollLease=0;
+    // Independent lanes must not invalidate one another's pending status polls.
+    private final int[] panelPollLease={0,0};
     private final int[] panelTransactionPollAttempts={0,0};
     private final boolean[] panelTransactionTimeoutLatched={false,false};
     private boolean panelReconciliationPending=false,panelReconciliationSnapshotVerified=false;
@@ -1009,7 +1010,8 @@ final class BleDiscovery {
         panelControlAction=0;panelControlLane=-1;panelControlWriteLease++;
         panelUpdateQueued=false;panelUpdateWritePending=false;panelUpdatePacket=null;
         panelUpdateLane=-1;panelUpdateWriteLease++;negotiatedMtu=23;
-        panelPollLease++;panelReconciliationPending=false;panelReconciliationLane=-1;
+        panelPollLease[0]++;panelPollLease[1]++;
+        panelReconciliationPending=false;panelReconciliationLane=-1;
         Arrays.fill(panelTransactionPollAttempts,0);
         Arrays.fill(panelTransactionTimeoutLatched,false);
         panelReconciliationSnapshotVerified=false;panelReconciliationSnapshot=null;
@@ -2458,9 +2460,9 @@ final class BleDiscovery {
         pumpQueue();
     }
 
-    private void panelRetryStatusRead(BluetoothGatt owner) {
+    private void panelRetryStatusRead(BluetoothGatt owner,int expectedLane) {
         if(panelStatusReadRetries>=3) {
-            notifyStatus("CORE Panel status retries exhausted; reconnect or request a fresh status read");
+            notifyStatus("CORE Panel status retries exhausted for output "+(expectedLane+1)+"; no live geometry ACK assumed");
             return;
         }
         panelStatusReadRetries++;
@@ -2468,6 +2470,7 @@ final class BleDiscovery {
         ui.postDelayed(()->{
             if(!stopped&&owner==gatt&&panelStatusRetryLease==lease&&
                !panelReadPending&&panelReadQueued==0) {
+                panelStatusExpectedLane=expectedLane;
                 panelReadQueued=2;pumpQueue();
             }
         },250L);
@@ -2487,7 +2490,7 @@ final class BleDiscovery {
             if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("CORE Panel status read failed: "+status);
-            panelRetryStatusRead(owner);pumpQueue();return;
+            panelRetryStatusRead(owner,lane);pumpQueue();return;
         }
         final PanelPreviewProtocol.Status current;
         try{current=PanelPreviewProtocol.Status.parse(value);}
@@ -2502,12 +2505,16 @@ final class BleDiscovery {
             if(affected!=null)affected.markSynchronizationUncertain(malformed.message);
             panelNotify(null,malformed);
             notifyStatus("Invalid CORE Panel status v2: "+ex.getMessage());
-            panelRetryStatusRead(owner);pumpQueue();return;
+            panelRetryStatusRead(owner,lane);pumpQueue();return;
         }
         if(panelStatusExpectedLane>=0&&current.lane!=panelStatusExpectedLane) {
-            panelStatusFresh[panelStatusExpectedLane]=false;
+            int expectedLane=panelStatusExpectedLane;
+            panelStatusFresh[expectedLane]=false;
             panelStatusExpectedLane=-1;
-            notifyStatus("CORE Panel status lane did not match the requested snapshot/transaction lane");
+            Log.i("OpenTailPanelSave","stale status: requested lane="+expectedLane+
+                " observed lane="+current.lane+"; never ACK another output");
+            notifyStatus("Stale Panel status from another output; retrying expected lane");
+            panelRetryStatusRead(owner,expectedLane);
             pumpQueue();return;
         }
         panelStatusExpectedLane=-1;
@@ -2525,7 +2532,15 @@ final class BleDiscovery {
             if(manager.state()==GeometryTransactionManager.State.BEGINNING &&
                current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acceptBegin(current);
             else if(manager.state()==GeometryTransactionManager.State.UPDATE_PENDING &&
-                    current.state==PanelPreviewProtocol.STATE_ACTIVE)manager.acknowledgeUpdate(current);
+                    current.state==PanelPreviewProtocol.STATE_ACTIVE){
+                if(manager.acknowledgeUpdate(current))
+                    Log.i("OpenTailPanelSave","live UPDATE ACK lane="+current.lane+
+                        " sequence="+current.lastAcceptedSequence);
+                else
+                    Log.i("OpenTailPanelSave","stale UPDATE status lane="+current.lane+
+                        " accepted="+current.lastAcceptedSequence+
+                        " rejected="+current.lastRejectedSequence);
+            }
             if(current.lastRejectedReason==PanelPreviewProtocol.ERR_COMMITTING_LOCKED)
                 manager.rejectUpdateDuringCommit(PanelPreviewProtocol.ERR_COMMITTING_LOCKED);
         }
@@ -2669,12 +2684,15 @@ final class BleDiscovery {
 
     private void panelScheduleTransactionPoll(BluetoothGatt owner,int lane) {
         if(lane<0||lane>1)return;
-        final int lease=++panelPollLease;
+        final int lease=++panelPollLease[lane];
         final int attempt=++panelTransactionPollAttempts[lane];
         long delay=attempt<=40?200L:1000L;
         ui.postDelayed(()->{
-            if(!stopped&&owner==gatt&&canControl()&&panelPollLease==lease&&
-               !panelReadPending&&panelReadQueued==0)readPanelStatus();
+            if(!stopped&&owner==gatt&&canControl()&&panelPollLease[lane]==lease&&
+               !panelReadPending&&panelReadQueued==0) {
+                panelStatusExpectedLane=lane;
+                panelReadQueued=2;pumpQueue();
+            }
         },delay);
     }
 
@@ -2824,6 +2842,9 @@ final class BleDiscovery {
             notifyStatus("CORE Panel UPDATE write failed: "+status);
         }
         // ATT write completion is not an application ACK. Always read status-v2.
+        if(lane>=0&&lane<2)
+            Log.i("OpenTailPanelSave","live UPDATE ATT lane="+lane+" GATT="+status+
+                " (not controller acceptance)");
         if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
         panelReadQueued=2;pumpQueue();
     }
