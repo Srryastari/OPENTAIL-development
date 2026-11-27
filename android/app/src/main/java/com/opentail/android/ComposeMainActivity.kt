@@ -3685,6 +3685,13 @@ class ComposeMainActivity : ComponentActivity() {
                 Pill(if (savingOutput.intValue == index) "Saving…" else "Save",t,true,
                     enabled=valid && savingOutput.intValue<0 &&
                         ble.canConfigure() && outputs[index]!=null) {
+                    // A second tap can execute before Compose recomposes the
+                    // disabled button. Never enqueue a duplicate durable Save.
+                    if(savingOutput.intValue>=0 || panelSaveQueuedLane>=0 ||
+                        panelSaveSubmittedDrafts.containsKey(index)) {
+                        outputMessage.value="Save already in progress; no second write sent"
+                        return@Pill
+                    }
                     try {
                         val saved=ble.lastConfirmedPanelSnapshot(index)
                             ?: throw IllegalStateException("Read authoritative Panel v4 before saving")
