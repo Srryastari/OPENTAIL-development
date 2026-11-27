@@ -1223,42 +1223,60 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
     return accepted?0:(capacity_ok?3:1);
 }
 int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
-                               const ot_pz_range_update_t *updates,size_t count){
-    if(lane>=OT_PZ_OUTPUTS||!updates||count==0u||count>4u)return 1;
-    /* Slider traffic is deliberately non-blocking and never queues stale edits. */
+                               const ot_pz_range_update_t *updates,size_t count,
+                               uint32_t *accepted_crc32){
+    if(lane>=OT_PZ_OUTPUTS||!updates||count==0u||count>4u||
+       !accepted_crc32)return 1;
+    /* Edits do not block the NimBLE host on flash or the promoter. */
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,0)!=pdTRUE)return 2;
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     ot_pz_preview_t *candidate=&pz_preview_scratch;
-    uint16_t active_revision=0u;
-    bool pending=false,valid=false;
-    uint16_t staged_revision=0u;
+    uint16_t active_revision=0u,staged_revision=0u;
+    bool pending=false;
     portENTER_CRITICAL(&state_lock);
     *candidate=pz_preview[lane];
     active_revision=pz_active_revision[lane];
     staged_revision=pz_revision[lane];
-    pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     portEXIT_CRITICAL(&state_lock);
-    valid=!pending&&staged_revision==base_revision&&
-        active_revision==base_revision&&
-        ot_pz_preview_apply_updates(candidate,lane,updates,count,
-                                    base_revision,active_revision,pending,now_ms);
-    ot_om_output_t projected={0};
-    if(valid)valid=ot_pz_to_fx_view(&candidate->candidate.outputs[lane],lane,
-                                    &projected);
-    if(valid){
-        portENTER_CRITICAL(&state_lock);
-        valid=pz_preview[lane].active&&!pz_preview[lane].committing&&
-            pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
-            pz_preview[lane].expires_ms==candidate->expires_ms&&
-            pz_active_revision[lane]==base_revision&&
-            pz_revision[lane]==base_revision&&
-            !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&!__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
-        if(valid){
-            pz_preview[lane]=*candidate;
-            pz_live_fx_views[lane]=projected;
-        }
-        portEXIT_CRITICAL(&state_lock);
+    /* An invalid range must not be mistaken for a stale session and latch a
+     * permanent sequence-sync error. Distinguish session state from geometry. */
+    const bool session_ok=!pending&&staged_revision==base_revision&&
+        active_revision==base_revision&&candidate->active&&!candidate->committing&&
+        candidate->lane==lane&&candidate->base_revision==base_revision&&
+        (int32_t)(now_ms-candidate->expires_ms)<0;
+    if(!session_ok){xSemaphoreGive(om_write_mutex);return 3;}
+    if(!ot_pz_preview_apply_updates(candidate,lane,updates,count,
+                                    base_revision,active_revision,pending,now_ms)){
+        xSemaphoreGive(om_write_mutex);return 1;
     }
+    ot_om_output_t projected={0};
+    if(!ot_pz_to_fx_view(&candidate->candidate.outputs[lane],lane,&projected)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    /* The accepted CRC is calculated under the SAME mutex as the UPDATE
+     * candidate. A second non-blocking CRC lookup after unlock could race
+     * ot_cfg_activate and incorrectly hard-fault a successfully applied edit. */
+    uint32_t crc=0u;
+    if(!pz_controller_wire_crc32(&candidate->candidate,&crc)){
+        xSemaphoreGive(om_write_mutex);return 1;
+    }
+    bool valid=false;
+    portENTER_CRITICAL(&state_lock);
+    valid=pz_preview[lane].active&&!pz_preview[lane].committing&&
+        pz_preview[lane].lane==lane&&pz_preview[lane].base_revision==base_revision&&
+        pz_preview[lane].expires_ms==candidate->expires_ms&&
+        pz_active_revision[lane]==base_revision&&
+        pz_revision[lane]==base_revision&&
+        !pz_deferred.pending&&!om_deferred.pending&&!tm_deferred.pending&&
+        !__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    if(valid){
+        pz_preview[lane]=*candidate;
+        pz_live_fx_views[lane]=projected;
+        *accepted_crc32=crc;
+    }
+    portEXIT_CRITICAL(&state_lock);
     xSemaphoreGive(om_write_mutex);
     if(valid)request_render_refresh();
     return valid?0:3;
