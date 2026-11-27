@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -131,7 +133,11 @@ class ComposeMainActivity : ComponentActivity() {
     // No intermediate persistent preview COMMIT or manual Reload.
     private var panelSaveQueuedLane = -1
     private var panelSaveQueuedDraft: String? = null
-    private var panelSaveQueuedChecks = 0
+    private var panelSaveQueuedStartedMs = 0L
+    private var panelSaveLastStep = ""
+    // This is an elapsed-time limit, not 100 Compose polls; verified
+    // UPDATE status may legitimately require multiple asynchronous reads.
+    private val panelSaveAckTimeoutMs = 45_000L
     private val panelSaveSubmittedDrafts = mutableMapOf<Int,String>()
     private var panelGeometryDraftValid = true
     /** Lane-specific volatile previews. BLE owns the authoritative
@@ -481,7 +487,8 @@ class ComposeMainActivity : ComponentActivity() {
                 savingOutput.intValue = -1
                 panelSaveQueuedLane = -1 // uncertain BLE state: no automatic Save replay
                 panelSaveQueuedDraft = null
-                panelSaveQueuedChecks = 0
+                panelSaveQueuedStartedMs = 0L
+                panelSaveLastStep = ""
                 panelSaveSubmittedDrafts.clear()
                 paletteV3Supported.value = false
                 paletteLoadedSlot.intValue = -1
@@ -2383,105 +2390,116 @@ class ComposeMainActivity : ComponentActivity() {
      * Never issue a preview COMMIT first: a partial persistent geometry
      * would violate the owner's single-action Save contract.
      */
+    private fun tracePanelSave(lane:Int, step:String) {
+        if(panelSaveLastStep==step)return
+        panelSaveLastStep=step
+        // Do not log draft contents, controller names, owner keys or pixels.
+        Log.i("OpenTailPanelSave","lane="+lane+" step="+step)
+    }
+
+    private fun endQueuedSaveWithoutWrite(lane:Int, reason:String) {
+        // A queued request has never begun a durable transfer. Drop only the
+        // request, not the editing draft or any other output's preview.
+        panelSaveQueuedLane=-1
+        panelSaveQueuedDraft=null
+        panelSaveQueuedStartedMs=0L
+        savingOutput.intValue=-1
+        tracePanelSave(lane,"BLOCKED "+reason)
+        outputMessage.value="Save not sent: "+reason+". Unsaved draft retained."
+    }
+
+    private fun queuedSaveTimedOut(lane:Int, step:String):Boolean {
+        tracePanelSave(lane,step)
+        if(SystemClock.elapsedRealtime()-panelSaveQueuedStartedMs < panelSaveAckTimeoutMs)
+            return false
+        endQueuedSaveWithoutWrite(lane,step+" timed out waiting for controller acknowledgement")
+        return true
+    }
+
+    /**
+     * Exactly one owner-selected v4 draft is frozen here. A live BEGIN or
+     * UPDATE ATT write is not controller acceptance. The manager transitions
+     * to ACTIVE only after status-v2 acknowledges the matching session and
+     * sequence; a durable Save begins only after the full physical candidate
+     * matches that acknowledged image. Never retry an uncertain durable write.
+     */
     private fun pumpPanelQueuedSave() {
         val lane=panelSaveQueuedLane
         if(lane !in 0..1)return
         val requested=panelSaveQueuedDraft
         if(requested==null||savingOutput.intValue!=lane||!ble.canConfigure()) {
-            panelSaveQueuedLane=-1
-            panelSaveQueuedDraft=null
-            savingOutput.intValue=-1
-            outputMessage.value="Save cancelled: controller or requested layout is unavailable"
+            endQueuedSaveWithoutWrite(lane,"controller disconnected or queued request unavailable")
             return
         }
         if(panelGeometryMapping!=null) {
             if(panelGeometryActiveLane!=lane || panelGeometryCommitRequested ||
-               panelGeometryCancelRequested || !panelGeometryDraftValid) {
-                panelSaveQueuedLane=-1
-                panelSaveQueuedDraft=null
-                savingOutput.intValue=-1
-                outputMessage.value="Save rejected: selected output's live mapping is not stable"
+                panelGeometryCancelRequested || !panelGeometryDraftValid) {
+                endQueuedSaveWithoutWrite(lane,"selected output live mapping is not stable")
                 return
             }
             val manager=ble.panelGeometryManager(lane)
-            if(manager?.syncUncertain()==true) {
-                panelSaveQueuedLane=-1
-                panelSaveQueuedDraft=null
-                savingOutput.intValue=-1
-                outputMessage.value="Save withheld: live mapping is uncertain; reconnect for authoritative verification"
+            if(manager?.syncUncertain()==true ||
+                manager?.state()==GeometryTransactionManager.State.RECONCILING) {
+                endQueuedSaveWithoutWrite(lane,
+                    "live status is uncertain; reconnect for authoritative snapshot before retry")
                 return
             }
-            if(panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null||
-               manager?.state()!=GeometryTransactionManager.State.ACTIVE) {
-                if(++panelSaveQueuedChecks>100) {
-                    panelSaveQueuedLane=-1
-                    panelSaveQueuedDraft=null
-                    savingOutput.intValue=-1
-                    outputMessage.value="Save not started: live updates did not receive controller confirmation"
-                }
+            val stage=when {
+                !panelGeometryBeginRequested[lane] -> "BEGIN not queued"
+                manager?.state()==GeometryTransactionManager.State.BEGINNING -> "BEGIN acknowledgement"
+                manager?.state()==GeometryTransactionManager.State.UPDATE_PENDING -> "UPDATE acknowledgement"
+                panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null -> "live UPDATE sequence"
+                manager?.state()!=GeometryTransactionManager.State.ACTIVE -> "live status acknowledgement"
+                else -> ""
+            }
+            if(stage.isNotEmpty()) {
+                queuedSaveTimedOut(lane,stage)
                 return
             }
         }
-        // Firmware rejection 10 means the Save's *physical* geometry was
-        // never accepted by live UPDATE (or the saved snapshot). Compare the
-        // exact full v4 candidate with the last acknowledged lane image BEFORE
-        // sending any durable write. Names, color order and calibration remain
-        // metadata-only changes and do not require a new UPDATE.
-        val verified=runCatching {
+        val accepted=runCatching {
             val snapshot=ble.lastConfirmedPanelSnapshot(lane)
                 ?: throw IllegalStateException("No verified Panel v4 lane snapshot")
             val upload=GeometryTransactionManager.fromV4SaveCandidate(
                 lane,PanelV4DraftCodec.encode(lane,JSONObject(requested),snapshot))
-            val accepted=if(panelGeometryMapping!=null) {
+            val acknowledged=if(panelGeometryMapping!=null) {
                 if(ble.panelGeometryManager(lane)?.state()!=GeometryTransactionManager.State.ACTIVE)
-                    throw IllegalStateException("Awaiting live preview acknowledgement")
+                    throw IllegalStateException("Awaiting live preview status")
                 panelGeometryAppliedMapping?.lane(lane)
-                    ?: throw IllegalStateException("Awaiting first live geometry acknowledgement")
+                    ?: throw IllegalStateException("Awaiting first live UPDATE acceptance")
             } else GeometryTransactionManager.fromV4SaveCandidate(lane,snapshot.wire)
-            GeometryTransactionManager.sameLiveGeometry(accepted,upload)
+            GeometryTransactionManager.sameLiveGeometry(acknowledged,upload)
         }.getOrElse {
-            outputMessage.value="Save waiting for verified live geometry: "+(it.message?:it.javaClass.simpleName)
+            tracePanelSave(lane,"candidate validation: "+(it.message?:"unknown"))
             false
         }
-        if(!verified) {
-            // Only the selected output is eligible for a new UPDATE. The frozen
-            // owner Save request is never uploaded until the exact mapping ACKs.
+        if(!accepted) {
+            // Queue only the current output's newest unsent candidate. Once a
+            // manager is UPDATE_PENDING, never issue its packet a second time.
             if(panelGeometryMapping!=null &&
                 panelGeometryPlanTarget==null && panelGeometryQueuedTarget==null &&
                 panelGeometryDraftValid &&
                 ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE &&
                 outputDrafts[lane]==requested) {
+                tracePanelSave(lane,"planning missing live geometry UPDATE")
                 queuePanelGeometryDraftUpdate()
             } else if(panelGeometryMapping==null && outputDrafts[lane]==requested) {
-                // startPanelGeometryPreview refreshes stale lane status before BEGIN.
+                tracePanelSave(lane,"preparing BEGIN for unaccepted geometry")
                 layoutLiveEditPending.value=true
                 startPanelGeometryPreview()
             }
-            if(++panelSaveQueuedChecks>100) {
-                panelSaveQueuedLane=-1
-                panelSaveQueuedDraft=null
-                savingOutput.intValue=-1
-                outputMessage.value="Save not sent: "+panelGeometryMessage.value.ifBlank {
-                    "Waiting for controller confirmation of the edited zone"
-                }
-            }
+            queuedSaveTimedOut(lane,"requested live geometry not yet accepted")
             return
         }
         if(!ble.savePanelV4(lane,requested)) {
-            // No command was accepted. Do not retry *after* a GATT write;
-            // BleDiscovery owns all in-flight/uncertain outcome handling.
-            if(++panelSaveQueuedChecks>100) {
-                panelSaveQueuedLane=-1
-                panelSaveQueuedDraft=null
-                savingOutput.intValue=-1
-                outputMessage.value="Save could not start; live configuration remains unsaved"
-            }
+            queuedSaveTimedOut(lane,"durable Save transport admission")
             return
         }
+        tracePanelSave(lane,"durable Save submitted once; awaiting authoritative readback")
         panelSaveSubmittedDrafts[lane]=requested
         panelSaveQueuedLane=-1
         panelSaveQueuedDraft=null
-        panelSaveQueuedChecks=0
+        panelSaveQueuedStartedMs=0L
         outputMessage.value="One Panel v4 Save submitted · verifying durable controller readback"
     }
 
@@ -3679,7 +3697,8 @@ class ComposeMainActivity : ComponentActivity() {
                             savingOutput.intValue=index
                             panelSaveQueuedLane=index
                             panelSaveQueuedDraft=draftText
-                            panelSaveQueuedChecks=0
+                            panelSaveQueuedStartedMs=SystemClock.elapsedRealtime()
+                            panelSaveLastStep=""
                             panelGeometryEpoch.intValue++ // keeps bounded Save admission checks alive
                             outputMessage.value="Verifying current live mapping before one Panel v4 Save..."
                             pumpPanelQueuedSave()
