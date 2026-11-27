@@ -1682,3 +1682,15 @@ assert(p0Disconnect?.includes('clearPanelGeometryPreview(') &&
   bleSource.includes('panelConfirmedSnapshots[lane]=null;') &&
   bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
   'GATT 133 must retire in-flight BLE ownership without replaying Save or deleting unsaved Layout draft');
+
+
+// A GATT 133 in any Panel write/read phase must retire the old ATT owner.
+// The local draft survives, no UPDATE or durable Save is replayed automatically.
+assert(bleSource.includes('Panel live UPDATE GATT 133; reconnect without replay') &&
+  bleSource.includes('Panel live control GATT 133; reconnect without replay') &&
+  bleSource.includes('Panel v4 durable Save GATT 133; reconcile verified readback before retry') &&
+  bleSource.includes('Panel v4 Save reply GATT 133; reconnect without replay') &&
+  bleSource.includes('authoritative readback matched full Panel v4 wire lane=') &&
+  bleSource.includes('durable BEGIN acknowledged lane=') &&
+  bleSource.includes('durable COMPLETE acknowledged lane='),
+  'GATT 133 must cause fail-closed Panel recovery and the full Save ACK/readback chain must be traceable');
