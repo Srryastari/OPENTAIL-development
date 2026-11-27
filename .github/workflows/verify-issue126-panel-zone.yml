@@ -85,6 +85,55 @@ jobs:
           target: esp32s3
           path: core-firmware
           command: idf.py build && python3 tests/check_input_edge_isr_iram.py build/opentail_core_alpha.elf && python3 tests/check_rmt_cache_safe.py build/opentail_core_alpha.elf "$IDF_PATH"
+      - name: Audit exact-target Panel Save stack frames (compiler estimate, not hardware measurement)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          build=Path("core-firmware/build")
+          source=Path("core-firmware/main/opentail_core.c").read_text()
+          budget=int(re.search(r"#define OT_CONFIG_WORKER_STACK_BYTES (\d+)u",source).group(1))
+          names={"opentail_core.c","panel_zone.c","panel_zone_pair_store.c","config_journal.c","ble_status.c"}
+          frames={}
+          for p in build.rglob("*.su"):
+              if not any(n in p.name for n in names):
+                  continue
+              for line in p.read_text().splitlines():
+                  parts=line.rsplit("\t",2)
+                  if len(parts)!=3:
+                      continue
+                  func=parts[0].rsplit(":",1)[-1].split(".")[0]
+                  if not parts[1].isdigit():
+                      continue
+                  frames[func]=max(frames.get(func,0),int(parts[1]))
+          required=("config_activation_task","ot_ble_panel_save","ot_pz_pair_store_begin","ot_pz_pair_store_snapshot","ot_pz_map_journal_valid","ot_pz_map_valid","ot_pz_join","ot_pz_output_valid")
+          missing=[n for n in required if n not in frames]
+          assert not missing,("missing compiler stack frames",missing)
+          # Conservative sum of application frames for each possible nested
+          # staging route. Missing optional static functions were inlined;
+          # their frames are included in their callers. SDK/NVS/logging/
+          # FreeRTOS library internals are NOT measured by this estimate.
+          prefix=("config_activation_task","pz_service_delegated_save","pz_save_controller_locked","ot_pz_pair_store_begin")
+          branches=(
+              ("ot_pz_pair_store_snapshot","ot_pz_map_journal_valid","ot_pz_map_valid","pz_join_into","ot_pz_valid","ot_pz_output_valid"),
+              ("ot_pz_join","pz_join_into","ot_pz_valid","ot_pz_output_valid"),
+              ("ot_pz_map_journal_build_reset","ot_pz_map_valid","pz_join_into","ot_pz_valid","ot_pz_output_valid"),
+              ("write_verified","read_exact","pz_pair_nvs_read","pz_pair_nvs_write_commit"),
+          )
+          routes=[(sum(frames.get(n,0) for n in prefix+branch),prefix+branch) for branch in branches]
+          worst=max(n for n,_ in routes)
+          lines=[f"worker stack budget={budget}; max selected application path={worst}; unallocated estimate={budget-worst} bytes (SDK frames excluded)",
+                 "Actual task stack high-water requires the 39-pixel and max-size COM9 tests."]
+          for count,route in routes:
+              lines.append(f"{count} bytes: "+ " -> ".join(f"{n}({frames.get(n,0)})" for n in route))
+          for name in required:
+              lines.append(f"{name}: {frames[name]} bytes")
+          print("\n".join(lines))
+          # Reserve at least 2 KiB beyond the estimated application frames.
+          assert budget-worst>=2048,("insufficient estimated worker stack reserve",budget,worst)
+          # Output belongs to root-owned build until the next step chowns it.
+          Path("panel-save-stack-audit.txt").write_text("\n".join(lines)+"\n")
+          PY
       - name: Verify actual pinned WS2815 encoder and RMT buffers (host simulated)
         run: python3 core-firmware/tests/test_ws2815_driver.py core-firmware/managed_components/espressif__led_strip
       - name: Verify application and flash manifest
@@ -210,6 +259,7 @@ jobs:
             core-firmware/build/CORE_BUILD_EVIDENCE.json
             core-firmware/build/isr-evidence/
             core-firmware/build/rmt-evidence/
+            panel-save-stack-audit.txt
           if-no-files-found: error
           retention-days: 14
 # Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
