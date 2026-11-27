@@ -153,6 +153,7 @@ jobs:
           # The ESP-IDF container emits root-owned build artifacts; restore
           # runner ownership before writing the exact-head evidence manifest.
           sudo chown -R "$(id -u):$(id -g)" core-firmware/build
+          mv panel-save-stack-audit.txt core-firmware/build/panel-save-stack-audit.txt
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -259,7 +260,7 @@ jobs:
             core-firmware/build/CORE_BUILD_EVIDENCE.json
             core-firmware/build/isr-evidence/
             core-firmware/build/rmt-evidence/
-            panel-save-stack-audit.txt
+            core-firmware/build/panel-save-stack-audit.txt
           if-no-files-found: error
           retention-days: 14
 # Passing this workflow does not certify 2,048-pixel RMT timing, brightness/current,
