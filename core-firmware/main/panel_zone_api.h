@@ -16,8 +16,11 @@ bool ot_ble_pixel_probe(const uint8_t *packet,size_t size,
 void ot_ble_diag_disconnect(void);
 
 /* Volatile authenticated live-arrangement preview; commit uses the existing journal. */
+/* BEGIN returns both CRCs before relinquishing its writer mutex, so the
+ * first live Zone edit cannot race the 25ms configuration promoter. */
 int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
-                               uint16_t pixel_capacity);
+                               uint16_t pixel_capacity,uint32_t *base_crc32,
+                               uint32_t *candidate_crc32);
 /* An accepted UPDATE returns the candidate CRC while still owning the
  * configuration mutex. It cannot race another task's CRC/status read. */
 int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
