@@ -1634,6 +1634,7 @@ int ot_ble_panel_save(uint8_t lane,const ot_pz_output_t *next,uint16_t base_revi
     live_match=live_active&&session_ok&&!structural_conflict;
     busy=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
         __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE)||
+        pz_preview_commit_requested||pz_preview_commit_worker_active||
         pz_preview[lane].committing||
         (before_deadline(now,sim_deadline)&&sim_mask)||
         (before_deadline(now,demo_deadline)&&demo.mode!=OT_DEMO_OFF);
