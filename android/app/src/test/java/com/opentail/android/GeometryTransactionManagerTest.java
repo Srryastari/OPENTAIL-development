@@ -291,6 +291,76 @@ public class GeometryTransactionManagerTest {
         assertTrue(GeometryTransactionManager.sameLiveGeometry(both.lane(1),one.lane(1)));
     }
 
+    @Test public void addZoneRequiresSequencedLiveAckBeforeOneDurableSaveAndReadback() throws Exception {
+        byte[] empty=PanelV4LayoutProtocol.expectedFactoryMap(0);
+        PanelPreviewProtocol.LaneSnapshot baseline=fullSnapshot(empty,7);
+        JSONObject draft=PanelV4DraftCodec.fromSnapshot(baseline);
+        draft.put("pixels",24);
+        draft.getJSONArray("zones").put(new JSONObject().put("name","Zone 1")
+            .put("pixels",24).put("role","unassigned"));
+        byte[] candidate=PanelV4DraftCodec.encode(0,draft,baseline);
+        GeometryTransactionManager.MappedLane requested=
+            GeometryTransactionManager.fromV4SaveCandidate(0,candidate);
+        assertEquals(24,requested.activePixels);
+        assertEquals(1,requested.zones.size());
+        List<PanelPreviewProtocol.UpdateDescriptor[]> batches=
+            requested.descriptorBatches(baseline,23);
+        assertEquals(1,batches.size());
+        GeometryTransactionManager manager=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,empty));
+        assertTrue(manager.requestBegin());
+        assertTrue(manager.acceptBegin(status(1,107,0,0x10,7,7,7,0,0,0)));
+        GeometryTransactionManager.Update update=
+            manager.queueUpdate(candidate,batches.get(0),23);
+        assertNotNull(update);
+        // ATT delivery and stale telemetry do not authorize durable Save.
+        assertEquals(GeometryTransactionManager.State.UPDATE_PENDING,manager.state());
+        assertNull(manager.queueUpdate(candidate,batches.get(0),23)); // no duplicate
+        assertFalse(manager.acknowledgeUpdate(status(1,107,0,0x10,7,7,7,0,0,0)));
+        assertEquals(GeometryTransactionManager.State.UPDATE_PENDING,manager.state());
+        assertFalse(GeometryTransactionManager.sameLiveGeometry(
+            GeometryTransactionManager.fromV4SaveCandidate(0,empty),requested));
+        // The controller must acknowledge this lane/session/sequence.
+        assertTrue(manager.acknowledgeUpdate(status(1,107,1,0x20,7,7,7,0,0,4)));
+        assertEquals(GeometryTransactionManager.State.ACTIVE,manager.state());
+        GeometryTransactionManager.MappedLane acknowledged=
+            GeometryTransactionManager.fromV4SaveCandidate(0,manager.candidateCopy());
+        assertTrue(GeometryTransactionManager.sameLiveGeometry(acknowledged,requested));
+        byte[] durableBegin=PanelV4LayoutProtocol.beginSave(0,7,candidate);
+        assertEquals(9,durableBegin.length);
+        assertEquals(667,candidate.length);
+        assertArrayEquals(candidate,fullSnapshot(candidate,8).wire);
+        assertEquals(1,PanelV4DraftCodec.fromSnapshot(fullSnapshot(candidate,8))
+            .getJSONArray("zones").length());
+    }
+
+    @Test public void gatt133LeavesPendingZoneDraftUnacceptedAndRequiresFreshReadback() {
+        byte[] saved={3,0,0};
+        byte[] unsaved={3,0,1};
+        GeometryTransactionManager old=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,7,saved));
+        assertTrue(old.requestBegin());
+        assertTrue(old.acceptBegin(status(1,109,0,0x10,7,7,7,0,0,0)));
+        PanelPreviewProtocol.UpdateDescriptor zone=
+            new PanelPreviewProtocol.UpdateDescriptor(1,129,0,0,12,0);
+        assertNotNull(old.queueUpdate(unsaved,
+            new PanelPreviewProtocol.UpdateDescriptor[]{zone},23));
+        assertFalse(old.acknowledgeUpdate(status(1,109,0,0x10,7,7,7,0,0,0)));
+        old.connectionLost(); // Android GATT 133 or socket timeout
+        assertEquals(GeometryTransactionManager.State.RECONCILING,old.state());
+        assertTrue(old.syncUncertain());
+        assertNull(old.queueUpdate(unsaved,
+            new PanelPreviewProtocol.UpdateDescriptor[]{zone},23));
+        assertArrayEquals(saved,old.lastConfirmed().wire);
+        // Reconnected manager is built only from new authoritative controller
+        // snapshot, not the unsaved pending packet, preserving the UI draft.
+        GeometryTransactionManager fresh=new GeometryTransactionManager(
+            new GeometryTransactionManager.Snapshot(0,8,saved));
+        assertEquals(GeometryTransactionManager.State.READY,fresh.state());
+        assertArrayEquals(saved,fresh.lastConfirmed().wire);
+        assertNotSame(old,fresh);
+    }
+
     @Test public void lastConfirmedGeometryDoesNotChangeDuringPreviewOrCommit() {
         byte[] original={3,0,1,2};byte[] edited={3,0,1,9};
         GeometryTransactionManager manager=new GeometryTransactionManager(
