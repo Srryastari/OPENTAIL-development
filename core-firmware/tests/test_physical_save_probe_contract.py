@@ -87,17 +87,30 @@ cb=ble.split("static int cfg_write(",1)[1].split("/* BLE post-render snapshot v1
 assert "ot_ble_config_save(index,&output,cfg_upload_revision)" in cb
 assert "cfg_ack(opcode,index,(uint8_t)rc)" in cb
 assert "cfg_upload_index=255" in cb
-# Panel v4 becomes the sole user-facing Save after Android #111 cutover. Its
-# GATT callback must retain the same stack/durable-phase evidence as v1 Save,
-# while legacy v1 writes remain available until compatibility passes.
+# Physical Build 957: host HWM 680 bytes, then stack overflow in nimble_host
+# during synchronous Save staging. The worker now owns the heavy call chain
+# while the caller retains the writer mutex and waits for verified staging.
 v4save=core.split("int ot_ble_panel_save(",1)[1].split("bool ot_ble_pixel_probe(",1)[0]
+worker=core.split("static void pz_service_delegated_save(void){",1)[1].split("/* Legacy output writes",1)[0]
+loop=core.split("static void config_activation_task(void *unused){",1)[1].split("static void input_sampler_task(",1)[0]
 assert "ot_pz_controller_t *candidate=&pz_pair_workspace.candidate;" in v4save
-assert "BLE_PANEL_SAVE_BEGIN" in v4save and "BLE_PANEL_SAVE_END" in v4save
-assert "uxTaskGetStackHighWaterMark(NULL)" in v4save
-assert "MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT" in v4save
-assert v4save.index("BLE_PANEL_SAVE_BEGIN") < v4save.index("pz_save_controller_locked(candidate)")
-assert v4save.index("pz_save_controller_locked(candidate)") < v4save.index("BLE_PANEL_SAVE_END")
-assert "save_elapsed_ms" in v4save and "pz_pair_commit_phase" in v4save
+assert "pz_save_controller_locked(" not in v4save
+assert "pz_save_requested=true;" in v4save
+assert "xSemaphoreTake(pz_save_done,portMAX_DELAY);" in v4save
+assert v4save.index("pz_save_requested=true;") < v4save.index("xSemaphoreTake(pz_save_done,portMAX_DELAY);") < v4save.index("const bool saved=pz_save_result;")
+assert v4save.index("const bool saved=pz_save_result;") < v4save.rindex("xSemaphoreGive(om_write_mutex);")
+assert loop.index("pz_service_delegated_save();") < loop.index("xSemaphoreTake(om_write_mutex")
+assert "xSemaphoreTake(om_write_mutex" not in worker
+assert "BLE_PANEL_SAVE_BEGIN" in worker and "BLE_PANEL_SAVE_END" in worker
+assert "uxTaskGetStackHighWaterMark(NULL)" in worker
+assert "MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT" in worker
+assert worker.index("BLE_PANEL_SAVE_BEGIN") < worker.index("pz_save_controller_locked(&pz_pair_workspace.candidate)") < worker.index("BLE_PANEL_SAVE_END")
+assert worker.index("pz_save_result=saved;") < worker.index("xSemaphoreGive(pz_save_done);")
+assert "worker_hwm<1024u" in worker
+assert "#define OT_CONFIG_WORKER_STACK_BYTES 8192u" in core
+assert "pz_save_done=xSemaphoreCreateBinary();" in core
+assert "config_promotion_ready=pz_save_done&&" in core
+assert "OT_CONFIG_WORKER_STACK_BYTES,NULL,5,NULL" in core
 panel_cfg=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
 assert "ot_ble_panel_save(lane,&output,panel_upload_revision)" in panel_cfg
 render=core.split("static void led_task(void *p) {",1)[1]
