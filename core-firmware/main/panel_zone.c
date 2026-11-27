@@ -166,12 +166,12 @@ bool ot_pz_valid(const ot_pz_controller_t *config){
 bool ot_pz_split(const ot_pz_controller_t *runtime,
                  ot_pz_lane_config_set_t *lanes,ot_pz_map_t *map){
     if(!runtime||!lanes||!map||!ot_pz_valid(runtime))return false;
-    ot_pz_lane_config_set_t next_lanes={0};
-    ot_pz_map_t next_map={0};
+    memset(lanes,0,sizeof(*lanes));
+    memset(map,0,sizeof(*map));
     for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
         const ot_pz_output_t *source=&runtime->outputs[lane];
-        ot_pz_lane_config_t *hardware=&next_lanes.lanes[lane];
-        ot_pz_map_output_t *geometry=&next_map.outputs[lane];
+        ot_pz_lane_config_t *hardware=&lanes->lanes[lane];
+        ot_pz_map_output_t *geometry=&map->outputs[lane];
         hardware->lane_id=(uint8_t)lane;
         memcpy(hardware->name,source->name,sizeof(hardware->name));
         hardware->active_pixels=source->active_pixels;
@@ -187,7 +187,6 @@ bool ot_pz_split(const ot_pz_controller_t *runtime,
         memcpy(geometry->zones,source->zones,
                (size_t)source->zone_count*sizeof(geometry->zones[0]));
     }
-    *lanes=next_lanes;*map=next_map;
     return true;
 }
 /* Panel v4 journal validation runs inside ot_cfg_activate's bounded task
@@ -229,11 +228,15 @@ bool ot_pz_join(const ot_pz_lane_config_set_t *lanes,const ot_pz_map_t *map,
 }
 bool ot_pz_lane_config_set_valid(const ot_pz_lane_config_set_t *lanes){
     if(!lanes)return false;
-    ot_pz_map_t empty={0};
-    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++)
-        empty.outputs[lane].lane_id=(uint8_t)lane;
-    ot_pz_controller_t joined;
-    return pz_join_into(lanes,&empty,&joined);
+    /* An empty map has no geometry to validate. Check the hardware fields
+     * directly so a Save never allocates an empty map and controller here. */
+    for(unsigned lane=0;lane<OT_PZ_OUTPUTS;lane++){
+        const ot_pz_lane_config_t *hardware=&lanes->lanes[lane];
+        if(hardware->lane_id!=lane||!pz_name_ok(hardware->name)||
+           hardware->active_pixels>OT_PZ_MAX_PIXELS||
+           hardware->color_order>OT_OM_BGR)return false;
+    }
+    return true;
 }
 bool ot_pz_map_valid(const ot_pz_map_t *map){
     if(!map)return false;
