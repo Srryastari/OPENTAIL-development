@@ -34,6 +34,40 @@ assert "xSemaphoreTake(om_write_mutex,0)" in active_crc
 assert "xSemaphoreTake(om_write_mutex,0)" in preview_crc
 assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in active_crc
 assert "pz_controller_wire_crc32(&pz_crc_snapshot,crc32)" in preview_crc
+# The 0xFE UPDATE callback may not publish a shadow and then race the
+# 25ms configuration worker for a separate non-blocking CRC lock. Accepted
+# geometry and its CRC must be one atomic receipt.
+live_update=core.split("int ot_ble_panel_preview_update_ranges(",1)[1].split("int ot_ble_panel_preview_heartbeat(",1)[0]
+assert "uint32_t *accepted_crc32" in live_update
+assert "const bool session_ok=" in live_update
+assert "if(!session_ok){xSemaphoreGive(om_write_mutex);return 3;}" in live_update
+assert "if(!ot_pz_preview_apply_updates(candidate" in live_update
+assert "xSemaphoreGive(om_write_mutex);return 1;" in live_update
+assert "pz_controller_wire_crc32(&candidate->candidate,&crc)" in live_update
+assert live_update.index("pz_controller_wire_crc32(&candidate->candidate,&crc)") < live_update.index("pz_preview[lane]=*candidate;")
+assert live_update.index("pz_preview[lane]=*candidate;") < live_update.index("*accepted_crc32=crc;") < live_update.index("xSemaphoreGive(om_write_mutex);\n    if(valid)request_render_refresh();")
+ble_update=ble.split("static int panel_preview_update_write(",1)[1].split("static int panel_preview_status_read(",1)[0]
+assert "update.descriptors,update.descriptor_count,\n        &candidate_crc);" in ble_update
+assert "ot_ble_panel_preview_crc32(" not in ble_update
+assert 'BLE_PANEL_UPDATE_ACK lane=' in ble_update
+assert ble_update.index("panel_preview_tx.candidate_crc32=candidate_crc;") < ble_update.index('BLE_PANEL_UPDATE_ACK lane=')
+assert "if(rc==3){" in ble_update and "panel_preview_tx.sequence_sync_fault=true;" in ble_update
+
+# BLE-only boot must bypass optional Wi-Fi + HTTP diagnostics without
+# suppressing real fault latching or silently disabling the SPI status LED.
+boot=core.split("void app_main(void) {",1)[1]
+assert "static const bool boot_network_diagnostics=false;" in core
+network_guard=boot.split("if(!boot_network_diagnostics){",1)[1].split("const bool wifi_started=wifi_ap_init();",1)[0]
+assert 'BLE-only bench startup; network diagnostics disabled' in network_guard
+assert "return;" in network_guard
+assert boot.index("xTaskCreate(config_activation_task") < boot.index("if(!boot_network_diagnostics){")
+assert boot.index("if(!boot_network_diagnostics){") < boot.index("wifi_ap_init();") < boot.index("http_start();")
+assert 'ot_st_set_fault("BLE GATT startup failed")' in boot
+assert 'ot_st_set_fault("render task could not start")' in boot
+status=(root/"main/status_led.c").read_text()
+assert "if(fault)return OT_ST_FAULT;" in status
+assert "void ot_st_set_fault(const char *reason)" in status
+assert "fault=true;" in status
 cb=ble.split("static int cfg_write(",1)[1].split("/* BLE post-render snapshot v1:",1)[0]
 assert "ot_ble_config_save(index,&output,cfg_upload_revision)" in cb
 assert "cfg_ack(opcode,index,(uint8_t)rc)" in cb
