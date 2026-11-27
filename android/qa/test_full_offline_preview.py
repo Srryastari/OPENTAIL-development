@@ -2,7 +2,7 @@
 """All 140 IDs: real Java/JNI frames vs independent exact CORE source build.
 
 Host renderer timings are NOT Android display FPS or radio measurements.
-Usage: JAVA_HOME=... python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects50
+Usage: JAVA_HOME=... python3 android/qa/test_full_offline_preview.py --core-dir pinned-effects110 --state-dir pinned-firmware127
 """
 import argparse
 import ctypes as C
@@ -18,11 +18,13 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 CPP=ROOT/'android/app/src/main/cpp'
 JAVA=ROOT/'android/app/src/main/java/com/opentail/android'
-PIN='1767b144e193ed6978816899ebb5eba237ee6e2d'
-CONTINUITY_PIN='7c0fcc450a7619a57603aabf833dea855a18bcd8'
-COLOR_PIN='984a12aeec4e348b869ba2504a2f994fc944f7f2'
-COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h','effects_1d.c','effects_1d.h'}
-CONTINUITY_FILES={'effects_1d.c','effects_1d.h','ot_auto_effects.c','ot_auto_effects.h'}
+PIN='601155a196a692792e60fd399505fdc676dc57d9'
+CONTINUITY_PIN=PIN
+COLOR_PIN=PIN
+STATE_PIN='dfe1a48c3f48dddf7f4c511f063d3743298ccd6a'
+COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h'}
+CONTINUITY_FILES={'ot_auto_effects.c','ot_auto_effects.h'}
+STATE_FILES={'effects_1d.c','effects_1d.h'}
 SOURCES=['wled_fx_compat.c','effects_1d.c','wled_1d.c','palette_1d.c','particle_system_1d.c','ot_auto_effects.c']
 
 ORACLE=r'''
@@ -139,23 +141,28 @@ def run(args,**kw):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--core-dir',type=Path,default=ROOT/'pinned-effects50')
-    parser.add_argument('--continuity-dir',type=Path,default=ROOT/'pinned-effects80')
-    parser.add_argument('--color-dir',type=Path,default=ROOT/'pinned-effects95')
+    parser.add_argument('--core-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--continuity-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--color-dir',type=Path,default=ROOT/'pinned-effects110')
+    parser.add_argument('--state-dir',type=Path,default=ROOT/'pinned-firmware127')
     args=parser.parse_args();core=args.core_dir.resolve()
     continuity=args.continuity_dir.resolve()
     colored=args.color_dir.resolve()
+    state=args.state_dir.resolve()
     assert run(['git','-C',core,'rev-parse','HEAD'],text=True).strip()==PIN
     assert run(['git','-C',continuity,'rev-parse','HEAD'],text=True).strip()==CONTINUITY_PIN
     assert run(['git','-C',colored,'rev-parse','HEAD'],text=True).strip()==COLOR_PIN
+    assert run(['git','-C',state,'rev-parse','HEAD'],text=True).strip()==STATE_PIN
     manifest=json.loads((CPP/'core/SOURCE.json').read_text())
     assert manifest['source_commit']==PIN
     assert manifest['seamless_loop_source_commit']==CONTINUITY_PIN
     assert set(manifest['seamless_loop_files'])==CONTINUITY_FILES
     assert manifest['color_slot_source_commit']==COLOR_PIN
     assert set(manifest['color_slot_files'])==COLOR_FILES
+    assert manifest['core_identity_source_commit']==STATE_PIN
+    assert set(manifest['core_identity_files'])==STATE_FILES
     for name,digest in manifest['files'].items():
-        original_dir=colored if name in COLOR_FILES else (continuity if name in CONTINUITY_FILES else core)
+        original_dir=state if name in STATE_FILES else (colored if name in COLOR_FILES else (continuity if name in CONTINUITY_FILES else core))
         local=(CPP/'core'/name).read_bytes()
         original=(original_dir/'core-firmware/main'/name).read_bytes()
         assert local==original and hashlib.sha256(local).hexdigest()==digest,name
@@ -167,9 +174,9 @@ def main():
         original=core/'core-firmware/main'
         corrected=continuity/'core-firmware/main'
         color_source=colored/'core-firmware/main'
-        # CORE oracle and copied JNI independently compile identical corrected
-        # proprietary algorithms; unchanged WLED/palette/particle source stays
-        # byte-pinned to Effects #50, no Android-specific frame substitutions.
+        # CORE oracle and copied JNI compile independently from the same
+        # immutable reconciled Effects #110 source, with no Android-only
+        # colors or animations substituted.
         oracle_sources=[(color_source if f in COLOR_FILES else (corrected if f in CONTINUITY_FILES else original))/f
                         for f in SOURCES]
         run(['cc','-std=c11','-O2','-shared','-fPIC',
@@ -274,21 +281,24 @@ def main():
                          'speed_supported':bool(flags&1),'intensity_supported':bool(flags&2),
                          'palette_supported':bool(flags&16),'profiles':len(profiles),
                          'frames':count-start_count,'speed_0_vs_255_trace_differs':hashes[1]!=hashes[2]})
-        # Exercise the exact 11 source-verified third-slot consumers in JNI,
+        # Exercise all 13 source-proven third-slot consumers in JNI,
         # including explicit black and changing only third while preserving the
         # first two colors. No fabricated Android-only frame substitution.
-        third_consumers=(28,29,34,50,52,54,55,56,84,87,103)
+        third_consumers=(28,29,34,38,50,52,54,55,56,84,87,95,103)
         for fx in third_consumers:
             for idx,third in enumerate((0x000000,0xff0000,0x0000ff)):
                 h=lib.make(fx)
                 for step in range(24):
                     ms=step*64
-                    assert lib.frame3(h,ms,128,200,255,0,0x00ff00,0x220033,
+                    # Aurora's third RGB is source-authentic only when
+                    # Color 1/2/3 palette 4 is selected; default is palette 50.
+                    palette=4 if fx==38 else 0
+                    assert lib.frame3(h,ms,128,200,255,palette,0x00ff00,0x220033,
                         third,1,440,2048,frame),(fx,ms,third)
                     pixels=b''.join(int(x).to_bytes(4,'big') for x in frame)
                     expected.extend(pixels)
                     plan.append(','.join(map(str,[int(step==0),fx,ms,128,200,255,
-                        0,0x00ff00,0x220033,third,1])))
+                        palette,0x00ff00,0x220033,third,1])))
                     count+=1
                 lib.drop(h)
         result=subprocess.run([str(jdk/'bin/java'),'-Djava.library.path='+str(t),'-cp',str(t),
@@ -299,7 +309,7 @@ def main():
         for row in rows:
             row['jni_timing']=timings[str(row['id'])]
             row['host_renderer_only_fps']=round(1e9/row['jni_timing']['mean_ns'],1)
-        report={'core_commit':PIN,'seamless_loop_commit':CONTINUITY_PIN,'color_slot_commit':COLOR_PIN,'candidate_commit':run(['git','rev-parse','HEAD'],text=True).strip(),
+        report={'core_commit':PIN,'seamless_loop_commit':CONTINUITY_PIN,'color_slot_commit':COLOR_PIN,'core_identity_commit':STATE_PIN,'candidate_commit':run(['git','rev-parse','HEAD'],text=True).strip(),
                 'tracked_android_dirty':bool(run(['git','diff','--name-only','HEAD','--','android'],text=True).strip()),
                 'effects':len(rows),'source_adapters':sum(r['source_adapter'] for r in rows),
                 'frames':count,'argb_bytes':len(expected),'parity':'byte-exact JNI vs independent pinned CORE build',

@@ -21,7 +21,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$PIN"
           git merge-base --is-ancestor d3ca7d036392d7709848b143a41f6bed1a26cb7b HEAD
-      - name: Verify no BLE/NVS/renderer/Android UI changes and unchanged physical release gate
+      - name: Verify exact owner-authorized Android P0 scope, immutable CORE renderer and unchanged physical release gate
         run: python3 scripts/check_integrated_candidate.py
       - name: Independently regress all evidence-review failure paths
         run: python3 scripts/test_final_day_evidence_lock.py

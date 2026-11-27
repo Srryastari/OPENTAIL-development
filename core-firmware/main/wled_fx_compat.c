@@ -198,9 +198,10 @@ static void palette_gradient(ot_wled_palette16_t *p,unsigned start,
         r+=dr;g+=dg;blue+=db;
     }
 }
-bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
+static bool ot_wled_palette_build_internal(uint8_t id,
+                           ot_wled_rgb_t primary,
                            ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
-                           ot_wled_palette16_t *out) {
+                           bool tertiary_set,ot_wled_palette16_t *out) {
     if(!out)return false;
     ot_wled_palette16_t next={0};
     if(id==0u || id==6u) {
@@ -226,7 +227,7 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
         palette_gradient(&next,0u,tertiary,8u,secondary);
         palette_gradient(&next,8u,secondary,15u,primary);
     } else if(id==5u) {
-        const bool has_third=tertiary.r||tertiary.g||tertiary.b;
+        const bool has_third=tertiary_set;
         for(unsigned i=0;i<16u;i++) {
             next.entries[i]=i<5u?primary:
                             i<10u?secondary:
@@ -239,6 +240,17 @@ bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
     *out=next;
     return true;
 }
+/* Backward-compatible helper for callers without a presence bit. The
+ * renderer uses tertiary_set so an authored RGB black is distinct from an
+ * absent third color. */
+bool ot_wled_palette_build(uint8_t id,ot_wled_rgb_t primary,
+                           ot_wled_rgb_t secondary,ot_wled_rgb_t tertiary,
+                           ot_wled_palette16_t *out) {
+    const bool tertiary_set=tertiary.r!=0u||tertiary.g!=0u||tertiary.b!=0u;
+    return ot_wled_palette_build_internal(id,primary,secondary,tertiary,
+                                          tertiary_set,out);
+}
+
 /* WLED colors.cpp generateRandomPalette(): four independent CHSV colors
  * form a CRGBPalette16 with stops at 0, 5, 10, 15. Source RNG and gradual
  * palette transitions are intentionally not invented here. */
@@ -419,15 +431,26 @@ bool ot_wled_palette_random_tick(ot_wled_palette_random_t *state,
 /* The global random/custom palette is generated and resolved by its owner.
  * Rendering only reads the caller's frame-stable snapshot. No per-zone random
  * generator, hidden cache, or stateful palette fallback is introduced. */
-static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
+static bool fx_palette_build_with_tertiary(
+                             const ot_wled_fx_config_t *cfg,uint8_t id,
                              ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
-                             ot_wled_rgb_t tertiary,ot_wled_palette16_t *out) {
+                             ot_wled_rgb_t tertiary,bool tertiary_set,
+                             ot_wled_palette16_t *out) {
     if((id==1u||id>72u)&&id==cfg->palette_id) {
         if(!cfg->resolved_palette||!out)return false;
         *out=*cfg->resolved_palette;
         return true;
     }
-    return ot_wled_palette_build(id,primary,secondary,tertiary,out);
+    return ot_wled_palette_build_internal(id,primary,secondary,tertiary,
+                                          tertiary_set,out);
+}
+/* Preserve the legacy helper behavior for palette callers that only have RGB. */
+static bool fx_palette_build(const ot_wled_fx_config_t *cfg,uint8_t id,
+                             ot_wled_rgb_t primary,ot_wled_rgb_t secondary,
+                             ot_wled_rgb_t tertiary,ot_wled_palette16_t *out) {
+    const bool tertiary_set=tertiary.r!=0u||tertiary.g!=0u||tertiary.b!=0u;
+    return fx_palette_build_with_tertiary(cfg,id,primary,secondary,tertiary,
+                                          tertiary_set,out);
 }
 
 /* WLED pinned colors.cpp generateRandomPalette() target evaluation
@@ -588,6 +611,29 @@ ot_wled_rgb_t ot_wled_gamma_rgb(ot_wled_rgb_t c,
     if(!tables)return c;
     const uint8_t *g=inverse?tables->inverse:tables->forward;
     return (ot_wled_rgb_t){g[c.r],g[c.g],g[c.b]};
+}
+
+/* Only the implemented, source-proven tertiary consumers. Six other
+ * metadata-declared third positions belong to optional overlays or source
+ * options that the current isolated 1D profile does not implement. */
+bool ot_wled_fx_tertiary_supported(uint16_t id){
+    switch(id){
+      case OT_WLED_CHASE_COLOR:
+      case OT_WLED_CHASE_RANDOM:
+      case OT_WLED_COLORFUL:
+      case OT_WLED_TWO_DOTS:
+      case OT_WLED_RUNNING_DUAL:
+      case OT_WLED_TRICOLOR_CHASE:
+      case OT_WLED_TRICOLOR_WIPE:
+      case OT_WLED_TRICOLOR_FADE:
+      case OT_WLED_SOLID_PATTERN_TRI:
+      case OT_WLED_GLITTER:
+      case OT_WLED_SOLID_GLITTER:
+      case OT_WLED_AURORA:
+      case OT_WLED_POPCORN:
+        return true;
+      default:return false;
+    }
 }
 
 /* Parse the color-role segment of source-pinned WLED metadata. Retain
@@ -1260,7 +1306,11 @@ static void chase_frame(const ot_wled_fx_config_t *cfg,
     if(cfg->effect_id==OT_WLED_CHASE_RAINBOW) {
         uint32_t sep=256u/(uint32_t)count;
         if(sep==0u)sep=1u;
-        base=wheel_rgb((uint8_t)((state->step*sep+call)&255u));
+        /* A truly black user background is an OFF region, not a hidden
+         * rainbow backlight. Preserve the source wheel when BG is nonzero. */
+        base=(cfg->background.r||cfg->background.g||cfg->background.b)?
+             wheel_rgb((uint8_t)((state->step*sep+call)&255u)):
+             (ot_wled_rgb_t){0,0,0};
         c3=cfg->background;
     } else if(cfg->effect_id==OT_WLED_CHASE_RAINBOW_WHITE) {
         const uint32_t n=state->step,m=(n+1u)%(uint32_t)count;
@@ -1822,8 +1872,13 @@ static void chase_random_frame(const ot_wled_fx_config_t *cfg,
     }
     state->step=(uint32_t)a;
     const size_t width=1u+(((uint32_t)cfg->intensity*(uint32_t)count)>>10);
-    const ot_wled_rgb_t base=scaled(wheel_rgb((uint8_t)state->aux0),cfg->brightness);
-    const ot_wled_rgb_t old=scaled(wheel_rgb((uint8_t)state->aux1),cfg->brightness);
+    /* Source wheel remains available with an authored nonblack BG.
+     * Explicit #000000 means moving-color-only for the owner preview. */
+    const bool off_bg=!(cfg->background.r||cfg->background.g||cfg->background.b);
+    const ot_wled_rgb_t base=scaled(off_bg?(ot_wled_rgb_t){0,0,0}:
+                       wheel_rgb((uint8_t)state->aux0),cfg->brightness);
+    const ot_wled_rgb_t old=scaled(off_bg?(ot_wled_rgb_t){0,0,0}:
+                       wheel_rgb((uint8_t)state->aux1),cfg->brightness);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
     const ot_wled_rgb_t third=scaled(cfg->tertiary_set?
                                      cfg->tertiary:cfg->foreground,cfg->brightness);
@@ -2078,11 +2133,20 @@ static uint8_t fx_cos8(uint8_t phase) {
  * primary (SEGCOLOR0) with its per-pixel beat-derived brightness. */
 static void bpm_frame(const ot_wled_fx_config_t *cfg,uint32_t now,
                       ot_wled_rgb_t *pixels,size_t count) {
-    const uint8_t phase=(uint8_t)(now/20u);
+    /* WLED's 8-bit phase subtraction wraps 0->255 at the low edge,
+     * producing full-brightness flashes and a hard 5.12s wrap that the
+     * owner saw as BPM stutter. Retain the beat rate and 1D offset but
+     * reflect the travel ramp and saturate brightness instead of wrapping.
+     * This intentional visual correction has a separate source golden. */
+    const uint32_t travel=(now/20u)&511u;
+    const uint32_t phase=travel<256u?travel:511u-travel;
     const uint8_t beat=fx_beatsin8(cfg->speed,64u,255u,now);
     for(size_t i=0;i<count;i++) {
-        const uint8_t intensity=(uint8_t)((uint32_t)beat-phase+i*10u);
-        pixels[i]=scaled(fx_video_fade(cfg->foreground,intensity),cfg->brightness);
+        int32_t level=(int32_t)beat-(int32_t)phase+(int32_t)(i*10u);
+        if(level<0)level=0;
+        if(level>255)level=255;
+        pixels[i]=scaled(fx_video_fade(cfg->foreground,(uint8_t)level),
+                         cfg->brightness);
     }
 }
 /* Source mode_lake() palette=0: keep WLED's signed-range beatsin8
@@ -3164,7 +3228,11 @@ static void popcorn_frame(const ot_wled_fx_config_t *cfg,
     }
     const ot_wled_rgb_t bg=scaled(cfg->background,cfg->brightness);
     const ot_wled_rgb_t fg=scaled(cfg->foreground,cfg->brightness);
-    for(size_t i=0;i<count;i++)pixels[i]=bg;
+    /* Match WLED: an authored third color clears Popcorn to black; the
+     * legacy two-color path retains its configured background. */
+    const ot_wled_rgb_t clear=cfg->tertiary_set?
+        (ot_wled_rgb_t){0u,0u,0u}:bg;
+    for(size_t i=0;i<count;i++)pixels[i]=clear;
     float gravity=-0.0001f-(float)cfg->speed/200000.0f;
     gravity*=(float)count;
     unsigned num_popcorn=(unsigned)cfg->intensity*max_popcorn/255u;
@@ -3180,12 +3248,22 @@ static void popcorn_frame(const ot_wled_fx_config_t *cfg,
             popcorn[i].vel=sqrtf(-2.0f*gravity*(float)peak);
             /* Palette=0, no tertiary: pinned source consumes a random
              * color-slot draw and maps every slot to primary. */
-            (void)fx_rand8(state,3u);
-            popcorn[i].col_index=0u;
+            const uint8_t source_slot=fx_rand8(state,3u);
+            /* Legacy default palette maps every source slot to FG.
+             * An explicitly enabled third RGB config instead maps the
+             * source-drawn index to its authored three source colors. */
+            popcorn[i].col_index=cfg->tertiary_set?source_slot:0u;
         }
         if(popcorn[i].pos>=0.0f) {
             const size_t index=(size_t)popcorn[i].pos;
-            if(index<count)pixels[index]=fg;
+            if(index<count){
+                ot_wled_rgb_t color=fg;
+                if(cfg->tertiary_set && popcorn[i].col_index==1u)
+                    color=bg;
+                else if(cfg->tertiary_set && popcorn[i].col_index==2u)
+                    color=scaled(cfg->tertiary,cfg->brightness);
+                pixels[index]=color;
+            }
         }
     }
 }
@@ -3574,8 +3652,11 @@ static void aurora_frame(const ot_wled_fx_config_t *cfg,
     if(!data)return;
     ot_wled_palette16_t palette;
     const uint8_t id=cfg->palette_id?cfg->palette_id:50u;
-    if(!fx_palette_build(cfg,id,cfg->foreground,
-               cfg->background,(ot_wled_rgb_t){0,0,0},&palette))return;
+    /* Aurora's authored third slot is consumed by explicit three-color
+     * palette modes, not by the default Aurora palette ID 50. */
+    if(!fx_palette_build_with_tertiary(cfg,id,cfg->foreground,
+               cfg->background,cfg->tertiary_set?cfg->tertiary:
+               (ot_wled_rgb_t){0,0,0},cfg->tertiary_set,&palette))return;
     for(unsigned w=0;w<waves;w++) {
         ot_aurora_wave_t *wave=&data[w];
         if(wave->alive) {
@@ -4090,8 +4171,10 @@ typedef struct {
     uint16_t previous_r, previous_g, previous_b;
 } ot_tv_state_t;
 
-static uint16_t tv_rand16_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
-    return (uint16_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
+static uint32_t tv_rand16_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
+    /* The source TV scene duration can exceed UINT16_MAX. Never
+     * truncate a 32-bit millisecond interval to 16 bits. */
+    return (uint32_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
 }
 static uint8_t tv_rand8_range(ot_wled_fx_state_t *s,uint32_t lo,uint32_t hi) {
     return (uint8_t)(hi>lo ? lo+fx_prng(s)%(hi-lo) : lo);
@@ -4118,8 +4201,12 @@ static void tv_simulator_frame(const ot_wled_fx_config_t *cfg,
     }
     if(now-tv->scene_start>=tv->scene_duration || state->aux1==0u) {
         tv->scene_start=now;
-        tv->scene_duration=tv_rand16_range(state,60u*250u*color_speed,
-                                                  60u*750u*color_speed);
+        /* 1D phone/controller cadence: higher speed must shorten the
+         * scene, not create a multi-minute almost-static preview. Scenes
+         * remain independent of the short flicker fade (250..2500 ms). */
+        const uint32_t scene_scale=21u-(uint32_t)color_speed;
+        tv->scene_duration=tv_rand16_range(state,
+                         250u*scene_scale,750u*scene_scale);
         tv->scene_color_hue=tv_rand16_range(state,0u,768u);
         tv->scene_color_sat=tv_rand8_range(state,100u,130u+color_intensity);
         tv->scene_color_bri=tv_rand8_range(state,200u,240u);
@@ -5598,7 +5685,12 @@ bool ot_wled_fx_render(const ot_wled_fx_config_t *cfg, ot_wled_fx_state_t *state
         cycle_time += (uint32_t)cfg->frame_time_ms*2u;
         uint32_t cycle_index=time_ms/cycle_time;
         uint32_t phase=time_ms%cycle_time;
-        on=(cycle_index!=state->step || phase<=on_time);
+        /* At speed=255 the WLED source cycle is exactly 2*FRAMETIME
+         * and the inclusive on-time plus catch-up forces all evenly
+         * sampled 30/60/120fps frames ON. Preserve older source math at
+         * every other speed; sample strict half-period at the extreme. */
+        on=cfg->speed==255u ? (phase<on_time) :
+            (cycle_index!=state->step || phase<=on_time);
         state->step=cycle_index;
     }
 

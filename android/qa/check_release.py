@@ -73,10 +73,10 @@ check("Continuous controller playback is capability-gated with explicit Home STO
 check("Native effects manifest is explicitly 140 IDs",
       len(re.findall(r'new Effect\(\d+, "', effect)) == 140)
 check("Active Compose output save uses authenticated BLE revision/readback path",
-      'ble.saveOutput(index, draftText)' in compose and
-      'BleConfigCodec.encode(JSONObject(draftText))' in compose and
-      all(k in ble for k in ("cfgKnownRevision", "cfgExpected", "Arrays.equals(cfgBytes,cfgExpected)",
-                             "cfgCrc", "cfgReadNext()", "cfgWriteNext()")))
+      'ble.savePanelV4(lane,requested)' in compose and
+      'PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)' in compose and
+      all(k in ble for k in ("panelSaveBusy", "PanelV4LayoutProtocol.beginSave", "panelSaveRead(",
+                             "Arrays.equals(panelSaveWire,snapshot.wire)", "panelSaveFinish(true")))
 check("Native source and verified project regression tests pass",
       subprocess.run(["node", str(root/"qa/test_native_source.cjs")],
                      cwd=root.parent, capture_output=True).returncode == 0)
@@ -110,18 +110,23 @@ check("Compose authoring preserves zone offsets and separate BLE confirmation",
           ("previewZoneOffsets(id, n)", "project.editZone(",
            "project.assignMany(", "project.setSequence(", "project.importJson(",
            "project.exportJson()", "ble.canControl()", "supportedIds.value",
-           "previewCurrentEffect()", "BleConfigCodec.encode(JSONObject(draftText))",
-           "ble.saveOutput(", "draftText = updated.toString()",
+           "previewCurrentEffect()", "PanelV4DraftCodec.encode(index,JSONObject(draftText),saved)",
+           "ble.savePanelV4(", "draftText = updated.toString()",
            "val updated = JSONObject(draftText)",
            "project.previewZoneOffsets(", "AlertDialog(containerColor=t.surface,"))
       and 'android:name=".MainActivity"' not in manifest_xml)
-check("Compose has full two-output draft editing without unsaved hardware mutation",
+check("Compose has independent drafts with automatic live preview and no premature NVS Save",
       all(word in compose for word in (
-          "BleConfigCodec.ROLES", "BleConfigCodec.ORDERS", "Fit last zone",
-          "Assigned ", "Color order", "Remove zone", "+ Add zone",
+          "project.assignMany(", "BleConfigCodec.ORDERS", "layoutLiveEditPending.value=true", "queuePanelGeometryDraftUpdate()",
+          "Assigned ", "if(outputToolsOpen)", "Remove zone", "+ Add zone",
           "val draft = runCatching { JSONObject(draftText) }",
-          "outputMessage.value = \"Save requested · verifying hardware readback\""))
-      and 'ble.saveOutput(index, draftText)' in compose)
+          "outputMessage.value=\"Verifying current live mapping before one Panel v4 Save...\"",
+          "if (savingOutput.intValue == index) Caption(\"Saving…",
+          'Pill(if (savingOutput.intValue == index) "Saving…" else "Save"'))
+      and 'ble.savePanelV4(lane,requested)' in compose
+      and 'ble.readPanelLaneSnapshot(index)' in compose
+      and 'outputDirty[index] = true' in compose
+      and '(!ownerEditedAfterSave && completedSave)' in compose)
 check("Native effect catalog and approved sequence toggles remain accessible",
       all(word in compose for word in ("PaletteEditor(", "Shared Palette", "Shuffle",
           "Repeat", "Edit time", "project.sequenceOptions()", "project.editTriggerStyle(",
