@@ -1237,7 +1237,7 @@ assert(bleSource.includes('55a56022-4915-7a92-cf44-b8b7102eaf30') &&
        bleSource.includes('panelStatusFresh[i]') &&
        bleSource.includes('BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE') &&
        bleSource.includes('panelStatusExpectedLane=panelSnapshotLane') &&
-       bleSource.includes('private void panelRetryStatusRead(BluetoothGatt owner)') &&
+       bleSource.includes('private void panelRetryStatusRead(BluetoothGatt owner,int expectedLane)') &&
        bleSource.includes('panelStatusReadRetries>=3') &&
        bleSource.includes('},250L)') &&
        bleSource.includes('private void startPanelControl()') &&
@@ -1642,3 +1642,43 @@ assert(homeConnect &&
        bleSource.includes('return "Bluetooth connected · owner enrollment incomplete";') &&
        bleSource.includes('return "Bluetooth connected · owner authorization incomplete";'),
        'Home must show owner-vs-link status and allow manual recovery with no new UI workflow');
+
+
+// P0 physical bench: Add Zone -> live UPDATE status ACK -> ONE durable Save ->
+// authoritative v4 readback; stale status and GATT 133 must not trigger replays.
+// A successful static check/host suite is not physical optical acceptance.
+const queuedSave=compose.split('private fun pumpPanelQueuedSave() {')[1]
+  ?.split('private fun pumpPanelGeometry() {')[0];
+assert(queuedSave &&
+  queuedSave.includes('panelGeometryPlanTarget!=null||panelGeometryQueuedTarget!=null') &&
+  queuedSave.includes('GeometryTransactionManager.State.UPDATE_PENDING') &&
+  queuedSave.includes('GeometryTransactionManager.sameLiveGeometry(acknowledged,upload)') &&
+  queuedSave.includes('ble.savePanelV4(lane,requested)') &&
+  queuedSave.indexOf('GeometryTransactionManager.sameLiveGeometry(acknowledged,upload)') <
+    queuedSave.indexOf('ble.savePanelV4(lane,requested)') &&
+  queuedSave.includes('panelSaveSubmittedDrafts[lane]=requested') &&
+  queuedSave.includes('panelSaveQueuedLane=-1') &&
+  queuedSave.includes('queuedSaveTimedOut(lane,"durable Save transport admission")') &&
+  !queuedSave.includes('panelSaveQueuedChecks'),
+  'Selected-output Save must wait for exact accepted live geometry, not ATT completion or 100 Compose polls');
+const p0StaleStatus=bleSource.split('private void panelStatusRead(')[1]
+  ?.split('private void panelBeginReconciliation(')[0];
+const p0StatusPoll=bleSource.split('private void panelScheduleTransactionPoll(')[1]
+  ?.split('private void startPanelCancel(')[0];
+assert(p0StaleStatus &&
+  p0StaleStatus.includes('panelRetryStatusRead(owner,expectedLane)') &&
+  p0StaleStatus.includes('if(manager.acknowledgeUpdate(current))') &&
+  p0StatusPoll?.includes('panelPollLease[lane]==lease') &&
+  p0StatusPoll.includes('panelStatusExpectedLane=lane') &&
+  bleSource.includes('panelPollLease[0]++;panelPollLease[1]++;') &&
+  !bleSource.includes('panelPollLease++'),
+  'Status from O2 cannot ACK O1 UPDATE or cancel its status poll');
+const p0Disconnect=compose.split('if (!ble.isConnected()) {')[1]
+  ?.split('if (!ble.canControl())')[0];
+assert(p0Disconnect?.includes('clearPanelGeometryPreview(') &&
+  compose.includes('outputDrafts.clear()')===false &&
+  compose.includes('panelSaveQueuedDraft = null') &&
+  bleSource.includes('panelGeometryManagers[lane]=null;') &&
+  bleSource.includes('panelConfirmedSnapshots[lane]=null;') &&
+  bleSource.includes('Arrays.equals(panelSaveWire,snapshot.wire)'),
+  'GATT 133 must retire in-flight BLE ownership without replaying Save or deleting unsaved Layout draft');
