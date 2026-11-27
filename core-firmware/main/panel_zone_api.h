@@ -18,8 +18,11 @@ void ot_ble_diag_disconnect(void);
 /* Volatile authenticated live-arrangement preview; commit uses the existing journal. */
 int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
                                uint16_t pixel_capacity);
+/* An accepted UPDATE returns the candidate CRC while still owning the
+ * configuration mutex. It cannot race another task's CRC/status read. */
 int ot_ble_panel_preview_update_ranges(uint8_t lane,uint16_t base_revision,
-                               const ot_pz_range_update_t *updates,size_t count);
+                               const ot_pz_range_update_t *updates,size_t count,
+                               uint32_t *accepted_crc32);
 int ot_ble_panel_preview_heartbeat(uint8_t lane,uint16_t base_revision);
 bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32);
 bool ot_ble_panel_preview_crc32(uint8_t lane,uint16_t base_revision,uint32_t *crc32);
