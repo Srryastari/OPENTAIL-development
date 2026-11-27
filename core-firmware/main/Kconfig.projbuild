@@ -29,4 +29,15 @@ menu "OpenTail CORE Alpha"
       may select another budget or a different board backend after
       measuring RAM, DMA, output throughput and power. It is not an
       advertised optical FPS or tested hardware maximum.
+  config OPENTAIL_MAX_BRIGHTNESS_LIMIT
+    int "Maximum 8-bit RGB channel brightness ceiling"
+    range 1 255
+    default 32
+    help
+      Safe firmware ceiling applied at the final CORE RGB pixel boundary.
+      The default remains 32 until current, rail voltage, thermal and
+      controller-output bench measurements authorize a higher setting.
+      This is a software ceiling, NOT a measured current limiter. Values
+      above the default must not be selected without documented bench
+      evidence for the installed supply, fuse, wiring, connectors and LED load.
 endmenu

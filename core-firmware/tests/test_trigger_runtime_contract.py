@@ -64,21 +64,46 @@ assert "edge_time_us>=state->release_deadline_us" in logic
 assert "now_us>=state->release_deadline_us" in logic
 assert "state->release_deadline_us=edge_time_us+OT_TURN_RELEASE_HOLD_US;" in logic
 assert "static DRAM_ATTR ot_turn_edge_event_t turn_edge_events[2][OT_TURN_EDGE_QUEUE_CAPACITY]" in core
-assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 32u" in core
+assert "#define OT_TURN_EDGE_QUEUE_CAPACITY 64u" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_head[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_tail[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_overflow[2]" in core
 assert "static DRAM_ATTR volatile uint32_t turn_edge_writer_active[2]" in core
+# The ISR must guard the entire timestamp+GPIO pair before publication.
+# A stale pre-guard GPIO read paired with a new timestamp can cross 400ms.
+isr = between(core, "static void IRAM_ATTR input_edge_isr(void *arg){",
+              "void ot_input_diag_snapshot_get(")
+guard = isr.index("ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u)")
+clock = isr.index("const uint64_t edge_time_us=is_turn?(uint64_t)esp_timer_get_time():0u;")
+gpio = isr.index("level=gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])")
+payload_time = isr.index("event->timestamp_us=edge_time_us;")
+payload_gpio = isr.index("event->asserted=asserted;")
+publish = isr.index("ot_isr_dram_store_release(&turn_edge_head[slot],head+1u)")
+unguard = isr.index("ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u)")
+assert guard < clock < gpio < payload_time < payload_gpio < publish < unguard
+# Unlike IDF's general __atomic_* fallback with external PSRAM enabled,
+# this ISR must use only force-inlined native S32C1I on DRAM_ATTR words.
+assert '#include "xt_utils.h"' in core
+assert "xt_utils_compare_and_set(word,previous,next)" in core
+assert "static inline __attribute__((always_inline))" in core
+assert "ot_isr_dram_fence();" in core
+assert "__atomic_" not in isr, "ISR cannot call PSRAM-aware libc atomic fallbacks"
+for helper in ("ot_isr_dram_fetch_add","ot_isr_dram_fetch_or",
+               "ot_isr_dram_fetch_and","ot_isr_dram_store_release",
+               "ot_isr_dram_load_acquire","ot_isr_dram_cas"):
+    assert helper in isr or helper=="ot_isr_dram_cas",helper
+
+assert "if(is_turn)" in isr
 assert "event->timestamp_us=edge_time_us;" in core
 assert "event->asserted=asserted;" in core
-assert "__atomic_store_n(&turn_edge_head[slot],head+1u,__ATOMIC_RELEASE)" in core
+assert "ot_isr_dram_store_release(&turn_edge_head[slot],head+1u)" in core
 assert "__atomic_load_n(&turn_edge_head[slot],__ATOMIC_ACQUIRE)" in core
 assert "__atomic_load_n(&turn_edge_tail[slot],__ATOMIC_ACQUIRE)" in core
 assert "__atomic_store_n(&turn_edge_tail[slot],tail,__ATOMIC_RELEASE)" in core
 assert "turn_edge_overflow[slot]" in core
 assert "gpio_ll_get_level(&GPIO,(uint32_t)input_pin_isr[input_index])" in core
-assert "__atomic_store_n(&turn_edge_writer_active[slot],1u,__ATOMIC_RELEASE)" in core
-assert "__atomic_store_n(&turn_edge_writer_active[slot],0u,__ATOMIC_RELEASE)" in core
+assert "ot_isr_dram_store_release(&turn_edge_writer_active[slot],1u)" in core
+assert "ot_isr_dram_store_release(&turn_edge_writer_active[slot],0u)" in core
 assert "static DRAM_ATTR gpio_num_t input_pin_isr[OT_IN_COUNT]" in core
 assert "input_pin_isr[i]=input_pin[i];" in core
 assert "input_boot_snapshot_us=(uint64_t)esp_timer_get_time();" in core
@@ -131,8 +156,11 @@ assert "mask|=(uint8_t)(1u<<(p->function[i]-1u))" in manager
 renderer = between(core, "static void led_task(void *p) {", "void app_main(")
 assert "local_tm=tm_profile;" in renderer
 assert "combined=ot_tm_resolve(&local_tm,physical);" in renderer
-assert "if(before_deadline(now,sim_deadline)) combined|=sim_mask;" in renderer
-assert "ot_om_section_next(output,&zone_cursor,px)" in renderer
+assert "if(before_deadline(now,sim_deadline)){" in renderer
+assert "combined|=sim_mask;" in renderer
+assert "fallback_mask" not in renderer
+assert "pixel_zone_map[ch][px]" in renderer
+assert "pixel_logical_map[ch][px]" in renderer
 assert "ot_om_trigger_overlay(role,combined," in renderer
 assert "if(!trigger_here){" in renderer
 assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
@@ -166,10 +194,11 @@ assert "ot_frame_snapshot_unavailable(" in renderer
 assert "uint16_t longest_pixels=0; /* Only successfully refreshed RMT lanes. */" in renderer
 assert renderer.index("uint16_t longest_pixels=0;") < renderer.index("bool frame_ready[OT_CHAIN_COUNT]")
 completion = renderer.index("if(frame_captured[ch])ot_frame_snapshot_complete(true);")
-assert renderer.index("if(local_outputs[ch].active_pixels>longest_pixels)",completion) > completion
-assert renderer.index("if(local_outputs[ch].active_pixels>longest_pixels)",completion) < renderer.index("ot_fps_pacer_observe(&pacer,work_us,longest_pixels)")
+assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) > completion
+assert renderer.index("if(render_pixels[ch]>longest_pixels)",completion) < renderer.index("ot_fps_pacer_observe(&pacer,work_us,longest_pixels)")
 assert "static bool input_init(void)" in core
-assert "boot_enrollment_ready" in ble
+assert "owner_link(&desc)" in ble
+assert "ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same," in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 # An authenticated owner's session must survive rejected or stale
 # secondary central events. Both owner session resets must clear only the
@@ -207,8 +236,16 @@ assert "live_input_mask=" not in simulate
 assert "#define OT_SIM_MAX_MS 15000u" in core
 stop = between(core, "static esp_err_t stop_post(httpd_req_t *r) {",
                "extern const uint8_t ot_dev_console_start[]")
-assert "sim_mask=0;" in stop
-assert "live_input_mask=" not in stop
+stop_core = between(core, "static void core_stop_all_sources(void){",
+                    "void ot_ble_stop_show(void){")
+assert "core_stop_all_sources();" in stop
+assert "sim_mask=0u;" in stop_core
+assert "live_input_mask=" not in stop_core
+assert "tm_gpio_input_mask" not in stop_core
+assert "gpio_set_level" not in stop_core
+assert "pz_preview_cancel_pending_locked();" in stop_core
+assert "pz_preview_cancel_all_locked();" in stop_core
+assert "if(pz_preview_commit_requested||pz_preview_commit_worker_active)return;" in core
 status = between(core, "static esp_err_t status_get(httpd_req_t *r) {",
                  "static esp_err_t")
 assert "ot_tm_resolve(&tm,physical)" in status
@@ -271,13 +308,21 @@ refresh = between(core, "static void request_render_refresh(void){", "static uin
 assert "task=render_task_handle;" in refresh
 assert "portEXIT_CRITICAL(&state_lock);" in refresh
 assert refresh.index("portEXIT_CRITICAL(&state_lock);") < refresh.index("xTaskNotifyGive(task)")
-for begin, end in (("static esp_err_t show_stop(httpd_req_t *r){", "/* Provision an ephemeral"),
-                   ("static esp_err_t stop_post(httpd_req_t *r) {", "/* CORE ships only its own")):
-    op = between(core, begin, end)
-    assert op.index("portEXIT_CRITICAL(&state_lock);") < op.index("request_render_refresh();")
-    assert "live_input_mask=0" not in op
+show_stop = between(core, "static esp_err_t show_stop(httpd_req_t *r){",
+                  "/* Provision an ephemeral")
+assert show_stop.index("portEXIT_CRITICAL(&state_lock);") < show_stop.index(
+    "request_render_refresh();")
+assert "live_input_mask=0" not in show_stop
+stop_post = between(core, "static esp_err_t stop_post(httpd_req_t *r) {",
+                    "/* CORE ships only its own")
+assert "core_stop_all_sources();" in stop_post
+stop_core = between(core, "static void core_stop_all_sources(void){",
+                    "void ot_ble_stop_show(void){")
+assert stop_core.index("portEXIT_CRITICAL(&state_lock);") < stop_core.index(
+    "request_render_refresh();")
+assert "live_input_mask=0" not in stop_core
 ble_stop = between(core, "void ot_ble_stop_show(void){", "/* Eight opt-in named-by-slot")
-assert "if(refresh_requested)request_render_refresh();" in ble_stop
+assert "core_stop_all_sources();" in ble_stop
 disconnect_stop = between(core, "void ot_ble_disconnect_show(void){", "static esp_err_t status_get(")
 assert "if(owned_before)request_render_refresh();" in disconnect_stop
 # Accepted show, FX, demo and synthetic trigger updates must wake the
@@ -314,7 +359,17 @@ assert "ot_tm_saved_apply(&tm_profile,&tm_deferred,next," not in save
 assert "om_deferred.pending || tm_deferred.pending || raw_active || live_input_mask!=0" in save
 assert "ot_om_apply_if_released(om_outputs,&om_deferred," not in sampler
 assert "ot_om_saved_apply(om_outputs,&om_deferred,next_all," not in core
-assert "om_deferred.pending=true;" in core
+# Issue #126 v4 stores hardware-only lane records and map-only geometry records
+# in their dedicated namespaces. The legacy Output Manager is a compatibility
+# projection; accepted geometry saves stage the real cross-namespace pair first.
+assert "pz_deferred.candidate=*candidate;pz_deferred.pending=true;" in core
+assert "ot_pz_pair_store_begin(&pz_pair_store_io,&pz_pair_workspace,\n        previous,candidate," in core
+assert "ot_pz_pair_store_finish(&pz_pair_store_io,workspace,transaction_id," in core
+assert "OT_PZ_PAIR_NS_OUTPUT_CFG" in core and '"ot_zone_map"' in core
+# Legacy BLE Save now reuses the existing mutex-protected pair-store workspace
+# rather than consuming another full controller object on the NimBLE host stack.
+assert "ot_pz_controller_t *const candidate=&pz_pair_workspace.candidate;" in core
+assert "pz_save_controller_locked(candidate)" in core
 assert 'cJSON_AddBoolToObject(obj,"config_apply_pending",config_pending)' in core
 assert "config_apply_pending" in readback
 assert "tm_persistent && !tm_deferred.pending" in core
@@ -322,17 +377,21 @@ assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," not in sampler
 assert "ot_tm_apply_if_released(&tm_profile,&tm_deferred," in core
 assert "if(input_quiet_samples<OT_DEBOUNCE_TICKS)input_quiet_samples++;" in sampler
 assert "config_activation_task" in core and "input_edge_isr" in core
-assert "config_activation_idle(epoch)" in core
+assert "config_activation_idle(epoch,false)" in core
+assert "config_activation_idle(epoch,true)" in core
 assert "ot_tm_journal_recover(" in core and "ot_om_journal_recover(" in core
 assert "xSemaphoreGive(om_write_mutex)" in save
 assert "require_revision&&tm_revision!=expected" in save
 assert "tm_revision++;" in save
-for begin, end in (("static esp_err_t om_post(", "bool ot_ble_config_get("),
-                   ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels")):
+for begin, end, persist in (
+    ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save("),
+    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
+     "pz_save_controller_locked(candidate)"),
+):
     saving = between(core, begin, end)
     assert "const bool raw_active=tm_gpio_input_mask()!=0;" in saving
-    assert "raw_active || live_input_mask" in saving
-    assert saving.index("tm_gpio_input_mask()") < saving.index("om_save(")
+    assert re.search(r"raw_active\s*\|\|\s*live_input_mask",saving)
+    assert saving.index("tm_gpio_input_mask()") < saving.index(persist)
 load = between(core, "static void tm_load(void){", "static bool tm_save(")
 assert "ot_tm_defaults(&tm_profile);" in load
 assert 'nvs_get_blob(h,"profile_v1",&stored,&size)' in load
@@ -352,7 +411,8 @@ assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("ble_startu
 assert boot.index("input_sampler_ready=sampler_ready;") < boot.index("http_startup_ready=wifi_started&&http_start();")
 for begin,end,persist in (
     ("static esp_err_t om_post(", "bool ot_ble_config_get(", "om_save(next_all)"),
-    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels", "om_save(next_all)"),
+    ("int ot_ble_config_save(", "/* Normalized instantaneous GPIO levels",
+     "pz_save_controller_locked(candidate)"),
     ("static int tm_commit(", "bool ot_ble_trigger_get(", "tm_save(next)"),
 ):
     op = between(core,begin,end)
@@ -380,10 +440,12 @@ assert "if(!trigger_here){" in renderer
 assert "if(decorated)c=ot_om_calibrate(c,output);" in renderer
 assert "if(trigger_here)c=ot_om_calibrate(" not in renderer
 assert "slot->overlay.style" in renderer
-# No universal car/body location assumptions; all output zones use active
-# user-specified lengths, not predetermined left/right or trunk zones.
-assert "ot_om_section_next(output,&zone_cursor,px)" in renderer
-assert "for(unsigned px=0;px<output->active_pixels;++px)" in renderer
+# No universal car/body location assumptions; the authoritative Panel/Zone
+# pixel map determines each physical pixel's logical zone and local index.
+assert "ot_pz_build_pixel_map(&local_panel[ch],pixel_zone_map[ch],pixel_logical_map[ch])" in renderer
+assert "pixel_zone_map[ch][px]" in renderer
+assert "pixel_logical_map[ch][px]" in renderer
+assert "for(unsigned px=0;px<render_pixels[ch];++px)" in renderer
 assert "local_tm=tm_profile;" in renderer
 assert "combined=ot_tm_resolve(&local_tm,physical);" in renderer
 
@@ -407,32 +469,52 @@ assert "OT_TM_BLE_READ_BYTES (7u+OT_IN_COUNT)" in (
     root / "trigger_manager.h").read_text()
 assert "ot_tm_ble_decode(" in gatt and "ot_tm_ble_encode(" in gatt
 
-# P1 #45: Independent exact-source fence for the corrected durable
-# transaction on Firmware #49. This checks actual ordering and readback;
-# NVS/interrupt power-fault injection is an additional hardware requirement.
+# P1 #45 trigger policy retains its own journal and release-gated RAM publish.
 trigger_promotion=between(core,"static void tm_promote(uint32_t epoch){",
-                         "static void om_promote(uint32_t epoch){")
-output_promotion=between(core,"static void om_promote(uint32_t epoch){",
-                        "static void config_activation_task(void *unused){")
-for kind,operation,helper in (
-    ("trigger",trigger_promotion,"ot_tm_apply_if_released("),
-    ("output geometry",output_promotion,"ot_om_apply_if_released("),
-):
-    active_write=operation.index("config_write_active(h,")
-    stage_erase=operation.index("config_clear_stage(h)")
-    after_erase_idle=operation.index("config_activation_idle(epoch)",stage_erase)
-    ram_apply=operation.index(helper)
-    assert active_write < stage_erase < after_erase_idle < ram_apply, (
-        f"{kind}: RAM publication must follow durable stage erasure and "
-        "fresh GPIO/epoch qualification (P1 issue #45)"
-    )
-    assert "if(!config_clear_stage(h))" in operation, kind
-    assert "config_recovery_fault=true;" in operation, kind
-    assert "tm_gpio_input_mask()==0u" in operation, kind
-    assert "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch" in operation, kind
-    assert "input_quiet_samples>=OT_DEBOUNCE_TICKS" in operation, kind
-    assert "stage.previous_revision" in operation and "stage.candidate_revision" in operation, kind
+                          "static void pz_promote(uint32_t epoch){")
+active_write=trigger_promotion.index("config_write_active(h,")
+stage_erase=trigger_promotion.index("config_clear_stage(h)")
+after_erase_idle=trigger_promotion.index("config_activation_idle(epoch,false)",stage_erase)
+ram_apply=trigger_promotion.index("ot_tm_apply_if_released(")
+assert active_write < stage_erase < after_erase_idle < ram_apply
+for token in ("if(!config_clear_stage(h))","config_recovery_fault=true;",
+              "tm_gpio_input_mask()==0u",
+              "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "stage.previous_revision","stage.candidate_revision"):
+    assert token in trigger_promotion, token
 
+# Issue #126 v4 runtime promotion finishes the coordinated lane/map journal,
+# verifies both active records, and publishes only the joined candidate after
+# a fresh quiet-input/epoch check. No combined v3 runtime promotion remains.
+panel_promotion=between(core,"static void pz_promote(uint32_t epoch){",
+                        "static void config_activation_task(void *unused){")
+for token in ("ot_pz_pair_store_finish","ot_pz_pair_store_snapshot",
+              "ot_pz_pair_store_recover","ot_pz_join",
+              "config_activation_idle(epoch,true)",
+              "tm_gpio_input_mask()==0u","live_input_mask==0u",
+              "__atomic_load_n(&input_edge_epoch,__ATOMIC_ACQUIRE)==epoch",
+              "input_quiet_samples>=OT_DEBOUNCE_TICKS",
+              "pz_outputs=workspace->pending.candidate",
+):
+    assert token in panel_promotion, token
+assert "nvs_open(" not in panel_promotion
+assert "config_recovery_fault=true;" in panel_promotion
+panel_finish=panel_promotion.index("ot_pz_pair_store_finish")
+panel_snapshot=panel_promotion.index("ot_pz_pair_store_snapshot")
+panel_recover=panel_promotion.index("ot_pz_pair_store_recover")
+panel_quiet=panel_promotion.rindex("if(!config_activation_idle(epoch,true))")
+panel_publish=panel_promotion.index("pz_outputs=workspace->pending.candidate")
+assert panel_finish<panel_snapshot<panel_recover<panel_quiet<panel_publish
+
+panel_recovery=between(core,"static void pz_load(void){",
+                       "static bool pz_save_controller_locked(")
+for token in ("ot_pz_pair_store_snapshot","ot_pz_pair_store_recover",
+              "ot_pz_pair_store_begin","pz_load_legacy_snapshot",
+              "v4_authoritative","pz_pair_commit_pending"):
+    assert token in panel_recovery, token
+assert "Corrupt v3 data never falls back to legacy embedded zones" not in panel_recovery
+assert "static void om_promote(" not in core
 # On power-loss recovery, an active-only journal still restores previous
 # mapping/geometry and holds the candidate pending; stage deletion does
 # not authorize a fresh boot to change Brake/Turn/Reverse behavior.
@@ -455,7 +537,7 @@ for token in ("om_active_revision,r->previous_revision",
 assert 'cJSON_AddNumberToObject(root,"active_config_revision",active_config_revision)' in readback
 assert 'cJSON_AddBoolToObject(root,"config_apply_pending",pending)' in readback
 assert "tm_revision==UINT16_MAX" in core
-assert "om_revision[index]==UINT16_MAX" in core
+assert "pz_revision[index]==UINT16_MAX" in core
 assert 'expected_config_revision required' in core
 # No wire-layout changes: the same authenticated 11-byte trigger mapping write
 # and 15-byte active-profile readback continue to use the durable edit token.

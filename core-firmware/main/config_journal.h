@@ -8,10 +8,17 @@
 #include <stdint.h>
 #include "trigger_manager.h"
 #include "output_manager.h"
+#include "panel_zone.h"
 #define OT_CFG_JOURNAL_MAGIC 0x4f544a33u
 #define OT_CFG_JOURNAL_VERSION 2u
 #define OT_CFG_JOURNAL_KEY_ACTIVE "active_v3"
 #define OT_CFG_JOURNAL_KEY_STAGED "stage_v3"
+/* Read-only physical input policy defaults are versioned separately from
+ * the editable IN1..IN8 function profile and its stage/active transaction. */
+#define OT_TM_POLICY_MAGIC 0x4f54504cu
+#define OT_TM_POLICY_VERSION 1u
+#define OT_TM_POLICY_KEY "policy_v1"
+#define OT_TM_TURN_RELEASE_INPUT_MASK 0x0cu /* physical IN3 + IN4 */
 
 /* V1 is read-only migration input (original #46 draft). */
 typedef struct {
@@ -30,11 +37,25 @@ typedef struct {
 } ot_tm_journal_t;
 typedef struct {
     uint32_t magic,version,crc;
+    uint8_t input_active_low;
+    uint8_t assertion_samples;
+    uint16_t sample_period_ms;
+    uint32_t turn_release_hold_us;
+    uint8_t turn_release_input_mask;
+    uint8_t reserved[3];
+} ot_tm_policy_record_t;
+typedef struct {
+    uint32_t magic,version,crc;
     ot_om_output_t previous[OT_OM_OUTPUTS],candidate[OT_OM_OUTPUTS];
     uint16_t previous_revision[OT_OM_OUTPUTS];
     uint16_t candidate_revision[OT_OM_OUTPUTS];
 } ot_om_journal_t;
 uint32_t ot_cfg_crc32(const void *data,size_t bytes);
+uint32_t ot_cfg_crc32_zeroed(const void *data,size_t bytes,size_t zero_offset,size_t zero_bytes);
+bool ot_tm_policy_build(ot_tm_policy_record_t *out,uint8_t input_active_low,
+                        uint8_t assertion_samples,uint16_t sample_period_ms,
+                        uint8_t turn_release_input_mask,uint32_t turn_release_hold_us);
+bool ot_tm_policy_valid(const ot_tm_policy_record_t *record);
 bool ot_tm_journal_build(ot_tm_journal_t *out,const ot_tm_profile_t *previous,
                          const ot_tm_profile_t *candidate);
 bool ot_om_journal_build(ot_om_journal_t *out,
@@ -60,3 +81,99 @@ bool ot_om_journal_recover(const ot_om_journal_t *active,
                            const ot_om_journal_t *staged,
                            ot_om_output_t live[OT_OM_OUTPUTS],
                            ot_om_pending_t *pending);
+
+/* Issue #126 hierarchical Panel/Zone journal. Stored in the dedicated
+ * ot_zone_map namespace; legacy v1/v2 profiles remain read-only in ot_output_cfg. */
+#define OT_PZ_JOURNAL_MAGIC 0x4f54504au
+#define OT_PZ_JOURNAL_VERSION OT_PZ_SCHEMA_VERSION
+#define OT_PZ_JOURNAL_KEY_ACTIVE "panel_active"
+#define OT_PZ_JOURNAL_KEY_STAGED "panel_stage"
+typedef struct {
+    uint32_t magic,version,crc;
+    ot_pz_controller_t previous,candidate;
+    uint16_t previous_revision[OT_PZ_OUTPUTS];
+    uint16_t candidate_revision[OT_PZ_OUTPUTS];
+} ot_pz_journal_t;
+bool ot_pz_journal_build(ot_pz_journal_t *out,
+                         const ot_pz_controller_t *previous,
+                         const ot_pz_controller_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS]);
+bool ot_pz_journal_valid(const ot_pz_journal_t *record);
+bool ot_pz_journal_recover(const ot_pz_journal_t *active,
+                           const ot_pz_journal_t *staged,
+                           ot_pz_controller_t *live,
+                           ot_pz_pending_t *pending,
+                           uint16_t active_revision[OT_PZ_OUTPUTS],
+                           uint16_t staged_revision[OT_PZ_OUTPUTS]);
+/* Persistent v4 split ownership: ot_zone_map contains geometry only;
+ * ot_output_cfg contains physical lane hardware only. The pair-intent record
+ * is written only after both stage records are durable. */
+#define OT_PZ_PAIR_SCHEMA_VERSION 4u
+#define OT_PZ_MAP_JOURNAL_MAGIC 0x4f544d34u
+#define OT_PZ_LANE_JOURNAL_MAGIC 0x4f544c34u
+#define OT_PZ_PAIR_INTENT_MAGIC 0x4f545034u
+#define OT_PZ_MAP_KEY_ACTIVE "map_active_v4"
+#define OT_PZ_MAP_KEY_STAGED "map_stage_v4"
+#define OT_PZ_LANE_KEY_ACTIVE "lane_active_v4"
+#define OT_PZ_LANE_KEY_STAGED "lane_stage_v4"
+#define OT_PZ_PAIR_INTENT_KEY "pair_intent_v4"
+
+typedef struct {
+    uint32_t magic,version,crc,transaction_id;
+    uint8_t reset_mask;
+    uint8_t reserved[3];
+    ot_pz_map_t previous,candidate;
+    uint16_t previous_revision[OT_PZ_OUTPUTS];
+    uint16_t candidate_revision[OT_PZ_OUTPUTS];
+} ot_pz_map_journal_t;
+
+typedef struct {
+    uint32_t magic,version,crc,transaction_id;
+    ot_pz_lane_config_set_t previous,candidate;
+    uint16_t previous_revision[OT_PZ_OUTPUTS];
+    uint16_t candidate_revision[OT_PZ_OUTPUTS];
+} ot_pz_lane_journal_t;
+
+typedef struct {
+    uint32_t magic,version,crc,transaction_id;
+    uint16_t previous_revision[OT_PZ_OUTPUTS];
+    uint16_t candidate_revision[OT_PZ_OUTPUTS];
+} ot_pz_pair_intent_t;
+
+bool ot_pz_map_journal_build(ot_pz_map_journal_t *out,
+                         const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id);
+bool ot_pz_map_journal_build_reset(ot_pz_map_journal_t *out,
+                         const ot_pz_map_t *previous,const ot_pz_map_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id,uint8_t reset_mask);
+bool ot_pz_map_journal_valid(const ot_pz_map_journal_t *record);
+bool ot_pz_lane_journal_build(ot_pz_lane_journal_t *out,
+                         const ot_pz_lane_config_set_t *previous,
+                         const ot_pz_lane_config_set_t *candidate,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS],
+                         uint32_t transaction_id);
+bool ot_pz_lane_journal_valid(const ot_pz_lane_journal_t *record);
+bool ot_pz_pair_intent_build(ot_pz_pair_intent_t *out,uint32_t transaction_id,
+                         const uint16_t previous_revision[OT_PZ_OUTPUTS],
+                         const uint16_t candidate_revision[OT_PZ_OUTPUTS]);
+bool ot_pz_pair_intent_valid(const ot_pz_pair_intent_t *record);
+
+/* Pure pair recovery model used by host fault-injection tests and boot NVS
+ * reconciliation. An intent selects the matching staged/active transaction;
+ * without intent, only a matching active pair is authoritative. */
+bool ot_pz_pair_journal_recover(
+                         const ot_pz_map_journal_t *map_active,
+                         const ot_pz_map_journal_t *map_staged,
+                         const ot_pz_lane_journal_t *lane_active,
+                         const ot_pz_lane_journal_t *lane_staged,
+                         const ot_pz_pair_intent_t *intent,
+                         const ot_pz_controller_t *legacy_fallback,
+                         ot_pz_controller_t *live,ot_pz_pending_t *pending,
+                         uint16_t active_revision[OT_PZ_OUTPUTS],
+                         uint16_t staged_revision[OT_PZ_OUTPUTS]);

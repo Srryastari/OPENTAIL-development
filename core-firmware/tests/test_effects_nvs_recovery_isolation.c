@@ -15,6 +15,7 @@ static void geometry(ot_om_output_t out[OT_OM_OUTPUTS]){
     for(unsigned ch=0;ch<OT_OM_OUTPUTS;ch++){
         out[ch].zone_count=2;
         out[ch].active_pixels=16u;
+        snprintf(out[ch].zones[0].name,OT_OM_NAME_LEN,"Effect %u",ch);
         out[ch].zones[0].pixels=8u;
         out[ch].zones[0].role=OT_OM_DECORATIVE;
         out[ch].zones[1].pixels=8u;

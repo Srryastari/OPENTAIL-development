@@ -18,11 +18,13 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 CPP=ROOT/'android/app/src/main/cpp'
 JAVA=ROOT/'android/app/src/main/java/com/opentail/android'
-PIN='6180e2a5ccbfbf8567513504669c6840b68c045b'
+PIN='601155a196a692792e60fd399505fdc676dc57d9'
+IDENTITY_PIN='97f4e2fd29df5aa9249292cee2649404fc98ed48'
 CONTINUITY_PIN=PIN
 COLOR_PIN=PIN
-COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h','effects_1d.c','effects_1d.h'}
-CONTINUITY_FILES={'effects_1d.c','effects_1d.h','ot_auto_effects.c','ot_auto_effects.h'}
+COLOR_FILES={'wled_fx_compat.c','wled_fx_compat.h'}
+CONTINUITY_FILES={'ot_auto_effects.c','ot_auto_effects.h'}
+IDENTITY_FILES={'effects_1d.c','effects_1d.h'}
 SOURCES=['wled_fx_compat.c','effects_1d.c','wled_1d.c','palette_1d.c','particle_system_1d.c','ot_auto_effects.c']
 
 ORACLE=r'''
@@ -142,20 +144,27 @@ def main():
     parser.add_argument('--core-dir',type=Path,default=ROOT/'pinned-effects50')
     parser.add_argument('--continuity-dir',type=Path,default=ROOT/'pinned-effects80')
     parser.add_argument('--color-dir',type=Path,default=ROOT/'pinned-effects95')
+    parser.add_argument('--identity-dir',type=Path,default=ROOT/'pinned-firmware127')
     args=parser.parse_args();core=args.core_dir.resolve()
     continuity=args.continuity_dir.resolve()
     colored=args.color_dir.resolve()
+    identity=args.identity_dir.resolve()
     assert run(['git','-C',core,'rev-parse','HEAD'],text=True).strip()==PIN
     assert run(['git','-C',continuity,'rev-parse','HEAD'],text=True).strip()==CONTINUITY_PIN
     assert run(['git','-C',colored,'rev-parse','HEAD'],text=True).strip()==COLOR_PIN
+    assert run(['git','-C',identity,'rev-parse','HEAD'],text=True).strip()==IDENTITY_PIN
     manifest=json.loads((CPP/'core/SOURCE.json').read_text())
     assert manifest['source_commit']==PIN
     assert manifest['seamless_loop_source_commit']==CONTINUITY_PIN
     assert set(manifest['seamless_loop_files'])==CONTINUITY_FILES
     assert manifest['color_slot_source_commit']==COLOR_PIN
     assert set(manifest['color_slot_files'])==COLOR_FILES
+    assert manifest['core_identity_source_commit']==IDENTITY_PIN
+    assert set(manifest['core_identity_files'])==IDENTITY_FILES
     for name,digest in manifest['files'].items():
-        original_dir=colored if name in COLOR_FILES else (continuity if name in CONTINUITY_FILES else core)
+        original_dir=(identity if name in IDENTITY_FILES else
+                      colored if name in COLOR_FILES else
+                      continuity if name in CONTINUITY_FILES else core)
         local=(CPP/'core'/name).read_bytes()
         original=(original_dir/'core-firmware/main'/name).read_bytes()
         assert local==original and hashlib.sha256(local).hexdigest()==digest,name
@@ -167,13 +176,16 @@ def main():
         original=core/'core-firmware/main'
         corrected=continuity/'core-firmware/main'
         color_source=colored/'core-firmware/main'
+        identity_source=identity/'core-firmware/main'
         # CORE oracle and copied JNI compile independently from the same
         # immutable reconciled Effects #110 source, with no Android-only
         # colors or animations substituted.
-        oracle_sources=[(color_source if f in COLOR_FILES else (corrected if f in CONTINUITY_FILES else original))/f
+        oracle_sources=[(identity_source if f in IDENTITY_FILES else
+                         color_source if f in COLOR_FILES else
+                         corrected if f in CONTINUITY_FILES else original)/f
                         for f in SOURCES]
         run(['cc','-std=c11','-O2','-shared','-fPIC',
-             '-I',color_source,'-I',corrected,'-I',original,t/'oracle.c',
+             '-I',identity_source,'-I',color_source,'-I',corrected,'-I',original,t/'oracle.c',
              *oracle_sources,'-lm','-o',t/'oracle.so'])
         run(['cc','-std=c11','-O2','-shared','-fPIC','-I',CPP,'-I',CPP/'core',
              '-I',jdk/'include','-I',jdk/'include/linux',CPP/'preview.c',CPP/'preview_jni.c',

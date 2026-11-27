@@ -14,16 +14,20 @@ gate = "if(full_frame && ot_sw_idf_stable() &&"
 confirm = "ot_ota_confirm_boot(true)"
 assert led.index(done) < led.index(all_lanes) < led.index(gate) < led.index(confirm)
 assert "ot_ble_radio_ever_ready() && !boot_frame_verified)" in led.split(gate, 1)[1].split(confirm, 1)[0]
+# Early renderer creation must not let an OTA candidate get confirmed before
+# the independent BLE radio is actually advertising and the frame completes.
+assert led.index("ot_sw_idf_stable()") < led.index("ot_ota_confirm_boot(true)")
 assert confirm not in startup, "Creating the FreeRTOS render task cannot validate OTA"
 assert "boot_frame_verified=ot_ota_confirm_boot(true);" in led.split(gate, 1)[1]
 assert "ble_startup_ready=ot_ble_start();" in startup
 assert 'if(!om_write_mutex)ot_st_set_fault("Output Manager save mutex allocation failed");' in startup
 assert 'if(!om_write_mutex){ESP_LOGE(TAG,"Output Manager save mutex allocation failed");abort();}' not in startup
 assert "if(!om_write_mutex || xSemaphoreTake(" in core
-assert startup.index("om_write_mutex=xSemaphoreCreateMutex();") < startup.index("xTaskCreate(led_task")
+render_alloc = startup.index('led_task,"ot_led",OT_RENDER_TASK_STACK_BYTES,NULL,8,NULL')
+assert render_alloc < startup.index("om_write_mutex=xSemaphoreCreateMutex();")
 assert "http_startup_ready=wifi_started&&http_start();" in startup
 assert "if(!http_startup_ready)ot_st_set_fault(" in startup
-assert startup.index("http_startup_ready=wifi_started&&http_start();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("http_startup_ready=wifi_started&&http_start();")
 # The diagnostic HTTP service must never take down physical lighting on
 # registration failure. OTA acceptance still requires service startup.
 http = core.split("static bool http_start(void) {",1)[1].split("static bool wifi_ap_init(void)",1)[0]
@@ -31,7 +35,17 @@ wifi = core.split("static bool wifi_ap_init(void) {",1)[1].split("static bool in
 assert "ESP_ERROR_CHECK(" not in wifi
 assert "abort();" not in wifi
 assert "return false;" in wifi and "return true;" in wifi
-assert "if(!esp_netif_create_default_wifi_ap())" in wifi
+# Keep explicit failure handling and cleanup for the owned Wi-Fi AP netif.
+# Wi-Fi is an optional diagnostic transport and must not panic the renderer.
+assert "esp_netif_t *const wifi_netif=esp_netif_new(&ap_cfg);" in wifi
+assert "if(!wifi_netif)" in wifi
+assert "esp_netif_attach_wifi_ap(wifi_netif)" in wifi
+assert "esp_wifi_set_default_wifi_ap_handlers()" in wifi
+assert "esp_netif_create_default_wifi_ap()" not in wifi
+assert "ESP_NETIF_DEFAULT_WIFI_AP()" in wifi
+assert "esp_netif_destroy_default_wifi(wifi_netif)" in wifi
+assert "wifi_heap_start_preflight()" in wifi
+assert "esp_wifi_deinit()" in wifi
 # Trigger GPIO setup is a fail-closed prerequisite for physical rendering.
 # Bad input pin configuration must not panic-loop or emit lighting based on
 # untrusted GPIO levels. Diagnostic Wi-Fi/BLE may still start for bench repair.
@@ -44,35 +58,48 @@ assert "return false;" in input_init and "return true;" in input_init
 assert "const bool inputs_ready=watchdog_ready&&input_init();" in startup
 assert 'if(!inputs_ready)ot_st_set_fault("physical GPIO or watchdog initialization failed");' in startup
 assert "const bool sampler_ready=input_watched &&" in startup
-assert "bool outputs_ready=sampler_ready&&!config_recovery_fault&&strip_init();" in startup
-assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < startup.index("xTaskCreate(led_task")
+assert "const bool outputs_ready=sampler_ready&&psram_ready&&!config_recovery_fault&&strip_init();" in startup
+assert startup.index("const bool inputs_ready=watchdog_ready&&input_init();") < render_alloc
 assert "const bool wifi_started=wifi_ap_init();" in startup
 assert 'if(!wifi_started)ot_st_set_fault("Wi-Fi diagnostic AP startup failed");' in startup
 assert "http_startup_ready=wifi_started&&http_start();" in startup
-assert startup.index("const bool wifi_started=wifi_ap_init();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("const bool wifi_started=wifi_ap_init();")
 assert "ESP_ERROR_CHECK(httpd_start" not in http
 assert "ESP_ERROR_CHECK(httpd_register_uri_handler" not in http
 assert "httpd_stop(server);" in http
 assert "return false;" in http and "return true;" in http
 assert 'ot_st_set_fault("BLE GATT startup failed")' in startup
-assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index("xTaskCreate(led_task")
+assert render_alloc < startup.index("ble_startup_ready=ot_ble_start();")
+# BLE-primary radio resource admission must precede the much larger Wi-Fi
+# SoftAP buffer allocations, but OTA still needs real BLE advertising plus
+# completed RMT frames and watchdog stability before confirmation.
+assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index(
+    "const bool wifi_started=wifi_ap_init();")
+assert startup.index("ble_startup_ready=ot_ble_start();") < startup.index(
+    "xTaskCreate(config_activation_task")
+assert startup.index("om_write_mutex=xSemaphoreCreateMutex();") < startup.index(
+    "ble_startup_ready=ot_ble_start();")
 ble = (Path(__file__).resolve().parents[1] / "main/ble_status.c").read_text()
 assert "bool ot_ble_start(void)" in ble
 assert "bool ot_ble_radio_ever_ready(void)" in ble
-# Physical enrollment must not read GPIO0 if its input configuration failed.
-# Preserve existing-owner HMAC connectivity; only new key disclosure fails closed.
-assert "static bool boot_enrollment_ready=false;" in ble
+# Enrollment no longer depends on GPIO0. Disclosure requires an encrypted bond
+# and the shared owner policy; storage corruption must never look like first boot.
 enroll=ble.split("static int owner_enroll_read(",1)[1].split("static int owner_challenge_read(",1)[0]
-assert "conn!=active_conn||!boot_enrollment_ready||gpio_get_level(GPIO_NUM_0)!=0" in enroll
+assert "conn!=active_conn||!owner_link(&desc)" in enroll
+assert "ot_owner_enrollment_allowed(owner_storage_fault,owner_valid,same," in enroll
 start_ble=ble.split("bool ot_ble_start(void){",1)[1].split("#else",1)[0]
-assert "const esp_err_t boot_err=gpio_config(&boot);" in start_ble
-assert "boot_enrollment_ready=boot_err==ESP_OK;" in start_ble
-assert 'ot_st_set_fault("BLE BOOT enrollment button unavailable");' in start_ble
-assert 'boot_enrollment_ready?"available":"disabled"' in start_ble
+assert "gpio_config(&boot)" not in start_ble
+assert "owner_security_config();ble_store_config_init();" in start_ble
 assert "__atomic_load_n(&ble_radio_ever_ready,__ATOMIC_ACQUIRE)" in ble
 assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)" in ble
 assert ble.index("ble_gap_adv_start(addr_type,") < ble.index("__atomic_store_n(&ble_radio_ever_ready,true")
-assert "else __atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in ble
+advertise = ble.split("static void advertise(void){", 1)[1].split(
+    "static int gap_event(struct ble_gap_event *ev,void *arg){", 1)[0]
+assert "else{" in advertise
+assert "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE);" in advertise
+assert "BLE advertising ACTIVE: OpenTail CORE" in advertise
+assert advertise.index("ble_gap_adv_start(") < advertise.index(
+    "__atomic_store_n(&ble_radio_ever_ready,true,__ATOMIC_RELEASE)")
 assert "__atomic_store_n(&ble_radio_ever_ready,false,__ATOMIC_RELEASE);" in ble
 assert 'if(rc){token_ready=false;ESP_LOGE(TAG,"BLE service registration failed: %d",rc);return false;}' in ble
 # GAP callbacks must only clear the actual owner session. Disconnects

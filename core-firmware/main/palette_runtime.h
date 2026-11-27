@@ -1,5 +1,6 @@
 #pragma once
-/* Firmware-owned durable palette bank. No changes to output/trigger NVS ABI. */
+/* Firmware-owned durable palette bank, colocated with effect preset slots.
+ * ot_palettes is a read-only legacy migration source. */
 #include <stdbool.h>
 #include <stdint.h>
 #include "palette_profile.h"

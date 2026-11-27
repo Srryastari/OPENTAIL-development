@@ -4,7 +4,10 @@
 #include "fx_zone_bank.h"
 int main(void){
  ot_om_output_t outputs[OT_OM_OUTPUTS];ot_om_defaults(outputs);
- for(unsigned i=0;i<OT_OM_OUTPUTS;i++)outputs[i].zones[0].role=OT_OM_DECORATIVE;
+ for(unsigned i=0;i<OT_OM_OUTPUTS;i++){
+  outputs[i].active_pixels=1;outputs[i].zone_count=1;outputs[i].zones[0].pixels=1;
+  strcpy(outputs[i].zones[0].name,"Owner pixel");outputs[i].zones[0].role=OT_OM_DECORATIVE;
+ }
  ot_fx_zone_bank_t bank={0},before;
  ot_ble_fx_packet_t req={.effect_id=3,.chain_mask=3,.zone_mask=1,.ttl_sec=1,.brightness=24};
  assert(ot_fx_bank_apply_continuous(&bank,&req,outputs,100));

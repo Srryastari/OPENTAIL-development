@@ -1043,7 +1043,11 @@ const nativePreview=fs.readFileSync('android/app/src/main/cpp/preview.c','utf8')
 const nativeManifest=JSON.parse(fs.readFileSync('android/app/src/main/cpp/core/SOURCE.json','utf8'));
 /* Issue103: actual SHA256 and byte-identity checks, not a stale source
  * comment claiming parity. Only reviewed pure renderer sources are repinned. */
-assert(nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
+assert(nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
+       nativeManifest.core_identity_source_commit==='97f4e2fd29df5aa9249292cee2649404fc98ed48' &&
+       nativeManifest.core_identity_files.length===2 &&
+       nativeManifest.core_identity_files.includes('effects_1d.c') &&
+       nativeManifest.core_identity_files.includes('effects_1d.h') &&
        nativeManifest.seamless_loop_source_commit===nativeManifest.source_commit &&
        nativeManifest.color_slot_source_commit===nativeManifest.source_commit &&
        nativeManifest.integrated_firmware96_head==='df27209b9876630b2b10f3a189f36817a2764009' &&
@@ -1067,7 +1071,7 @@ for(const file of ['wled_fx_compat.c','wled_fx_compat.h',
 }
 assert(fs.readFileSync('android/app/src/main/cpp/core/wled_fx_compat.c','utf8')
          .includes('bool ot_wled_fx_tertiary_supported(uint16_t id)') &&
-       nativeManifest.source_commit==='6180e2a5ccbfbf8567513504669c6840b68c045b' &&
+       nativeManifest.source_commit==='601155a196a692792e60fd399505fdc676dc57d9' &&
        nativePreview.includes('ot_effects_1d_render(&cfg,&p->state') &&
        nativePreview.includes('ot_wled_palette_global_tick('),
        'All effects must use the pinned authoritative registry and palette producer');

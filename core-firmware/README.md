@@ -1,4 +1,6 @@
-# OpenTail CORE v0.1.25-alpha — 522-pixel RMT bench diagnostic build
+# OpenTail CORE — universal two-output controller
+
+Fresh outputs have zero LEDs, panels and zones. Driver capacity is independent of user geometry. The following v0.1.25 build notes are historical; 522 is not a configuration default.
 
 > **Current PR #12:** For a free Windows ESP32-S3 build, follow [BUILD-PR12-WINDOWS.md](BUILD-PR12-WINDOWS.md) and run [BUILD-CORE-WINDOWS.ps1](BUILD-CORE-WINDOWS.ps1). This packages the flashable images but never flashes hardware. The older PREPARE-AND-BUILD instructions below describe the historical v0.1.24 enrollment bench release.
 
@@ -6,11 +8,15 @@
 
 This is a test build retaining the HTTP Studio, output/trigger NVS profiles, BLE shows, BLE Output Manager read/write and Wi-Fi fallback.
 
-## BLE onboarding
+## Current BLE onboarding (owner-bond-v3)
 
-After the controller is running, hold the board's **BOOT (GPIO0)** button while Android v0.1.12 taps **Pair with BOOT** in Layout > Bluetooth Output Manager. It reads a 128-bit bench owner secret only while GPIO0 is held low. The secret is generated once and stored in separate NVS namespace `ot_blepair`; later BOOT enrollment re-reads the same secret (physical possession remains required). Android saves the key encrypted via Android Keystore. On later BLE connections the app reads a fresh 16-byte random challenge and proves knowledge of the stored key by truncated HMAC-SHA256. The owner key is **not transmitted during ordinary reconnection**. The existing temporary Wi-Fi token path remains supported as an explicitly requested fallback.
+Select the controller in the app and accept Android's Bluetooth pairing. A fresh controller durably assigns ownership to the first encrypted bonded phone. No BOOT/GPIO0 action is used. The optional six-digit PIN prompt has **Skip**; the owner can use **Set PIN** in the app later. Skip does not disable an existing PIN. Remembered connections prove the stored owner key automatically. A different phone can enroll only with an authenticated bond using the configured PIN; without a PIN it cannot claim an already owned controller.
 
-**SECURITY WARNING:** The initial enrollment secret is delivered via unauthenticated BLE GATT while BOOT is held. A nearby attacker capable of intercepting that enrollment exchange may obtain it. This is **not production-grade MITM-resistant pairing**. Do not expose on a public product or use as sole security for road-lighting. Future production commissioning needs authenticated OOB provisioning/LE Secure Connections with MITM protection, key rotation/revocation, and independent road-lighting failover. Physical input wiring/driver electrical safety are not validated by this build.
+Skip accepts the first-phone claim race on a fresh controller; Just Works bonding does not authenticate first enrollment against an active nearby attacker. Setting a PIN protects subsequent new-phone enrollment, not a first enrollment that already occurred. Existing trusted owner credentials remain valid when a PIN changes. Lost owner access with no PIN requires an explicitly authorized reset. A failed or corrupt ownership record fails closed; it is never treated as fresh. Legacy owner keys are preserved and must be proved before identity migration.
+
+The normal flash package preserves NVS. `03_FACTORY_RESET_COM9.bat` is a separate, explicitly confirmed full bench erase/reflash command. It validates all images and source identity before accepting `ERASE-ALL`. No automatic reset occurs in firmware or app operation. Forget the old Android Bluetooth bond after a full controller reset. Serial log recording is optional.
+
+Host tests exercise actual enrollment/storage callbacks with simulated GAP/NVS, but Android pairing dialogs, bond recovery and physical LEDs require the bench. Software checks do not establish physical acceptance.
 
 ## Build and rollback
 
