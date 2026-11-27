@@ -699,6 +699,68 @@ static void test_off_role_still_accepts_independent_show_effect(void){
     free(probe);
 }
 
+/* Physical Build 972: mask 0x03, one configured lane, other fresh zero.
+ * The same continuous identity admission is used by Android Show Modes. */
+static void test_broadcast_with_empty_output(void){
+    ot_pz_controller_t panel,defaults;
+    ot_pz_defaults(&defaults);
+    ot_om_output_t views[OT_OM_OUTPUTS];
+    ot_fx_zone_bank_t bank;
+    ot_ble_fx_packet_t req=make_fx(0u,0u,0u);
+    req.chain_mask=3u;req.zone_mask=255u;
+    req.r=255u;req.g=0u;req.b=0u;
+    for(unsigned lane=0;lane<OT_OM_OUTPUTS;lane++){
+        panel=defaults;
+        make_output(&panel.outputs[lane],lane);
+        panel.outputs[lane].zones[0].role=OT_OM_OFF;
+        panel.outputs[lane].zones[1].role=OT_PZ_ROLE_UNASSIGNED;
+        assert(ot_pz_valid(&panel));
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+            assert(ot_pz_to_fx_view(&panel.outputs[o],o,&views[o]));
+        ot_fx_bank_reset(&bank);
+        assert(ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+            views,panel.outputs,NULL,1000u));
+        for(unsigned z=0;z<2u;z++){
+            assert(bank.zones[lane][z].configured&&bank.zones[lane][z].continuous);
+            assert(!bank.zones[1u-lane][z].configured);
+        }
+        ot_fx_zone_bank_t before=bank;
+        req.chain_mask=(uint8_t)(1u<<(1u-lane));
+        assert(!ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+            views,panel.outputs,NULL,1001u));
+        assert(memcmp(&bank,&before,sizeof(bank))==0);
+        req.chain_mask=3u;
+        /* Reject mismatched zero projection rather than silently skipping a
+         * populated authoritative Panel. Reject inconsistent nonzero view. */
+        views[1u-lane].active_pixels=1u;
+        assert(!ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+            views,panel.outputs,NULL,1002u));
+        assert(memcmp(&bank,&before,sizeof(bank))==0);
+        views[1u-lane].active_pixels=0u;
+        make_output(&panel.outputs[1u-lane],1u-lane);
+        assert(!ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+            views,panel.outputs,NULL,1003u));
+        assert(memcmp(&bank,&before,sizeof(bank))==0);
+        /* Capacity with no assigned logical pixels is also a valid empty view. */
+        panel.outputs[1u-lane]=defaults.outputs[1u-lane];
+        panel.outputs[1u-lane].active_pixels=100u;
+        assert(ot_pz_to_fx_view(&panel.outputs[1u-lane],1u-lane,&views[1u-lane]));
+        assert(ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+            views,panel.outputs,NULL,1004u));
+        ot_fx_bank_stop_all(&bank);
+        for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+            for(unsigned z=0;z<OT_OM_ZONES;z++)
+                assert(!ot_fx_slot_active(&bank.zones[o][z],1005u));
+    }
+    panel=defaults;
+    for(unsigned o=0;o<OT_OM_OUTPUTS;o++)
+        assert(ot_pz_to_fx_view(&panel.outputs[o],o,&views[o]));
+    ot_fx_bank_reset(&bank);
+    assert(!ot_fx_bank_apply_continuous_tertiary_identity(&bank,&req,
+        views,panel.outputs,NULL,2000u));
+    puts("PASS P0 Show broadcast: either configured lane, OFF/unassigned, zero logical pixels skipped, no-target and malformed projection rejected, STOP retained");
+}
+
 int main(void){
     ot_pz_controller_t active;
     make_controller(&active);
@@ -707,6 +769,7 @@ int main(void){
     render_probe_t probe={0};
 
     test_off_role_still_accepts_independent_show_effect();
+    test_broadcast_with_empty_output();
     test_production_identity_lookup();
     test_zone_independence_and_discontiguous_ranges(&active,&bank,&probe);
     test_preview_phase_commit_cancel_and_unaffected_zone(&active,&bank,&probe);
