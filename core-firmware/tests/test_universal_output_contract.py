@@ -59,7 +59,10 @@ assert "memcpy(om_outputs" not in om_get and "ot_om_defaults" not in om_get
 # inside ot_cfg_activate's small internal FreeRTOS task stack.
 panel_source=(root / "panel_zone.c").read_text(encoding="utf-8")
 assert "static bool pz_join_into(" in panel_source
-assert "return pz_join_into(lanes,&empty,&joined);" in panel_source
+lane_validator = panel_source.split("bool ot_pz_lane_config_set_valid(", 1)[1].split("bool ot_pz_map_valid(", 1)[0]
+assert "ot_pz_map_t empty" not in lane_validator
+assert "ot_pz_controller_t joined" not in lane_validator
+assert "hardware->active_pixels>OT_PZ_MAX_PIXELS" in lane_validator
 assert "return pz_join_into(&maximum,map,&joined);" in panel_source
 assert "if(!pz_join_into(lanes,map,&next))return false;" in panel_source
 
