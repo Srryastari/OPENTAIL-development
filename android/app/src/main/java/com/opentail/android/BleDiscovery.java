@@ -849,6 +849,8 @@ final class BleDiscovery {
         panelSaveWaitingWrite=false;
         if(status!=BluetoothGatt.GATT_SUCCESS) {
             panelSaveFinish(false,"Panel v4 Save GATT "+status+"; outcome uncertain",null);
+            if(status==133)recoverStalledGatt(owner,
+                "Panel v4 durable Save GATT 133; reconcile verified readback before retry");
             return;
         }
         panelSaveWaitingRead=true;
@@ -862,6 +864,8 @@ final class BleDiscovery {
         panelSaveWaitingRead=false;panelSaveLease++;
         if(status!=BluetoothGatt.GATT_SUCCESS) {
             panelSaveFinish(false,"Panel Save ACK GATT "+status+"; outcome uncertain",null);
+            if(status==133)recoverStalledGatt(owner,
+                "Panel v4 Save reply GATT 133; reconnect without replay");
             return;
         }
         if(panelSavePhase==5) {
@@ -2833,6 +2837,10 @@ final class BleDiscovery {
         }
         if(status!=BluetoothGatt.GATT_SUCCESS)
             notifyStatus("CORE Panel control write failed: "+status);
+        if(status==133) {
+            recoverStalledGatt(owner,"Panel live control GATT 133; reconnect without replay");
+            return;
+        }
         if(lane>=0&&lane<2)panelStatusExpectedLane=lane;
         if(status==BluetoothGatt.GATT_SUCCESS&&action==PANEL_CONTROL_COMMIT&&
            lane>=0&&lane<2) {
@@ -2852,6 +2860,10 @@ final class BleDiscovery {
             GeometryTransactionManager manager=lane>=0&&lane<2?panelGeometryManagers[lane]:null;
             if(manager!=null)manager.markSynchronizationUncertain("CORE Panel UPDATE ATT write failed ("+status+")");
             notifyStatus("CORE Panel UPDATE write failed: "+status);
+            if(status==133) {
+                recoverStalledGatt(owner,"Panel live UPDATE GATT 133; reconnect without replay");
+                return;
+            }
         }
         // ATT write completion is not an application ACK. Always read status-v2.
         if(lane>=0&&lane<2)
