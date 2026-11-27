@@ -88,13 +88,16 @@ assert "case 3:return 3u;" in ble
 assert "case 1:return 7u;" in ble
 assert "stale=pz_revision[lane]!=base_revision" in panel_save
 assert "candidate->outputs[lane]=*next;" in panel_save
-assert "pz_save_controller_locked(candidate)" in panel_save
+assert "pz_save_controller_locked(" not in panel_save
+assert "pz_save_requested=true;" in panel_save
+assert "xSemaphoreTake(pz_save_done,portMAX_DELAY);" in panel_save
+assert "const bool saved=pz_save_result;" in panel_save
 assert "pz_preview[lane].committing=true" in panel_save
 assert "ot_pz_live_geometry_matches(" in (ROOT / "main/panel_zone.c").read_text()
 assert "pz_preview[lane].committing=true" in panel_save
 assert "if(live_match)" in panel_save and "if(!saved)" in panel_save
 assert "pz_preview[lane].expires_ms=now_ms+OT_PZ_PREVIEW_LEASE_MS" in panel_save
-assert "ot_pz_preview_cancel(&pz_preview[lane])" not in panel_save.split("const bool saved=pz_save_controller_locked(candidate);",1)[1]
+assert "ot_pz_preview_cancel(&pz_preview[lane])" not in panel_save.split("const bool saved=pz_save_result;",1)[1]
 cfg_writer=ble.split("static int panel_cfg_write(",1)[1].split("static void panel_preview_set_error(",1)[0]
 assert "const bool live_save=panel_preview_tx.active" in cfg_writer
 assert "panel_preview_tx.lane==lane&&panel_preview_tx.base_revision==revision" in cfg_writer
