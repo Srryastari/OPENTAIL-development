@@ -2288,8 +2288,8 @@ class ComposeMainActivity : ComponentActivity() {
             val mapping=withCurrentEditorDraft(projected,lane)
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
-                mapping.lane(0).descriptorBatches(left,mtu),
-                mapping.lane(1).descriptorBatches(right,mtu)
+                if(lane==0) mapping.lane(0).descriptorBatches(left,mtu) else emptyList(),
+                if(lane==1) mapping.lane(1).descriptorBatches(right,mtu) else emptyList()
             )
             panelGeometryMapping=mapping
             panelGeometryActiveLane=lane
@@ -2355,8 +2355,8 @@ class ComposeMainActivity : ComponentActivity() {
         try {
             val mtu=ble.panelUpdateMtu()
             val batches=arrayOf(
-                target.lane(0).descriptorBatches(base.lane(0),mtu),
-                target.lane(1).descriptorBatches(base.lane(1),mtu)
+                if(panelGeometryActiveLane==0) target.lane(0).descriptorBatches(base.lane(0),mtu) else emptyList(),
+                if(panelGeometryActiveLane==1) target.lane(1).descriptorBatches(base.lane(1),mtu) else emptyList()
             )
             if(batches.all { it.isEmpty() }) {
                 panelGeometryAppliedMapping=target
@@ -2452,8 +2452,8 @@ class ComposeMainActivity : ComponentActivity() {
                 ble.panelGeometryManager(lane)?.state()==GeometryTransactionManager.State.ACTIVE &&
                 outputDrafts[lane]==requested) {
                 queuePanelGeometryDraftUpdate()
-            } else if(panelGeometryMapping==null && ble.panelGeometryReady(lane) &&
-                       outputDrafts[lane]==requested) {
+            } else if(panelGeometryMapping==null && outputDrafts[lane]==requested) {
+                // startPanelGeometryPreview refreshes stale lane status before BEGIN.
                 layoutLiveEditPending.value=true
                 startPanelGeometryPreview()
             }
@@ -2461,7 +2461,9 @@ class ComposeMainActivity : ComponentActivity() {
                 panelSaveQueuedLane=-1
                 panelSaveQueuedDraft=null
                 savingOutput.intValue=-1
-                outputMessage.value="Save not sent: controller has not accepted the requested live geometry"
+                outputMessage.value="Save not sent: "+panelGeometryMessage.value.ifBlank {
+                    "Waiting for controller confirmation of the edited zone"
+                }
             }
             return
         }
