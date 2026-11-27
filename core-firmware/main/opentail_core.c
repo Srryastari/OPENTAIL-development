@@ -3115,15 +3115,15 @@ static bool strip_configure_channel(unsigned ch,unsigned pixels){
         .strip_gpio_num=out_pin[ch],.max_leds=pixels,
         .led_model=LED_MODEL_CUSTOM,
         /* WS2815: at 10 MHz bit0=3/9, bit1=9/3, reset=1600+1600 low.
-         * Keep the asymmetric GPIO16 DMA / GPIO17 non-DMA baseline. */
+         * Preserve the physically verified Nov 15 GPIO16/17 non-DMA, 64-symbol baseline. */
         .timings={.t0h_ns=300,.t0l_ns=900,.t1h_ns=900,.t1l_ns=300,.reset_us=320},
         .color_component_format={.format={.r_pos=1,.g_pos=2,.b_pos=0,.w_pos=3,.num_components=3}},
         .flags={.invert_out=false}
     };
     const led_strip_rmt_config_t rmt={
         .clk_src=RMT_CLK_SRC_DEFAULT,.resolution_hz=10000000,
-        .mem_block_symbols=(ch==0?1024:64),
-        .flags={.with_dma=(ch==0)}
+        .mem_block_symbols=64,
+        .flags={.with_dma=false}
     };
     led_strip_handle_t next=NULL;
     esp_err_t e=led_strip_new_rmt_device(&cfg,&rmt,&next);
@@ -3873,7 +3873,7 @@ static void led_task(void *p) {
                    ESP_LOGI(TAG,"PIXEL_PROBE_ROUTE lane=%u gpio=%u driver=%p capacity=%u bytes=%u dma=%u symbols=%u hz=10000000 signal=%lu output_en=%u unchanged_rmt=%u (not optical proof)",
                        (unsigned)(ch+1u),(unsigned)out_pin[ch],(void *)strip[ch],
                        (unsigned)strip_capacity[ch],(unsigned)strip_capacity[ch]*3u,
-                       (unsigned)(ch==0),(unsigned)(ch==0?1024:64),
+                       0u,64u,
                        (unsigned long)route.sig_out,(unsigned)route.oe,(unsigned)route_ok);
                    (void)gpio_dump_io_configuration(stdout,(1ULL << 16) | (1ULL << 17));
                    if(!route_ok)ESP_LOGE(TAG,"Pixel probe GPIO routing differs from allocated RMT route");

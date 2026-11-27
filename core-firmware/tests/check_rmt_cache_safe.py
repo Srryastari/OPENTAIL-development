@@ -68,7 +68,7 @@ for name in required+optional:
 audit+=['PASS scoped allocator compiler flags on exactly two dependency sources',
         'PASS internal payload/object/composite encoder plus IDF child encoders/queues/GDMA storage',
         'PASS configured cache-safe TX interrupt; global PSRAM threshold remains 1024',
-        'DMA BASELINE: GPIO16 true/1024; GPIO17 false/64; both 10000000 Hz',
+        'PHYSICAL BASELINE: GPIO16 false/64; GPIO17 false/64; both 10000000 Hz',
         'NOT RUN: physical cache-off NVS/Wi-Fi/BLE stress or optical illumination']
 out=build/'rmt-evidence';out.mkdir(exist_ok=True)
 (out/'rmt.symbols.txt').write_text(table)
