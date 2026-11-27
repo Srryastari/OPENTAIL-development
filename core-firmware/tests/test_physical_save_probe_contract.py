@@ -42,7 +42,7 @@ assert "pz_controller_wire_crc32(&pz_outputs,&base_crc)" in live_begin
 assert "pz_controller_wire_crc32(&pz_preview[lane].candidate,&live_crc)" in live_begin
 assert live_begin.index("pz_controller_wire_crc32(&pz_preview[lane].candidate,&live_crc)") < live_begin.index("xSemaphoreGive(om_write_mutex)")
 assert "*base_crc32=base_crc;" in live_begin and "*candidate_crc32=live_crc;" in live_begin
-begin_gatt=ble.split("if(command.opcode==OT_PZ_TX_OP_BEGIN){",1)[1].split("const uint8_t lane=command.lane;",1)[1].split("const uint8_t lane=command.lane;",1)[0] if False else ble.split("if(command.opcode==OT_PZ_TX_OP_BEGIN){",1)[1].split("\n    const uint8_t lane=command.lane;",1)[0]
+begin_gatt=ble.split("if(command.opcode==OT_PZ_TX_OP_BEGIN){",1)[1].split("\n    const uint8_t lane=command.lane;",1)[0]
 assert "ot_ble_panel_preview_begin(lane,revision,capacity," in begin_gatt
 assert "panel_preview_tx.base_crc32=base_crc;" in begin_gatt
 assert "panel_preview_tx.candidate_crc32=candidate_crc;" in begin_gatt
