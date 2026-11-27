@@ -1694,3 +1694,11 @@ assert(bleSource.includes('Panel live UPDATE GATT 133; reconnect without replay'
   bleSource.includes('durable BEGIN acknowledged lane=') &&
   bleSource.includes('durable COMPLETE acknowledged lane='),
   'GATT 133 must cause fail-closed Panel recovery and the full Save ACK/readback chain must be traceable');
+
+const saveButton=compose.split('Pill(if (savingOutput.intValue == index) "Saving…" else "Save"')[1]
+  ?.split('Caption(if(!valid)')[0];
+assert(saveButton?.includes('if(savingOutput.intValue>=0 || panelSaveQueuedLane>=0 ||') &&
+  saveButton.includes('panelSaveSubmittedDrafts.containsKey(index)') &&
+  saveButton.includes('return@Pill'),
+  'The first Save tap must disable a duplicate action before Compose has recomposed');
+
