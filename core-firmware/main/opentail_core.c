@@ -1182,9 +1182,10 @@ bool ot_ble_panel_active_crc32(uint8_t lane,uint16_t revision,uint32_t *crc32){
     return ok;
 }
 int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
-                               uint16_t pixel_capacity){
+                               uint16_t pixel_capacity,uint32_t *base_crc32,
+                               uint32_t *candidate_crc32){
     if(lane>=OT_PZ_OUTPUTS||pixel_capacity>OT_PZ_MAX_PIXELS||
-       base_revision==UINT16_MAX)return 1;
+       base_revision==UINT16_MAX||!base_crc32||!candidate_crc32)return 1;
     if(!input_sampler_ready||!config_promotion_ready||config_recovery_fault||
        !native_outputs_ready)return 2;
     if(!om_write_mutex||xSemaphoreTake(om_write_mutex,pdMS_TO_TICKS(2000))!=pdTRUE)
@@ -1198,11 +1199,10 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
     const uint32_t now_ms=(uint32_t)(esp_timer_get_time()/1000LL);
     bool accepted=false;
     portENTER_CRITICAL(&state_lock);
-    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||__atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
+    const bool pending=pz_deferred.pending||om_deferred.pending||tm_deferred.pending||
+        __atomic_load_n(&pz_pair_commit_pending,__ATOMIC_ACQUIRE);
     /* Requested capacity belongs to volatile preview, not saved NVS.
-     * Permit a fresh zero-LED lane to commission 100 LEDs without Save.
-     * Reject shrinking below any still-mapped endpoint; do not render an
-     * invalid intermediate geometry or mutate the committed records. */
+     * Permit a fresh zero-LED lane to commission LEDs without Save. */
     const bool capacity_ok=pixel_capacity<=OT_PZ_MAX_PIXELS;
     accepted=!pending&&!pz_preview[lane].active&&capacity_ok&&
         pz_revision[lane]==base_revision&&pz_active_revision[lane]==base_revision&&
@@ -1218,6 +1218,22 @@ int ot_ble_panel_preview_begin(uint8_t lane,uint16_t base_revision,
         }
     }
     portEXIT_CRITICAL(&state_lock);
+    /* Both wire CRCs are from the SAME accepted state under the SAME mutex.
+     * No additional nonblocking CRC acquisition in the NimBLE callback. */
+    uint32_t base_crc=0u,live_crc=0u;
+    if(accepted){
+        const bool crc_ok=pz_controller_wire_crc32(&pz_outputs,&base_crc)&&
+            pz_controller_wire_crc32(&pz_preview[lane].candidate,&live_crc);
+        if(!crc_ok){
+            portENTER_CRITICAL(&state_lock);
+            ot_pz_preview_cancel(&pz_preview[lane]);
+            portEXIT_CRITICAL(&state_lock);
+            accepted=false;
+        }else{
+            *base_crc32=base_crc;
+            *candidate_crc32=live_crc;
+        }
+    }
     xSemaphoreGive(om_write_mutex);
     if(accepted)request_render_refresh();
     return accepted?0:(capacity_ok?3:1);
