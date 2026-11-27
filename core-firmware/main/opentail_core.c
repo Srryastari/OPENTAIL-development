@@ -168,7 +168,9 @@ static TickType_t native_show_deadline=0;
 static uint32_t native_show_started_ms=0;
 static bool native_outputs_ready=false;
 static bool ble_startup_ready=false; /* Set once before render task creation. */
-static bool http_startup_ready=false; /* Diagnostics are required to confirm a new OTA image. */
+/* This bench profile uses BLE for controller access. */
+static const bool boot_network_diagnostics=false;
+static bool http_startup_ready=false;
 static bool ble_owns_show=false;
 /* The only FX library is internal to CORE. BLE writes effect IDs, not pixel frames. */
 static bool ble_fx_enabled=false;
@@ -3863,7 +3865,8 @@ static void led_task(void *p) {
             * Confirm OTA only after every configured RMT lane completes its
             * first frame; startup faults must leave rollback available. */
            if(full_frame && ot_sw_idf_stable() &&
-              om_write_mutex && ble_startup_ready && http_startup_ready &&
+              om_write_mutex && config_promotion_ready && ble_startup_ready &&
+              (!boot_network_diagnostics || http_startup_ready) &&
               ot_ble_radio_ever_ready() && !boot_frame_verified)
                boot_frame_verified=ot_ota_confirm_boot(true);
            if(!native_rendering && full_frame){
@@ -4063,6 +4066,10 @@ void app_main(void) {
             5120,NULL,5,NULL)==pdPASS;
         if(!config_promotion_ready)
             ot_st_set_fault("durable configuration promoter failed to start");
+    }
+    if(!boot_network_diagnostics){
+        ESP_LOGI(TAG,"BLE-only bench startup; network diagnostics disabled");
+        return;
     }
     ot_boot_heap_snapshot("pre-wifi");
     const bool wifi_started=wifi_ap_init();
